@@ -306,8 +306,8 @@ async def run(
         records: list[dict[str, Any]] = []
         task_costs: list[float] = []
         task_cost_missing = 0
-    task_usage_missing = 0
-    task_price_missing = 0
+        task_usage_missing = 0
+        task_price_missing = 0
         scenario_pass_counts = {scenario: 0 for scenario in scenarios}
         try:
             for scenario in scenarios:
