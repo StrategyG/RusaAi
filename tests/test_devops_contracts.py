@@ -111,6 +111,21 @@ def test_agent_task_contract_rejects_agent_stage_mismatch():
     with pytest.raises(ContractValidationError, match="agent_task"):
         validate_agent_task(payload)
 
+def test_security_guard_is_cross_cutting_and_read_only():
+    payload = _task()
+    payload.update(agent_id="rusa_security_guard_agent", stage="deploy")
+    payload["input"] = {
+        "release_manifest_ref": "artifact://release/manifest",
+        "environment": "staging",
+        "evidence_refs": ["evidence://release/verification"],
+    }
+    payload["constraints"].update(
+        approval_required=True,
+        approval_scope=["deploy"],
+        write_scope=[],
+    )
+    validate_agent_task(payload)
+
 
 def test_deploy_task_requires_approval_and_deploy_scope():
     payload = _task()
@@ -138,6 +153,12 @@ def test_monitor_task_is_read_only_and_has_no_network_access():
     )
     with pytest.raises(ContractValidationError, match="network_access"):
         validate_agent_task(payload)
+
+
+def test_agent_result_security_guard_can_review_any_lifecycle_stage():
+    payload = _result()
+    payload["agent_id"] = "rusa_security_guard_agent"
+    validate_agent_result(payload)
 
 
 def test_agent_result_passed_requires_evidence():
