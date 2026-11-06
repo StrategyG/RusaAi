@@ -67,7 +67,7 @@ jobs:
         run: python scripts/security/validate_trivy_exceptions.py
 
       - name: Validate deployment shell scripts
-        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh tests/test_deploy_scripts.sh
+        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh tests/test_deploy_scripts.sh tests/test_staging_rollback.sh
 
       - name: Test deployment and rollback behavior
         run: bash tests/test_deploy_scripts.sh
@@ -339,6 +339,10 @@ jobs:
             http://127.0.0.1:${RUSA_PORT:-8000}/v1/chat/completions)"
           test "$auth_status" = "401"
 
+      - name: Exercise real PostgreSQL deployment and rollback
+        id: staging-rollback-drill
+        run: bash tests/test_staging_rollback.sh "rusa-agent-runtime:${{ github.sha }}"
+
       - name: Enforce all image scans and production smoke test
         if: always()
         env:
@@ -349,8 +353,9 @@ jobs:
           POSTGRES_CRITICAL: ${{ steps.postgres-critical-scan.outcome }}
           POSTGRES_HIGH: ${{ steps.postgres-high-scan.outcome }}
           PRODUCTION_SMOKE: ${{ steps.production-compose-smoke.outcome }}
+          STAGING_ROLLBACK: ${{ steps.staging-rollback-drill.outcome }}
         run: |
-          printf 'API critical: %s | API high: %s | Agent critical: %s | Agent high: %s | PostgreSQL critical: %s | PostgreSQL high: %s | Production smoke: %s\n' "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE"
+          printf 'API critical: %s | API high: %s | Agent critical: %s | Agent high: %s | PostgreSQL critical: %s | PostgreSQL high: %s | Production smoke: %s | Staging rollback: %s\n' "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE" "$STAGING_ROLLBACK"
           test "$API_CRITICAL" = "success"
           test "$API_HIGH" = "success"
           test "$AGENT_CRITICAL" = "success"
@@ -358,6 +363,7 @@ jobs:
           test "$POSTGRES_CRITICAL" = "success"
           test "$POSTGRES_HIGH" = "success"
           test "$PRODUCTION_SMOKE" = "success"
+          test "$STAGING_ROLLBACK" = "success"
 
   release-gate:
     name: Release Gate
