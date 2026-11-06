@@ -96,7 +96,7 @@ BEGIN
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker') THEN
-        GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE, SET TRUE;
+        GRANT rusa_knowledge_worker TO rusa_agent_worker WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api') THEN
