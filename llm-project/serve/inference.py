@@ -16,6 +16,10 @@ class InferenceNotReady(RuntimeError):
     """Raised when a request arrives before a real model is loaded."""
 
 
+class InferenceCapacityError(RuntimeError):
+    """Raised when the model cannot allocate memory for a request."""
+
+
 _STREAM_END = object()
 
 
@@ -163,6 +167,7 @@ class ModelRuntime:
     ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "max_new_tokens": max_tokens,
+            "max_time": max(1.0, float(os.getenv("RUSA_GENERATION_TIMEOUT_SECONDS", "120"))),
             "do_sample": temperature > 0,
             "pad_token_id": self.tokenizer.pad_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
@@ -172,6 +177,29 @@ class ModelRuntime:
             kwargs["temperature"] = temperature
             kwargs["top_p"] = top_p
         return kwargs
+
+    def _run_generate(
+        self,
+        inputs: Dict[str, Any],
+        temperature: float,
+        top_p: float,
+        max_tokens: int,
+        streamer: Any = None,
+    ) -> Any:
+        kwargs = self._generation_kwargs(temperature, top_p, max_tokens)
+        if streamer is not None:
+            kwargs["streamer"] = streamer
+        try:
+            with self._torch.inference_mode():
+                return self.model.generate(**inputs, **kwargs)
+        except RuntimeError as exc:
+            if "out of memory" in str(exc).lower():
+                if self.device == "cuda":
+                    self._torch.cuda.empty_cache()
+                raise InferenceCapacityError(
+                    "The model is temporarily at memory capacity"
+                ) from None
+            raise
 
     def generate(
         self,
@@ -183,11 +211,9 @@ class ModelRuntime:
         self._require_ready()
         inputs = self._tokenize_one(messages, max_tokens)
         prompt_tokens = int(inputs["attention_mask"].sum().item())
-        with self._torch.inference_mode():
-            output = self.model.generate(
-                **inputs,
-                **self._generation_kwargs(temperature, top_p, max_tokens),
-            )
+        output = self._run_generate(
+            inputs, temperature, top_p, max_tokens
+        )
         prompt_width = int(inputs["input_ids"].shape[1])
         generated_ids = output[0][prompt_width:]
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
@@ -223,11 +249,9 @@ class ModelRuntime:
             key: value.to(self.model.device)
             for key, value in inputs.items()
         }
-        with self._torch.inference_mode():
-            output = self.model.generate(
-                **inputs,
-                **self._generation_kwargs(temperature, top_p, max_tokens),
-            )
+        output = self._run_generate(
+            inputs, temperature, top_p, max_tokens
+        )
 
         prompt_width = int(inputs["input_ids"].shape[1])
         results: List[Dict[str, Any]] = []
@@ -267,12 +291,10 @@ class ModelRuntime:
             skip_special_tokens=True,
             timeout=0.25,
         )
-        kwargs = self._generation_kwargs(temperature, top_p, max_tokens)
-        kwargs["streamer"] = streamer
-
         def run_generation() -> None:
-            with self._torch.inference_mode():
-                self.model.generate(**inputs, **kwargs)
+            self._run_generate(
+                inputs, temperature, top_p, max_tokens, streamer=streamer
+            )
 
         generation_task = asyncio.create_task(asyncio.to_thread(run_generation))
         try:
