@@ -161,7 +161,8 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
         "base_url": args.base_url,
         "model": args.model,
         "git_revision": git_revision(),
-        "hardware": hardware_metadata(),
+        "benchmark_client_hardware": hardware_metadata(),
+        "server_readiness": health.json(),
         "workload": {
             "requests": args.requests,
             "concurrency": args.concurrency,
