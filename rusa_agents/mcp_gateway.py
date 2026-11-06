@@ -35,7 +35,7 @@ class MCPKnowledgeGateway:
             for tenant, token in tenant_tokens.items()
         ):
             raise ValueError("MCP tenant token map is invalid")
-        tools = frozenset(allowed_tools or KNOWLEDGE_TOOLS)
+        tools = frozenset(KNOWLEDGE_TOOLS if allowed_tools is None else allowed_tools)
         if not tools or not tools.issubset(KNOWLEDGE_TOOLS):
             raise ValueError("MCP gateway may expose only approved read-only knowledge tools")
         self.server_url = server_url
