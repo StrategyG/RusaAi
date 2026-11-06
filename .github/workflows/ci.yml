@@ -168,7 +168,9 @@ jobs:
           exit 1
       - name: Verify inference process crash recovery
         run: |
-          docker exec --user 0 rusa-ai-ci sh -c 'kill -9 1' || true
+          container_pid="$(docker inspect --format '{{.State.Pid}}' rusa-ai-ci)"
+          test "$container_pid" -gt 1
+          sudo kill -9 "$container_pid"
           for attempt in $(seq 1 30); do
             restart_count="$(docker inspect --format '{{.RestartCount}}' rusa-ai-ci)"
             if [ "$restart_count" -ge 1 ] && curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
