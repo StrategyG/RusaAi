@@ -22,7 +22,15 @@ _SECRET_ASSIGNMENT = re.compile(
 _PROVIDER_TOKEN = re.compile(
     r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b"
 )
-_DATABASE_PASSWORD = re.compile(r"(?i)(postgres(?:ql)?://[^:/@\s]+:)[^@\s]+(@)")
+_DATABASE_PASSWORD = re.compile(r"(?i)((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^:/@\s]+:)[^@\s]+(@)")
+_PRIVATE_KEY_BLOCK = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_CLOUD_ACCESS_KEY = re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")
+_SLACK_TOKEN = re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")
+_STRIPE_TOKEN = re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b")
+_GOOGLE_API_KEY = re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")
 _QUERY_SECRET = re.compile(r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|password|secret)=)[^&\s]+")
 
 
@@ -40,6 +48,11 @@ def redact_audit_value(value: Any, key: str = "") -> Any:
         redacted = _SECRET_ASSIGNMENT.sub(r"\1\2[REDACTED]", redacted)
         redacted = _PROVIDER_TOKEN.sub("[REDACTED]", redacted)
         redacted = _DATABASE_PASSWORD.sub(r"\1[REDACTED]\2", redacted)
+        redacted = _PRIVATE_KEY_BLOCK.sub("[REDACTED PRIVATE KEY]", redacted)
+        redacted = _CLOUD_ACCESS_KEY.sub("[REDACTED]", redacted)
+        redacted = _SLACK_TOKEN.sub("[REDACTED]", redacted)
+        redacted = _STRIPE_TOKEN.sub("[REDACTED]", redacted)
+        redacted = _GOOGLE_API_KEY.sub("[REDACTED]", redacted)
         redacted = _QUERY_SECRET.sub(r"\1[REDACTED]", redacted)
         return redacted
     return value
