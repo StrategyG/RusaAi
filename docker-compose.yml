@@ -175,6 +175,7 @@ services:
         PostgresMemoryStore(dsn).initialize()
         queue.configure_api_permissions()
         with psycopg.connect(owner_dsn) as connection:
+            connection.autocommit = True
             migration = Path("/app/migrations/005_rag_knowledge_pgvector.sql").read_text(encoding="utf-8")
             connection.execute(migration, prepare=False)
             identity_migration = Path("/app/migrations/006_user_identity.sql").read_text(encoding="utf-8")
