@@ -5,11 +5,49 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+import pytest_asyncio
+
+from rusa_agents.contracts import TaskCreate
+from rusa_agents.storage import Database, utcnow
+from rusa_agents.worker import AgentRuntime
 
 from rusa_agents.contracts import TaskStatus
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.storage import TaskRow
 from rusa_agents.tools import ToolError, ToolRegistry
+
+
+class FakeProvider:
+    async def complete(self, system_prompt: str, user_prompt: str) -> str:
+        return '{"steps": [], "expected_outcome": "benchmark"}'
+
+
+async def no_op_tool(**kwargs):
+    return {"ok": True}
+
+
+def make_task():
+    return TaskCreate.model_validate({
+        "objective": "Exercise deterministic benchmark scenario",
+        "repository": "StrategyG/RusaAi",
+        "work_branch": "feature/benchmark-contract-test",
+        "acceptance_criteria": ["Required evidence is present"],
+    })
+
+
+@pytest_asyncio.fixture
+async def database(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'benchmark-test.db'}")
+    await db.initialize()
+    yield db
+    await db.close()
+
+
+@pytest.fixture
+def registry():
+    tools = ToolRegistry()
+    tools.register("benchmark.noop", no_op_tool)
+    return tools
 
 
 BENCHMARK = json.loads(
@@ -66,9 +104,6 @@ async def test_tool_failure_is_not_silently_accepted():
 
 @pytest.mark.asyncio
 async def test_qa_failure_cannot_be_marked_succeeded(database, registry):
-    from rusa_agents.worker import AgentRuntime
-    from test_agent_runtime import FakeProvider, make_task
-
     runtime = AgentRuntime(database, FakeProvider(), registry)
     task_id = await runtime.submit(
         "tenant-benchmark",
@@ -95,10 +130,6 @@ async def test_qa_failure_cannot_be_marked_succeeded(database, registry):
 
 @pytest.mark.asyncio
 async def test_worker_crash_recovery_is_deterministic(database, registry):
-    from rusa_agents.worker import AgentRuntime
-    from test_agent_runtime import FakeProvider, make_task
-    from rusa_agents.storage import utcnow
-
     runtime = AgentRuntime(database, FakeProvider(), registry)
     task_id = await runtime.submit(
         "tenant-benchmark",
