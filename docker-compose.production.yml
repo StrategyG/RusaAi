@@ -1,0 +1,69 @@
+services:
+  api:
+    image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_DATABASE_URL: ${RUSA_DATABASE_URL:?Set a TLS PostgreSQL DSN}
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
+
+  worker:
+    image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "rusa_agents.worker_main"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_DATABASE_URL: ${RUSA_DATABASE_URL:?Set a TLS PostgreSQL DSN}
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      DOCKER_HOST: unix:///run/docker.sock
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    volumes:
+      - ${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
+      - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
+      - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
+    group_add:
+      - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
+    expose:
+      - "9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
+
+networks:
+  rusa-internal:
+    driver: bridge
+    internal: true
+  rusa-egress:
+    driver: bridge
