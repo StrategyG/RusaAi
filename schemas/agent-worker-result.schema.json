@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa-ai.local/schemas/agent-worker-result.schema.json",
+  "title": "RUSA-AI Worker Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "tool_calls", "blockers", "risk", "criteria_results", "criteria_evidence"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "maxLength": 8000},
+    "tool_calls": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "arguments"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "create_branch", "read_file", "list_files",
+              "write_file", "create_pull_request", "get_ci_status", "get_branch_diff"
+            ]
+          },
+          "arguments": {"type": "object"}
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+    },
+    "risk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+    "criteria_results": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "additionalProperties": {"type": "boolean"}
+    },
+    "criteria_evidence": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 2000}
+    }
+  }
+}
