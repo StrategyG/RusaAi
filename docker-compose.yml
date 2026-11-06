@@ -57,6 +57,8 @@ services:
       - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
     group_add:
       - "${RUSA_DOCKER_GID:-1001}"
+    expose:
+      - "9100"
     depends_on:
       postgres:
         condition: service_healthy
