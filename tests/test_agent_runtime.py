@@ -899,3 +899,53 @@ async def test_github_file_update_uses_optimistic_current_sha(monkeypatch):
     assert observed["sha"] == "c" * 40
     assert result["commit_sha"] == "d" * 40
     assert result["already_applied"] is False
+
+
+@pytest.mark.asyncio
+async def test_synthesis_requires_citations_to_exist_in_rag_evidence():
+    import json
+    from rusa_agents.orchestrator import HierarchicalOrchestrator, PlanRejected
+
+    class CitationProvider:
+        def __init__(self, citation):
+            self.citation = citation
+
+        async def complete(self, system_prompt, user_prompt):
+            task_data = json.loads(user_prompt)
+            return json.dumps(
+                {
+                    "summary": "Retrieved evidence summary",
+                    "key_findings": ["Evidence found"],
+                    "citations": [self.citation],
+                    "acceptance_criteria_assessment": [
+                        {
+                            "criterion": criterion,
+                            "status": "met",
+                            "evidence": "Grounded in retrieved source chunks",
+                        }
+                        for criterion in task_data["acceptance_criteria"]
+                    ],
+                }
+            )
+
+    task = make_task().model_dump()
+    evidence = [
+        {
+            "tool": "rag.search",
+            "result": {
+                "chunks": [
+                    {"citation": "[design-doc#chunk123]", "text": "Grounded architecture evidence"}
+                ]
+            },
+        }
+    ]
+    valid = HierarchicalOrchestrator(
+        CitationProvider("[design-doc#chunk123]"),
+        ToolRegistry(),
+    )
+    result = await valid.synthesize(task, evidence)
+    assert result["citations"] == ["[design-doc#chunk123]"]
+
+    invalid = HierarchicalOrchestrator(CitationProvider("[invented#source]"), ToolRegistry())
+    with pytest.raises(PlanRejected):
+        await invalid.synthesize(task, evidence)
