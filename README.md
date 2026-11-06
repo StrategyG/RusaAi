@@ -10,13 +10,14 @@ The complete RUSA-AI product is not production-certified until a real model arti
 
 The agent control plane is a separate service from model inference. It uses a hierarchical master orchestrator and six specialist workers: Analyst, Architect, Developer, Debugger, Tester, and Security.
 
-Capabilities within the allowlist:
-- Read and list regular text files in the task repository.
-- Create or reuse an isolated work branch.
-- Write approved repository files on that branch.
+Capabilities within the configured allowlist:
+- Read and list regular text files in an explicitly allowlisted repository.
+- Create or reuse a deterministic tenant/task-scoped work branch.
+- Write approved repository files on that isolated branch.
 - Open or reuse a draft pull request.
-- Read GitHub Actions checks and perform bounded repair cycles.
-- Persist tenant-scoped task state, episodic memory, and audit evidence.
+- Read complete, bounded GitHub Actions check-runs and perform at most two repair cycles by default.
+- Review the complete GitHub compare diff and re-check CI against the same commit SHA.
+- Persist tenant-scoped task state, fenced worker leases, episodic memory, and audit evidence.
 
 The agent does not expose arbitrary shell execution, unrestricted network access, secret retrieval, force push, merge, deployment, release, permission changes, or workflow changes. GitHub Actions provides the isolated test/build execution environment. Human review and protected-branch controls govern merge and release.
 
@@ -29,7 +30,7 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 - rusa_agents/: contracts, policy, provider, GitHub tools, queue, memory, audit, orchestrator, task API, and worker process.
 - schemas/a2a/: A2A task-envelope JSON Schema.
 - docs/architecture/: agent architecture, worker contract, and security/operations model.
-- tests/: API, contract, policy, orchestration, and security regression tests.
+- tests/: API, contract, policy, orchestration, HTTP-boundary, PostgreSQL, and security regression tests.
 
 ## Requirements
 
@@ -43,13 +44,16 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 ## Local setup
 
 1. Create and activate a Python virtual environment.
-2. Install dependencies: python -m pip install -r requirements-dev.txt
+2. Install dependencies: python -m pip install -r requirements-dev.txt.
 3. Copy .env.example to .env and generate unique secrets. Do not commit .env.
 4. Configure RUSA_MODEL_PATH and RUSA_MODEL_DIR for the inference API.
-5. Configure the agent database password, per-tenant API key map, provider, GitHub token, and audit HMAC key.
-6. Start the services with docker compose up --build -d.
+5. Configure separate PostgreSQL owner/worker/API passwords, per-tenant API keys, provider credentials, GitHub credentials, audit HMAC key, and RUSA_AGENT_ALLOWED_REPOSITORIES.
+6. Restrict the GitHub App or fine-grained token to the same repository allowlist. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
+7. Start the services with docker compose up --build -d.
 
-The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS. Set Idempotency-Key on task submission to prevent duplicate tasks.
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
+
+Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated, exact owner/name allowlist enforced by both the API and GitHub gateway.
 
 ## Quality gates
 
@@ -59,10 +63,10 @@ Run:
 - pytest -q
 - pip-audit -r requirements.txt -r requirements-agent.txt
 
-CI also builds both the inference API image and the agent runtime image, then smoke-tests the inference API container.
+When RUSA_TEST_DATABASE_URL is configured, PostgreSQL integration tests exercise idempotency, lease fencing, checkpoint ownership, and row-level security. CI provisions a dedicated PostgreSQL 16 service and runs those tests. CI builds both the inference API image and the agent runtime image, then smoke-tests the inference API container. Pull-request checks run regardless of the target branch so stacked PRs receive checks.
 
 ## Production acceptance
 
-A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, tenant isolation tests, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
+A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, outbound egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
 
-See docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md for the complete architecture and acceptance model.
+The runtime foundation is not a production certification. A real provider, GitHub App, PostgreSQL deployment, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested.
