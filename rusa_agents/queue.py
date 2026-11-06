@@ -79,6 +79,61 @@ class PostgresTaskQueue:
                 WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))
             """)
 
+
+    def configure_api_permissions(self) -> None:
+        """Apply least-privilege grants for the tenant-facing API role.
+
+        The migration identity must own the queue table (or be a superuser).
+        Existing grants and worker default privileges are revoked so future
+        worker-created tables do not become visible to the API automatically.
+        """
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            api_role_exists = connection.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api')"
+            ).fetchone()[0]
+            if not api_role_exists:
+                raise RuntimeError("rusa_agent_api role is missing")
+
+            role_state = connection.execute(
+                """
+                SELECT current_user,
+                       COALESCE(
+                           (SELECT rolsuper FROM pg_roles WHERE rolname=current_user),
+                           false
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'
+                       )
+                """
+            ).fetchone()
+            current_user, is_superuser, worker_role_exists = role_state
+            if worker_role_exists and (
+                current_user == "rusa_agent_worker" or is_superuser
+            ):
+                connection.execute(
+                    """
+                    ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                    IN SCHEMA public REVOKE ALL ON TABLES FROM rusa_agent_api
+                    """
+                )
+                connection.execute(
+                    """
+                    ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                    IN SCHEMA public REVOKE ALL ON SEQUENCES FROM rusa_agent_api
+                    """
+                )
+
+            connection.execute(
+                "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM rusa_agent_api"
+            )
+            connection.execute(
+                "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api"
+            )
+            connection.execute(
+                "GRANT SELECT, INSERT, UPDATE ON TABLE public.rusa_agent_tasks TO rusa_agent_api"
+            )
+
+
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute("""
@@ -95,11 +150,20 @@ class PostgresTaskQueue:
                              AND table_name='rusa_agent_tasks'
                              AND column_name='lease_token'
                        )
+                       AND has_table_privilege(
+                           current_user, 'public.rusa_agent_tasks', 'SELECT'
+                       ),
+                       has_table_privilege(
+                           current_user, 'public.rusa_agent_tasks', 'INSERT'
+                       ),
+                       has_table_privilege(
+                           current_user, 'public.rusa_agent_tasks', 'UPDATE'
+                       )
                 FROM pg_class AS c
                 JOIN pg_namespace AS n ON n.oid=c.relnamespace
                 WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
             """).fetchone()
-        return bool(row and row[0] and row[1] and row[2] and row[3])
+        return bool(row and all(row))
 
     @staticmethod
     def _validate_worker_id(worker_id: str) -> None:
