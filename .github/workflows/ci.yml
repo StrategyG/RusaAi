@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
         env:
           POSTGRES_DB: rusa_test
           POSTGRES_USER: rusa_test
@@ -118,7 +118,7 @@ jobs:
         run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
 
       - name: Pull pinned PostgreSQL image
-        run: docker pull postgres:16.15-alpine3.22
+        run: docker pull postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
 
       - name: Block all CRITICAL inference API vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -187,7 +187,7 @@ jobs:
       - name: Block all CRITICAL PostgreSQL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -197,7 +197,7 @@ jobs:
       - name: Gate PostgreSQL HIGH vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -207,7 +207,7 @@ jobs:
       - name: Export complete PostgreSQL vulnerability report
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
           format: json
           output: trivy-postgres-full.json
           exit-code: "0"
@@ -251,7 +251,7 @@ jobs:
       - name: Generate PostgreSQL SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: postgres:16.15-alpine3.22
+          image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
           format: cyclonedx-json
           output-file: sbom-postgres.cdx.json
           artifact-name: sbom-postgres-${{ github.sha }}
