@@ -54,7 +54,11 @@ def test_agent_api_requires_authentication(monkeypatch):
         response = client.post(
             "/v1/agent/tasks",
             headers={"X-Tenant-ID": "tenant-a"},
-            json={},
+            json={
+                "objective": "Authenticated task submission",
+                "repository": "StrategyG/RusaAi",
+                "acceptance_criteria": ["Tests pass"],
+            },
         )
     assert response.status_code == 401
 
