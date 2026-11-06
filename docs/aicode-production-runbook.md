@@ -118,6 +118,7 @@ ENVIRONMENT=production
 RUSA_AICODE_ENABLED=false  # fail-closed; set true only after all release gates pass
 RUSA_DATABASE_URL=postgresql://rusa_runtime_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
 RUSA_API_KEYS={"LONG_RANDOM_API_KEY_AT_LEAST_32_BYTES":"tenant-acme"}
+RUSA_METRICS_API_KEY=LONG_RANDOM_OPERATOR_ONLY_KEY_AT_LEAST_32_BYTES
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
 RUSA_MODEL_NAME=rusa-ai
@@ -176,7 +177,7 @@ API and worker containers run non-root, read-only root filesystems, dropped capa
 ```bash
 curl -fsS http://127.0.0.1:8000/health
 curl -fsS http://127.0.0.1:8000/health/ready
-curl -fsS -H "X-API-Key: $RUSA_API_KEY" http://127.0.0.1:8000/metrics
+curl -fsS -H "X-API-Key: $RUSA_METRICS_API_KEY" http://127.0.0.1:8000/metrics
 ```
 
 Submit a bounded task:
