@@ -9,7 +9,7 @@ import time
 from collections.abc import Coroutine
 from typing import Any
 
-from .audit import PostgresAuditLog, record_task_policy
+from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
@@ -38,6 +38,7 @@ class AICodeRuntime:
         if not self.config.audit_hmac_key:
             raise RuntimeError("RUSA_AUDIT_HMAC_KEY is required by the worker runtime")
         self.audit = PostgresAuditLog(self.config.worker_database_url, self.config.audit_hmac_key)
+        self.task_policy_audit = PostgresTaskPolicyAudit(self.config.worker_database_url)
         self.workspace_manager = GitWorkspaceManager(
             self.config.git_mirror_root,
             self.config.workspace_root,
@@ -51,6 +52,8 @@ class AICodeRuntime:
         self.queue.initialize()
         self.memory.initialize()
         self.audit.initialize()
+        if self.config.environment == "production":
+            self.task_policy_audit.verify_ready("rusa_worker_runtime")
         self.sandbox.verify_ready(
             require_rootless=self.config.environment == "production",
             require_image=self.config.environment == "production",
@@ -203,8 +206,16 @@ class AICodeRuntime:
                 raise PermissionError("Tenant has no configured repository permissions")
 
             await self._assert_lease(job, lost_lease)
+            record_task_policy(
+                job.tenant_id,
+                job.task_id,
+                self.worker_id,
+                "task.execute",
+                True,
+                sink=self.task_policy_audit,
+                required=self.config.environment == "production",
+            )
             authorized = True
-            record_task_policy(job.tenant_id, job.task_id, self.worker_id, "task.execute", True)
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
@@ -325,7 +336,18 @@ class AICodeRuntime:
             outcome = "success"
         except Exception as exc:
             if not authorized:
-                record_task_policy(job.tenant_id, job.task_id, self.worker_id, "task.execute", False)
+                try:
+                    record_task_policy(
+                        job.tenant_id,
+                        job.task_id,
+                        self.worker_id,
+                        "task.execute",
+                        False,
+                        sink=self.task_policy_audit,
+                        required=self.config.environment == "production",
+                    )
+                except Exception:
+                    logger.error("Could not persist denied task execution audit event")
             logger.exception("AICode task %s failed", job.task_id)
             outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():
