@@ -20,7 +20,13 @@ CREATE TABLE IF NOT EXISTS public.aicode_task_policy_events (
         AND decision = 'deny'
     )),
     CHECK (tenant_id IS NULL OR length(tenant_id) BETWEEN 1 AND 128),
-    CHECK (task_id IS NULL OR length(task_id) BETWEEN 1 AND 128)
+    CHECK (task_id IS NULL OR length(task_id) BETWEEN 1 AND 128),
+    CHECK (
+        (tenant_id IS NULL AND actor = 'unauthenticated'
+            AND action = 'task.authenticate' AND decision = 'deny')
+        OR (tenant_id IS NOT NULL AND actor LIKE 'api:%' AND action <> 'task.execute')
+        OR (tenant_id IS NOT NULL AND actor LIKE 'worker:%' AND action = 'task.execute')
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_aicode_task_policy_events_tenant_time
@@ -48,7 +54,11 @@ CREATE POLICY aicode_task_policy_events_api_insert
     ON public.aicode_task_policy_events
     FOR INSERT TO rusa_api_runtime
     WITH CHECK (
-        tenant_id = NULLIF(current_setting('rusa.tenant_id', true), '')
+        (
+            tenant_id = NULLIF(current_setting('rusa.tenant_id', true), '')
+            AND actor LIKE 'api:%'
+            AND action <> 'task.execute'
+        )
         OR (
             tenant_id IS NULL
             AND actor = 'unauthenticated'
@@ -64,6 +74,8 @@ CREATE POLICY aicode_task_policy_events_worker_insert
     FOR INSERT TO rusa_worker_runtime
     WITH CHECK (
         tenant_id = NULLIF(current_setting('rusa.tenant_id', true), '')
+        AND actor LIKE 'worker:%'
+        AND action = 'task.execute'
     );
 
 CREATE OR REPLACE FUNCTION public.rusa_task_policy_event_immutable()
