@@ -187,7 +187,7 @@ async def lifespan(application: FastAPI):
                 require_pinned_manifest=environment == "production",
             )
             application.state.artifact = artifact
-            application.state.model_name = os.getenv("RUSA_MODEL_NAME", artifact.model_id)
+            application.state.model_name = os.getenv("RUSA_MODEL_NAME", "rusa-ai-v1")
 
             load_timeout = _positive_float("RUSA_MODEL_LOAD_TIMEOUT_SECONDS", 1800.0)
             attempts = _positive_int("RUSA_MODEL_LOAD_RETRIES", 2)
