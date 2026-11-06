@@ -202,11 +202,17 @@ def test_security_diff_fails_closed_for_protected_or_truncated_files(monkeypatch
 def test_repository_reads_redact_sensitive_values(monkeypatch):
     gateway = make_gateway()
     task = make_task()
-    payload = base64.b64encode(b'password = "do-not-expose-this-value"').decode()
+    raw_content = b'password = "do-not-expose-this-value"'
+    payload = base64.b64encode(raw_content).decode()
 
     async def fake_request(method, path, *, json_body=None, params=None, allow_not_found=False):
         if "/contents/" in path:
-            return {"content": payload, "encoding": "base64", "size": len(payload)}
+            return {
+                "type": "file",
+                "content": payload,
+                "encoding": "base64",
+                "size": len(raw_content),
+            }
         raise AssertionError(path)
 
     monkeypatch.setattr(gateway, "_request", fake_request)

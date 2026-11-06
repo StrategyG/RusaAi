@@ -170,6 +170,8 @@ def make_orchestrator(tools, overrides=None, audit=None):
                     ToolCall("create_pull_request", {"title": "RUSA-AI autonomous change"}),
                 ],
             )
+        elif role == WorkerRole.TESTER:
+            default_result = worker_result(role, [ToolCall("get_ci_status")])
         else:
             default_result = worker_result(role)
         workers.append(overrides.get(role, ScriptedWorker(role, [default_result])))
@@ -528,11 +530,29 @@ def test_changed_head_after_security_requires_reverification():
     from dataclasses import replace
 
     class MovingHeadTools(FakeTools):
+        def __init__(self):
+            super().__init__()
+            self.ci_reads = 0
+            self.diff_reads = 0
+
         async def execute(self, task, call):
             result = await super().execute(task, call)
-            if len(self.calls) > 1:
-                return replace(result, data={**result.data, "head_sha": "b" * 40},
-                               evidence={**result.evidence, "head_sha": "b" * 40})
+            if call.name == "get_ci_status":
+                self.ci_reads += 1
+                if self.ci_reads >= 3:
+                    return replace(
+                        result,
+                        data={**result.data, "head_sha": "c" * 40},
+                        evidence={**result.evidence, "head_sha": "c" * 40},
+                    )
+            elif call.name == "get_branch_diff":
+                self.diff_reads += 1
+                if self.diff_reads >= 2:
+                    return replace(
+                        result,
+                        data={**result.data, "head_sha": "c" * 40},
+                        evidence={**result.evidence, "head_sha": "c" * 40},
+                    )
             return result
 
     tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
