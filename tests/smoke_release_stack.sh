@@ -18,6 +18,13 @@ cleanup() {
   if (( result != 0 )); then
     compose ps --all || true
     compose logs --tail 100 || true
+    for service in rusa-agent-worker rusa-agent-api; do
+      container_id="$(compose ps --all --quiet "$service" || true)"
+      if [[ -n "$container_id" ]]; then
+        echo "Health diagnostics for $service"
+        docker inspect --format '{{json .State.Health}}' "$container_id" || true
+      fi
+    done
   fi
   compose down --volumes --remove-orphans || true
   exit "$result"
@@ -52,6 +59,10 @@ deploy() {
   test "$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")" = "0"
   test "$(docker inspect --format '{{.Image}}' "$migration_id")" = \
     "$(docker image inspect --format '{{.Id}}' "$RUSA_AGENT_IMAGE")"
+
+  # Verify the exact tenant RLS structures before starting application workers.
+  sql -c "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname IN ('rusa_agent_tasks','rusa_agent_memory') ORDER BY relname"
+  sql -c "SELECT tablename, policyname, qual, with_check FROM pg_policies WHERE schemaname='public' AND tablename IN ('rusa_agent_tasks','rusa_agent_memory') ORDER BY tablename, policyname"
 
   # Wait for readiness rather than treating container creation as success.
   local api_ready=false agent_ready=false
