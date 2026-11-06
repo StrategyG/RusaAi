@@ -1,4 +1,7 @@
 import pytest
+pytest.importorskip("bs4", reason="optional document parser dependencies are not installed")
+pytest.importorskip("pypdf", reason="optional document parser dependencies are not installed")
+pytest.importorskip("docx", reason="optional document parser dependencies are not installed")
 
 import rusa_knowledge.parsers as parsers
 from rusa_knowledge.parsers import parse_file
