@@ -113,6 +113,7 @@ services:
       RUSA_AGENT_WORKER_DB_PASSWORD: ${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD in .env}
       RUSA_AGENT_API_DB_PASSWORD: ${RUSA_AGENT_API_DB_PASSWORD:?Set RUSA_AGENT_API_DB_PASSWORD in .env}
       RUSA_WEB_DB_PASSWORD: ${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}
+      RUSA_AGENT_BACKUP_DB_PASSWORD: ${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}
     volumes:
       - rusa-agent-postgres-data:/var/lib/postgresql/data
       - ./scripts/postgres/init-agent-db.sh:/docker-entrypoint-initdb.d/10-init-agent-db.sh:ro
@@ -134,6 +135,7 @@ services:
       - -c
       - |
         import os
+        import re
         from pathlib import Path
         import psycopg
         from psycopg import sql
@@ -178,6 +180,28 @@ services:
                     ).format(sql.Literal(web_password))
                 )
             connection.execute("GRANT CONNECT ON DATABASE rusa_agent TO rusa_web_api")
+            backup_password = os.environ["RUSA_AGENT_BACKUP_DB_PASSWORD"]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", backup_password):
+                raise RuntimeError("RUSA_AGENT_BACKUP_DB_PASSWORD must be 32-256 URL-safe characters")
+            backup_role = connection.execute(
+                "SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_backup'"
+            ).fetchone()
+            if backup_role:
+                connection.execute(
+                    sql.SQL(
+                        "ALTER ROLE rusa_agent_backup WITH LOGIN INHERIT PASSWORD {} "
+                        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS"
+                    ).format(sql.Literal(backup_password))
+                )
+            else:
+                connection.execute(
+                    sql.SQL(
+                        "CREATE ROLE rusa_agent_backup LOGIN INHERIT PASSWORD {} "
+                        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS"
+                    ).format(sql.Literal(backup_password))
+                )
+            connection.execute("GRANT pg_read_all_data TO rusa_agent_backup")
+            connection.execute("GRANT CONNECT ON DATABASE rusa_agent TO rusa_agent_backup")
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
         queue = PostgresTaskQueue(dsn)
         queue.initialize()
@@ -194,6 +218,7 @@ services:
       RUSA_AGENT_OWNER_DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
       RUSA_WEB_DB_PASSWORD: ${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}
+      RUSA_AGENT_BACKUP_DB_PASSWORD: ${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}
     depends_on:
       rusa-agent-db:
         condition: service_healthy
@@ -329,7 +354,7 @@ services:
     restart: "no"
     stop_grace_period: ${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}
     environment:
-      DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
+      DATABASE_URL: postgresql://rusa_agent_backup:${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
       BACKUP_DIR: /backups
       BACKUP_AGE_RECIPIENT: ${RUSA_BACKUP_AGE_RECIPIENT:?Set RUSA_BACKUP_AGE_RECIPIENT in .env}
       BACKUP_RETENTION_DAYS: ${RUSA_BACKUP_RETENTION_DAYS:-30}
@@ -368,7 +393,7 @@ services:
     restart: unless-stopped
     stop_grace_period: ${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}
     environment:
-      DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
+      DATABASE_URL: postgresql://rusa_agent_backup:${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
       BACKUP_DIR: /backups
       BACKUP_AGE_RECIPIENT: ${RUSA_BACKUP_AGE_RECIPIENT:?Set RUSA_BACKUP_AGE_RECIPIENT in .env}
       BACKUP_RETENTION_DAYS: ${RUSA_BACKUP_RETENTION_DAYS:-30}
