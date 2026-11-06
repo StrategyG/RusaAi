@@ -33,9 +33,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve tests
+        run: ruff check llm-project/serve tests scripts
       - name: Compile
-        run: python -m compileall -q llm-project tests
+        run: python -m compileall -q llm-project tests scripts
       - name: Test
         run: pytest -q
       - name: Audit production dependencies
