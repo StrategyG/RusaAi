@@ -15,6 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
     op.create_table(
         "agent_tasks",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -127,7 +129,36 @@ def upgrade() -> None:
     )
 
 
+    op.execute("""
+        CREATE TABLE agent_documents (
+            id varchar(36) PRIMARY KEY,
+            tenant_id varchar(128) NOT NULL,
+            source_id varchar(255) NOT NULL,
+            chunk_id varchar(64) NOT NULL,
+            title varchar(500) NOT NULL,
+            content text NOT NULL,
+            metadata_json json NOT NULL DEFAULT '{}'::json,
+            embedding vector(384) NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            CONSTRAINT uq_agent_documents_tenant_source_chunk
+                UNIQUE (tenant_id, source_id, chunk_id)
+        )
+    """)
+    op.create_index(
+        "ix_agent_documents_tenant_source",
+        "agent_documents",
+        ["tenant_id", "source_id"],
+    )
+    op.execute(
+        "CREATE INDEX ix_agent_documents_embedding ON agent_documents "
+        "USING hnsw (embedding vector_cosine_ops)"
+    )
+
+
 def downgrade() -> None:
+    op.drop_index("ix_agent_documents_embedding", table_name="agent_documents")
+    op.drop_index("ix_agent_documents_tenant_source", table_name="agent_documents")
+    op.drop_table("agent_documents")
     op.drop_index("ix_agent_messages_correlation", table_name="agent_messages")
     op.drop_index("ix_agent_messages_tenant_task_created", table_name="agent_messages")
     op.drop_table("agent_messages")
