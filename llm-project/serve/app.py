@@ -140,7 +140,7 @@ class TransformersBackend:
             str(path),
             local_files_only=True,
             trust_remote_code=False,
-            torch_dtype=dtype,
+            dtype=dtype,
         )
         model.to(device)
         model.eval()
