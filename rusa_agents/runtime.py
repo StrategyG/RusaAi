@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 from .audit import AuditLog
-from .contracts import WorkerRole
 from .github_gateway import GitHubRepositoryGateway, GitHubToolGateway
 from .memory import SQLiteMemory
 from .orchestrator import AICodeOrchestrator
