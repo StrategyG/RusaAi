@@ -19,8 +19,8 @@ from .http_limits import BodyLimitMiddleware
 from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
-if MAX_AGENT_REQUEST_BYTES <= 0:
-    raise RuntimeError("RUSA_AGENT_MAX_REQUEST_BYTES must be positive")
+if not 1024 <= MAX_AGENT_REQUEST_BYTES <= 16 * 1024 * 1024:
+    raise RuntimeError("RUSA_AGENT_MAX_REQUEST_BYTES must be between 1024 and 16777216")
 
 
 class CreateAgentTaskRequest(BaseModel):
@@ -320,3 +320,53 @@ def get_task(
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"task_id": task_id, "tenant_id": tenant_id, **result}
+
+
+@app.post("/v1/agent/tasks/{task_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+def retry_failed_task(
+    task_id: str,
+    request: Request,
+    tenant_id: str = Depends(authenticate_tenant),
+) -> dict[str, str]:
+    try:
+        if request.app.state.queue.requeue_failed(tenant_id, task_id):
+            return {"task_id": task_id, "tenant_id": tenant_id, "status": "queued"}
+        result = request.app.state.queue.get(tenant_id, task_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent task queue is temporarily unavailable",
+        ) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    raise HTTPException(
+        status_code=409,
+        detail="Only failed tasks can be retried",
+    )
+
+
+@app.delete("/v1/agent/tasks/{task_id}")
+def cancel_task(
+    task_id: str,
+    request: Request,
+    tenant_id: str = Depends(authenticate_tenant),
+) -> dict[str, str]:
+    try:
+        cancelled = request.app.state.queue.cancel(tenant_id, task_id)
+        if not cancelled:
+            result = request.app.state.queue.get(tenant_id, task_id)
+        else:
+            result = None
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent task queue is temporarily unavailable",
+        ) from exc
+    if cancelled or (result is not None and result.get("status") == "cancelled"):
+        return {"task_id": task_id, "tenant_id": tenant_id, "status": "cancelled"}
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    raise HTTPException(
+        status_code=409,
+        detail="Task cannot be cancelled from its current state",
+    )
