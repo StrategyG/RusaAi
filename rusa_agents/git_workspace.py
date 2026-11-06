@@ -61,7 +61,7 @@ class GitWorkspaceManager:
             args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
         return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
-    def refresh(self, repository: str) -> None:
+    def refresh(self, repository: str, base_branch: str) -> None:
         owner, repo = repository.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
@@ -92,7 +92,8 @@ class GitWorkspaceManager:
             fetched = self._run(
                 [
                     "git", "-c", "credential.helper=", "--git-dir", str(mirror),
-                    "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*",
+                    "fetch", "--prune", "origin",
+                    f"+refs/heads/{base_branch}:refs/heads/{base_branch}",
                 ],
                 extra_env=extra_env,
             )
@@ -117,7 +118,7 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
-        self.refresh(task.repository.full_name)
+        self.refresh(task.repository.full_name, task.repository.base_branch)
         self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
