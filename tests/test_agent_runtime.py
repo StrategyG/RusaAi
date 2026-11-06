@@ -757,3 +757,78 @@ def test_secret_redaction_handles_common_token_formats():
     assert "123456789012345678901234567890" not in sanitized["message"]
     assert "abcdefghijklmnop" not in sanitized["message"]
     assert sanitized["nested"]["password"] == "[REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_github_branch_creation_is_idempotent(monkeypatch):
+    from rusa_agents.tools import GitHubTools
+
+    github = GitHubTools(token="test-token")
+    calls = []
+
+    async def fake_request(method, path, **kwargs):
+        calls.append((method, path))
+        return {"object": {"sha": "a" * 40}}
+
+    monkeypatch.setattr(github, "_request", fake_request)
+    result = await github.create_branch(
+        "StrategyG/RusaAi",
+        "main",
+        "feature/already-created",
+    )
+    assert result["already_exists"] is True
+    assert result["sha"] == "a" * 40
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_github_pull_request_creation_reuses_existing_open_pr(monkeypatch):
+    from rusa_agents.tools import GitHubTools
+
+    github = GitHubTools(token="test-token")
+
+    async def fake_request(method, path, **kwargs):
+        assert method == "GET"
+        assert path.endswith("/pulls")
+        return [{"number": 12, "html_url": "https://github.com/StrategyG/RusaAi/pull/12", "state": "open", "draft": True}]
+
+    monkeypatch.setattr(github, "_request", fake_request)
+    result = await github.create_pull_request(
+        "StrategyG/RusaAi",
+        "Title",
+        "Body",
+        "feature/existing",
+        "main",
+    )
+    assert result["number"] == 12
+    assert result["already_exists"] is True
+
+
+@pytest.mark.asyncio
+async def test_github_file_write_detects_already_applied_content(monkeypatch):
+    import base64
+    from rusa_agents.tools import GitHubTools
+
+    github = GitHubTools(token="test-token")
+    content = "same content"
+
+    async def fake_request(method, path, **kwargs):
+        if method == "GET" and "/contents/" in path:
+            return {
+                "sha": "c" * 40,
+                "content": base64.b64encode(content.encode()).decode(),
+            }
+        if method == "GET" and path.endswith("/commits"):
+            return [{"sha": "d" * 40}]
+        raise AssertionError(f"Unexpected GitHub request: {method} {path}")
+
+    monkeypatch.setattr(github, "_request", fake_request)
+    result = await github.write_file(
+        "StrategyG/RusaAi",
+        "docs/idempotent.md",
+        content,
+        "docs: add idempotent file",
+        "feature/idempotent",
+    )
+    assert result["already_applied"] is True
+    assert result["commit_sha"] == "d" * 40
