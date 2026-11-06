@@ -9,7 +9,7 @@ Status: IMPLEMENTATION ADVANCED — NOT PRODUCTION CERTIFIED.
 - OpenAI-compatible planner adapter; no fabricated model completions.
 - Hierarchical supervisor, logical specialist-role routing, persisted message bus, plan validation, branch diff review, reviewer risk assessment, and approver-controlled human override.
 - JSON Schema-validated tool registry with GitHub branch-scoped operations.
-- Separate tenant and approver API credentials.
+- Separate tenant and approver API credentials; recursive credential redaction for tool results, task context, memory, and RAG documents.
 - MCP Streamable HTTP gateway with administrator-defined server/tool allowlists and schema validation.
 - Tenant-scoped pgvector RAG ingestion, retrieval, source filtering, citations, and deletion; embedding dimension fixed at 384.
 - Tenant-scoped key/value memory CRUD and keyword search.
