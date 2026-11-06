@@ -541,3 +541,37 @@ def test_postgres_queue_can_cancel_task_waiting_for_human_approval():
             "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
             (tenant_id,),
         )
+
+
+def test_workspace_task_queries_are_scoped_by_tenant_and_user():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-workspace-{uuid4().hex}"
+    user_id = str(uuid4())
+    other_user_id = str(uuid4())
+    own_task = replace(
+        make_task(tenant_id, f"workspace-own-{uuid4().hex}"),
+        metadata={"user_id": user_id},
+    )
+    other_task = replace(
+        make_task(tenant_id, f"workspace-other-{uuid4().hex}"),
+        metadata={"user_id": other_user_id},
+    )
+    own_id = queue.enqueue(own_task)
+    other_id = queue.enqueue(other_task)
+
+    own_rows = queue.list_tasks(tenant_id, user_id=user_id, limit=10)
+    tenant_rows = queue.list_tasks(tenant_id, limit=10)
+    own_stats = queue.stats(tenant_id, user_id=user_id)
+    record = queue.get(tenant_id, own_id)
+
+    assert [item["task_id"] for item in own_rows] == [own_id]
+    assert {item["task_id"] for item in tenant_rows} == {own_id, other_id}
+    assert own_stats["counts"]["queued"] == 1
+    assert record is not None
+    assert record["payload"]["metadata"]["user_id"] == user_id
+    assert queue.list_dead_letters(tenant_id, user_id=user_id) == []
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute("DELETE FROM rusa_agent_tasks WHERE tenant_id=%s", (tenant_id,))
