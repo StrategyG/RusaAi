@@ -10,8 +10,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_worker_runtime') THEN
         CREATE ROLE rusa_worker_runtime NOLOGIN NOBYPASSRLS;
     END IF;
-END
-$;
+END;
+$$;
 
 -- Keep privilege groups non-login and explicitly unable to bypass row security.
 ALTER ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
