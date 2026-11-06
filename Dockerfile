@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip && python -m pip install --prefix=/install -r requirements.txt
+COPY pyproject.toml .
+COPY rusa_agents ./rusa_agents
+RUN python -m pip install --prefix=/install --no-deps .
 
 FROM python:3.10-slim AS runner
 
