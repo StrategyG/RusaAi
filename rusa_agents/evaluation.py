@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from statistics import quantiles
 from typing import Any
 
 from sqlalchemy import select
