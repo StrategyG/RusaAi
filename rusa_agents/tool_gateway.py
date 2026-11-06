@@ -115,7 +115,7 @@ class DockerSandbox:
                 return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
             except subprocess.TimeoutExpired:
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
-            output = (completed.stdout + "\\n" + completed.stderr)[-20000:]
+            output = (completed.stdout + "\n" + completed.stderr)[-20000:]
             return ToolResult(
                 completed.returncode == 0,
                 output,
