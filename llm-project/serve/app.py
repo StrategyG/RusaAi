@@ -15,6 +15,7 @@ from typing import Any, Literal
 import jsonschema
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
@@ -712,12 +713,13 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 }
             )
             yield _sse("[DONE]")
-        finally:
-            controller.release()
+    async def release_stream_slot() -> None:
+        controller.release()
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
+        background=BackgroundTask(release_stream_slot),
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
