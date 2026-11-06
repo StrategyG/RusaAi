@@ -62,3 +62,63 @@ class OpenAICompatibleProvider:
                         raise
                     await asyncio.sleep(min(2 ** attempt, 8))
         raise RuntimeError("Model provider request failed")
+
+
+class OpenAIChatInferenceProvider:
+    """OpenAI-compatible chat adapter for the public inference endpoint."""
+
+    def __init__(
+        self,
+        base_url: str,
+        default_model: str = "rusa-ai",
+        api_key: str | None = None,
+        timeout_seconds: float = 120.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.default_model = default_model
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    async def check_ready(self) -> bool:
+        timeout = httpx.Timeout(10.0, connect=5.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.get(f"{self.base_url}/models", headers=self._headers())
+            response.raise_for_status()
+            return True
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: int = 1024,
+    ) -> str:
+        payload = {
+            "model": model or self.default_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            if not isinstance(content, str) or not content.strip():
+                raise RuntimeError("Inference provider returned empty or non-text content")
+            return content
