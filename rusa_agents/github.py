@@ -2,6 +2,7 @@
 
 import base64
 import json
+import math
 import re
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -12,12 +13,52 @@ from .contracts import CodingTask, ToolCall, ToolResult
 from .policy import AutonomyPolicy
 
 
+_SECRET_PATTERNS = (
+    (
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+        ),
+        "[REDACTED PRIVATE KEY]",
+    ),
+    (
+        re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"
+        ),
+        "[REDACTED TOKEN]",
+    ),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)"
+            r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+        ),
+        r"\1\2[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"
+        ),
+        "[REDACTED JWT]",
+    ),
+)
+
+
+def redact_sensitive_text(value: str) -> str:
+    for pattern, replacement in _SECRET_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
+
+
 class GitHubToolGateway:
     def __init__(
         self, *, token: str, api_url: str = "https://api.github.com",
         timeout_seconds: float = 20.0, max_file_bytes: int = 1_000_000,
         max_response_bytes: int = 2_000_000,
         allowed_repositories_by_tenant: dict[str, set[str]] | None = None,
+        max_check_pages: int = 10,
+        max_diff_pages: int = 3,
+        max_diff_files: int = 20,
+        max_diff_patch_chars: int = 5500,
+        max_diff_chars: int = 100_000,
     ) -> None:
         parsed = urlparse(api_url)
         if (
@@ -27,13 +68,20 @@ class GitHubToolGateway:
             raise ValueError("GitHub API URL must use HTTPS without credentials or query")
         if not token:
             raise ValueError("GitHub token is required")
-        if timeout_seconds <= 0 or max_file_bytes < 1024 or max_response_bytes < 1024:
+        if (
+            timeout_seconds <= 0 or max_file_bytes < 1024 or max_response_bytes < 1024
+            or not 1 <= max_check_pages <= 10 or not 1 <= max_diff_pages <= 3
+            or not 1 <= max_diff_files <= 100
+            or not 1024 <= max_diff_patch_chars <= 12000
+            or max_diff_chars < max_diff_patch_chars
+        ):
             raise ValueError("invalid GitHub gateway limits")
         if not allowed_repositories_by_tenant:
             raise ValueError("an explicit per-tenant repository allowlist is required")
         for tenant_id, repositories in allowed_repositories_by_tenant.items():
             if (
-                not tenant_id
+                not isinstance(tenant_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tenant_id)
                 or not repositories
                 or any(
                     not isinstance(repository, str)
@@ -47,10 +95,22 @@ class GitHubToolGateway:
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
         self.max_file_bytes = max_file_bytes
         self.max_response_bytes = max_response_bytes
+        self.max_check_pages = max_check_pages
+        self.max_diff_pages = max_diff_pages
+        self.max_diff_files = max_diff_files
+        self.max_diff_patch_chars = max_diff_patch_chars
+        self.max_diff_chars = max_diff_chars
         self.allowed_repositories_by_tenant = {
-            tenant_id: frozenset(repositories)
+            tenant_id: frozenset(repository.lower() for repository in repositories)
             for tenant_id, repositories in allowed_repositories_by_tenant.items()
         }
+
+    def _validate_task(self, task: CodingTask) -> None:
+        allowed = self.allowed_repositories_by_tenant.get(task.tenant_id, frozenset())
+        if task.repository.full_name.lower() not in allowed:
+            raise PermissionError("repository is not allowlisted for this tenant")
+        if not task.has_tenant_scoped_work_branch():
+            raise PermissionError("work branch is not bound to the tenant and task identity")
 
     def _root(self, task: CodingTask) -> str:
         owner, name = task.repository.full_name.split("/", 1)
@@ -154,7 +214,12 @@ class GitHubToolGateway:
             raise RuntimeError("binary files are not supported by the agent read tool") from exc
         return ToolResult(
             name="read_file", success=True,
-            data={"path": path, "ref": ref, "content": decoded},
+            data={
+                "path": path,
+                "ref": ref,
+                "content": redact_sensitive_text(decoded),
+                "sensitive_content_redacted": redact_sensitive_text(decoded) != decoded,
+            },
             evidence={"source": "github_contents_api", "sha": result.get("sha")},
         )
 
@@ -236,10 +301,222 @@ class GitHubToolGateway:
             evidence={"source": "github_pull_requests_api"},
         )
 
+    async def _get_ci_status(self, task: CodingTask) -> ToolResult:
+        root = self._root(task)
+        branch = await self._request(
+            "GET",
+            f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
+        )
+        if not isinstance(branch, dict):
+            raise RuntimeError("work branch was not found")
+        sha = str(branch.get("commit", {}).get("sha", ""))
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            raise RuntimeError("GitHub returned an invalid work-branch commit SHA")
+
+        first = await self._request(
+            "GET",
+            f"{root}/commits/{sha}/check-runs",
+            params={"per_page": "100", "page": "1"},
+        )
+        if not isinstance(first, dict):
+            raise RuntimeError("GitHub check-runs response was invalid")
+        total_count = first.get("total_count")
+        if type(total_count) is not int or total_count < 0:
+            return ToolResult(
+                name="get_ci_status",
+                success=True,
+                data={"head_sha": sha, "checks": [], "checks_complete": False,
+                      "total_count": None, "all_checks_success": False},
+                evidence={"source": "github_check_runs_api", "head_sha": sha},
+            )
+
+        all_runs: list[dict[str, Any]] = []
+        page_count = max(1, math.ceil(total_count / 100))
+        page_limit = min(page_count, self.max_check_pages)
+        for page in range(1, page_limit + 1):
+            payload = first if page == 1 else await self._request(
+                "GET",
+                f"{root}/commits/{sha}/check-runs",
+                params={"per_page": "100", "page": str(page)},
+            )
+            if not isinstance(payload, dict):
+                break
+            if payload.get("total_count") != total_count:
+                break
+            runs = payload.get("check_runs")
+            if not isinstance(runs, list):
+                break
+            all_runs.extend(item for item in runs if isinstance(item, dict))
+
+        run_ids = [item.get("id") for item in all_runs]
+        checks_complete = (
+            total_count <= self.max_check_pages * 100
+            and len(all_runs) == total_count
+            and all(type(run_id) is int for run_id in run_ids)
+            and len(run_ids) == len(set(run_ids))
+        )
+        latest_by_identity: dict[tuple[Any, Any], tuple[str, dict[str, Any]]] = {}
+        for item in all_runs:
+            app = item.get("app") if isinstance(item.get("app"), dict) else {}
+            identity = (app.get("id"), item.get("name"))
+            timestamp = str(item.get("started_at") or item.get("created_at") or "")
+            current = latest_by_identity.get(identity)
+            if current is None or timestamp >= current[0]:
+                latest_by_identity[identity] = (timestamp, item)
+        latest_runs = [entry[1] for entry in latest_by_identity.values()]
+        checks = [
+            {
+                "id": item.get("id"),
+                "app_id": (item.get("app") or {}).get("id")
+                    if isinstance(item.get("app"), dict) else None,
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "conclusion": item.get("conclusion"),
+                "details_url": item.get("details_url"),
+                "started_at": item.get("started_at"),
+            }
+            for item in latest_runs
+        ]
+        checks.sort(key=lambda item: (str(item.get("name") or ""), str(item.get("app_id") or "")))
+        all_success = (
+            checks_complete and bool(checks)
+            and all(
+                item.get("status") == "completed" and item.get("conclusion") == "success"
+                for item in checks
+            )
+        )
+        return ToolResult(
+            name="get_ci_status",
+            success=True,
+            data={
+                "head_sha": sha,
+                "checks": checks,
+                "checks_complete": checks_complete,
+                "total_count": len(checks),
+                "raw_total_count": total_count,
+                "all_checks_success": all_success,
+            },
+            evidence={"source": "github_check_runs_api", "head_sha": sha},
+        )
+
+    async def _get_branch_diff(self, task: CodingTask) -> ToolResult:
+        root = self._root(task)
+        base = await self._request(
+            "GET",
+            f"{root}/branches/{quote(task.repository.base_branch, safe='/')}",
+        )
+        head = await self._request(
+            "GET",
+            f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
+        )
+        if not isinstance(base, dict) or not isinstance(head, dict):
+            raise RuntimeError("base or work branch was not found")
+        base_sha = str(base.get("commit", {}).get("sha", ""))
+        head_sha = str(head.get("commit", {}).get("sha", ""))
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", base_sha) or not re.fullmatch(
+            r"[0-9a-fA-F]{40}", head_sha
+        ):
+            raise RuntimeError("GitHub returned an invalid branch commit SHA")
+        if base_sha == head_sha:
+            return ToolResult(
+                name="get_branch_diff",
+                success=True,
+                data={
+                    "base_sha": base_sha, "head_sha": head_sha, "changed_files": 0,
+                    "files": [], "diff_complete": True,
+                },
+                evidence={"source": "github_compare_api", "head_sha": head_sha},
+            )
+
+        compare_ref = quote(f"{base_sha}...{head_sha}", safe=".")
+        first = await self._request(
+            "GET",
+            f"{root}/compare/{compare_ref}",
+            params={"per_page": "100", "page": "1"},
+        )
+        if not isinstance(first, dict):
+            raise RuntimeError("GitHub compare response was invalid")
+        first_files = first.get("files")
+        changed_count = first.get("changed_files")
+        if not isinstance(first_files, list) or type(changed_count) is not int:
+            raise RuntimeError("GitHub compare response omitted file metadata")
+
+        page_count = max(1, math.ceil(changed_count / 100))
+        page_limit = min(page_count, self.max_diff_pages)
+        collected: list[dict[str, Any]] = []
+        diff_chars = 0
+        sensitive_content_detected = False
+        diff_complete = (
+            changed_count <= self.max_diff_pages * 100
+            and changed_count <= self.max_diff_files
+        )
+        for page in range(1, page_limit + 1):
+            payload = first if page == 1 else await self._request(
+                "GET",
+                f"{root}/compare/{compare_ref}",
+                params={"per_page": "100", "page": str(page)},
+            )
+            if not isinstance(payload, dict) or payload.get("changed_files") != changed_count:
+                diff_complete = False
+                break
+            page_files = payload.get("files")
+            if not isinstance(page_files, list):
+                diff_complete = False
+                break
+            for item in page_files:
+                if len(collected) >= self.max_diff_files:
+                    diff_complete = False
+                    break
+                if not isinstance(item, dict):
+                    diff_complete = False
+                    continue
+                filename = str(item.get("filename", ""))
+                patch = item.get("patch")
+                if not filename or not AutonomyPolicy.safe_repository_path(filename):
+                    patch = ""
+                    diff_complete = False
+                elif not isinstance(patch, str):
+                    patch = ""
+                    diff_complete = False
+                if (
+                    len(patch) > self.max_diff_patch_chars
+                    or diff_chars + len(patch) > self.max_diff_chars
+                ):
+                    patch = patch[:max(
+                        0,
+                        min(self.max_diff_patch_chars, self.max_diff_chars - diff_chars),
+                    )]
+                    diff_complete = False
+                diff_chars += len(patch)
+                redacted_patch = redact_sensitive_text(patch)
+                if redacted_patch != patch:
+                    sensitive_content_detected = True
+                collected.append({
+                    "path": filename,
+                    "status": item.get("status"),
+                    "additions": item.get("additions"),
+                    "deletions": item.get("deletions"),
+                    "patch": redacted_patch,
+                })
+
+        if len(collected) != changed_count:
+            diff_complete = False
+        return ToolResult(
+            name="get_branch_diff",
+            success=True,
+            data={
+                "base_sha": base_sha,
+                "head_sha": head_sha,
+                "changed_files": changed_count,
+                "files": collected,
+                "diff_complete": diff_complete,
+                "sensitive_content_detected": sensitive_content_detected,
+            },
+            evidence={"source": "github_compare_api", "head_sha": head_sha},
+        )
+
     async def execute(self, task: CodingTask, call: ToolCall) -> ToolResult:
-        allowed = self.allowed_repositories_by_tenant.get(task.tenant_id, frozenset())
-        if task.repository.full_name not in allowed:
-            raise PermissionError("repository is not allowlisted for this tenant")
+        self._validate_task(task)
         arguments = dict(call.arguments)
         root = self._root(task)
         if call.name == "create_branch":
@@ -275,42 +552,7 @@ class GitHubToolGateway:
         if call.name == "create_pull_request":
             return await self._create_pull_request(task, arguments)
         if call.name == "get_ci_status":
-            branch = await self._request(
-                "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
-            )
-            if not isinstance(branch, dict):
-                raise RuntimeError("work branch was not found")
-            sha = branch["commit"]["sha"]
-            checks = await self._request(
-                "GET", f"{root}/commits/{sha}/check-runs", params={"per_page": "100"},
-            )
-            if not isinstance(checks, dict):
-                raise RuntimeError("GitHub check-runs response was invalid")
-            items = [
-                {
-                    "name": item.get("name"),
-                    "status": item.get("status"),
-                    "conclusion": item.get("conclusion"),
-                    "details_url": item.get("details_url"),
-                }
-                for item in checks.get("check_runs", [])
-            ]
-            checks_complete = (
-                type(checks.get("total_count")) is int
-                and checks["total_count"] == len(items)
-            )
-            complete = checks_complete and bool(items) and all(
-                item["status"] == "completed" for item in items
-            )
-            passed = complete and all(item["conclusion"] == "success" for item in items)
-            return ToolResult(
-                name=call.name, success=True,
-                data={
-                    "head_sha": sha,
-                    "checks": items,
-                    "checks_complete": checks_complete,
-                    "all_checks_success": passed,
-                },
-                evidence={"source": "github_check_runs_api", "head_sha": sha},
-            )
+            return await self._get_ci_status(task)
+        if call.name == "get_branch_diff":
+            return await self._get_branch_diff(task)
         raise PermissionError(f"tool '{call.name}' is not implemented")
