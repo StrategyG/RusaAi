@@ -59,7 +59,7 @@ Values above are initial configuration examples, not capacity guarantees. Measur
 
 ## 4. Startup and health checks
 
-1. Start the API with the model directory mounted read-only.
+1. Start the API with the model directory mounted read-only. Model loading occurs before the application reports ready; configure the orchestrator startup grace period for the expected artifact size.
 2. Confirm logs state that the selected backend and verified model loaded successfully. Logs must not contain prompts, completions, API keys, or secret values.
 3. GET /health/live confirms only that the process responds.
 4. GET /health/ready must return HTTP 200 and report model_loaded, model_manifest_verified, authentication_configured, and task_schema_loaded as true.
