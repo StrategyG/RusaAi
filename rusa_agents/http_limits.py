@@ -48,7 +48,7 @@ class BodyLimitMiddleware:
 
         try:
             outcome = await asyncio.wait_for(collect(), timeout=self.timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             response = JSONResponse(
                 {"detail": "Request body timed out"},
                 status_code=408,
