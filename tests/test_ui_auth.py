@@ -133,7 +133,7 @@ class FakeAuditLog:
     def __init__(self):
         self.calls = []
 
-    def record(self, event, task_id, actor, details=None, tenant_id="default"):
+    def record(self, event, *, tenant_id, task_id, actor, details=None):
         self.calls.append((event, task_id, actor, details or {}, tenant_id))
 
 
@@ -142,22 +142,22 @@ class FakeQueue:
         self.enqueued = []
         self.records = {}
 
-    def enqueue(self, tenant_id, task_id, payload, idempotency_key):
-        self.enqueued.append((tenant_id, task_id, payload, idempotency_key))
+    def enqueue(self, task):
+        self.enqueued.append(task)
         record = {
-            "task_id": task_id,
-            "tenant_id": tenant_id,
+            "task_id": task.task_id,
+            "tenant_id": task.tenant_id,
             "state": "queued",
             "attempts": 0,
-            "max_attempts": 3,
-            "payload": payload,
+            "max_attempts": 4,
+            "payload": task.to_dict(),
             "result": None,
             "last_error": None,
             "created_at": "2026-11-06T00:00:00+00:00",
             "updated_at": "2026-11-06T00:00:00+00:00",
         }
-        self.records[task_id] = record
-        return {"task_id": task_id, "state": "queued"}
+        self.records[task.task_id] = record
+        return task.task_id
 
     def get(self, tenant_id, task_id):
         record = self.records.get(task_id)
@@ -175,7 +175,10 @@ class FakeQueue:
     def list_tasks(self, tenant_id, user_id=None, limit=50, offset=0):
         records = [r for r in self.records.values() if r["tenant_id"] == tenant_id]
         if user_id:
-            records = [r for r in records if r["payload"].get("user_id") == user_id]
+            records = [
+                r for r in records
+                if (r["payload"].get("metadata") or {}).get("user_id") == user_id
+            ]
         return records[offset : offset + limit]
 
     def list_dead_letters(self, tenant_id, limit=50, user_id=None):
@@ -302,9 +305,9 @@ def test_task_submission_is_attributed_to_authenticated_user(client):
         json={"envelope": envelope},
     )
     assert response.status_code == 202
-    stored = app.state.task_queue.enqueued[0][2]
-    assert stored["user_id"] == USER_ID
-    assert stored["tenant_id"] == TENANT
+    stored = app.state.task_queue.enqueued[0]
+    assert stored.metadata["user_id"] == USER_ID
+    assert stored.tenant_id == TENANT
 
 
 def test_user_task_list_is_scoped_to_owner(client):
@@ -315,7 +318,7 @@ def test_user_task_list_is_scoped_to_owner(client):
         "state": "queued",
         "attempts": 0,
         "max_attempts": 3,
-        "payload": {"task_id": task_id, "tenant_id": TENANT, "user_id": ADMIN_ID, "objective": "admin task"},
+        "payload": {"task_id": task_id, "tenant_id": TENANT, "metadata": {"user_id": ADMIN_ID}, "objective": "admin task"},
         "result": None,
         "last_error": None,
         "created_at": "2026-11-06T00:00:00+00:00",
@@ -334,7 +337,7 @@ def test_admin_can_list_tenant_tasks(client):
         "state": "queued",
         "attempts": 0,
         "max_attempts": 3,
-        "payload": {"task_id": task_id, "tenant_id": TENANT, "user_id": USER_ID, "objective": "user task"},
+        "payload": {"task_id": task_id, "tenant_id": TENANT, "metadata": {"user_id": USER_ID}, "objective": "user task"},
         "result": None,
         "last_error": None,
         "created_at": "2026-11-06T00:00:00+00:00",
