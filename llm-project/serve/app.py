@@ -419,7 +419,7 @@ def require_task_permission(permission: str):
         api_key: str | None = Depends(api_key_header),
     ) -> str:
         try:
-            tenant_id = authenticate_api_key(request, api_key, require_key=True)
+            tenant_id = authenticate_api_key(request, api_key)
         except HTTPException:
             principal = getattr(request.state, "principal", None)
             if principal is None:
@@ -533,9 +533,9 @@ async def readiness_check():
     return {"status": "ready", "inference": "reachable", "database": "reachable" if queue else "not_configured"}
 
 
-def _configured_model_name(request: Request) -> str:
-    config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
-    if request.model != config.model_name:
+def _configured_model_name(chat_request: ChatCompletionRequest, http_request: Request) -> str:
+    config = getattr(http_request.app.state, "config", None) or RuntimeConfig.from_env()
+    if chat_request.model != config.model_name:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{request.model}' is not available",
@@ -545,7 +545,7 @@ def _configured_model_name(request: Request) -> str:
 
 def _sse(data: dict[str, Any] | str) -> str:
     payload = data if isinstance(data, str) else json.dumps(data, separators=(",", ":"))
-    return f"data: {payload}\\n\\n"
+    return f"data: {payload}\n\n"
 
 
 @app.get("/v1/models", dependencies=[Depends(verify_api_key)])
@@ -570,11 +570,9 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
     model_name = _configured_model_name(request, http_request)
     messages = [message.model_dump() for message in request.messages]
-    controller = getattr(
-        http_request.app.state,
-        "inference_admission",
-        InferenceAdmissionController(8, 32, 10.0),
-    )
+    controller = getattr(http_request.app.state, "inference_admission", None)
+    if controller is None:
+        controller = InferenceAdmissionController(8, 32, 10.0)
 
     if not request.stream:
         await controller.acquire()
