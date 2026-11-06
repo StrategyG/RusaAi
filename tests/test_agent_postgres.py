@@ -175,3 +175,29 @@ def test_postgres_queue_fences_expired_lease_owners():
                 "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s AND task_id=%s",
                 (task.tenant_id, task_id),
             )
+
+
+
+def test_api_database_role_has_only_task_submit_and_read_privileges():
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
+                    CREATE ROLE rusa_agent_api NOLOGIN NOBYPASSRLS;
+                END IF;
+            END $$;
+        """)
+        connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
+    PostgresTaskQueue(DSN).initialize()
+    PostgresMemoryStore(DSN).initialize()
+    with psycopg.connect(DSN) as connection:
+        privileges = connection.execute("""
+            SELECT
+                has_table_privilege('rusa_agent_api', 'rusa_agent_tasks', 'SELECT'),
+                has_table_privilege('rusa_agent_api', 'rusa_agent_tasks', 'INSERT'),
+                has_table_privilege('rusa_agent_api', 'rusa_agent_tasks', 'UPDATE'),
+                has_table_privilege('rusa_agent_api', 'rusa_agent_tasks', 'DELETE'),
+                has_table_privilege('rusa_agent_api', 'rusa_agent_memory', 'SELECT')
+        """).fetchone()
+    assert privileges == (True, True, False, False, False)

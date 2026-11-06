@@ -68,3 +68,8 @@ The runtime can autonomously create a branch, modify permitted files, and open a
 - [ ] Audit is shipped to immutable remote storage and HMAC key is managed by KMS.
 - [ ] Prompt-injection, tool abuse, duplicate delivery, and worker crash tests pass.
 - [ ] Staging load/soak test, monitoring, alerting, incident response, and rollback are approved.
+
+
+## Database least-privilege boundary
+
+The API database role is granted only SELECT and INSERT on the tenant-scoped task table. It receives no UPDATE/DELETE privileges and no access to episodic memory tables or sequences. The worker role owns queue and memory operations; row-level security remains enabled and forced on tenant-scoped tables. Existing volumes must run the queue/memory initialization migration so prior default grants are revoked.
