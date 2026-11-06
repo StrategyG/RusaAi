@@ -1,5 +1,6 @@
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -90,6 +91,99 @@ def test_postgres_queue_idempotency_key_replays_per_tenant_and_rejects_payload_c
             "DELETE FROM aicode_jobs WHERE tenant_id IN (%s, %s)",
             (tenant_id, other_tenant),
         )
+
+
+def test_postgres_queue_concurrent_idempotency_returns_one_task_id():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = f"tenant-idempotency-race-{uuid4().hex}"
+    idempotency_key = f"concurrent-{uuid4().hex}"
+    payload = {"objective": "concurrent stable payload"}
+    request_hash = hashlib.sha256(b"concurrent stable payload").hexdigest()
+
+    def submit(_):
+        return queue.enqueue_idempotent(
+            str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(submit, range(16)))
+
+    task_ids = {task_id for task_id, _ in results}
+    created_count = sum(1 for _, created in results if created)
+    assert len(task_ids) == 1
+    assert created_count == 1
+
+    with queue._connect() as conn:
+        conn.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_postgres_queue_two_workers_cannot_claim_the_same_task_concurrently():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = f"tenant-claim-race-{uuid4().hex}"
+    task_id = str(uuid4())
+    assert queue.enqueue(
+        task_id, tenant_id, {"objective": "exclusive claim"},
+        max_attempts=2, priority=2147483647,
+    )
+
+    def claim(worker_id):
+        return queue.claim(worker_id, lease_seconds=30)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(claim, ("claim-worker-a", "claim-worker-b")))
+
+    claims_for_task = [
+        job for job in results if job is not None and job.task_id == task_id
+    ]
+    assert len(claims_for_task) == 1
+    assert queue.get(task_id, tenant_id)["attempts"] == 1
+
+    with queue._connect() as conn:
+        conn.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_postgres_queue_cancel_racing_with_success_ack_never_resurrects_task():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = f"tenant-cancel-race-{uuid4().hex}"
+    task_id = str(uuid4())
+    assert queue.enqueue(
+        task_id, tenant_id, {"objective": "cancel and complete race"},
+        max_attempts=1, priority=2147483647,
+    )
+    claimed = queue.claim("cancel-race-worker", lease_seconds=30)
+    assert claimed is not None and claimed.task_id == task_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        cancel_future = pool.submit(queue.cancel, task_id, tenant_id)
+        complete_future = pool.submit(
+            queue.complete,
+            claimed.id,
+            tenant_id,
+            "cancel-race-worker",
+            claimed.lease_token,
+            {"completed": True},
+        )
+        cancelled = cancel_future.result()
+        completed = complete_future.result()
+
+    current = queue.get(task_id, tenant_id)
+    assert current is not None
+    assert current["status"] in {"cancelled", "succeeded"}
+    if current["status"] == "cancelled":
+        assert cancelled is True
+        assert completed is False
+    else:
+        assert completed is True
+        assert cancelled is False
+    assert queue.owns_lease(
+        claimed.id, tenant_id, "cancel-race-worker", claimed.lease_token
+    ) is False
+
+    with queue._connect() as conn:
+        conn.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
 
 
 def test_postgres_queue_retries_then_dead_letters():
