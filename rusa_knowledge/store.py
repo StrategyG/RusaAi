@@ -16,10 +16,11 @@ def _vector_literal(vector: list[float], dimensions: int) -> str:
     if len(vector) != dimensions:
         raise ValueError("embedding dimension does not match the pgvector column")
     values = [float(value) for value in vector]
-    if not all(math.isfinite(value) for value in values):
-        raise ValueError("embedding vector contains a non-finite value")
-    if sum(value * value for value in values) <= 0:
-        raise ValueError("embedding vector must not be a zero vector")
+    if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values):
+        raise ValueError("embedding vector contains an invalid or out-of-range value")
+    norm_squared = sum(value * value for value in values)
+    if not math.isfinite(norm_squared) or norm_squared <= 0:
+        raise ValueError("embedding vector must have a finite, non-zero norm")
     return "[" + ",".join(format(value, ".9g") for value in values) + "]"
 
 
