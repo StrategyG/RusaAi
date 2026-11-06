@@ -49,3 +49,8 @@ This revision adds or updates regression tests for the new controls. It must be 
 ## Production decision
 
 NOT YET CERTIFIED PRODUCTION-READY. The repository now has stronger code-level controls, but a production decision requires the verification evidence above. No merge to main, deployment, release, or live credential configuration is implied by this review.
+
+
+## CI trigger correction
+
+The stacked PR target branch originally filtered pull-request events to main only, so PR #8 targeting feat/aicode-agent-production had no PR-triggered workflow run. The target branch workflow has now been updated to accept pull requests against all branches. A push-triggered CI run on the updated target branch is in progress; the PR #8 head is being advanced to request its own PR checks against the corrected target workflow.
