@@ -23,6 +23,7 @@ RUSA_API_IMAGE=$old_api
 RUSA_WORKER_IMAGE=$old_worker
 RUSA_SANDBOX_IMAGE=$old_sandbox
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
+RUSA_AICODE_ENABLED=false
 RUSA_API_DATABASE_URL=postgresql://api:secret@db.example/rusa?sslmode=verify-full
 EOF
   cat > "$dir/bin/docker" <<'DOCKER'
