@@ -13,6 +13,17 @@ FROM python:3.11-slim AS runner
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/llm-project/serve ENVIRONMENT=production
 
+# Refresh runtime OS packages so the image receives available Debian security fixes.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# The base Python image may ship vulnerable packaging tools even when the app
+# requirements do not depend on them. Keep the runtime toolchain above known fixes.
+RUN python -m pip install --no-cache-dir --upgrade \
+      pip setuptools "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip check
+
 RUN useradd -m -u 10001 appuser
 COPY --from=builder /install /usr/local
 COPY . .
