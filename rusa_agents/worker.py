@@ -483,6 +483,12 @@ class AgentRuntime:
                 if tool_name == "github.write_file":
                     if arguments.get("branch") != snapshot["work_branch"]:
                         raise ToolError("Writes are restricted to the task's exact work branch")
+                if tool_name == "github.compare_branches":
+                    if (
+                        arguments.get("head") != snapshot["work_branch"]
+                        or arguments.get("base") != snapshot["base_branch"]
+                    ):
+                        raise ToolError("Branch comparison must use the task's exact branches")
                 if tool_name == "github.create_pull_request":
                     if (
                         arguments.get("head") != snapshot["work_branch"]
@@ -504,7 +510,62 @@ class AgentRuntime:
                     arguments["commit_sha"] = latest_sha
 
             await self._assert_lease(tenant_id, task_id)
-            result = await self.tools.execute(tool_name, arguments)
+            if tool_name == "agent.review_diff":
+                comparisons = [
+                    item for item in previous
+                    if item["tool"] == "github.compare_branches"
+                ]
+                if not comparisons:
+                    raise ToolError("Reviewer requires a persisted branch comparison")
+                result = await self.orchestrator.review_diff(
+                    snapshot,
+                    comparisons[-1]["result"],
+                )
+                if not result["approved"] and tool_name not in approved:
+                    async with self.database.session() as session:
+                        row = await session.scalar(
+                            select(TaskRow).where(
+                                TaskRow.id == task_id,
+                                TaskRow.tenant_id == tenant_id,
+                                TaskRow.lease_owner == self.worker_id,
+                            )
+                        )
+                        if not row:
+                            raise LeaseLost(f"Worker no longer owns task {task_id}")
+                        self._set_status(row, TaskStatus.AWAITING_APPROVAL)
+                        row.pending_action = tool_name
+                        row.lease_owner = None
+                        row.lease_until = None
+                        await session.commit()
+                    await self.audit.record(
+                        tenant_id,
+                        task_id,
+                        self.worker_id,
+                        "task.awaiting_approval",
+                        {
+                            "action": tool_name,
+                            "reason": "reviewer_rejected_diff",
+                            "risk_level": result["risk_level"],
+                        },
+                    )
+                    await self._publish(
+                        tenant_id,
+                        task_id,
+                        WorkerRole.REVIEWER,
+                        WorkerRole.SECURITY,
+                        "task.blocked",
+                        {
+                            "reason": "reviewer_rejected_diff",
+                            "summary": result["summary"],
+                            "findings": result["findings"],
+                            "risk_level": result["risk_level"],
+                        },
+                    )
+                    return
+                if not result["approved"] and tool_name in approved:
+                    result["human_override"] = True
+            else:
+                result = await self.tools.execute(tool_name, arguments)
             previous.append(
                 {
                     "tool": tool_name,
@@ -570,6 +631,20 @@ class AgentRuntime:
                 item["result"] for item in results
                 if item["tool"] == "github.get_ci_status"
             ]
+            review_results = [
+                item["result"] for item in results
+                if item["tool"] == "agent.review_diff"
+            ]
+            has_comparison = any(
+                item["tool"] == "github.compare_branches" for item in results
+            )
+            review_ok = bool(
+                review_results
+                and (
+                    review_results[-1].get("approved")
+                    or review_results[-1].get("human_override")
+                )
+            )
             latest_write_sha = (
                 writes[-1]["result"].get("commit_sha") if writes else None
             )
@@ -582,6 +657,12 @@ class AgentRuntime:
             if not has_branch:
                 target = TaskStatus.BLOCKED
                 error = "No feature branch creation evidence"
+            elif has_write and not has_comparison:
+                target = TaskStatus.BLOCKED
+                error = "Code changes require branch diff evidence"
+            elif has_write and not review_ok:
+                target = TaskStatus.BLOCKED
+                error = "Code changes require reviewer approval"
             elif has_write and row.require_pull_request and not has_pr:
                 target = TaskStatus.BLOCKED
                 error = "Code changes require a pull request"
@@ -602,6 +683,11 @@ class AgentRuntime:
                     "acceptance_criteria_evaluated": False,
                     "verification_scope": [
                         "feature_branch_created",
+                        *(
+                            ["branch_diff_reviewed"]
+                            if has_write and review_ok
+                            else []
+                        ),
                         *(
                             ["draft_pull_request_created"]
                             if has_write and row.require_pull_request
