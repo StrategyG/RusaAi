@@ -157,6 +157,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
 
     queue.initialize()
     memory.initialize()
+    queue.configure_api_permissions()
     tenant_a = f"rusa-test-api-a-{uuid4().hex}"
     tenant_b = f"rusa-test-api-b-{uuid4().hex}"
     task_a = make_task(tenant_a, f"api-a-{uuid4().hex}")
@@ -179,7 +180,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
                     ),
                     (SELECT rolbypassrls FROM pg_roles WHERE rolname='rusa_agent_api')
             """).fetchone()
-        assert privileges == (True, True, False, False, False, False, False, False)
+        assert privileges == (True, True, True, False, False, False, False, False)
 
         with psycopg.connect(DSN) as connection:
             connection.execute("SET ROLE rusa_agent_worker")
