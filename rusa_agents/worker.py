@@ -179,6 +179,8 @@ class AgentRuntime:
             )
             if not row or row.status != TaskStatus.BLOCKED.value or not row.plan:
                 raise ValueError("Only a blocked task with a persisted plan can be resumed")
+            if row.attempts >= row.max_attempts:
+                raise ValueError("Task retry budget is exhausted; create a new task after review")
             error = row.error or ""
             if "CI checks" in error:
                 target_tool = "github.get_ci_status"
