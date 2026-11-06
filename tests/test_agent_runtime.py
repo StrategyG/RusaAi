@@ -562,6 +562,23 @@ class ExecutionProvider:
                     "risk_level": "low" if self.review_approved else "medium",
                 }
             )
+        if "Synthesis agent" in system_prompt:
+            task_data = json.loads(user_prompt)
+            return json.dumps(
+                {
+                    "summary": "Task completed with verified repository and CI evidence",
+                    "key_findings": ["A draft pull request was created"],
+                    "citations": [],
+                    "acceptance_criteria_assessment": [
+                        {
+                            "criterion": criterion,
+                            "status": "met",
+                            "evidence": "The task execution and final CI evidence were recorded",
+                        }
+                        for criterion in task_data["acceptance_criteria"]
+                    ],
+                }
+            )
 
         return json.dumps(
             {
@@ -688,6 +705,8 @@ async def test_worker_executes_full_plan_and_verifies_completion(database):
     assert task["cursor"] == 7
     assert task["result"]["verified"] is True
     assert task["result"]["acceptance_criteria_evaluated"] is False
+    assert task["result"]["final_answer"]["summary"]
+    assert task["result"]["final_answer"]["acceptance_criteria_assessment"][0]["status"] == "met"
     messages = await runtime.messages.history("tenant-e2e", task_id)
     assert any(message["message_type"] == "task.progress" for message in messages)
     assert any(message["message_type"] == "task.result" for message in messages)
