@@ -152,7 +152,7 @@ RUSA_DOCKER_GID=1001
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
 
-Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is not forcibly terminated; cancel it through the API or let it reach a safe checkpoint. Existing task status, cancellation, health, and metrics endpoints remain available.
+Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is not forcibly terminated; worker shutdown drains the current task, with a 65-minute Compose grace period aligned to the one-hour task timeout. Cancel a task through the API if it should stop sooner. Existing task status, cancellation, health, and metrics endpoints remain available.
 
 API keys and the audit HMAC key must each contain at least 32 UTF-8 bytes. Use a secret manager. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
 
