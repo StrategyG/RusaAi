@@ -18,6 +18,7 @@ from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.providers import OpenAICompatibleProvider
+from rusa_agents.runtime import build_orchestrator
 from rusa_agents.workers import AgentWorker
 from rusa_agents.worker import run_worker
 
@@ -592,3 +593,21 @@ def test_orchestrator_rejects_malformed_github_evidence_port(tmp_path):
     )
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.BLOCKED
+
+
+
+def test_runtime_requires_repository_allowlist_for_single_tenant(monkeypatch):
+    monkeypatch.setenv("RUSA_PROVIDER_BASE_URL", "http://127.0.0.1:8001/v1")
+    monkeypatch.setenv("RUSA_PROVIDER_MODEL", "test-model")
+    monkeypatch.setenv("RUSA_GITHUB_TOKEN", "x" * 40)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rusa:secret@localhost:5432/rusa")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-default")
+    monkeypatch.delenv("RUSA_API_KEY_TENANTS_JSON", raising=False)
+    monkeypatch.setenv(
+        "RUSA_GITHUB_TENANT_REPOSITORIES_JSON",
+        '{"tenant-other":["StrategyG/RusaAi"]}',
+    )
+    monkeypatch.delenv("RUSA_GITHUB_ALLOWED_REPOSITORIES", raising=False)
+
+    with pytest.raises(RuntimeError, match="fallback tenant"):
+        build_orchestrator()

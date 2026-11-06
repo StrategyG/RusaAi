@@ -97,6 +97,13 @@ def build_orchestrator() -> AICodeOrchestrator:
                 "tenant repository allowlist is missing authenticated tenants: "
                 + ", ".join(sorted(missing_tenants))
             )
+    elif tenant_repositories is not None:
+        fallback_tenant = os.getenv("RUSA_TENANT_ID", "default")
+        if fallback_tenant not in tenant_repositories:
+            raise RuntimeError(
+                "tenant repository allowlist is missing fallback tenant "
+                f"{fallback_tenant!r}"
+            )
 
     allowed_repositories = {
         item.strip()
