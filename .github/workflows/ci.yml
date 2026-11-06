@@ -281,8 +281,8 @@ jobs:
       - name: Require every release check to pass
         env:
           TEST_RESULT: ${{ needs.test.result }}
-          IMAGE_RESULT: ${{ needs.docker-build.result }}
-          RAG_MCP_RESULT: ${{ needs.rag-mcp.result }}
+          IMAGE_RESULT: ${{ needs['docker-build'].result }}
+          RAG_MCP_RESULT: ${{ needs['rag-mcp'].result }}
         run: |
           printf 'Test, lint, and security: %s\n' "$TEST_RESULT"
           printf 'Build, test, and scan production images: %s\n' "$IMAGE_RESULT"
