@@ -32,6 +32,7 @@ def knowledge_store():
             """
         )
         connection.execute("ALTER ROLE rusa_knowledge_test_api NOBYPASSRLS")
+        connection.execute("GRANT USAGE ON SCHEMA public TO rusa_knowledge_test_api")
         connection.execute(
             "GRANT SELECT ON public.rusa_knowledge_documents, "
             "public.rusa_knowledge_chunks TO rusa_knowledge_test_api"
