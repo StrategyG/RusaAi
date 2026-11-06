@@ -45,11 +45,16 @@ class AICodeRuntime:
         )
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
+        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
 
     def initialize(self) -> None:
         self.queue.initialize()
         self.memory.initialize()
         self.audit.initialize()
+        self.sandbox.verify_ready(
+            require_rootless=self.config.environment == "production",
+            require_image=self.config.environment == "production",
+        )
         if not self.audit.verify():
             raise RuntimeError("Central audit ledger integrity verification failed")
 
@@ -78,7 +83,7 @@ class AICodeRuntime:
         )
         gateway = WorkspaceToolGateway(
             workspace,
-            sandbox=DockerSandbox(image=self.config.sandbox_image),
+            sandbox=self.sandbox,
         )
         workers = [
             AutonomousCodeWorker(role, self.provider, gateway)
