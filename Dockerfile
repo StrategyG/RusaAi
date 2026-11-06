@@ -21,11 +21,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN groupadd --system --gid 10001 rusa \
-    && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
+    && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa \
+    && mkdir -p /var/lib/rusa-agent \
+    && chown -R 10001:10001 /var/lib/rusa-agent
 
 COPY --from=builder /install /usr/local
 COPY llm-project/serve /app/llm-project/serve
 COPY schemas /app/schemas
+COPY rusa_agents /app/rusa_agents
 
 USER 10001:10001
 
