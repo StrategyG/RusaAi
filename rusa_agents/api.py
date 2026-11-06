@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
@@ -22,9 +23,12 @@ MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"
 class RequestGuardMiddleware:
     """Bound and buffer every HTTP request body, including chunked bodies."""
 
-    def __init__(self, app, max_request_bytes):
+    def __init__(self, app, max_request_bytes, body_timeout_seconds: float = 15.0):
+        if body_timeout_seconds <= 0:
+            raise ValueError("body_timeout_seconds must be positive")
         self.app = app
         self.max_request_bytes = max_request_bytes
+        self.body_timeout_seconds = body_timeout_seconds
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -75,7 +79,13 @@ class RequestGuardMiddleware:
         buffered_messages = []
         received_bytes = 0
         while True:
-            message = await receive()
+            try:
+                message = await asyncio.wait_for(
+                    receive(), timeout=self.body_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                await send_error(408, "Request body timed out")
+                return
             if message["type"] == "http.disconnect":
                 return
             if message["type"] != "http.request":
@@ -144,7 +154,8 @@ class CreateAgentTaskRequest(BaseModel):
     objective: str = Field(min_length=1, max_length=4000)
     repository: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     base_branch: str = Field(default="main", min_length=1, max_length=128)
-    work_branch: str = Field(min_length=1, max_length=128)
+    # Optional compatibility field; the API always derives the actual work branch.
+    work_branch: str | None = Field(default=None, min_length=1, max_length=128)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
     context: str = Field(default="", max_length=16000)
 
@@ -259,6 +270,15 @@ def create_task(
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
     if body.repository not in tenant_repository_allowlist(tenant_id):
         raise HTTPException(status_code=403, detail="Repository is not allowlisted for this tenant")
+    task_id = uuid.uuid4().hex
+    expected_branch = CodingTask.expected_work_branch_for(
+        tenant_id, idempotency_key or "", task_id,
+    )
+    if body.work_branch is not None and body.work_branch != expected_branch:
+        raise HTTPException(
+            status_code=422,
+            detail="work_branch is server-generated and must use the tenant-scoped namespace",
+        )
     try:
         task = CodingTask(
             tenant_id=tenant_id,
@@ -266,16 +286,22 @@ def create_task(
             repository=RepositoryTarget(
                 full_name=body.repository,
                 base_branch=body.base_branch,
-                work_branch=body.work_branch,
+                work_branch=expected_branch,
             ),
             acceptance_criteria=tuple(body.acceptance_criteria),
             context=body.context,
             idempotency_key=idempotency_key or "",
+            task_id=task_id,
         )
         task_id = request.app.state.queue.enqueue(task)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"task_id": task_id, "status": "queued", "tenant_id": tenant_id}
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "tenant_id": tenant_id,
+        "work_branch": expected_branch,
+    }
 
 
 @app.get("/v1/agent/tasks/{task_id}")

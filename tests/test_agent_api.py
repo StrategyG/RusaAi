@@ -8,11 +8,15 @@ from rusa_agents import api
 class FakeQueue:
     def __init__(self, dsn):
         self.tasks = {}
+        self.idempotency = {}
 
     def check_ready(self):
         return True
 
     def enqueue(self, task):
+        key = (task.tenant_id, task.idempotency_key or task.task_id)
+        if key in self.idempotency:
+            return self.idempotency[key]
         self.tasks[task.task_id] = {
             "tenant_id": task.tenant_id,
             "status": "queued",
@@ -20,6 +24,7 @@ class FakeQueue:
             "attempts": 0,
             "last_error": None,
         }
+        self.idempotency[key] = task.task_id
         return task.task_id
 
     def get(self, tenant_id, task_id):
@@ -47,7 +52,6 @@ def task_body():
         "objective": "Add regression tests",
         "repository": "StrategyG/RusaAi",
         "base_branch": "main",
-        "work_branch": "feature/api-test",
         "acceptance_criteria": ["Tests pass"],
     }
 
@@ -71,6 +75,7 @@ def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
         assert created.status_code == 202
         assert created.headers["X-Request-ID"]
         assert created.headers["Cache-Control"] == "no-store"
+        assert created.json()["work_branch"].startswith("rusa-agent/")
         task_id = created.json()["task_id"]
         fetched = client.get(f"/v1/agent/tasks/{task_id}", headers=headers)
         assert fetched.status_code == 200
@@ -128,6 +133,21 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
     assert response.status_code == 413
 
 
+def test_agent_api_reuses_same_tenant_branch_for_idempotent_retry(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {
+        "X-API-Key": "a" * 48,
+        "X-Tenant-ID": "tenant-a",
+        "Idempotency-Key": "retry-123",
+    }
+    with TestClient(api.app) as client:
+        first = client.post("/v1/agent/tasks", headers=headers, json=task_body())
+        second = client.post("/v1/agent/tasks", headers=headers, json=task_body())
+    assert first.status_code == second.status_code == 202
+    assert first.json()["task_id"] == second.json()["task_id"]
+    assert first.json()["work_branch"] == second.json()["work_branch"]
+
+
 
 def test_agent_api_rejects_repository_outside_tenant_allowlist(monkeypatch):
     configure_api(monkeypatch)
@@ -169,3 +189,33 @@ def test_agent_api_enforces_streamed_body_limit_without_content_length():
     asyncio.run(middleware(scope, receive, send))
     response_start = next(item for item in sent if item["type"] == "http.response.start")
     assert response_start["status"] == 413
+
+
+def test_agent_api_times_out_slow_request_body():
+    import asyncio
+
+    from rusa_agents.api import RequestGuardMiddleware
+
+    sent = []
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(*args):
+        raise AssertionError("incomplete request must not reach downstream app")
+
+    middleware = RequestGuardMiddleware(
+        downstream, max_request_bytes=8, body_timeout_seconds=0.01,
+    )
+    scope = {
+        "type": "http", "method": "POST", "path": "/test",
+        "headers": [], "state": {},
+    }
+    asyncio.run(middleware(scope, receive, send))
+    response_start = next(
+        item for item in sent if item["type"] == "http.response.start"
+    )
+    assert response_start["status"] == 408

@@ -1,6 +1,7 @@
 """PostgreSQL durable queue with tenant-scoped idempotency, RLS, and worker leases."""
 
 import json
+import re
 import secrets
 from typing import Any
 
@@ -48,32 +49,75 @@ class PostgresTaskQueue:
 
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn) as connection:
-            row = connection.execute(
-                "SELECT to_regclass('public.rusa_agent_tasks')"
-            ).fetchone()
-        return bool(row and row[0])
+            row = connection.execute("""
+                SELECT c.relrowsecurity, c.relforcerowsecurity,
+                       EXISTS (
+                           SELECT 1 FROM pg_policies
+                           WHERE schemaname='public'
+                             AND tablename='rusa_agent_tasks'
+                             AND policyname='rusa_agent_tenant_isolation'
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM information_schema.columns
+                           WHERE table_schema='public'
+                             AND table_name='rusa_agent_tasks'
+                             AND column_name='lease_token'
+                       )
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid=c.relnamespace
+                WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
+            """).fetchone()
+        return bool(row and row[0] and row[1] and row[2] and row[3])
+
+    @staticmethod
+    def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(payload)
+        normalized.pop("created_at", None)
+        normalized.pop("task_id", None)
+        return normalized
+
+    @staticmethod
+    def _validate_lease_token(lease_token: str) -> None:
+        if not isinstance(lease_token, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{32,128}", lease_token,
+        ):
+            raise ValueError("lease_token is invalid")
 
     def enqueue(self, task: CodingTask, max_attempts: int = 4) -> str:
-        if not 1 <= max_attempts <= 10:
-            raise ValueError("max_attempts must be between 1 and 10")
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 10:
+            raise ValueError("max_attempts must be an integer between 1 and 10")
         key = task.idempotency_key or task.task_id
+        payload = task.to_dict()
         with self._psycopg.connect(self.dsn) as connection:
             connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (task.tenant_id,))
-            connection.execute("""
+            inserted = connection.execute("""
                 INSERT INTO rusa_agent_tasks
                     (tenant_id, task_id, idempotency_key, payload, max_attempts)
                 VALUES (%s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-            """, (task.tenant_id, task.task_id, key, json.dumps(task.to_dict()), max_attempts))
-            row = connection.execute("""
-                SELECT task_id FROM rusa_agent_tasks
+                RETURNING task_id
+            """, (
+                task.tenant_id, task.task_id, key,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True), max_attempts,
+            )).fetchone()
+            if inserted is not None:
+                return str(inserted[0])
+            existing = connection.execute("""
+                SELECT task_id, payload FROM rusa_agent_tasks
                 WHERE tenant_id=%s AND idempotency_key=%s
             """, (task.tenant_id, key)).fetchone()
-        return str(row[0])
+            if existing is None:
+                raise RuntimeError("idempotency conflict could not be resolved")
+            stored_payload = existing[1]
+            if isinstance(stored_payload, str):
+                stored_payload = json.loads(stored_payload)
+            if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
+                raise ValueError("idempotency key was already used with a different task payload")
+            return str(existing[0])
 
     def claim(self, lease_seconds: int = 300) -> dict[str, Any] | None:
-        if not 10 <= lease_seconds <= 3600:
-            raise ValueError("lease_seconds must be between 10 and 3600")
+        if type(lease_seconds) is not int or not 10 <= lease_seconds <= 3600:
+            raise ValueError("lease_seconds must be an integer between 10 and 3600")
         lease_token = secrets.token_urlsafe(32)
         with self._psycopg.connect(self.dsn) as connection:
             connection.execute("""
@@ -116,8 +160,9 @@ class PostgresTaskQueue:
     def renew_lease(
         self, tenant_id: str, task_id: str, lease_token: str, lease_seconds: int = 300,
     ) -> bool:
-        if not 10 <= lease_seconds <= 3600 or not lease_token:
-            raise ValueError("a valid lease token and lease duration are required")
+        self._validate_lease_token(lease_token)
+        if type(lease_seconds) is not int or not 10 <= lease_seconds <= 3600:
+            raise ValueError("lease_seconds must be an integer between 10 and 3600")
         with self._psycopg.connect(self.dsn) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
@@ -127,9 +172,30 @@ class PostgresTaskQueue:
             """, (lease_seconds, tenant_id, task_id, lease_token))
         return cursor.rowcount == 1
 
+    def checkpoint(
+        self, tenant_id: str, task_id: str, record: TaskRecord, lease_token: str,
+    ) -> bool:
+        self._validate_lease_token(lease_token)
+        if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
+            raise ValueError("checkpoint identity does not match its task envelope")
+        with self._psycopg.connect(self.dsn) as connection:
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET result=%s::jsonb, updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s AND status='running'
+                  AND lease_token=%s AND lease_until > now()
+            """, (
+                json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True),
+                tenant_id, task_id, lease_token,
+            ))
+        return cursor.rowcount == 1
+
     def acknowledge(
         self, tenant_id: str, task_id: str, record: TaskRecord, lease_token: str,
     ) -> None:
+        self._validate_lease_token(lease_token)
+        if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
+            raise ValueError("acknowledgement identity does not match its task envelope")
         queue_status = (
             "waiting_external" if record.state == TaskState.WAITING_EXTERNAL else record.state.value
         )
@@ -150,6 +216,11 @@ class PostgresTaskQueue:
         self, tenant_id: str, task_id: str, error: str, lease_token: str, *,
         delay_seconds: int = 10,
     ) -> None:
+        self._validate_lease_token(lease_token)
+        if not isinstance(error, str):
+            raise ValueError("retry error must be a string")
+        if type(delay_seconds) is not int:
+            raise ValueError("delay_seconds must be an integer")
         with self._psycopg.connect(self.dsn) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks

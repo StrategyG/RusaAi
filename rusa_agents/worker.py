@@ -48,6 +48,13 @@ class QueueWorker:
     async def _run_with_lease(self, task, checkpoint, tenant_id, task_id, lease_token):
         stop_event = asyncio.Event()
 
+        async def persist(record):
+            saved = await asyncio.to_thread(
+                self.queue.checkpoint, tenant_id, task_id, record, lease_token,
+            )
+            if not saved:
+                raise RuntimeError("task checkpoint rejected because the lease is no longer valid")
+
         async def maintain_lease():
             while not stop_event.is_set():
                 try:
@@ -66,7 +73,11 @@ class QueueWorker:
                     if not renewed:
                         raise RuntimeError("worker lease was lost; execution must stop")
 
-        process = asyncio.create_task(self.orchestrator.run(task, checkpoint))
+        process = asyncio.create_task(
+            self.orchestrator.run(
+                task, checkpoint, checkpoint_callback=persist,
+            )
+        )
         heartbeat = asyncio.create_task(maintain_lease())
         try:
             done, _ = await asyncio.wait(
@@ -90,9 +101,10 @@ class QueueWorker:
             return False
         tenant_id = item["tenant_id"]
         task_id = item["task_id"]
-        lease_token = item["lease_token"]
+        lease_token = item.get("lease_token")
         task = None
         try:
+            PostgresTaskQueue._validate_lease_token(lease_token)
             from .contracts import CodingTask, TaskRecord
 
             task = CodingTask.from_dict(item["payload"])

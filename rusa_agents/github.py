@@ -240,6 +240,8 @@ class GitHubToolGateway:
         allowed = self.allowed_repositories_by_tenant.get(task.tenant_id, frozenset())
         if task.repository.full_name not in allowed:
             raise PermissionError("repository is not allowlisted for this tenant")
+        if task.repository.work_branch != task.expected_work_branch():
+            raise PermissionError("work branch is outside the task's tenant-scoped namespace")
         arguments = dict(call.arguments)
         root = self._root(task)
         if call.name == "create_branch":

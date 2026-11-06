@@ -224,3 +224,19 @@ Use a TLS reverse proxy/API gateway in production. Enforce distributed rate limi
 ## 10. Production status boundary
 
 This implementation is an enterprise-oriented runtime foundation, not a claim that the full RUSA-AI product is production-certified. A real provider, GitHub token with minimum repository permissions, PostgreSQL instance, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested. A green CI pipeline proves code checks for the commit; it does not prove model quality, capacity, security certification, or production SLOs.
+
+
+## 11. Runtime persistence, isolation and release evidence
+
+The following controls are implemented in the production-hardening branch and must be validated against the deployed PostgreSQL roles and ASGI stack:
+
+- **Tenant-bound repository scope:** API allowlists are per tenant. The API derives work-branch names from a tenant digest and idempotency identity; GitHub operations reject a task whose branch does not match that namespace.
+- **Idempotent task submission:** reusing an idempotency key is allowed only when the normalized task payload matches the original request. A changed objective, repository, branch, criteria or context is rejected.
+- **Lease fencing:** every claim receives a cryptographically random token. Lease renewal, checkpoint persistence, retry and acknowledgement require the current token, preventing a stale worker from committing after reassignment.
+- **Durable orchestration checkpoints:** worker results and stage transitions are persisted while the lease is held. Checkpoint failure is propagated and cannot be acknowledged as a successful task.
+- **Bounded request intake:** actual streamed body bytes are counted before JSON parsing, with a 256 KiB default limit and a 15-second body timeout.
+- **Fail-closed readiness:** the queue is ready only when forced row-level security, the tenant policy and the lease-token column are present.
+
+### Release verification still required
+
+Run the PostgreSQL integration suite with the least-privilege API and worker roles; verify crash/restart recovery, stale-token rejection, concurrent claims, and tenant isolation. Test request limits through the real reverse proxy. Independently validate trusted CI producer identity, immutable artifact-to-commit mapping, backups/restores, load/soak SLOs and model quality. Unit tests and a green CI run alone do not certify the complete RUSA-AI product for production.

@@ -10,7 +10,7 @@ from rusa_agents.contracts import (
     ToolCall, ToolResult, WorkerResult, WorkerRole,
 )
 from rusa_agents.github import GitHubToolGateway
-from rusa_agents.orchestrator import AICodeOrchestrator
+from rusa_agents.orchestrator import AICodeOrchestrator, CheckpointPersistenceError
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.provider import OpenAICompatibleProvider
 from rusa_agents.workers import AgentWorker
@@ -290,6 +290,33 @@ def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.SUCCEEDED
     assert record.repair_cycles == 1
+
+
+def test_orchestrator_persists_stage_checkpoints_and_propagates_failures():
+    checkpoints = []
+
+    async def persist(record):
+        checkpoints.append((record.state, record.stage_index))
+
+    task = make_task()
+    orchestrator = make_orchestrator(FakeTools(["passed", "passed"]))
+    record = asyncio.run(
+        orchestrator.run(task, checkpoint_callback=persist)
+    )
+    assert record.state == TaskState.SUCCEEDED
+    assert record.stage_index == 7
+    assert checkpoints
+    assert checkpoints[-1] == (TaskState.SUCCEEDED, 7)
+
+    async def reject(_record):
+        raise RuntimeError("database unavailable")
+
+    with pytest.raises(CheckpointPersistenceError, match="checkpoint"):
+        asyncio.run(
+            make_orchestrator(FakeTools()).run(
+                make_task(), checkpoint_callback=reject,
+            )
+        )
 
 
 def test_orchestrator_blocks_high_risk_task_for_human_approval():

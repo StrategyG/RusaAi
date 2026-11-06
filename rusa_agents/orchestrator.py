@@ -256,6 +256,7 @@ class AICodeOrchestrator:
                                 "ci_outcome": final_outcome,
                             },
                         )
+                        await self._persist(record, checkpoint_callback)
                         return record
                     record.stage_index = 7
                     continue

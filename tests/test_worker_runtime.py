@@ -23,6 +23,8 @@ class FakeQueue:
         self.renewals = 0
         self.acknowledged = None
         self.retried = None
+        self.checkpoints = []
+        self.checkpoint_ok = True
 
     def claim(self, lease_seconds):
         return {
@@ -40,6 +42,10 @@ class FakeQueue:
         self.renewals += 1
         return True
 
+    def checkpoint(self, tenant_id, task_id, record, lease_token):
+        self.checkpoints.append((tenant_id, task_id, record.stage_index, lease_token))
+        return self.checkpoint_ok
+
     def acknowledge(self, tenant_id, task_id, record, lease_token):
         self.acknowledged = (tenant_id, task_id, record.state, lease_token)
 
@@ -48,7 +54,7 @@ class FakeQueue:
 
 
 class FakeOrchestrator:
-    async def run(self, task, checkpoint=None):
+    async def run(self, task, checkpoint=None, *, checkpoint_callback=None):
         await asyncio.sleep(0.06)
         record = TaskRecord(task=task)
         record.transition(TaskState.OBSERVING)
@@ -56,6 +62,8 @@ class FakeOrchestrator:
         record.transition(TaskState.EXECUTING)
         record.transition(TaskState.VERIFYING)
         record.transition(TaskState.BLOCKED)
+        assert checkpoint_callback is not None
+        await checkpoint_callback(record)
         return record
 
 
@@ -76,7 +84,26 @@ def test_worker_renews_lease_during_long_task():
     )
     assert asyncio.run(worker.run_once()) is True
     assert queue.renewals >= 1
+    assert queue.checkpoints
+    assert queue.checkpoints[0][3] == "lease-token-for-test"
     assert queue.acknowledged == (
         task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test",
     )
     assert queue.retried is None
+
+
+def test_worker_does_not_acknowledge_when_checkpoint_lease_is_lost():
+    task = make_task()
+    queue = FakeQueue(task)
+    queue.checkpoint_ok = False
+    worker = QueueWorker(
+        queue=queue,
+        orchestrator=FakeOrchestrator(),
+        memory=FakeMemory(),
+        lease_seconds=10,
+        heartbeat_interval_seconds=0.01,
+    )
+    assert asyncio.run(worker.run_once()) is True
+    assert queue.acknowledged is None
+    assert queue.retried is not None
+    assert queue.retried[3] == "lease-token-for-test"

@@ -13,29 +13,36 @@ DSN = os.getenv("RUSA_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="RUSA_TEST_DATABASE_URL is not configured")
 
 
-def make_task(tenant_id, key):
+def make_task(tenant_id, key, objective="PostgreSQL queue integration test"):
+    task_id = uuid4().hex
+    work_branch = CodingTask.expected_work_branch_for(tenant_id, key, task_id)
     return CodingTask(
         tenant_id=tenant_id,
-        objective="PostgreSQL queue integration test",
+        objective=objective,
         repository=RepositoryTarget(
             full_name="StrategyG/RusaAi",
             base_branch="main",
-            work_branch=f"test/{uuid4().hex[:12]}",
+            work_branch=work_branch,
         ),
         acceptance_criteria=("Queue is tenant scoped",),
         idempotency_key=key,
+        task_id=task_id,
     )
 
 
 def test_postgres_queue_idempotency_claim_and_checkpoint():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
+    assert queue.check_ready() is True
     key = f"queue-{uuid4().hex}"
     task = make_task("tenant-integration-a", key)
     duplicate = make_task("tenant-integration-a", key)
     other_tenant = make_task("tenant-integration-b", key)
     first_id = queue.enqueue(task)
     assert queue.enqueue(duplicate) == first_id
+    changed = make_task(task.tenant_id, key, objective="Different payload")
+    with pytest.raises(ValueError, match="different task payload"):
+        queue.enqueue(changed)
     assert queue.enqueue(other_tenant) != first_id
 
     claimed = queue.claim()
@@ -43,6 +50,9 @@ def test_postgres_queue_idempotency_claim_and_checkpoint():
     assert claimed["task_id"] == first_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
+    assert queue.checkpoint(
+        task.tenant_id, first_id, record, claimed["lease_token"],
+    )
     queue.acknowledge(task.tenant_id, first_id, record, claimed["lease_token"])
     fetched = queue.get(task.tenant_id, first_id)
     assert fetched is not None
@@ -154,6 +164,9 @@ def test_postgres_queue_fences_expired_lease_owners():
 
         record = TaskRecord(task=task)
         record.transition(TaskState.OBSERVING)
+        assert not queue.checkpoint(
+            task.tenant_id, task_id, record, first["lease_token"],
+        )
         with pytest.raises(RuntimeError, match="lease was lost"):
             queue.acknowledge(task.tenant_id, task_id, record, first["lease_token"])
         assert not queue.renew_lease(
@@ -161,6 +174,9 @@ def test_postgres_queue_fences_expired_lease_owners():
         )
         assert queue.renew_lease(
             task.tenant_id, task_id, second["lease_token"], lease_seconds=10,
+        )
+        assert queue.checkpoint(
+            task.tenant_id, task_id, record, second["lease_token"],
         )
         queue.acknowledge(task.tenant_id, task_id, record, second["lease_token"])
     finally:
