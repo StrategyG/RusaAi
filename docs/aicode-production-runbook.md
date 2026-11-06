@@ -24,9 +24,10 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_client_idempotency.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–005 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), append-only task policy events, and tenant-scoped client idempotency. Apply migrations 001–006 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -57,6 +58,22 @@ Create a fine-grained token scoped only to each authorized repository:
 Do not grant Actions administration, repository administration, secrets, environments, workflow write, or organization permissions. Branch protection must prevent direct writes to the default branch and require human review before merge.
 
 The repository origin must be exactly `https://github.com/{owner}/{repo}.git`. Embedded credentials, SSH remotes, alternate hosts, and redirects are rejected.
+
+## 3A. Protect the default branch
+
+Before opening production tenants, configure GitHub branch protection or a repository ruleset for `main`:
+
+- Require pull requests; disallow direct pushes and force pushes.
+- Require at least one approving review and dismiss stale approvals after new commits.
+- Require conversation resolution before merge.
+- Require these exact status checks from the latest workflow:
+  - `Test, lint, and security`
+  - `Build, test, and scan production images`
+- Require the branch to be up to date before merge when the repository's merge policy permits it.
+- Block branch deletion and prevent administrator bypass unless an explicitly documented break-glass policy exists.
+- Verify the ruleset is active against `main`; a workflow file or passing CI run does not itself protect the branch.
+
+The GitHub integration available to this deployment does not change repository rulesets. A repository administrator must apply and verify these settings in GitHub before the release gate can pass.
 
 ## 4. Model endpoint requirements
 
@@ -242,7 +259,9 @@ Rollback:
 Do not declare production certification until:
 - PR head CI passes, including PostgreSQL integration tests and both image builds.
 - Migration and runtime role permissions are verified.
-- Tenant isolation tests show zero cross-tenant access.
+- Tenant isolation tests show zero cross-tenant access using distinct non-superuser API and worker login accounts.
+- Client task retries with the same tenant-scoped `Idempotency-Key` return one task; reusing the key with a different request is rejected.
+- The `main` branch ruleset is active and requires the two named CI jobs plus human review.
 - Sandbox adversarial and resource exhaustion tests pass.
 - GitHub token is least-privilege and branch protection is active.
 - Model endpoint is reachable and passes task-quality evaluation.
@@ -308,6 +327,12 @@ The current code still requires independent verification before it can be certif
 - Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
 - Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
 
+
+### Client request idempotency and publication fencing
+
+The task intake endpoint accepts an optional `Idempotency-Key` header (1–128 printable non-space ASCII characters). The key is scoped to the authenticated tenant and stored with a SHA-256 fingerprint of the canonical request body. Repeating the same request returns the original task ID and status; reusing the key with a different body returns HTTP 409. Migration 006 is mandatory in production and the API startup check fails closed if its columns or unique index are missing.
+
+Each worker attempt uses a lease-derived branch suffix with 96 bits of token material. The publisher rechecks the live database lease immediately before and after the Git push and before/after draft pull-request operations. A GitHub push is an external network side effect and cannot be made atomic with a PostgreSQL lease; if the lease expires during an in-flight push, an isolated orphan feature branch may remain. The post-push fence prevents that stale attempt from proceeding to draft PR creation or task completion. Reconcile orphan branches during operational cleanup; never promote them automatically.
 
 ### Task authorization audit
 
