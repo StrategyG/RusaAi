@@ -222,7 +222,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'
                 ) THEN
-                    CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+                    EXECUTE 'CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS';
                 END IF;
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'
@@ -681,7 +681,7 @@ def test_postgres_failed_task_requeue_cannot_bypass_tenant_capacity():
                     CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
-                    CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+                    EXECUTE 'CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS';
                 END IF;
             END;
             $rusa$
