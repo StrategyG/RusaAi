@@ -120,6 +120,7 @@ class DockerSandbox:
         """Stream Docker output with a hard memory/output budget."""
         process = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
