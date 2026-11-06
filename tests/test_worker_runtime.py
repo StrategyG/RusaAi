@@ -31,17 +31,18 @@ class FakeQueue:
             "task_id": self.task.task_id,
             "payload": self.task.to_dict(),
             "result": None,
-            "lease_token": "lease-token-for-test",
+            "lease_token": "x" * 43,
         }
 
     def renew_lease(self, tenant_id, task_id, lease_token, lease_seconds):
         assert tenant_id == self.task.tenant_id
         assert task_id == self.task.task_id
-        assert lease_token == "lease-token-for-test"
+        assert lease_token == "x" * 43
         self.renewals += 1
         return True
 
     def checkpoint(self, tenant_id, task_id, lease_token, record):
+        assert lease_token == "x" * 43
         self.checkpointed = (tenant_id, task_id, lease_token, record.state)
         return True
 
@@ -84,13 +85,40 @@ def test_worker_renews_lease_during_long_task():
     assert asyncio.run(worker.run_once()) is True
     assert queue.renewals >= 1
     assert queue.acknowledged == (
-        task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test",
+        task.tenant_id, task.task_id, TaskState.BLOCKED, "x" * 43,
     )
     assert queue.retried is None
     assert queue.checkpointed == (
-        task.tenant_id, task.task_id, "lease-token-for-test", TaskState.BLOCKED,
+        task.tenant_id, task.task_id, "x" * 43, TaskState.BLOCKED,
     )
 
+
+
+def test_worker_fails_closed_on_invalid_claim_token():
+    task = make_task()
+    queue = FakeQueue(task)
+
+    def claim_invalid(lease_seconds):
+        return {
+            "tenant_id": task.tenant_id,
+            "task_id": task.task_id,
+            "payload": task.to_dict(),
+            "result": None,
+            "lease_token": "invalid",
+        }
+
+    queue.claim = claim_invalid
+    worker = QueueWorker(
+        queue=queue,
+        orchestrator=FakeOrchestrator(),
+        memory=FakeMemory(),
+        lease_seconds=10,
+        heartbeat_interval_seconds=0.01,
+    )
+    assert asyncio.run(worker.run_once()) is True
+    assert queue.acknowledged is None
+    assert queue.retried is None
+    assert queue.checkpointed is None
 
 
 def test_worker_claim_error_is_retried_by_poll_loop():

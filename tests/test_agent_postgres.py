@@ -30,6 +30,7 @@ def make_task(tenant_id, key, repository=None, objective="PostgreSQL queue integ
 def test_postgres_queue_idempotency_claim_and_checkpoint():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
+    assert queue.check_ready() is True
     key = f"queue-{uuid4().hex}"
     task = make_task("tenant-integration-a", key)
     duplicate = make_task("tenant-integration-a", key, repository=task.repository)

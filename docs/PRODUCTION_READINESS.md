@@ -15,6 +15,11 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - Request IDs, basic security headers, a content-length limit, and generic internal error responses are added.
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
+- Multi-tenant repository allowlists and task-scoped work branches constrain GitHub write operations.
+- PostgreSQL queue claims use random lease tokens; heartbeat, checkpoint, retry and acknowledgement are fenced by the active token.
+- Orchestration stage results are persisted durably and resumed from the latest accepted checkpoint.
+- Idempotency-key reuse is accepted only when the normalized task payload matches the original request.
+- Queue readiness verifies forced row-level security, the tenant isolation policy and the lease-token column.
 
 ## Current verification boundary
 
@@ -29,11 +34,19 @@ The code changes require successful CI on the remediation pull request. The mode
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Orchestrator, workers, queue, retries, idempotency, cancellation | Not implemented |
+| Multi-agent runtime | Hierarchical orchestrator, workers, PostgreSQL leases/checkpoints, retries and idempotency | Implemented; integration CI and staging recovery tests pending |
 | Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
+
+## Remaining runtime verification
+
+- Run PostgreSQL integration tests with the least-privilege API and worker roles; skipped database tests are not passing evidence.
+- Exercise expired lease takeover, stale-token rejection, worker crash/restart and concurrent claim races.
+- Verify row-level security using non-owner, non-BYPASSRLS roles.
+- Run request-size and timeout tests through the deployed reverse proxy.
+- Complete backup/restore, load/soak, alerting, rollback and incident-response drills before production promotion.
 
 ## Deployment rules
 

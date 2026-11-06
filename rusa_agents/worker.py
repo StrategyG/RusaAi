@@ -111,7 +111,12 @@ class QueueWorker:
             return False
         tenant_id = item["tenant_id"]
         task_id = item["task_id"]
-        lease_token = item["lease_token"]
+        lease_token = item.get("lease_token")
+        try:
+            PostgresTaskQueue._validate_lease_token(lease_token)
+        except ValueError:
+            logger.error("queue returned an invalid lease token; leaving task for lease expiry")
+            return True
         task = None
         try:
             from .contracts import CodingTask, TaskRecord
