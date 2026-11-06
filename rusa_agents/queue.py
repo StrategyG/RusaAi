@@ -100,6 +100,119 @@ class PostgresTaskQueue:
                 $rusa$
             """)
 
+    def configure_api_permissions(self) -> None:
+        """Grant tenant mutations only through narrowly scoped SECURITY DEFINER functions."""
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            role_state = connection.execute("""
+                SELECT
+                    EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'),
+                    EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'),
+                    current_user,
+                    COALESCE(
+                        (SELECT rolsuper FROM pg_roles WHERE rolname=current_user),
+                        false
+                    )
+            """).fetchone()
+            api_exists, worker_exists, current_user, is_superuser = role_state
+            if not api_exists or not worker_exists:
+                raise RuntimeError("rusa_agent_api and rusa_agent_worker roles must exist")
+            if current_user != "rusa_agent_worker" and not is_superuser:
+                raise RuntimeError(
+                    "API permission migration must run as rusa_agent_worker or a database superuser"
+                )
+
+            connection.execute(
+                "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM rusa_agent_api"
+            )
+            connection.execute(
+                "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api"
+            )
+            connection.execute(
+                "GRANT SELECT, INSERT ON TABLE public.rusa_agent_tasks TO rusa_agent_api"
+            )
+
+            connection.execute("""
+                CREATE OR REPLACE FUNCTION public.rusa_agent_cancel_task(
+                    p_tenant_id TEXT, p_task_id TEXT
+                )
+                RETURNS BOOLEAN
+                LANGUAGE plpgsql
+                SECURITY DEFINER
+                SET search_path = pg_catalog, public
+                AS $rusa$
+                DECLARE affected_rows INTEGER;
+                BEGIN
+                    IF p_tenant_id IS NULL OR p_task_id IS NULL
+                       OR p_tenant_id IS DISTINCT FROM current_setting('rusa.tenant_id', true)
+                    THEN
+                        RETURN FALSE;
+                    END IF;
+                    UPDATE public.rusa_agent_tasks
+                    SET status='cancelled',
+                        lease_owner=NULL,
+                        lease_token=NULL,
+                        lease_until=NULL,
+                        lease_heartbeat_at=NULL,
+                        last_error='cancelled by tenant',
+                        updated_at=now()
+                    WHERE tenant_id=p_tenant_id AND task_id=p_task_id
+                      AND status IN (
+                          'queued', 'retry', 'waiting_external', 'running', 'awaiting_approval'
+                      );
+                    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+                    RETURN affected_rows = 1;
+                END;
+                $rusa$
+            """)
+
+            connection.execute("""
+                CREATE OR REPLACE FUNCTION public.rusa_agent_requeue_failed_task(
+                    p_tenant_id TEXT, p_task_id TEXT
+                )
+                RETURNS BOOLEAN
+                LANGUAGE plpgsql
+                SECURITY DEFINER
+                SET search_path = pg_catalog, public
+                AS $rusa$
+                DECLARE affected_rows INTEGER;
+                BEGIN
+                    IF p_tenant_id IS NULL OR p_task_id IS NULL
+                       OR p_tenant_id IS DISTINCT FROM current_setting('rusa.tenant_id', true)
+                    THEN
+                        RETURN FALSE;
+                    END IF;
+                    UPDATE public.rusa_agent_tasks
+                    SET status='queued',
+                        attempts=0,
+                        result=NULL,
+                        available_at=now(),
+                        lease_owner=NULL,
+                        lease_token=NULL,
+                        lease_until=NULL,
+                        lease_heartbeat_at=NULL,
+                        last_error=NULL,
+                        updated_at=now()
+                    WHERE tenant_id=p_tenant_id AND task_id=p_task_id
+                      AND status='failed';
+                    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+                    RETURN affected_rows = 1;
+                END;
+                $rusa$
+            """)
+
+            connection.execute(
+                "REVOKE ALL ON FUNCTION public.rusa_agent_cancel_task(TEXT, TEXT) FROM PUBLIC"
+            )
+            connection.execute(
+                "REVOKE ALL ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) FROM PUBLIC"
+            )
+            connection.execute(
+                "GRANT EXECUTE ON FUNCTION public.rusa_agent_cancel_task(TEXT, TEXT) TO rusa_agent_api"
+            )
+            connection.execute(
+                "GRANT EXECUTE ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) TO rusa_agent_api"
+            )
+
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute("""
@@ -115,12 +228,28 @@ class PostgresTaskQueue:
                            WHERE table_schema='public'
                              AND table_name='rusa_agent_tasks'
                              AND column_name='lease_token'
+                       ),
+                       has_table_privilege(
+                           current_user, 'public.rusa_agent_tasks', 'SELECT'
+                       ),
+                       has_table_privilege(
+                           current_user, 'public.rusa_agent_tasks', 'INSERT'
+                       ),
+                       has_function_privilege(
+                           current_user,
+                           'public.rusa_agent_cancel_task(text,text)',
+                           'EXECUTE'
+                       ),
+                       has_function_privilege(
+                           current_user,
+                           'public.rusa_agent_requeue_failed_task(text,text)',
+                           'EXECUTE'
                        )
                 FROM pg_class AS c
                 JOIN pg_namespace AS n ON n.oid=c.relnamespace
                 WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
             """).fetchone()
-        return bool(row and row[0] and row[1] and row[2] and row[3])
+        return bool(row and all(row))
 
     @staticmethod
     def _validate_worker_id(worker_id: str) -> None:
@@ -416,6 +545,36 @@ class PostgresTaskQueue:
                   AND lease_until > now()
             """, (delay, error[:2000], tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
+
+    def cancel(self, tenant_id: str, task_id: str) -> bool:
+        """Cancel a non-terminal task through a tenant-checked database function."""
+        if not tenant_id or not task_id:
+            raise ValueError("tenant_id and task_id are required")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            row = connection.execute(
+                "SELECT public.rusa_agent_cancel_task(%s, %s)",
+                (tenant_id, task_id),
+            ).fetchone()
+        return bool(row and row[0])
+
+    def requeue_failed(self, tenant_id: str, task_id: str) -> bool:
+        """Explicitly requeue a failed task through a tenant-checked database function."""
+        if not tenant_id or not task_id:
+            raise ValueError("tenant_id and task_id are required")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            row = connection.execute(
+                "SELECT public.rusa_agent_requeue_failed_task(%s, %s)",
+                (tenant_id, task_id),
+            ).fetchone()
+        return bool(row and row[0])
 
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
