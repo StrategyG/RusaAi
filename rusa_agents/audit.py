@@ -69,8 +69,8 @@ class PostgresTaskPolicyAudit:
             row = conn.execute(
                 """
                 SELECT current_user,
-                       role.rolsuper,
-                       role.rolbypassrls,
+                       db_role.rolsuper,
+                       db_role.rolbypassrls,
                        pg_has_role(current_user, %s, 'member'),
                        table_info.relrowsecurity,
                        table_info.relforcerowsecurity,
