@@ -64,6 +64,40 @@ compose() {
   docker compose --env-file "$ENV_FILE" --file "$COMPOSE_FILE" "$@"
 }
 
+wait_for_migration() {
+  local services migration_id state exit_code attempt
+  services="$(compose config --services)"
+  if ! grep -Fxq "rusa-agent-migrate" <<< "$services"; then
+    return 0
+  fi
+
+  for ((attempt = 0; attempt < 180; attempt++)); do
+    migration_id="$(compose ps --all --quiet rusa-agent-migrate)"
+    if [[ -n "$migration_id" ]]; then
+      state="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+      if [[ "$state" == "exited" ]]; then
+        exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")"
+        if [[ "$exit_code" == "0" ]]; then
+          return 0
+        fi
+        echo "PostgreSQL migration service exited with status $exit_code." >&2
+        compose logs --tail 100 rusa-agent-migrate >&2 || true
+        return 1
+      fi
+      if [[ "$state" == "dead" ]]; then
+        echo "PostgreSQL migration service entered the dead state." >&2
+        compose logs --tail 100 rusa-agent-migrate >&2 || true
+        return 1
+      fi
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for the PostgreSQL migration service to complete." >&2
+  compose logs --tail 100 rusa-agent-migrate >&2 || true
+  return 1
+}
+
 set_env_value() {
   local key="$1"
   local value="$2"
@@ -107,7 +141,7 @@ rollback_on_error() {
   fi
 
   cp -p "$BACKUP_FILE" "$ENV_FILE"
-  if compose pull && compose up -d --no-build --remove-orphans --wait --wait-timeout 180 && health_check; then
+  if compose pull && compose up -d --no-build --remove-orphans && wait_for_migration && health_check; then
     echo "Automatic rollback completed successfully." >&2
     exit "$original_status"
   fi
@@ -125,7 +159,8 @@ set_env_value RUSA_AGENT_IMAGE "$AGENT_IMAGE"
 
 compose config --quiet
 compose pull
-compose up -d --no-build --remove-orphans --wait --wait-timeout 180
+compose up -d --no-build --remove-orphans
+wait_for_migration
 health_check
 
 trap - ERR
