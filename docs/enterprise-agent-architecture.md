@@ -78,6 +78,7 @@ Approver credentials are separate from tenant API credentials. Merge, deploy, re
 
 - GET /v1/agent/tools — inspect the registered tool inventory and JSON Schemas.
 - GET /v1/agent/audit/verify — verify the authenticated tenant's audit hash chain.
+- GET /v1/agent/evaluation/metrics — inspect tenant-scoped success, retries, plan validation, reviewer, citation, and latency metrics.
 - POST /v1/agent/tasks — submit an idempotent task.
 - GET /v1/agent/tasks/{task_id} — tenant-scoped task state and evidence.
 - GET /v1/agent/tasks/{task_id}/messages — agent communication trace.
