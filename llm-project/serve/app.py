@@ -20,6 +20,8 @@ from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
 
+from rusa_agents.http_limits import BodyLimitMiddleware
+
 logger = logging.getLogger("rusa-ai-serve")
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -29,6 +31,8 @@ logging.basicConfig(
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = REPOSITORY_ROOT / "schemas" / "a2a" / "task-envelope.schema.json"
 MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", "1048576"))
+if not 1024 <= MAX_REQUEST_BYTES <= 64 * 1024 * 1024:
+    raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be between 1024 and 67108864")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
@@ -312,6 +316,11 @@ app = FastAPI(
     openapi_url="/openapi.json" if environment != "production" else None,
     lifespan=lifespan,
 )
+app.add_middleware(
+    BodyLimitMiddleware,
+    max_bytes=lambda: MAX_REQUEST_BYTES,
+    timeout=15.0,
+)
 
 
 @app.middleware("http")
@@ -324,6 +333,12 @@ async def request_context_middleware(request: Request, call_next):
         try:
             request_size = int(content_length)
         except ValueError:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Invalid Content-Length header"},
+                headers={"X-Request-ID": request_id},
+            )
+        if request_size < 0:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Invalid Content-Length header"},
