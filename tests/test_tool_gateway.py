@@ -50,6 +50,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     (workspace / "private.pem").write_text("PRIVATE KEY")
     (workspace / "id_rsa").write_text("PRIVATE KEY")
     (workspace / ".npmrc").write_text("//registry.invalid/:_authToken=secret")
+    (workspace / "terraform.tfstate").write_text("state-secret")
     secret_target = workspace / "outside-secret.txt"
     secret_target.write_text("SECRET")
     (workspace / "linked-secret.txt").symlink_to(secret_target)
@@ -64,6 +65,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         assert not (snapshot_path / "private.pem").exists()
         assert not (snapshot_path / "id_rsa").exists()
         assert not (snapshot_path / ".npmrc").exists()
+        assert not (snapshot_path / "terraform.tfstate").exists()
         assert not (snapshot_path / "linked-secret.txt").exists()
         return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
 
