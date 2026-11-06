@@ -607,6 +607,14 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
+    released = False
+
+    async def release_stream_slot() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            controller.release()
+
     async def event_stream():
         final_event: GenerationEvent | None = None
         try:
@@ -713,8 +721,8 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 }
             )
             yield _sse("[DONE]")
-    async def release_stream_slot() -> None:
-        controller.release()
+        finally:
+            await release_stream_slot()
 
     return StreamingResponse(
         event_stream(),
