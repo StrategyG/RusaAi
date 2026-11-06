@@ -251,9 +251,9 @@ def create_task(
     tenant_id: str = Depends(authenticate_tenant),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict[str, Any]:
-    if idempotency_key is not None and not re.fullmatch(
-        r"[A-Za-z0-9_.:-]{1,128}", idempotency_key
-    ):
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", idempotency_key):
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
     tenant_repositories = configured_tenant_repository_map().get(tenant_id)
     if tenant_repositories is None or body.repository.lower() not in tenant_repositories:
