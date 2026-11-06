@@ -20,7 +20,7 @@ def test_knowledge_migration_grants_write_only_to_restricted_worker_role():
     assert "ON public.rusa_knowledge_documents TO rusa_knowledge_worker" in migration
     assert "ON public.rusa_knowledge_chunks TO rusa_knowledge_worker" in migration
     assert not re.search(
-        r"GRANT\\s+[^;]+\\s+ON\\s+public\\.rusa_knowledge_(?:documents|chunks)\\s+TO\\s+rusa_agent_worker",
+        r"GRANT\s+[^;]+\s+ON\s+public\.rusa_knowledge_(?:documents|chunks)\s+TO\s+rusa_agent_worker",
         migration,
         flags=re.IGNORECASE,
     )
