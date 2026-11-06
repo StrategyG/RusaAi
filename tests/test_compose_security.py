@@ -144,6 +144,7 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     scheduler = services["rusa-agent-db-backup-scheduler"]
     assert scheduler["profiles"] == ["backup"]
     assert scheduler["restart"] == "unless-stopped"
+    assert scheduler["stop_grace_period"] == "180s"
     assert "rusa-agent-db-backups:/backups" in scheduler["volumes"]
     assert scheduler["environment"]["RUSA_BACKUP_INTERVAL_SECONDS"] == (
         "${RUSA_BACKUP_INTERVAL_SECONDS:-3600}"
