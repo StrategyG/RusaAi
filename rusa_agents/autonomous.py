@@ -46,7 +46,7 @@ class AutonomousCodeWorker:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise ValueError("agent response must be a JSON object")
-        if set(payload) - {"message", "actions", "done", "blocked", "blockers"}:
+        if set(payload) - {"message", "actions", "done", "blocked", "blockers", "evidence"}:
             raise ValueError("agent response contains unsupported fields")
         if not isinstance(payload.get("message", ""), str):
             raise ValueError("message must be a string")
@@ -60,6 +60,8 @@ class AutonomousCodeWorker:
             not isinstance(item, str) for item in payload.get("blockers", [])
         ):
             raise ValueError("blockers must be a list of strings")
+        if not isinstance(payload.get("evidence", {}), dict):
+            raise ValueError("evidence must be an object")
         return payload
 
     async def run(self, task: CodingTask, prior_results: list[WorkerResult]) -> WorkerResult:
@@ -82,9 +84,26 @@ class AutonomousCodeWorker:
                 "Do not claim tests/security checks passed unless the tool gateway returned exit_code 0. "
                 "When finished, set done=true. If blocked, explain the blocker in message and set done=true."
             )
+            acceptance_review = (
+                self.role == WorkerRole.ANALYST
+                and task.metadata.get("aicode_phase") == "acceptance_review"
+            )
+            if acceptance_review:
+                system_prompt += (
+                    " You are now performing the final acceptance review after implementation and QA. "
+                    "Inspect the actual repository files and prior tester/security evidence using only "
+                    "your read-only tools. Return evidence.acceptance_criteria as an array containing "
+                    "exactly one object for every acceptance criterion, with keys criterion (exact original "
+                    "criterion text), passed (boolean), and evidence (non-empty string naming concrete "
+                    "repository paths, symbols, or test cases). Do not omit, merge, rewrite, or add criteria. "
+                    "Set passed=true only when concrete repository evidence demonstrates completion. "
+                    "If evidence is insufficient, set passed=false and explain why. Never rely only on "
+                    "another agent's summary."
+                )
             user_prompt = (
                 f"Task ID: {task.task_id}\nRepository: {task.repository.full_name}\n"
                 f"Objective: {task.objective}\nAcceptance criteria: {task.acceptance_criteria}\n"
+                f"Execution phase: {task.metadata.get('aicode_phase', 'implementation')}\n"
                 f"Context: {task.context}\nPrior worker reports:\n{history}\n"
                 f"Previous tool transcript:\n{chr(10).join(transcript)[-self.max_output_chars:]}\n"
                 f"Iteration: {step + 1}/{self.max_steps}. Choose bounded actions or finish."
