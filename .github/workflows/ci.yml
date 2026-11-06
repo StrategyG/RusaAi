@@ -110,4 +110,6 @@ jobs:
           RUSA_MAX_PARALLEL_WORKERS: "4"
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
-        run: docker compose -f docker-compose.production.yml config --quiet
+        run: |
+          touch .env
+          docker compose -f docker-compose.production.yml config --quiet
