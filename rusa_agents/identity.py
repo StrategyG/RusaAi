@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import secrets
 import uuid
@@ -78,7 +79,22 @@ class PostgresIdentityStore:
         return psycopg.connect(self.dsn, connect_timeout=5, row_factory=dict_row)
 
     def ensure_schema(self) -> None:
-        """Create additive identity tables and indexes; safe to run repeatedly."""
+        """Create local schemas, or verify a separately managed production migration."""
+        if os.getenv("RUSA_AUTH_SCHEMA_MANAGED_EXTERNALLY", "false").lower() == "true":
+            with self._connect() as db:
+                present = db.execute(
+                    """
+                    SELECT
+                        to_regclass('public.rusa_users') IS NOT NULL,
+                        to_regclass('public.rusa_sessions') IS NOT NULL,
+                        to_regclass('public.rusa_auth_login_attempts') IS NOT NULL
+                    """
+                ).fetchone()
+            if not present or not all(present):
+                raise RuntimeError(
+                    "managed identity schema is missing; apply migrations/006_user_identity.sql"
+                )
+            return
         with self._connect() as db:
             db.execute(
                 """
