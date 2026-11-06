@@ -1,0 +1,162 @@
+groups:
+  - name: rusa-inference
+    rules:
+      - alert: InferenceP95LatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, model) (rate(rusa_inference_duration_seconds_bucket[5m]))) > 15
+        for: 10m
+        labels:
+          severity: warning
+          service: rusa-inference
+        annotations:
+          summary: "Inference p95 latency is above 15 seconds"
+          description: "Model {{ $labels.model }} has sustained high generation latency."
+
+      - alert: InferenceErrorRateHigh
+        expr: sum by (model) (rate(rusa_inference_requests_total{outcome="error"}[5m])) / clamp_min(sum by (model) (rate(rusa_inference_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: rusa-inference
+        annotations:
+          summary: "Inference error rate exceeds 5 percent"
+          description: "Model {{ $labels.model }} is returning elevated inference errors."
+
+      - alert: InferenceTokenThroughputLow
+        expr: histogram_quantile(0.5, sum by (le, model) (rate(rusa_inference_tokens_per_second_bucket[15m]))) < 5
+        for: 15m
+        labels:
+          severity: warning
+          service: rusa-inference
+        annotations:
+          summary: "Inference token throughput is low"
+          description: "Median generated token throughput for {{ $labels.model }} is below 5 tokens per second."
+
+  - name: rusa-agents
+    rules:
+      - alert: AgentFailureRateHigh
+        expr: sum(rate(rusa_agent_task_executions_total{outcome="failed"}[5m])) / clamp_min(sum(rate(rusa_agent_task_executions_total[5m])), 0.001) > 0.10
+        for: 10m
+        labels:
+          severity: critical
+          service: rusa-agent-worker
+        annotations:
+          summary: "Agent task failure rate exceeds 10 percent"
+          description: "Agent execution failures are elevated over the last five minutes."
+
+      - alert: AgentQueueBacklog
+        expr: max(rusa_agent_queue_depth{state="queued"}) > 50
+        for: 10m
+        labels:
+          severity: warning
+          service: rusa-agent-worker
+        annotations:
+          summary: "Agent queue backlog exceeds 50 tasks"
+          description: "The tenant-aggregated queue backlog is above the operating threshold."
+
+      - alert: AgentQueueOldestTaskTooOld
+        expr: max(rusa_agent_queue_oldest_age_seconds) > 600
+        for: 5m
+        labels:
+          severity: warning
+          service: rusa-agent-worker
+        annotations:
+          summary: "Oldest queued agent task is older than ten minutes"
+          description: "Investigate worker availability, provider latency, and queue backpressure."
+
+  - name: rusa-database
+    rules:
+      - alert: PostgreSQLUnavailable
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: rusa-agent-db
+        annotations:
+          summary: "PostgreSQL exporter cannot reach the database"
+          description: "Check database health, network connectivity, and the read-only monitoring role."
+
+      - alert: DatabasePoolWaiting
+        expr: max(rusa_database_pool_waiting) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: rusa-agent-db
+        annotations:
+          summary: "Application requests are waiting for database connections"
+          description: "Review pool sizing, long-running queries, and database connection saturation."
+
+      - alert: DatabaseCapacityWarning
+        expr: pg_database_size_bytes{datname="rusa_agent"} / on() max(rusa_database_size_limit_bytes{database="rusa_agent"}) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+          service: rusa-agent-db
+        annotations:
+          summary: "RUSA-AI database has used more than 80 percent of its capacity threshold"
+          description: "Increase storage capacity or apply the approved retention and archival policy."
+
+      - alert: HostFilesystemLow
+        expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.10
+        for: 10m
+        labels:
+          severity: critical
+          service: host
+        annotations:
+          summary: "Host filesystem free space is below 10 percent"
+          description: "Check PostgreSQL, Prometheus, Loki, Tempo, and Docker log volume growth."
+
+  - name: rusa-gpu
+    rules:
+      - alert: GPUUtilizationSaturated
+        expr: DCGM_FI_DEV_GPU_UTIL > 95
+        for: 15m
+        labels:
+          severity: warning
+          service: gpu
+        annotations:
+          summary: "GPU utilization is above 95 percent"
+          description: "Review inference concurrency, batching, and GPU capacity."
+
+      - alert: GPUMemoryPressure
+        expr: DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+          service: gpu
+        annotations:
+          summary: "GPU memory utilization is above 90 percent"
+          description: "Review model size, batch size, and concurrent inference allocation."
+
+  - name: rusa-retrieval
+    rules:
+      - alert: RAGEvaluationRecallLow
+        expr: rusa_rag_eval_recall_at_k{k="5",job="rusa-rag-evaluation"} < 0.80
+        for: 10m
+        labels:
+          severity: critical
+          service: rusa-rag
+        annotations:
+          summary: "RAG Recall@5 is below 0.80"
+          description: "Review embedding quality, chunking, metadata filters, and hybrid ranking."
+
+      - alert: RAGEvaluationStale
+        expr: time() - rusa_rag_eval_last_run_timestamp_seconds{job="rusa-rag-evaluation"} > 172800
+        for: 15m
+        labels:
+          severity: warning
+          service: rusa-rag
+        annotations:
+          summary: "RAG retrieval evaluation has not run for 48 hours"
+          description: "Check the evaluation job, curated dataset, and Pushgateway."
+
+  - name: rusa-platform
+    rules:
+      - alert: CoreObservabilityTargetDown
+        expr: up{job=~"rusa-inference|postgres|node|cadvisor|otel-collector-host"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: observability
+        annotations:
+          summary: "A core RUSA-AI monitoring target is down"
+          description: "Check service health, container networking, and Prometheus scrape configuration."

@@ -1,0 +1,76 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: rusa-ai
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: rusa-inference
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/rusa_metrics_token
+    static_configs:
+      - targets: ["rusa-api:8000"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  - job_name: otel-collector-host
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  - job_name: rusa-agent-api
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/rusa_metrics_token
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/agent-api.yml"]
+        refresh_interval: 30s
+
+  - job_name: rusa-agent-worker
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/agent-worker.yml"]
+        refresh_interval: 30s
+
+  - job_name: rusa-mcp
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/rusa_metrics_token
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/mcp.yml"]
+        refresh_interval: 30s
+
+  - job_name: nvidia-dcgm
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/gpu.yml"]
+        refresh_interval: 30s

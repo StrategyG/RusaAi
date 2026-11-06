@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: RUSA-AI
+    orgId: 1
+    folder: RUSA-AI
+    type: file
+    disableDeletion: true
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
