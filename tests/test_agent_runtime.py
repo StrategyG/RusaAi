@@ -1110,3 +1110,25 @@ def test_orchestrator_never_executes_repository_tool_without_current_lease():
     assert record.state == TaskState.FAILED
     assert tools.calls == []
     assert "lease is no longer valid" in record.errors[-1]
+
+
+def test_hmac_audit_log_redacts_sensitive_detail_values(tmp_path):
+    path = tmp_path / "audit-redacted.jsonl"
+    audit = HMACAuditLog(str(path), "audit-key-" + "x" * 48)
+    audit.record(
+        "task.completed",
+        tenant_id="tenant-a",
+        task_id="task-redaction",
+        actor="master",
+        details={
+            "api_key": "raw-api-key-secret-value",
+            "summary": 'token = "raw-token-secret-value"',
+            "nested": {"password": "raw-password-secret-value"},
+        },
+    )
+    serialized = path.read_text()
+    assert "raw-api-key-secret-value" not in serialized
+    assert "raw-token-secret-value" not in serialized
+    assert "raw-password-secret-value" not in serialized
+    assert "[REDACTED]" in serialized
+    assert audit.verify() is True
