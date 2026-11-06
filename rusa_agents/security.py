@@ -17,7 +17,7 @@ _SECRET_PATTERNS = (
         re.DOTALL,
     ),
     re.compile(
-        r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|secret)"
+        r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd|secret|token)"
         r"(\s*[:=]\s*)[\"']?[^,\s\"'&}]+"
     ),
 )
@@ -34,6 +34,11 @@ _SECRET_KEYS = {
     "authorization",
     "private_key",
     "github_token",
+    "token",
+    "secret_key",
+    "access_key",
+    "session_token",
+    "id_token",
 }
 
 
