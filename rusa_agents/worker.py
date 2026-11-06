@@ -421,6 +421,8 @@ class AgentRuntime:
                 raise ToolError(decision.reason)
 
             arguments = dict(step["arguments"])
+            if tool_name == "rag.search":
+                arguments["tenant_id"] = tenant_id
             if tool_name.startswith("github."):
                 if arguments.get("repository") != snapshot["repository"]:
                     raise ToolError("Tool repository must match the task repository")
