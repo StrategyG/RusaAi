@@ -61,7 +61,15 @@ def parse_file(path: str | Path, *, source_uri: str | None = None) -> ParsedDocu
             raise ValueError("encrypted PDF files are not supported")
         if len(reader.pages) > 5000:
             raise ValueError("PDF exceeds the 5000-page parsing limit")
-        content = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+        page_texts: list[str] = []
+        extracted_chars = 0
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            extracted_chars += len(page_text)
+            if extracted_chars > MAX_EXTRACTED_CHARS:
+                raise ValueError("extracted document text exceeds the 2 million character limit")
+            page_texts.append(page_text)
+        content = "\n\n".join(page_texts)
         parser = "pypdf"
     else:
         from docx import Document
@@ -86,12 +94,25 @@ def parse_file(path: str | Path, *, source_uri: str | None = None) -> ParsedDocu
             raise ValueError("DOCX file is not a valid ZIP archive") from exc
 
         document = Document(BytesIO(raw))
-        blocks = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+        blocks: list[str] = []
+        extracted_chars = 0
+
+        def append_block(block: str) -> None:
+            nonlocal extracted_chars
+            if not block.strip():
+                return
+            extracted_chars += len(block) + 1
+            if extracted_chars > MAX_EXTRACTED_CHARS:
+                raise ValueError("extracted document text exceeds the 2 million character limit")
+            blocks.append(block)
+
+        for paragraph in document.paragraphs:
+            append_block(paragraph.text)
         for table in document.tables:
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if cells:
-                    blocks.append(" | ".join(cells))
+                    append_block(" | ".join(cells))
         content = "\n".join(blocks)
         parser = "python-docx"
 
