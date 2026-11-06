@@ -84,13 +84,23 @@ def test_weight_tampering_is_detected(tmp_path):
 
 
 def test_manifest_path_traversal_is_rejected(tmp_path):
-    build_artifact(
-        tmp_path,
-        files={
-            "config.json": b"{}",
-            "tokenizer.json": b"{}",
-            "../outside.safetensors": b"weights",
+    manifest = {
+        "schema_version": 1,
+        "model_id": "rusa-ai-test",
+        "revision": "test-revision-001",
+        "license": "test-only",
+        "tokenizer_id": "rusa-ai-test-tokenizer",
+        "tokenizer_revision": "test-tokenizer-revision",
+        "files": {
+            "config.json": hashlib.sha256(b"{}").hexdigest(),
+            "tokenizer.json": hashlib.sha256(b"{}").hexdigest(),
+            "../outside.safetensors": hashlib.sha256(b"weights").hexdigest(),
         },
+    }
+    (tmp_path / "config.json").write_bytes(b"{}")
+    (tmp_path / "tokenizer.json").write_bytes(b"{}")
+    (tmp_path / "rusa-model-manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True), encoding="utf-8"
     )
     manifest_sha = sha256_file(tmp_path / "rusa-model-manifest.json")
     with pytest.raises(ModelArtifactError, match="path traversal"):
