@@ -9,7 +9,7 @@ Every push and pull request runs the reusable CI workflow:
 3. **Production verification:** the production Compose stack must become healthy with a running PostgreSQL service; CI verifies the agent readiness endpoint, task/memory tables, and forced tenant RLS. A separate local-registry drill deploys immutable image digests, reinitializes the worker schema against persisted data, performs manual rollback, forces an unhealthy release, and verifies automatic rollback preserves the PostgreSQL sentinel row.
 4. **Release Gate:** a single aggregate check that fails unless quality, all six CRITICAL/HIGH image scans, production Compose smoke, and the PostgreSQL-backed rollback drill succeed. Configure this exact check as required on protected branches.
 
-Trivy blocks every CRITICAL finding and every HIGH finding except the exact CVEs listed in the root .trivyignore file. Each exception has a mitigation, owner, and expiry in docs/SECURITY_EXCEPTIONS.md; scripts/security/validate_trivy_exceptions.py fails CI when an exception expires or the ignore list and register diverge. Unfiltered JSON reports for both application images and PostgreSQL are retained as 30-day workflow artifacts. New CVEs are not automatically ignored.
+Trivy blocks every CRITICAL finding in all three images. It blocks every HIGH finding in the application images except the exact CVEs listed in the root .trivyignore file; PostgreSQL HIGH findings are not excepted. Each application exception has a mitigation, owner, and expiry in docs/SECURITY_EXCEPTIONS.md; scripts/security/validate_trivy_exceptions.py fails CI when an exception expires or the ignore list and register diverge. Unfiltered JSON reports for the inference API, agent runtime, and PostgreSQL are retained as 30-day workflow artifacts. New CVEs are not automatically ignored.
 
 The CI workflow validates both the build-enabled development Compose file and the build-free production Compose manifest. It is reusable by the release workflow. A semantic-version tag is not published unless the complete CI workflow succeeds again on the exact tagged commit.
 
@@ -27,6 +27,8 @@ Only `vMAJOR.MINOR.PATCH` tags are accepted. The release workflow:
 - builds the API and agent runtime images;
 - publishes immutable SHA and semantic-version tags to GHCR;
 - rescans the published images;
+- smoke-tests the exact published API and worker digests against a running PostgreSQL Compose stack;
+- runs the manual and forced-failure automatic rollback drill using the published worker digest and a real PostgreSQL volume;
 - creates CycloneDX SBOMs and attaches them to the GitHub Release;
 - signs image digests with Cosign using GitHub OIDC keyless signing;
 - publishes SLSA build-provenance attestations.
