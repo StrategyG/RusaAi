@@ -25,6 +25,12 @@ health_timeout="${RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
   exit 64
 }
 
+if [[ "${RUSA_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+  command -v flock >/dev/null 2>&1 || { echo "flock is required for serialized deployments." >&2; exit 69; }
+  exec 9>"$lock_file"
+  flock -n 9 || { echo "Another RUSA-AI deployment or rollback is in progress." >&2; exit 75; }
+fi
+
 get_env_value() {
   local key="$1"
   awk -F= -v key="$key" '
@@ -49,12 +55,6 @@ docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_
 [[ "$old_worker_image" =~ $WORKER_PATTERN ]] || { echo "Current worker image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$old_sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Current sandbox image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
-
-if [[ "${RUSA_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
-  command -v flock >/dev/null 2>&1 || { echo "flock is required for serialized deployments." >&2; exit 69; }
-  exec 9>"$lock_file"
-  flock -n 9 || { echo "Another RUSA-AI deployment or rollback is in progress." >&2; exit 75; }
-fi
 
 tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
