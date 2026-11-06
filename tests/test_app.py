@@ -1,7 +1,10 @@
 import hashlib
+import json
 import uuid
+from types import SimpleNamespace
 
 from app import app, set_inference_provider
+from rusa_agents.providers import InferenceStreamEvent
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -341,3 +344,122 @@ def test_task_rbac_denies_read_only_principal_and_audits_decision(monkeypatch, c
     assert events[-1]["actor"] == "api:reader-service"
     assert events[-1]["action"] == "task.create"
     assert events[-1]["decision"] == "deny"
+
+def test_chat_completions_streams_openai_sse_and_usage(monkeypatch):
+    class StreamingProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "unused"
+
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content="hello ")
+            yield InferenceStreamEvent(content="world")
+            yield InferenceStreamEvent(
+                finish_reason="stop",
+                prompt_tokens=3,
+                completion_tokens=2,
+            )
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusa-ai"),
+        raising=False,
+    )
+    set_inference_provider(StreamingProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusa-ai",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert '"content":"hello "' in response.text
+    assert '"content":"world"' in response.text
+    assert '"finish_reason":"stop"' in response.text
+    assert '"total_tokens":5' in response.text
+    assert response.text.rstrip().endswith("data: [DONE]")
+
+
+def test_inference_denies_read_only_tenant_role(monkeypatch):
+    class StubProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "must not be called"
+
+    key = "read-only-inference-test-credential-000000"
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        json.dumps({
+            digest: {
+                "subject": "reader-service",
+                "tenant_id": "tenant-reader",
+                "roles": ["read_only"],
+            }
+        }),
+    )
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    set_inference_provider(StubProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"X-API-Key": key},
+            json={
+                "model": "rusa-ai",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient inference permissions"
+
+
+def test_inference_rejects_unconfigured_model(monkeypatch):
+    class StubProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("provider must not receive an unconfigured model")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusa-ai"),
+        raising=False,
+    )
+    set_inference_provider(StubProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "unapproved-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 404
+
