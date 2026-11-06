@@ -39,7 +39,7 @@ class HierarchicalOrchestrator:
                 "context": task["context"],
                 "acceptance_criteria": task["acceptance_criteria"],
                 "allowed_tools": task["allowed_tools"],
-                "registered_tools": sorted(self.tools.names()),
+                "registered_tools": self.tools.describe(),
             },
             ensure_ascii=False,
         )
