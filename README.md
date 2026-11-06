@@ -1,127 +1,97 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+This branch provides a FastAPI service, an A2A task-envelope schema, and a model
+architecture blueprint. The chat endpoint returns a simulated response based on
+the last message. This branch has no trained model weights, model inference
+backend, or executable agent runtime. Task validation checks an envelope against
+the bundled schema. It does not queue or execute tasks.
 
----
+## Repository layout
 
-## Key Features & Architecture
+| Path | Purpose |
+| --- | --- |
+| [llm-project/serve/app.py](llm-project/serve/app.py) | FastAPI entry point |
+| [llm-project/model/blueprint.py](llm-project/model/blueprint.py) | Model architecture blueprint |
+| [llm-project/configs/](llm-project/configs/) | Model, training, and inference configuration drafts |
+| [schemas/a2a/task-envelope.schema.json](schemas/a2a/task-envelope.schema.json) | A2A task-envelope schema |
+| [tests/](tests/) | API test suite |
+| [requirements.txt](requirements.txt) | Python dependencies for the service and tests |
+| [Dockerfile](Dockerfile) | Container build and startup configuration |
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+## Run locally
 
----
+The commands below use Bash, Python 3.10 or later, and curl.
+Run them from the repository root after cloning this branch.
 
-## Repository Structure
-
-```
-RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
-├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
-```
-
----
-
-## Quick Start & Local Setup
-
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
-
-### 2. Environment Setup
 ```bash
-# Clone the repository
-git clone StrategyG/RusaAi
+git clone --branch docs/api-quickstart https://github.com/StrategyG/RusaAi.git
 cd RusaAi
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
+The application reads variables from the process environment. Export them in
+your shell before starting the API.
+
+| Variable | Behavior |
+| --- | --- |
+| `ENVIRONMENT` | Defaults to `production` when unset or blank for the startup check. The check ignores case and surrounding whitespace. |
+| `RUSA_API_KEY` | Production startup requires a non-blank value. Other environments can start without it, but both protected routes then return HTTP 401. |
+
+Both POST endpoints require an exact match in the `X-API-Key` header. They
+return HTTP 401 for a missing or incorrect key. `GET /health` is public and
+reports process liveness.
+
+Set a local test key and start the service in the background so the smoke
+checks can use the same shell and key. Use a unique secret outside local testing.
+
 ```bash
-cp .env.example .env
+export ENVIRONMENT=production
+export RUSA_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+python -m uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000 &
+RUSA_API_PID=$!
 ```
 
----
+## Smoke check
 
-## Running the Application
-
-### Running Locally with Uvicorn
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+curl --fail --show-error --silent --retry 5 --retry-connrefused http://127.0.0.1:8000/health
+curl --fail --show-error --silent http://127.0.0.1:8000/v1/chat/completions \
+  -H "X-API-Key: ${RUSA_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-### Running with Docker & Docker Compose
+Both calls return HTTP 200. The first reports `"status":"healthy"`. The
+second returns a simulated reply in `choices[0].message.content`.
+To check task-envelope structure, send a JSON object with an `envelope` field
+to `POST /v1/validate-task` with the same header.
+
+Stop the local API with `kill "$RUSA_API_PID"`.
+
+## Run tests
+
+From the repository root with the virtual environment active:
+
 ```bash
-# Build and start container
-docker-compose up --build -d
-
-# Verify server status
-curl localhost:8000/health
+python -m pytest -q tests/
 ```
 
----
+The tests configure their own API keys and start in-process clients.
 
-## Running Tests
+## Run with Docker
 
-Execute the automated test suite using pytest:
+From the repository root, with Docker running and host port 8000 free, export
+`RUSA_API_KEY` as shown above. Build the image and run it with the key passed
+through from the current shell.
+
 ```bash
-pytest llm-project/tests/ -v
+docker build -t rusa-ai:local .
+docker run --rm -d --name rusa-ai-local -p 127.0.0.1:8000:8000 \
+  -e RUSA_API_KEY rusa-ai:local
 ```
 
----
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
-
----
-
-## Security & Governance
-
-- **API Authorization**: Set `RUSA_API_KEY` and send it in the `X-API-Key` header for chat completions and task validation. Missing or invalid keys return HTTP 401. Production startup requires a non-blank key. Production is the default when `ENVIRONMENT` is unset. The `/health` liveness probe remains public.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
-
----
-
-## License
-This project is licensed under the MIT License.
+Run the same smoke checks, then stop the container with
+`docker stop rusa-ai-local`. The Dockerfile runs Uvicorn as a non-root user
+and probes `/health` inside the container.
