@@ -463,7 +463,7 @@ def require_inference_permission(
     request: Request,
     api_key: str | None = Depends(api_key_header),
 ) -> str:
-    tenant_id = authenticate_api_key(request, api_key, require_key=True)
+    tenant_id = authenticate_api_key(request, api_key)
     principal = getattr(request.state, "principal", None)
     config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
     if principal is None:
@@ -538,7 +538,7 @@ def _configured_model_name(chat_request: ChatCompletionRequest, http_request: Re
     if chat_request.model != config.model_name:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{request.model}' is not available",
+            detail=f"Model '{chat_request.model}' is not available",
         )
     return config.model_name
 
