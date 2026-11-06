@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.queue import PostgresTaskQueue
@@ -96,10 +96,24 @@ class TaskValidationResponse(BaseModel):
 
 class RepositoryInput(BaseModel):
     full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-    base_branch: str = Field(default="main", min_length=1, max_length=180)
-    work_branch: str = Field(
-        pattern=r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$"
+    base_branch: str = Field(
+        default="main", pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$"
     )
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_repository_segments(cls, value: str) -> str:
+        owner, repo = value.split("/", 1)
+        if owner in {".", ".."} or repo in {".", ".."}:
+            raise ValueError("Repository owner/name segments are invalid")
+        return value
+
+    @field_validator("base_branch")
+    @classmethod
+    def validate_base_branch(cls, value: str) -> str:
+        if ".." in value or "//" in value or value.endswith("/"):
+            raise ValueError("Base branch name is invalid")
+        return value
 
 
 class AICodeTaskRequest(BaseModel):
@@ -113,6 +127,7 @@ class AICodeTaskResponse(BaseModel):
     task_id: str
     status: str
     tenant_id: str
+    work_branch: str
 
 
 def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
@@ -230,10 +245,14 @@ def create_aicode_task(
     if allowed_repositories is not None and request.repository.full_name not in allowed_repositories:
         raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
     task_id = str(uuid4())
+    work_branch = f"feature/aicode/{task_id[:12]}"
     payload = {
         "objective": request.objective,
         "context": request.context,
-        "repository": request.repository.model_dump(),
+        "repository": {
+            **request.repository.model_dump(),
+            "work_branch": work_branch,
+        },
         "acceptance_criteria": request.acceptance_criteria,
     }
     try:
@@ -243,7 +262,7 @@ def create_aicode_task(
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
     if not created:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
-    return AICodeTaskResponse(task_id=task_id, status="queued", tenant_id=tenant_id)
+    return AICodeTaskResponse(task_id=task_id, status="queued", tenant_id=tenant_id, work_branch=work_branch)
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
