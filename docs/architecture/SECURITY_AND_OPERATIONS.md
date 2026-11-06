@@ -14,7 +14,7 @@
 | Stale worker writes | Checkpoint, heartbeat, retry, and acknowledgement require current lease owner and unexpired lease | Validate with multiple worker replicas under load |
 | Incomplete CI evidence | Bounded pagination; total-count consistency; exact commit SHA; all check runs complete and successful | GitHub API evidence is adapter provenance, not a cryptographic attestation |
 | Changed code after test | Security worker re-reads CI and complete compare diff; a second read-only model pass reviews the retrieved diff; success requires identical tester/security/diff head SHA | Deployment must bind to the immutable verified commit and re-check release gates |
-| Secret in a changed file | Gateway redacts common secret formats; orchestrator blocks diffs containing redaction markers | Add repository-specific secret scanners and verify against a red-team corpus |
+| Secret in a changed file | Gateway blocks detected secrets before writes, redacts common formats on reads, and orchestrator blocks diffs containing redaction markers | Add repository-specific secret scanners and verify against a red-team corpus |
 | Oversized or unreviewable diff | Maximum 20 changed files, bounded patch size and total response size; incomplete diffs are blocked | Tune limits using representative repositories and load tests |
 | Audit tampering | HMAC chain, file locking, fsync | Ship logs to immutable remote storage; manage key rotation through KMS |
 | Provider/GitHub response exhaustion | Streaming response limits, timeouts, bounded file and diff sizes | Load-test limits and configure outbound egress allowlists |
