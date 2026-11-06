@@ -4,9 +4,21 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+
+@dataclass(frozen=True)
+class InferenceStreamEvent:
+    """One bounded delta or terminal event from an OpenAI-compatible SSE stream."""
+
+    content: str | None = None
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 async def _read_limited_json(
@@ -194,3 +206,162 @@ class OpenAIChatInferenceProvider:
             if not isinstance(content, str) or not content.strip():
                 raise RuntimeError("Inference provider returned empty or non-text content")
             return content
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        max_tokens: int = 1024,
+    ) -> AsyncIterator[InferenceStreamEvent]:
+        """Stream bounded OpenAI-compatible SSE deltas without buffering the full response."""
+        payload = {
+            "model": model or self.default_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=False, transport=self.transport
+        ) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            ) as response:
+                declared_length = response.headers.get("content-length")
+                if declared_length:
+                    try:
+                        if int(declared_length) > self.max_response_bytes:
+                            raise RuntimeError(
+                                f"Model provider stream exceeds the {self.max_response_bytes}-byte limit"
+                            )
+                    except ValueError as exc:
+                        raise RuntimeError(
+                            "Model provider returned an invalid Content-Length"
+                        ) from exc
+                response.raise_for_status()
+
+                total_bytes = 0
+                buffer = bytearray()
+                data_lines: list[bytes] = []
+                finished = False
+                done = False
+
+                async for chunk in response.aiter_bytes(chunk_size=4096):
+                    total_bytes += len(chunk)
+                    if total_bytes > self.max_response_bytes:
+                        raise RuntimeError(
+                            f"Model provider stream exceeds the {self.max_response_bytes}-byte limit"
+                        )
+                    buffer.extend(chunk)
+                    if len(buffer) > 65536 and b"\\n" not in buffer:
+                        raise RuntimeError("Model provider SSE line exceeds the 65536-byte limit")
+
+                    while b"\\n" in buffer:
+                        line, _, remainder = buffer.partition(b"\\n")
+                        buffer = bytearray(remainder)
+                        line = line.rstrip(b"\\r")
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                            if sum(map(len, data_lines)) > 65536:
+                                raise RuntimeError("Model provider SSE event exceeds the 65536-byte limit")
+                            continue
+                        if line or not data_lines:
+                            continue
+
+                        event_data = b"\\n".join(data_lines)
+                        data_lines.clear()
+                        if event_data == b"[DONE]":
+                            done = True
+                            break
+                        event = self._decode_stream_event(event_data)
+                        if event is not None:
+                            if event.finish_reason is not None:
+                                finished = True
+                            yield event
+                    if done:
+                        break
+
+                if not done and (buffer or data_lines):
+                    if buffer:
+                        line = bytes(buffer).rstrip(b"\\r")
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                    if data_lines:
+                        event_data = b"\\n".join(data_lines)
+                        if event_data == b"[DONE]":
+                            done = True
+                        else:
+                            event = self._decode_stream_event(event_data)
+                            if event is not None:
+                                if event.finish_reason is not None:
+                                    finished = True
+                                yield event
+
+                if not finished:
+                    raise RuntimeError("Model provider stream ended without a finish reason")
+
+    @staticmethod
+    def _decode_stream_event(data: bytes) -> InferenceStreamEvent | None:
+        try:
+            payload = json.loads(data)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Model provider returned malformed SSE JSON") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("Model provider SSE event must be a JSON object")
+        if payload.get("error") is not None:
+            raise RuntimeError("Model provider reported a streaming inference error")
+
+        content: str | None = None
+        finish_reason: str | None = None
+        choices = payload.get("choices", [])
+        if choices:
+            if not isinstance(choices, list) or not isinstance(choices[0], dict):
+                raise RuntimeError("Model provider returned an invalid stream choice")
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+            if not isinstance(delta, dict):
+                raise RuntimeError("Model provider returned an invalid stream delta")
+            content = delta.get("content")
+            if content is not None and not isinstance(content, str):
+                raise RuntimeError("Model provider stream content must be text")
+            finish_reason = choice.get("finish_reason")
+            if finish_reason is not None and not isinstance(finish_reason, str):
+                raise RuntimeError("Model provider finish_reason must be text")
+
+        usage = payload.get("usage") or {}
+        if not isinstance(usage, dict):
+            raise RuntimeError("Model provider returned invalid stream usage")
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        for name, value in (
+            ("prompt_tokens", prompt_tokens),
+            ("completion_tokens", completion_tokens),
+        ):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise RuntimeError(f"Model provider returned invalid {name}")
+
+        if (
+            content is None
+            and finish_reason is None
+            and prompt_tokens is None
+            and completion_tokens is None
+        ):
+            return None
+        return InferenceStreamEvent(
+            content=content,
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
