@@ -47,8 +47,8 @@ build_and_push_api() {
   docker build --pull --file scripts/testing/Dockerfile.health-stub \
     --build-arg "READY_STATUS=$ready_status" \
     --build-arg "RELEASE_ID=$release_id" \
-    --tag "$image" .
-  docker push "$image"
+    --tag "$image" . >&2
+  docker push "$image" >&2
   docker image inspect --format='{{index .RepoDigests 0}}' "$image"
 }
 
