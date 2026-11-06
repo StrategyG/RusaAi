@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 
+import psycopg
 import pytest
 
 from rusa_agents.audit import PostgresAuditLog
@@ -128,7 +129,7 @@ def test_postgres_audit_chain_is_verifiable_and_append_only(postgres_runtime):
     audit.record("task.finished", task_id, "pytest", {"state": "blocked"}, tenant_id=tenant_id)
     assert audit.verify()
 
-    with pytest.raises(Exception):
+    with pytest.raises(psycopg.errors.RaiseException):
         with audit._connect() as db:
             db.execute(
                 """
