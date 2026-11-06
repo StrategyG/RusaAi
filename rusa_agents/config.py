@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 @dataclass(frozen=True)
@@ -67,8 +70,24 @@ class RuntimeConfig:
         missing = [name for name, value in required.items() if not value]
         if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
             missing.append("API keys of at least 32 UTF-8 bytes")
+        if any(not tenant.strip() for tenant in self.api_keys.values()):
+            missing.append("non-empty API-key tenant mappings")
         if any(not tenant.strip() for tenant in self.tenant_repositories):
             missing.append("non-empty tenant identifiers")
+        if self.database_url:
+            database_url = urlparse(self.database_url)
+            ssl_modes = parse_qs(database_url.query).get("sslmode", [])
+            if database_url.scheme not in {"postgres", "postgresql"}:
+                missing.append("RUSA_DATABASE_URL using PostgreSQL")
+            if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
+                missing.append("RUSA_DATABASE_URL with sslmode=require, verify-ca, or verify-full")
+        if self.model_base_url:
+            model_url = urlparse(self.model_base_url)
+            if model_url.scheme != "https" or not model_url.hostname or model_url.username or model_url.password:
+                missing.append("RUSA_MODEL_BASE_URL using credential-free HTTPS")
+        for tenant, repositories in self.tenant_repositories.items():
+            if any(not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) for repository in repositories):
+                missing.append(f"valid owner/repository allowlist entries for tenant {tenant}")
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
 
@@ -85,8 +104,15 @@ class RuntimeConfig:
         missing = [name for name, value in required.items() if not value]
         if self.audit_hmac_key and len(self.audit_hmac_key.encode("utf-8")) < 32:
             missing.append("RUSA_AUDIT_HMAC_KEY of at least 32 UTF-8 bytes")
-        if not self.sandbox_image or "@sha256:" not in self.sandbox_image:
-            missing.append("RUSA_SANDBOX_IMAGE pinned by immutable sha256 digest")
+        if self.workspace_root and not Path(self.workspace_root).is_absolute():
+            missing.append("RUSA_WORKSPACE_ROOT must be an absolute path")
+        if self.git_mirror_root and not Path(self.git_mirror_root).is_absolute():
+            missing.append("RUSA_GIT_MIRROR_ROOT must be an absolute path")
+        if not self.sandbox_image or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._/:@-]+@sha256:[0-9a-f]{64}",
+            self.sandbox_image,
+        ):
+            missing.append("RUSA_SANDBOX_IMAGE pinned by a valid immutable sha256 digest")
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
 
