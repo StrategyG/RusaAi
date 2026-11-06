@@ -1,9 +1,10 @@
-"""Container healthcheck for the agent worker's database schema."""
+"""Container healthcheck for required PostgreSQL schemas and tenant RLS."""
 
 import os
 import sys
 
-import psycopg
+from .memory import PostgresMemoryStore
+from .queue import PostgresTaskQueue
 
 
 def main() -> int:
@@ -11,14 +12,10 @@ def main() -> int:
     if not dsn:
         return 1
     try:
-        with psycopg.connect(dsn, connect_timeout=3) as connection:
-            tasks = connection.execute(
-                "SELECT to_regclass('public.rusa_agent_tasks')"
-            ).fetchone()
-            memory = connection.execute(
-                "SELECT to_regclass('public.rusa_agent_memory')"
-            ).fetchone()
-        return 0 if tasks and tasks[0] and memory and memory[0] else 1
+        return 0 if (
+            PostgresTaskQueue(dsn).check_ready()
+            and PostgresMemoryStore(dsn).check_ready()
+        ) else 1
     except Exception:
         return 1
 
