@@ -99,6 +99,44 @@ class PostgresTaskQueue:
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+
+                roles = conn.execute("""
+                    SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+                    FROM pg_roles
+                    WHERE rolname = ANY(%s)
+                """, (["rusa_api_runtime", "rusa_worker_runtime"],)).fetchall()
+                role_flags = {row[0]: (row[1], row[2], row[3]) for row in roles}
+                if set(role_flags) != {"rusa_api_runtime", "rusa_worker_runtime"}:
+                    raise RuntimeError("Separate API/worker database role groups are missing")
+                if any(any(flags) for flags in role_flags.values()):
+                    raise RuntimeError(
+                        "API/worker role groups must be NOLOGIN, NOSUPERUSER, and NOBYPASSRLS"
+                    )
+
+                identity = conn.execute("""
+                    SELECT current_user,
+                           pg_has_role(current_user, 'rusa_api_runtime', 'member'),
+                           pg_has_role(current_user, 'rusa_worker_runtime', 'member'),
+                           COALESCE((
+                               SELECT rolsuper OR rolbypassrls OR NOT rolcanlogin
+                               FROM pg_roles WHERE rolname=current_user
+                           ), true)
+                """).fetchone()
+                if (
+                    not identity
+                    or identity[3]
+                    or identity[1] == identity[2]
+                    or identity[0] not in {"rusa_api_login", "rusa_worker_login"}
+                ):
+                    raise RuntimeError(
+                        "Database connection must use exactly one non-superuser API or worker login role"
+                    )
+                if (
+                    identity[0] == "rusa_api_login" and not identity[1]
+                ) or (
+                    identity[0] == "rusa_worker_login" and not identity[2]
+                ):
+                    raise RuntimeError("Database login is not a member of its matching runtime role group")
                 return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
