@@ -33,7 +33,7 @@ flowchart TB
 ## RAG pipeline
 
 1. An operator ingests a local file. Remote URLs are not fetched, preventing ingestion-time SSRF.
-2. TXT, Markdown, HTML, PDF, and DOCX parsers extract bounded text. The default source size is 10 MiB and extracted text is capped at 2 million characters.
+2. TXT, Markdown, HTML, PDF, and DOCX parsers extract bounded text. The default source size is 10 MiB and extracted text is capped at 2 million characters. PDF page count and DOCX archive expansion are also bounded. High-confidence private-key, GitHub-token, and AWS-key patterns are rejected before embedding.
 3. Text is normalized and divided into 1,200-character chunks with 180-character overlap. Chunking prefers paragraph and sentence boundaries.
 4. An OpenAI-compatible embeddings endpoint returns 1,536-dimensional vectors. The client validates response shape, vector indexes, dimensions, finite values, and non-zero vectors.
 5. The store writes document metadata and chunks in one PostgreSQL transaction.
