@@ -1,0 +1,3 @@
+- targets: ["rusa-mcp:8002"]
+  labels:
+    service: rusa-mcp

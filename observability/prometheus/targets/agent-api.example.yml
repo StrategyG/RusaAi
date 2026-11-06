@@ -1,0 +1,3 @@
+- targets: ["rusa-agent-api:8001"]
+  labels:
+    service: rusa-agent-api

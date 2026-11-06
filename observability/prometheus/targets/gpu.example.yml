@@ -1,0 +1,3 @@
+- targets: ["dcgm-exporter:9400"]
+  labels:
+    service: nvidia-dcgm
