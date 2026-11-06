@@ -252,7 +252,9 @@ async def readiness_check():
         logger.exception("Inference readiness probe failed")
         raise HTTPException(status_code=503, detail="Inference backend is unavailable") from None
 
-    config = getattr(app.state, "config", RuntimeConfig.from_env())
+    config = getattr(app.state, "config", None)
+    if config is None:
+        config = RuntimeConfig.from_env()
     queue = getattr(app.state, "queue", None)
     if config.environment == "production" and queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
