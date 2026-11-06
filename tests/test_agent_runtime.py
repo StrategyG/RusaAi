@@ -444,3 +444,46 @@ def test_tenant_and_approver_credentials_are_separate(monkeypatch):
         resolve_approver_tenant(tenant_secret)
     with pytest.raises(HTTPException):
         resolve_tenant(approver_secret)
+
+
+@pytest.mark.asyncio
+async def test_approver_can_resume_task_blocked_on_ci(database, registry):
+    runtime = AgentRuntime(database, FakeProvider(), registry)
+    task_id = await runtime.submit("tenant-a", "request-0004", make_task().model_dump())
+    plan = valid_plan().model_dump(mode="json")
+    results = [
+        {"tool": "github.list_files", "purpose": "inspect", "result": {"entries": []}},
+        {"tool": "github.create_branch", "purpose": "branch", "result": {"sha": "a" * 40}},
+        {"tool": "github.write_file", "purpose": "write", "result": {"commit_sha": "b" * 40}},
+        {"tool": "github.create_pull_request", "purpose": "PR", "result": {"number": 1}},
+        {"tool": "github.get_ci_status", "purpose": "CI", "result": {"commit_sha": "b" * 40, "all_passed": False}},
+    ]
+    async with database.session() as session:
+        row = await session.scalar(select(TaskRow).where(TaskRow.id == task_id))
+        row.status = TaskStatus.BLOCKED.value
+        row.plan = plan
+        row.cursor = len(plan["steps"])
+        row.tool_results = results
+        row.error = "CI checks for the latest write have not all passed"
+        await session.commit()
+
+    await runtime.resume("tenant-a", task_id)
+    task = await runtime.get_task("tenant-a", task_id)
+    assert task["status"] == TaskStatus.QUEUED.value
+    assert task["cursor"] == 4
+    assert len(task["tool_results"]) == 4
+    assert task["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_blocked_task_with_unknown_reason_requires_operator_review(database, registry):
+    runtime = AgentRuntime(database, FakeProvider(), registry)
+    task_id = await runtime.submit("tenant-a", "request-0005", make_task().model_dump())
+    async with database.session() as session:
+        row = await session.scalar(select(TaskRow).where(TaskRow.id == task_id))
+        row.status = TaskStatus.BLOCKED.value
+        row.plan = valid_plan().model_dump(mode="json")
+        row.error = "No feature branch creation evidence"
+        await session.commit()
+    with pytest.raises(ValueError):
+        await runtime.resume("tenant-a", task_id)
