@@ -188,25 +188,26 @@ class PostgresKnowledgeStore:
                 "DELETE FROM rusa_knowledge_chunks WHERE tenant_id=%s AND document_id=%s::uuid",
                 (tenant_id, document_id),
             )
-            connection.executemany(
-                """
-                INSERT INTO rusa_knowledge_chunks
-                    (tenant_id, document_id, collection, chunk_index, content, embedding, metadata)
-                VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                """,
-                [
-                    (
-                        tenant_id,
-                        document_id,
-                        collection,
-                        index,
-                        content,
-                        vector,
-                        chunk_metadata,
-                    )
-                    for index, content, vector, chunk_metadata in rows
-                ],
-            )
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO rusa_knowledge_chunks
+                        (tenant_id, document_id, collection, chunk_index, content, embedding, metadata)
+                    VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
+                    """,
+                    [
+                        (
+                            tenant_id,
+                            document_id,
+                            collection,
+                            index,
+                            content,
+                            vector,
+                            chunk_metadata,
+                        )
+                        for index, content, vector, chunk_metadata in rows
+                    ],
+                )
         return document_id
 
     def search(
