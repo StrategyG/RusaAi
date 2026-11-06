@@ -169,3 +169,15 @@ def test_agent_api_rejects_repository_assigned_to_another_tenant(monkeypatch):
     with TestClient(api.app) as client:
         response = client.post("/v1/agent/tasks", headers=headers, json=body)
     assert response.status_code == 403
+
+
+def test_agent_api_maps_queue_outage_to_retryable_503(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    with TestClient(api.app) as client:
+        client.app.state.queue.get = lambda tenant_id, task_id: (_ for _ in ()).throw(
+            RuntimeError("database unavailable")
+        )
+        response = client.get("/v1/agent/tasks/missing", headers=headers)
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Agent task queue is temporarily unavailable"
