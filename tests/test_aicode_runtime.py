@@ -164,3 +164,19 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
     assert history_workers[0].seen_prior
     assert any("Changed parser" in item.summary for item in history_workers[0].seen_prior)
     assert record.state == TaskState.SUCCEEDED
+
+
+
+def test_orchestrator_fails_cleanly_if_memory_lookup_fails(tmp_path):
+    class BrokenMemory(SQLiteMemory):
+        def get(self, task_id, tenant_id="default"):
+            raise RuntimeError("database unavailable")
+
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=BrokenMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.FAILED
+    assert any("database unavailable" in error for error in record.errors)
