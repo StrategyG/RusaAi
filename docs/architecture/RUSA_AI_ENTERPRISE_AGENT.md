@@ -182,7 +182,7 @@ See [RAG and MCP Enterprise Architecture](RAG_MCP_ENTERPRISE.md) for the data mo
 
 No arbitrary shell, unrestricted network, local filesystem access, secret retrieval, force push, merge, deployment, release, or permission-management tool is registered. GitHub Actions is the isolated execution environment for tests and build validation. The agent does not execute repository code on the worker host.
 
-## 8. Evaluation and release gates
+## 9. Evaluation and release gates
 
 ### Per-task hard gates
 
