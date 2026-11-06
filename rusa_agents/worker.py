@@ -635,8 +635,8 @@ class AgentRuntime:
             task_id,
             WorkerRole.SYNTHESIZER,
             WorkerRole.SUPERVISOR,
-            "task.result",
-            final_answer,
+            "task.progress",
+            {"synthesis_ready": True, "summary": final_answer["summary"]},
         )
         await self._verify_and_finish(tenant_id, task_id, final_answer)
 
@@ -749,7 +749,11 @@ class AgentRuntime:
             task_id,
             self.worker_id,
             "task.finished",
-            {"status": state, "error": error},
+            {
+                "status": state,
+                "error": error,
+                "final_answer": final_answer if target == TaskStatus.SUCCEEDED else None,
+            },
         )
         await self._publish(
             tenant_id,
