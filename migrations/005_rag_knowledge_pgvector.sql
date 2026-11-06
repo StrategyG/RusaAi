@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS public.rusa_knowledge_documents (
     CONSTRAINT rusa_knowledge_documents_collection_check
         CHECK (collection ~ '^[a-z0-9][a-z0-9_-]{0,62}$'),
     CONSTRAINT rusa_knowledge_documents_source_check
-        CHECK (length(source_uri) BETWEEN 1 AND 2048),
+        CHECK (length(source_uri) BETWEEN 1 AND 2048 AND octet_length(source_uri) <= 2048),
     CONSTRAINT rusa_knowledge_documents_title_check
         CHECK (length(title) BETWEEN 1 AND 256),
     CONSTRAINT rusa_knowledge_documents_metadata_check
