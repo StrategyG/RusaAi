@@ -69,6 +69,12 @@ class PostgresTaskQueue:
                 ON aicode_jobs(tenant_id, created_at DESC)
             """)
 
+    def ping(self) -> bool:
+        """Return database connectivity without exposing application data."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1").fetchone()
+        return row is not None and row[0] == 1
+
     def enqueue(self, task_id: str, tenant_id: str, payload: dict[str, Any],
                 max_attempts: int = 3, priority: int = 0) -> bool:
         if not tenant_id or not task_id or max_attempts < 1:
