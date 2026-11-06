@@ -63,6 +63,8 @@ class DockerSandbox:
             f"--cpus={self.cpu_limit}",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "--mount", f"type=bind,src={workspace},dst=/workspace,rw",
+            "--env", "PYTHONDONTWRITEBYTECODE=1",
+            "--env", "PYTEST_ADDOPTS=-p no:cacheprovider",
             "--workdir", "/workspace",
             self.image,
             *self.PROFILES[profile],
@@ -181,7 +183,7 @@ class WorkspaceToolGateway:
 
     def git_diff(self) -> ToolResult:
         completed = subprocess.run(
-            ["git", "-C", str(self.workspace), "diff", "--no-ext-diff", "--"],
+            ["git", "-C", str(self.workspace), "diff", "--no-ext-diff", "--no-textconv", "--"],
             check=False, capture_output=True, text=True, timeout=30,
         )
         if completed.returncode != 0:
