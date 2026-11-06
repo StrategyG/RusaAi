@@ -147,6 +147,7 @@ class TransformersBackend:
             str(path),
             local_files_only=True,
             trust_remote_code=False,
+            use_safetensors=True,
             torch_dtype=dtype,
         )
         model.to(device)

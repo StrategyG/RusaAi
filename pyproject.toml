@@ -17,6 +17,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+model = [
+  "torch>=2.6.0,<3",
+  "transformers==5.22.1",
+  "safetensors>=0.4.5,<1",
+  "accelerate>=1.0,<2",
+]
 dev = [
   "pytest>=8,<10",
   "ruff>=0.9,<1",

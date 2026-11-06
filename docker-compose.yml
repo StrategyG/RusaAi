@@ -19,7 +19,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: rusa-ai:local
+      target: model-runtime
+    image: rusa-ai-model:local
     restart: unless-stopped
     init: true
     env_file: .env
@@ -33,6 +34,7 @@ services:
       RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
       TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
       DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_AGENT_ENABLED: ${RUSA_AGENT_ENABLED:-false}
     volumes:
       - type: bind
         source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
@@ -68,7 +70,11 @@ services:
 
   rusa-agent-worker:
     profiles: ["agent"]
-    image: rusa-ai:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: agent-runtime
+    image: rusa-ai-agent:local
     command: ["python", "-m", "rusa_agents.worker"]
     restart: unless-stopped
     init: true
@@ -76,6 +82,13 @@ services:
     environment:
       DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_AGENT_DATA_DIR: /data
+      RUSA_PROVIDER_BASE_URL: ${RUSA_PROVIDER_BASE_URL:?Set RUSA_PROVIDER_BASE_URL in .env}
+      RUSA_PROVIDER_MODEL: ${RUSA_PROVIDER_MODEL:?Set RUSA_PROVIDER_MODEL in .env}
+      RUSA_PROVIDER_API_KEY: ${RUSA_PROVIDER_API_KEY:-}
+      RUSA_GITHUB_TOKEN: ${RUSA_GITHUB_TOKEN:?Set RUSA_GITHUB_TOKEN in .env}
+      RUSA_GITHUB_ALLOWED_REPOSITORIES: ${RUSA_GITHUB_ALLOWED_REPOSITORIES:?Set RUSA_GITHUB_ALLOWED_REPOSITORIES in .env}
+      RUSA_AGENT_MAX_TURNS: ${RUSA_AGENT_MAX_TURNS:-8}
+      RUSA_WORKER_LEASE_SECONDS: ${RUSA_WORKER_LEASE_SECONDS:-1800}
     volumes:
       - rusa-agent-data:/data
     depends_on:

@@ -1,0 +1,6 @@
+# Optional local model runtime. Core API and AICode worker stay lightweight.
+# 5.22.1 is newer than the patched Transformers 5.10.0 security baseline.
+torch>=2.6.0,<3
+transformers==5.22.1
+safetensors>=0.4.5,<1
+accelerate>=1.0,<2

@@ -40,8 +40,10 @@ jobs:
         run: bandit -q -r rusa_agents
       - name: Test
         run: pytest -q
-      - name: Audit production dependencies
+      - name: Audit core production dependencies
         run: pip-audit -r requirements.txt
+      - name: Audit local-model production dependencies
+        run: pip-audit -r requirements-model.txt
 
   container:
     name: Build and smoke-test container
@@ -49,14 +51,24 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build --pull -t rusa-ai:${{ github.sha }} .
-      - name: Run container
+      - name: Build API, model, and worker images
+        run: |
+          docker build --pull --target api -t rusa-ai-api:${{ github.sha }} .
+          docker build --pull --target model-runtime -t rusa-ai-model:${{ github.sha }} .
+          docker build --pull --target agent-runtime -t rusa-ai-agent:${{ github.sha }} .
+      - name: Verify worker package imports
+        run: |
+          docker run --rm rusa-ai-agent:${{ github.sha }} \
+            python -c "from rusa_agents.worker import run_worker; print('worker import ok')"
+      - name: Run model-serving container
         run: |
           docker run -d --name rusa-ai-ci \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
-            rusa-ai:${{ github.sha }}
+            rusa-ai-model:${{ github.sha }}
+      - name: Verify application imports
+        run: |
+          docker exec rusa-ai-ci python -c "import app; import rusa_agents; print('application imports ok')"
       - name: Verify liveness
         run: |
           for attempt in $(seq 1 20); do
