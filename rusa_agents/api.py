@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .bootstrap import build_planner, build_tooling
 from .contracts import TaskCreate
+from .evaluation import AgentEvaluator
 from .memory import MemoryStore
 from .rag import RAGService
 from .storage import Database
@@ -178,6 +179,16 @@ async def ready(request: Request) -> dict[str, Any]:
     if not all(checks.values()):
         raise HTTPException(status_code=503, detail=checks)
     return {"status": "ready", "checks": checks}
+
+
+@app.get("/v1/agent/evaluation/metrics")
+async def get_evaluation_metrics(
+    limit: int = Query(default=100, ge=1, le=1000),
+    tenant: str = Depends(tenant_dependency),
+    runtime: AgentRuntime = Depends(runtime_dependency),
+) -> dict[str, Any]:
+    evaluator = AgentEvaluator(runtime.database)
+    return await evaluator.metrics(tenant, limit)
 
 
 @app.get("/v1/agent/audit/verify")
