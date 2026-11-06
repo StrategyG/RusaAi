@@ -7,7 +7,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -757,16 +756,16 @@ def validate_task_envelope(request: TaskValidationRequest):
 def create_aicode_task(
     request: AICodeTaskRequest,
     http_request: Request,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+        description="Required tenant-scoped key. Reuse it when retrying the same submission.",
+    ),
     tenant_id: str = Depends(require_task_permission("task:create")),
 ):
-    idempotency_key = http_request.headers.get("Idempotency-Key", "")
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", idempotency_key):
-        audit_api_task(http_request, tenant_id, None, "task.create", False)
-        raise HTTPException(
-            status_code=400,
-            detail="A valid Idempotency-Key header is required (1-128 safe ASCII characters)",
-        )
-
     config = RuntimeConfig.from_env()
     task_id = str(uuid4())
     allowed_repositories = config.tenant_repositories.get(tenant_id)
