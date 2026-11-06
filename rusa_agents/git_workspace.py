@@ -17,8 +17,16 @@ BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$"
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {
     ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der",
-    ".ppk", ".tfstate", ".tfvars",
+    ".ppk", ".tfstate", ".tfvars", ".env",
 }
+
+
+def _is_env_file_name(name: str) -> bool:
+    lowered = name.lower()
+    if lowered == ".env.example":
+        return False
+    return lowered == ".env" or lowered.startswith(".env.") or ".env." in lowered or lowered.endswith(".env")
+
 BLOCKED_WRITE_NAMES = {
     ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
     "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
@@ -28,6 +36,8 @@ BLOCKED_WRITE_NAMES = {
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
+    "secrets.yaml", "secrets.yml", "secret.yaml", "secret.yml",
+    "credentials.yaml", "credentials.yml",
 }
 BLOCKED_WRITE_PREFIXES = (
     ".github/", "migrations/", "schemas/", "llm-project/configs/",
@@ -250,14 +260,17 @@ class GitHubPublisher:
             status = record[:2].decode("ascii", "replace")
             raw_path = record[3:].decode("utf-8", "surrogateescape")
             if "R" in status or "C" in status:
+                # Never stage a rename/copy as a single safe path: the destination
+                # may have a protected name even when the source path is benign.
                 skip_next = True
+                continue
             path = Path(raw_path)
             parts = {part.lower() for part in path.parts}
             if (
                 path.is_absolute()
                 or ".." in path.parts
                 or parts.intersection(BLOCKED_PATH_PARTS)
-                or any(part.startswith(".env") and part != ".env.example" for part in parts)
+                or any(_is_env_file_name(part) for part in path.parts)
             ):
                 continue
             if (
