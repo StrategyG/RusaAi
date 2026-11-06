@@ -296,7 +296,23 @@ class GitHubToolGateway:
                 total_count = page_total
             elif page_total != total_count:
                 break
-            raw_items.extend(payload["check_runs"])
+            seen = {
+                item.get("id") if item.get("id") is not None else (
+                    item.get("name"), item.get("status"), item.get("conclusion"),
+                    item.get("details_url"),
+                )
+                for item in raw_items if isinstance(item, dict)
+            }
+            for item in payload["check_runs"]:
+                if not isinstance(item, dict):
+                    continue
+                identity = item.get("id") if item.get("id") is not None else (
+                    item.get("name"), item.get("status"), item.get("conclusion"),
+                    item.get("details_url"),
+                )
+                if identity not in seen:
+                    raw_items.append(item)
+                    seen.add(identity)
             if len(raw_items) >= total_count:
                 break
 
