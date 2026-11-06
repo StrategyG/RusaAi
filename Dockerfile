@@ -10,7 +10,11 @@ RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "whe
     && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
 COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
-RUN python -m pip install --no-cache-dir --prefix=/install --no-deps .
+ARG RUSA_INSTALL_LOCAL_MODEL=0
+RUN python -m pip install --no-cache-dir --prefix=/install --no-deps . \
+    && if [ "$RUSA_INSTALL_LOCAL_MODEL" = "1" ]; then \
+         python -m pip install --no-cache-dir --prefix=/install ".[model]"; \
+       fi
 RUN PYTHONPATH=/install/lib/python3.12/site-packages python -m pip check \
     && python -m pip uninstall -y setuptools wheel jaraco.context \
     && python -m pip uninstall -y pip \
