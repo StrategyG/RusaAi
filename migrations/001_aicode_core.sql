@@ -25,6 +25,14 @@ CREATE INDEX IF NOT EXISTS idx_aicode_jobs_claim
 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_tenant
     ON public.aicode_jobs(tenant_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.aicode_rate_limits (
+    tenant_id TEXT NOT NULL,
+    route_key TEXT NOT NULL,
+    window_start BIGINT NOT NULL,
+    request_count INTEGER NOT NULL CHECK (request_count > 0),
+    PRIMARY KEY (tenant_id, route_key, window_start)
+);
+
 CREATE TABLE IF NOT EXISTS public.aicode_memory (
     tenant_id TEXT NOT NULL,
     task_id UUID NOT NULL,
@@ -78,6 +86,7 @@ GRANT USAGE ON SCHEMA public TO rusa_runtime;
 GRANT SELECT, INSERT, UPDATE ON public.aicode_jobs TO rusa_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.aicode_jobs_id_seq TO rusa_runtime;
 GRANT SELECT, INSERT, UPDATE ON public.aicode_memory TO rusa_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.aicode_rate_limits TO rusa_runtime;
 GRANT SELECT, INSERT ON public.aicode_audit_events TO rusa_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.aicode_audit_events_id_seq TO rusa_runtime;
 
