@@ -36,7 +36,7 @@ class MCPKnowledgeGateway:
             not isinstance(tenant, str)
             or not TENANT_PATTERN.fullmatch(tenant)
             or not isinstance(token, str)
-            or len(token) < 32
+            or not 32 <= len(token) <= 512
             for tenant, token in tenant_tokens.items()
         ):
             raise ValueError("MCP tenant token map is invalid")
