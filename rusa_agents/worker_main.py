@@ -7,8 +7,6 @@ import os
 import signal
 
 from prometheus_client import Gauge, start_http_server
-
-from .metrics import WORKER_READY
 from .runtime import AICodeRuntime
 
 
