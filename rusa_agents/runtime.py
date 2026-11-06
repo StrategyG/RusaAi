@@ -62,17 +62,18 @@ class AICodeRuntime:
     def _task(job: Job) -> CodingTask:
         data: dict[str, Any] = job.payload
         repository = data["repository"]
+        lease_suffix = job.lease_token.replace("-", "")[:8]
         return CodingTask(
             objective=data["objective"],
             repository=RepositoryTarget(
                 full_name=repository["full_name"],
                 base_branch=repository.get("base_branch", "main"),
-                work_branch=repository.get("work_branch", f"feature/aicode/{job.task_id[:12]}"),
+                work_branch=f"feature/aicode/{job.task_id[:12]}-{lease_suffix}",
             ),
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
             task_id=job.task_id,
-            metadata={"tenant_id": job.tenant_id},
+            metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
         )
 
     async def _build_orchestrator(
@@ -124,7 +125,7 @@ class AICodeRuntime:
             await asyncio.sleep(60)
             try:
                 renewed = await asyncio.to_thread(
-                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, 180
+                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
                 )
             except Exception:
                 logger.exception("Lease heartbeat failed for job %s", job.id)
@@ -135,9 +136,23 @@ class AICodeRuntime:
                 logger.error("Lease lost for job %s", job.id)
                 return
 
+    async def _assert_lease(self, job: Job, lost_lease: asyncio.Event) -> None:
+        if lost_lease.is_set():
+            raise RuntimeError("Worker has already lost its task lease")
+        owned = await asyncio.to_thread(
+            self.queue.owns_lease,
+            job.id,
+            job.tenant_id,
+            self.worker_id,
+            job.lease_token,
+        )
+        if not owned:
+            lost_lease.set()
+            raise RuntimeError("Task lease is no longer owned by this worker")
+
     async def _await_human_review(self, job: Job, task: CodingTask, reason: str) -> None:
         updated = await asyncio.to_thread(
-            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, reason
+            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, job.lease_token, reason
         )
         if not updated:
             raise RuntimeError("Queue rejected awaiting-approval transition because the lease was lost")
@@ -186,12 +201,13 @@ class AICodeRuntime:
                 return True
             if record.state != TaskState.SUCCEEDED:
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id,
+                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
                 )
                 outcome = "failed"
                 return True
 
+            await self._assert_lease(job, lost_lease)
             commit_sha = await self._await_with_lease(
                 asyncio.to_thread(
                     self.publisher.commit_and_push,
@@ -202,6 +218,7 @@ class AICodeRuntime:
                 ),
                 lost_lease,
             )
+            await self._assert_lease(job, lost_lease)
             pr_url = await self._await_with_lease(
                 self.publisher.create_or_get_draft_pr(
                     task.repository.full_name,
@@ -253,7 +270,7 @@ class AICodeRuntime:
                 tenant_id=job.tenant_id,
             )
             completed = await asyncio.to_thread(
-                self.queue.complete, job.id, job.tenant_id, self.worker_id
+                self.queue.complete, job.id, job.tenant_id, self.worker_id, job.lease_token
             )
             if not completed:
                 raise RuntimeError("Queue rejected completion because the lease is no longer owned")
@@ -268,7 +285,7 @@ class AICodeRuntime:
             outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id,
+                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     f"{type(exc).__name__}: {exc}",
                 )
         finally:
