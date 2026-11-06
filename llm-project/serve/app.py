@@ -42,7 +42,7 @@ from rusa_knowledge.service import KnowledgeService
 
 def _is_rfc3339_datetime(value: object) -> bool:
     if not isinstance(value, str) or not re.fullmatch(
-        r"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})",
+        r"\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})",
         value,
     ):
         return False
@@ -54,7 +54,7 @@ def _is_rfc3339_datetime(value: object) -> bool:
 
 
 def _is_absolute_uri(value: object) -> bool:
-    if not isinstance(value, str) or not value or re.search(r"\\s", value):
+    if not isinstance(value, str) or not value or re.search(r"\s", value):
         return False
     if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
         return False
