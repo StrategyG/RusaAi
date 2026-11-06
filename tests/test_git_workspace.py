@@ -116,3 +116,23 @@ def test_workspace_manager_refuses_untrusted_mirror_origin(tmp_path):
     manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
     with pytest.raises(RuntimeError, match="credential-free HTTPS"):
         manager.refresh("StrategyG/RusaAi", "main")
+
+
+def test_publisher_filters_deployment_configuration_paths(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    files = [
+        "src/app.py",
+        "Dockerfile.worker",
+        "docker-compose.override.yml",
+        "compose.yaml",
+        "requirements-dev.txt",
+        "K8S/deployment.yaml",
+        "infra/prod.tf",
+    ]
+    for name in files:
+        target = repository / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x")
+    assert GitHubPublisher._safe_changed_paths(repository) == ["src/app.py"]
