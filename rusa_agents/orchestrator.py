@@ -39,6 +39,7 @@ class AICodeOrchestrator:
         "create_branch": "branch_create", "read_file": "repo_read",
         "list_files": "repo_read", "write_file": "repo_write",
         "create_pull_request": "pull_request_create", "get_ci_status": "ci_read",
+        "get_branch_diff": "repo_read",
     }
 
     def __init__(
@@ -152,10 +153,20 @@ class AICodeOrchestrator:
         ):
             return "pending"
         checks = result.data.get("checks", [])
-        if not isinstance(checks, list) or not checks:
+        total_count = result.data.get("total_count")
+        if (
+            not isinstance(checks, list)
+            or not checks
+            or type(total_count) is not int
+            or total_count != len(checks)
+        ):
+            return "pending"
+        if any(not isinstance(item, dict) for item in checks):
             return "pending"
         if any(item.get("status") != "completed" for item in checks):
             return "pending"
+        if any(item.get("conclusion") != "success" for item in checks):
+            return "failed"
         required = {
             item.get("name"): item for item in checks
             if item.get("name") in self.required_ci_checks
@@ -269,8 +280,67 @@ class AICodeOrchestrator:
                          if item.name == "get_ci_status"),
                         None,
                     ) if tester_result else None
+                    security_ci = next(
+                        (item for item in reversed(result.tool_results)
+                         if item.name == "get_ci_status"),
+                        None,
+                    )
+                    security_diff = next(
+                        (item for item in reversed(result.tool_results)
+                         if item.name == "get_branch_diff"),
+                        None,
+                    )
                     if tester_ci is None or self._ci_outcome(tester_ci) != "passed":
                         raise _TaskBlocked("tester CI evidence is missing or unverifiable")
+                    if security_ci is None or security_diff is None:
+                        raise _TaskBlocked("security worker must provide CI and complete diff evidence")
+
+                    tester_sha = tester_ci.data.get("head_sha")
+                    security_sha = security_ci.data.get("head_sha")
+                    diff_sha = security_diff.data.get("head_sha")
+                    diff_files = security_diff.data.get("files")
+                    changed_files = security_diff.data.get("changed_files")
+                    diff_valid = (
+                        security_diff.name == "get_branch_diff"
+                        and security_diff.success is True
+                        and security_diff.evidence.get("source") == "github_compare_api"
+                        and isinstance(diff_sha, str)
+                        and re.fullmatch(r"[0-9a-f]{40}", diff_sha)
+                        and security_diff.evidence.get("head_sha") == diff_sha
+                        and security_diff.data.get("diff_complete") is True
+                        and isinstance(diff_files, list)
+                        and type(changed_files) is int
+                        and changed_files == len(diff_files)
+                    )
+                    if not diff_valid:
+                        raise _TaskBlocked("security review requires a complete, verifiable repository diff")
+
+                    security_outcome = self._ci_outcome(security_ci)
+                    if (
+                        tester_sha != security_sha
+                        or tester_sha != diff_sha
+                        or security_outcome == "pending"
+                    ):
+                        record.stage_index = 3
+                        record.transition(TaskState.WAITING_EXTERNAL)
+                        await self._persist(record, checkpoint_callback)
+                        self._event(
+                            "task.waiting_external", record, "rusa-master",
+                            {
+                                "reason": "security evidence does not match the tested commit",
+                                "tested_sha": tester_sha,
+                                "security_ci_sha": security_sha,
+                                "diff_sha": diff_sha,
+                            },
+                        )
+                        return record
+                    if security_outcome == "failed":
+                        if record.repair_cycles >= self.max_repair_cycles:
+                            raise _TaskBlocked("security-stage CI failed after the maximum repair cycles")
+                        record.stage_index = 5
+                        record.repair_cycles += 1
+                        await self._persist(record, checkpoint_callback)
+                        continue
 
                     decision = self.policy.evaluate(
                         "ci_read", risk=RiskLevel.LOW, repository=task.repository,
@@ -282,11 +352,11 @@ class AICodeOrchestrator:
                         timeout=self.worker_timeout_seconds,
                     )
                     final_sha = final_ci.data.get("head_sha")
-                    tester_sha = tester_ci.data.get("head_sha")
                     final_outcome = self._ci_outcome(final_ci)
                     if final_outcome != "passed" or final_sha != tester_sha:
                         record.stage_index = 3
                         record.transition(TaskState.WAITING_EXTERNAL)
+                        await self._persist(record, checkpoint_callback)
                         self._event(
                             "task.waiting_external", record, "rusa-master",
                             {
@@ -297,6 +367,14 @@ class AICodeOrchestrator:
                             },
                         )
                         return record
+                    self._event(
+                        "ci.final_verified", record, "rusa-master",
+                        {
+                            "head_sha": final_sha,
+                            "checks": final_ci.data.get("total_count", 0),
+                            "diff_files": changed_files,
+                        },
+                    )
                     record.stage_index = 7
                     await self._persist(record, checkpoint_callback)
                     continue

@@ -17,7 +17,7 @@ class MemoryReader(Protocol):
 class AgentWorker:
     TOOL_NAMES = {
         "create_branch", "read_file", "list_files", "write_file",
-        "create_pull_request", "get_ci_status",
+        "create_pull_request", "get_ci_status", "get_branch_diff",
     }
     ROLE_TOOLS = {
         WorkerRole.ANALYST: {"read_file", "list_files"},
@@ -27,7 +27,7 @@ class AgentWorker:
         },
         WorkerRole.DEBUGGER: {"read_file", "list_files", "write_file", "get_ci_status"},
         WorkerRole.TESTER: {"get_ci_status"},
-        WorkerRole.SECURITY: {"read_file", "list_files", "get_ci_status"},
+        WorkerRole.SECURITY: {"read_file", "list_files", "get_ci_status", "get_branch_diff"},
     }
 
     def __init__(
@@ -70,6 +70,13 @@ class AgentWorker:
             "(low|medium|high|critical), criteria_results (object mapping every exact acceptance "
             "criterion to a boolean). Mark a criterion true only when the available evidence supports it."
         )
+        if self.role == WorkerRole.SECURITY:
+            system_prompt += (
+                " Mandatory security verification: call get_ci_status and get_branch_diff. "
+                "Inspect every changed file in the complete diff. If the diff is incomplete, "
+                "contains an unreviewable file, or does not match the tested commit SHA, report "
+                "a blocker. Do not approve a change based only on the developer summary."
+            )
         user_prompt = json.dumps(
             {
                 "task": task.to_dict(),

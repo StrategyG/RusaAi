@@ -82,8 +82,31 @@ class FakeTools:
             return ToolResult(
                 name=call.name,
                 success=True,
-                data={"head_sha": "a" * 40, "checks": checks, "checks_complete": True, "all_checks_success": outcome == "passed"},
+                data={
+                    "head_sha": "a" * 40,
+                    "checks": checks,
+                    "checks_complete": True,
+                    "total_count": len(checks),
+                    "all_checks_success": outcome == "passed",
+                },
                 evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
+            )
+        if call.name == "get_branch_diff":
+            return ToolResult(
+                name=call.name,
+                success=True,
+                data={
+                    "base_sha": "b" * 40,
+                    "head_sha": "a" * 40,
+                    "changed_files": 1,
+                    "files": [{
+                        "path": "rusa_agents/example.py",
+                        "status": "modified",
+                        "patch": "+return True",
+                    }],
+                    "diff_complete": True,
+                },
+                evidence={"source": "github_compare_api", "head_sha": "a" * 40},
             )
         return ToolResult(
             name=call.name,
@@ -120,7 +143,15 @@ def make_orchestrator(tools, overrides=None, audit=None):
     overrides = overrides or {}
     workers = []
     for role in WorkerRole:
-        workers.append(overrides.get(role, ScriptedWorker(role, [worker_result(role)])))
+        default_result = (
+            worker_result(
+                role,
+                [ToolCall("get_ci_status"), ToolCall("get_branch_diff")],
+            )
+            if role == WorkerRole.SECURITY
+            else worker_result(role)
+        )
+        workers.append(overrides.get(role, ScriptedWorker(role, [default_result])))
     return AICodeOrchestrator(
         workers=workers,
         tools=tools,
@@ -622,3 +653,27 @@ def test_github_gateway_branch_diff_fails_closed_for_missing_patch(monkeypatch):
     monkeypatch.setattr(gateway, "_request", fake_request)
     result = asyncio.run(gateway.execute(task, ToolCall("get_branch_diff")))
     assert result.data["diff_complete"] is False
+
+
+
+def test_security_stage_blocks_incomplete_repository_diff():
+    class IncompleteDiffTools(FakeTools):
+        async def execute(self, task, call):
+            if call.name == "get_branch_diff":
+                self.calls.append((call.name, dict(call.arguments)))
+                return ToolResult(
+                    name=call.name,
+                    success=True,
+                    data={
+                        "head_sha": "a" * 40,
+                        "changed_files": 1,
+                        "files": [],
+                        "diff_complete": False,
+                    },
+                    evidence={"source": "github_compare_api", "head_sha": "a" * 40},
+                )
+            return await super().execute(task, call)
+
+    record = asyncio.run(make_orchestrator(IncompleteDiffTools()).run(make_task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("complete" in error.lower() for error in record.errors)
