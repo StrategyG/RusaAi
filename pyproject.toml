@@ -29,7 +29,7 @@ dev = [
 model = ["torch>=2.0,<3"]
 
 [tool.setuptools.packages.find]
-include = ["rusa_agents*"]
+include = ["rusa_agents*", "rusa_knowledge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
