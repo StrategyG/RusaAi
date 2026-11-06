@@ -424,3 +424,27 @@ def test_github_gateway_rejects_empty_tenant_repository_allowlist():
             object(),
             tenant_repositories={"tenant-a": set()},
         )
+
+
+
+def test_provider_requires_explicit_allowlist_for_remote_https_host():
+    with pytest.raises(ValueError, match="explicitly allowlisted"):
+        OpenAICompatibleProvider("https://provider.example/v1", "model")
+
+
+def test_provider_accepts_explicitly_allowlisted_remote_https_host():
+    provider = OpenAICompatibleProvider(
+        "https://provider.example/v1",
+        "model",
+        allowed_hosts={"provider.example"},
+    )
+    assert provider.endpoint == "https://provider.example/v1/chat/completions"
+
+
+def test_provider_host_allowlist_is_case_insensitive():
+    provider = OpenAICompatibleProvider(
+        "https://Provider.Example/v1",
+        "model",
+        allowed_hosts={"provider.example"},
+    )
+    assert provider.endpoint.endswith("/chat/completions")

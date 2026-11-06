@@ -31,6 +31,11 @@ def build_orchestrator() -> AICodeOrchestrator:
         provider_model,
         os.getenv("RUSA_PROVIDER_API_KEY"),
         timeout_seconds=float(os.getenv("RUSA_PROVIDER_TIMEOUT_SECONDS", "120")),
+        allowed_hosts={
+            host.strip()
+            for host in os.getenv("RUSA_PROVIDER_ALLOWED_HOSTS", "").split(",")
+            if host.strip()
+        },
     )
     raw_tenant_repositories = os.getenv("RUSA_GITHUB_TENANT_REPOSITORIES_JSON")
     raw_api_tenants = os.getenv("RUSA_API_KEY_TENANTS_JSON")

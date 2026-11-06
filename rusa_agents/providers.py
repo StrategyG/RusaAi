@@ -15,6 +15,7 @@ class OpenAICompatibleProvider:
         model: str,
         api_key: str | None = None,
         timeout_seconds: float = 120,
+        allowed_hosts: set[str] | frozenset[str] | None = None,
     ) -> None:
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"https", "http"} or not parsed.hostname:
@@ -23,6 +24,15 @@ class OpenAICompatibleProvider:
             raise ValueError("remote model provider endpoints must use HTTPS")
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("provider URL cannot contain credentials, query, or fragment")
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        normalized_hosts = {
+            host.strip().lower().rstrip(".")
+            for host in (allowed_hosts or set())
+            if isinstance(host, str) and host.strip()
+        }
+        if parsed.hostname.lower().rstrip(".") not in local_hosts:
+            if parsed.hostname.lower().rstrip(".") not in normalized_hosts:
+                raise ValueError("remote provider host must be explicitly allowlisted")
         if not model.strip():
             raise ValueError("provider model must not be empty")
         if not 1 <= timeout_seconds <= 300:
@@ -53,6 +63,7 @@ class OpenAICompatibleProvider:
         async with httpx.AsyncClient(
             timeout=self.timeout,
             follow_redirects=False,
+            trust_env=False,
         ) as client:
             async with client.stream("POST", self.endpoint, headers=headers, json=body) as response:
                 response.raise_for_status()

@@ -32,7 +32,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 | Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
-| Provider security | Approved endpoint allowlist, HTTPS, secret manager, egress restrictions | Deployment configuration required |
+| Provider security | HTTPS, explicit hostname allowlist, disabled ambient proxy inheritance, secret manager, egress restrictions | Host allowlist enforced by runtime; secret manager and network egress controls remain deployment requirements |
 | Model artifact | License, immutable revision, checksum, tokenizer/chat template, provenance | Blocked: no model artifact supplied |
 | Model quality | Versioned benchmark dataset, task success, safety and regression evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, concurrency, RAM/VRAM and context limits | Blocked |

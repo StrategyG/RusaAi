@@ -24,7 +24,9 @@ Mock model responses are intentionally not supported. Inference returns HTTP 503
 - llm-project/serve/: API and local inference adapter.
 - schemas/a2a/: A2A task envelope JSON Schema.
 - tests/: API, authentication, readiness, and schema tests.
-- rusa_agents/: hierarchical coding-agent runtime, workers, GitHub gateway, queue, memory, and audit.\n- AI_CODE.md: normative AICode operating and security contract.\n- docs/: architecture, integration, and production-readiness documentation.
+- rusa_agents/: hierarchical coding-agent runtime, workers, GitHub gateway, queue, memory, and audit.
+- AI_CODE.md: normative AICode operating and security contract.
+- docs/: architecture, integration, and production-readiness documentation.
 
 ## Requirements
 
@@ -59,12 +61,19 @@ The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only 
 ## API endpoints
 
 - POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
-- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.\n- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
+- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
+- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
 - GET /v1/agent/tasks/{task_id}: requires X-API-Key; returns task status only within the authenticated tenant.
 
-## Agent worker\n\nSet RUSA_AGENT_ENABLED=true, DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), and RUSA_GITHUB_TOKEN in the secret-backed .env file. For a single-tenant deployment, configure RUSA_GITHUB_ALLOWED_REPOSITORIES. For a multi-tenant deployment, configure RUSA_API_KEY_TENANTS_JSON with SHA-256 API-key hashes and RUSA_GITHUB_TENANT_REPOSITORIES_JSON with a separate repository allowlist for every authenticated tenant. Do not use a shared global repository allowlist for multiple tenants. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.\n\nSee AI_CODE.md for the agent contract and docs/PRODUCTION_READINESS.md for release gates.\n\n## Quality gates
+## Agent worker
 
-Run ruff check llm-project/serve tests, python -m compileall -q llm-project tests, pytest -q, and pip-audit -r requirements.txt.
+Set RUSA_AGENT_ENABLED=true, DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_ALLOWED_HOSTS, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), and RUSA_GITHUB_TOKEN in the secret-backed .env file. For a single-tenant deployment, configure RUSA_GITHUB_ALLOWED_REPOSITORIES. For a multi-tenant deployment, configure RUSA_API_KEY_TENANTS_JSON with SHA-256 API-key hashes and RUSA_GITHUB_TENANT_REPOSITORIES_JSON with a separate repository allowlist for every authenticated tenant. Remote model provider hostnames must appear in RUSA_PROVIDER_ALLOWED_HOSTS. Do not use a shared global repository allowlist for multiple tenants. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.
+
+See AI_CODE.md for the agent contract and docs/PRODUCTION_READINESS.md for release gates.
+
+## Quality gates
+
+Run ruff check rusa_agents llm-project/serve tests, python -m compileall -q rusa_agents llm-project tests, pytest -q, pip-audit -r requirements.txt, and pip-audit -r requirements-model.txt. PostgreSQL integration tests require DATABASE_URL.
 
 A green CI run validates the serving foundation. It does not prove model quality, model capacity, multi-agent correctness, or production SLOs.
 
