@@ -136,6 +136,12 @@ Start the API and web workspace with:
 docker compose up -d --build
 ```
 
-The web workspace is published on the loopback interface at `http://127.0.0.1:3000` by default. Put a TLS reverse proxy in front of it before exposing it beyond a trusted local network. Keep `RUSA_COOKIE_SECURE=true` when serving over HTTPS. Agent task submission remains disabled until `RUSA_AGENT_ENABLED=true` and the provider, GitHub, queue, and worker configuration are valid.
+The web workspace is published on the loopback interface at `http://127.0.0.1:3000` by default. Put a TLS reverse proxy in front of it before exposing it beyond a trusted local network. Keep `RUSA_COOKIE_SECURE=true` when serving over HTTPS. Agent task submission remains disabled until `RUSA_AGENT_ENABLED=true`, the provider/GitHub credentials are configured, and the agent profile is started:
+
+```bash
+docker compose --profile agent up -d --build
+```
+
+For remote MCP, also start the `knowledge` profile and configure the tenant token/hash mappings.
 
 The chat page currently uses non-streaming completions. Conversation history persistence and live task updates are follow-on UI capabilities; do not treat the workspace as production-certified until browser E2E, authorization, CSRF, and staging tests pass.
