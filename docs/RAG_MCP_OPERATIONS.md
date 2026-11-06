@@ -23,7 +23,9 @@ Migration 007 creates tenant-scoped document/chunk tables, pgvector indexes,
 forced row-level security, and the write-capable `rusa_knowledge_worker` role
 for controlled ingestion. Migration 008 creates `rusa_knowledge_reader` with
 SELECT-only grants and tenant RLS, removes the coding worker's membership in the
-write-capable ingestion role, and grants the worker runtime only the reader role.
+write-capable ingestion role, grants the worker runtime only the reader role,
+and revokes the legacy knowledge-table SELECT grants from `rusa_api_runtime`.
+The core API queue role therefore has no direct knowledge-store access.
 
 For the MCP service, create a dedicated login and grant it only the reader role:
 
@@ -37,6 +39,8 @@ Set `RUSA_KNOWLEDGE_DATABASE_URL` to the `rusa_mcp_login` DSN and
 `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_reader`. For autonomous worker
 retrieval, use the restricted worker login DSN and the same reader role. Do not
 grant the ingestion role to the MCP login, API login, or general application role.
+The API login must not receive SELECT grants on the knowledge tables; only the
+read-only reader role is used by MCP and autonomous retrieval.
 
 The ingestion CLI is the only path that should use the write-capable role.
 Run it as a separate, controlled ingestion identity that is explicitly granted
