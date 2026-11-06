@@ -119,9 +119,9 @@ class PostgresMemoryStore:
                 FROM rusa_agent_memory
                 WHERE tenant_id=%s AND namespace=%s
                   AND (expires_at IS NULL OR expires_at > now())
-                  AND to_tsvector('simple', content) @@ plainto_tsquery('simple', %s)
-                ORDER BY ts_rank(to_tsvector('simple', content),
-                                 plainto_tsquery('simple', %s)) DESC, created_at DESC
+                  AND search_vector @@ plainto_tsquery('simple', %s)
+                ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC,
+                         created_at DESC
                 LIMIT %s
             """, (tenant_id, namespace, terms, terms, limit)).fetchall()
         return [
