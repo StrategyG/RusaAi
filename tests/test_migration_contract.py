@@ -28,7 +28,7 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
 
 def test_rls_migrations_are_bootstrapped_before_any_test_module():
     source = Path("tests/conftest.py").read_text(encoding="utf-8")
-    migrations = re.findall(r'"(\\d{3}_[A-Za-z0-9_-]+\\.sql)"', source)
+    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', source)
 
     assert migrations == [
         "001_aicode_core.sql",
@@ -42,4 +42,4 @@ def test_rls_migrations_are_bootstrapped_before_any_test_module():
 def test_role_provisioning_do_blocks_have_valid_dollar_terminators():
     for name in ("001_aicode_core.sql", "004_aicode_tenant_rls.sql"):
         source = (Path("migrations") / name).read_text(encoding="utf-8")
-        assert re.search(r"DO \\$\\$\\s*BEGIN[\\s\\S]*?\\nEND;\\s*\\$\\$;", source)
+        assert re.search(r"DO \$\$\s*BEGIN[\s\S]*?\nEND;\s*\$\$;", source)
