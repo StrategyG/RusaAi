@@ -11,12 +11,25 @@ AGENT_IMAGE="${2:?Usage: compose-deploy.sh <api-image@sha256:digest> <agent-imag
 BACKUP_FILE="${ENV_FILE}.previous"
 LOCK_FILE="$ROOT_DIR/.deploy.lock"
 
-[[ "$API_IMAGE" =~ ^ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]] || {
-  echo "API image must be an immutable GHCR sha256 digest reference." >&2
+IMAGE_REGISTRY="${RUSA_IMAGE_REGISTRY:-ghcr.io}"
+[[ "$IMAGE_REGISTRY" =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?$ ]] || {
+  echo "RUSA_IMAGE_REGISTRY must be a registry hostname with an optional port." >&2
   exit 1
 }
-[[ "$AGENT_IMAGE" =~ ^ghcr\.io/[a-z0-9._-]+/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]] || {
-  echo "Agent image must be an immutable GHCR sha256 digest reference." >&2
+
+is_immutable_image() {
+  local reference="$1"
+  [[ "$reference" == "$IMAGE_REGISTRY/"* ]] || return 1
+  local image_path="${reference#"$IMAGE_REGISTRY/"}"
+  [[ "$image_path" =~ ^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$ ]]
+}
+
+is_immutable_image "$API_IMAGE" || {
+  echo "API image must be an immutable sha256 digest from $IMAGE_REGISTRY." >&2
+  exit 1
+}
+is_immutable_image "$AGENT_IMAGE" || {
+  echo "Agent image must be an immutable sha256 digest from $IMAGE_REGISTRY." >&2
   exit 1
 }
 [[ -s "$ENV_FILE" ]] || {
@@ -30,12 +43,14 @@ LOCK_FILE="$ROOT_DIR/.deploy.lock"
 
 # A first deployment must establish a known-good digest baseline before this
 # automatic rollback mechanism can be used safely.
-grep -Eq '^RUSA_API_IMAGE=ghcr\.io/.+@sha256:[a-f0-9]{64}$' "$ENV_FILE" || {
-  echo "Seed RUSA_API_IMAGE with the currently running GHCR digest before first automated deployment." >&2
+current_api_image="$(awk -F= '$1 == "RUSA_API_IMAGE" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
+current_agent_image="$(awk -F= '$1 == "RUSA_AGENT_IMAGE" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
+is_immutable_image "$current_api_image" || {
+  echo "Seed RUSA_API_IMAGE with the currently running immutable $IMAGE_REGISTRY digest before first automated deployment." >&2
   exit 1
 }
-grep -Eq '^RUSA_AGENT_IMAGE=ghcr\.io/.+@sha256:[a-f0-9]{64}$' "$ENV_FILE" || {
-  echo "Seed RUSA_AGENT_IMAGE with the currently running GHCR digest before first automated deployment." >&2
+is_immutable_image "$current_agent_image" || {
+  echo "Seed RUSA_AGENT_IMAGE with the currently running immutable $IMAGE_REGISTRY digest before first automated deployment." >&2
   exit 1
 }
 
