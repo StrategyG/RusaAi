@@ -180,4 +180,4 @@ This branch is suitable for deploying the API/schema-validation scaffold after C
 
 ## License
 
-MIT. See the repository license file for the full terms.
+No `LICENSE` file is currently present in the repository. Do not assume MIT redistribution rights until the repository owner adds an explicit license.
