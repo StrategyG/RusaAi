@@ -277,7 +277,8 @@ class GitHubPublisher:
                 path.suffix.lower() in BLOCKED_SUFFIXES
                 or path.name.lower() in {"id_rsa", "id_ed25519"}
                 or path.name.lower() in BLOCKED_WRITE_NAMES
-                or path.name.lower().startswith(("requirements", "dockerfile.", "docker-compose.", "compose."))
+                or path.name.lower().startswith(("requirements", "dockerfile.", "docker-compose.", "compose.", "secret.", "secrets.", "credential.", "credentials."))
+                or path.name.lower().endswith((".secret", ".secrets", ".kubeconfig"))
                 or any(raw_path.lower().startswith(prefix.lower()) for prefix in BLOCKED_WRITE_PREFIXES)
             ):
                 continue
