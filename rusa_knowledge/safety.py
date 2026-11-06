@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from urllib.parse import urlsplit
 
 _PATTERNS = (
     (
@@ -26,3 +28,21 @@ def reject_credential_material(text: str) -> None:
     for pattern, label in _PATTERNS:
         if pattern.search(text):
             raise ValueError(f"document contains {label}; ingestion was blocked")
+
+
+def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> str:
+    """Validate metadata before embedding or persistence; never store embedded credentials."""
+    if not isinstance(metadata, dict):
+        raise ValueError("document metadata must be a JSON object")
+    try:
+        parsed = urlsplit(source_uri)
+    except ValueError as exc:
+        raise ValueError("source_uri is invalid") from exc
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("source_uri must not contain embedded credentials")
+    try:
+        metadata_json = json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("document metadata must be JSON-serializable") from exc
+    reject_credential_material("\\n".join((source_uri, title, metadata_json)))
+    return metadata_json
