@@ -825,6 +825,7 @@ def validate_task_envelope(request: TaskValidationRequest):
 def create_aicode_task(
     request: AICodeTaskRequest,
     http_request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     tenant_id: str = Depends(require_task_permission("task:create")),
 ):
     config = RuntimeConfig.from_env()
@@ -854,21 +855,46 @@ def create_aicode_task(
         "acceptance_criteria": request.acceptance_criteria,
     }
     try:
-        created = queue.enqueue(
-        task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
-    )
+        if idempotency_key is not None:
+            task_id, created = queue.enqueue_idempotent(
+                task_id,
+                tenant_id,
+                payload,
+                idempotency_key,
+                audit_actor=_api_task_actor(http_request),
+            )
+            work_branch_prefix = f"feature/aicode/{task_id[:12]}"
+            accepted = True
+        else:
+            created = queue.enqueue(
+                task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
+            )
+            accepted = created
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except Exception:
         logger.exception("Could not enqueue AICode task")
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
     audit_api_task(
-        http_request, tenant_id, task_id, "task.create", created, persist=False
+        http_request, tenant_id, task_id, "task.create", accepted, persist=False
     )
-    if not created:
+    if not accepted:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
+    status_value = "queued"
+    if idempotency_key is not None and not created:
+        try:
+            existing = queue.get(
+                task_id, tenant_id, audit_actor=_api_task_actor(http_request)
+            )
+            if existing is not None:
+                status_value = existing["status"]
+        except Exception:
+            logger.exception("Could not read idempotent task replay status")
     return AICodeTaskResponse(
         task_id=task_id,
-        status="queued",
+        status=status_value,
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
     )
