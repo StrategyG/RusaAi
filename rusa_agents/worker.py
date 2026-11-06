@@ -6,11 +6,16 @@ import json
 import re
 import os
 import signal
+from typing import Any
 
 from .audit import HMACAuditLog
 from .contracts import WorkerRole, TaskState
 from .github import GitHubToolGateway
 from .memory import PostgresMemoryStore
+from .rag_memory import CompositeMemoryReader
+from .mcp_gateway import MCPKnowledgeGateway
+from .tool_router import CompositeToolGateway
+from rusa_knowledge.service import KnowledgeService
 from .orchestrator import AICodeOrchestrator
 from .provider import OpenAICompatibleProvider
 from .queue import PostgresTaskQueue
@@ -26,6 +31,7 @@ class QueueWorker:
         queue: PostgresTaskQueue,
         orchestrator: AICodeOrchestrator,
         memory: PostgresMemoryStore,
+        memory_reader: Any | None = None,
         poll_interval_seconds: float = 1.0,
         maintenance_interval_seconds: float = 3600.0,
         lease_seconds: int = 300,
@@ -40,10 +46,16 @@ class QueueWorker:
         self.queue = queue
         self.orchestrator = orchestrator
         self.memory = memory
+        self.memory_reader = memory_reader or memory
         self.poll_interval_seconds = poll_interval_seconds
         self.maintenance_interval_seconds = maintenance_interval_seconds
         self.lease_seconds = lease_seconds
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
+
+    def close(self) -> None:
+        close = getattr(self.memory_reader, "close", None)
+        if callable(close):
+            close()
 
     async def _run_with_lease(self, task, checkpoint, tenant_id, task_id, lease_token):
         stop_event = asyncio.Event()
@@ -243,10 +255,48 @@ def build_worker() -> QueueWorker:
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
         os.environ["RUSA_AGENT_AUDIT_KEY"],
     )
-    workers = [AgentWorker(role, provider, memory) for role in WorkerRole]
+
+    memory_reader: Any = memory
+    rag_enabled = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    if rag_enabled:
+        knowledge_service = KnowledgeService.from_env(check_ready=True)
+        memory_reader = CompositeMemoryReader(
+            memory,
+            knowledge_service,
+            collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+        )
+
+    tools: Any = github
+    mcp_server_url = os.getenv("RUSA_MCP_SERVER_URL", "").strip()
+    tenant_tokens_raw = os.getenv("RUSA_MCP_TENANT_TOKENS", "").strip()
+    if mcp_server_url:
+        try:
+            tenant_tokens = json.loads(tenant_tokens_raw) if tenant_tokens_raw else {}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must be valid JSON") from exc
+        if not isinstance(tenant_tokens, dict) or not tenant_tokens:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must map tenant IDs to bearer tokens")
+        allowed_tools = {
+            item.strip()
+            for item in os.getenv(
+                "RUSA_MCP_ALLOWED_TOOLS",
+                "search_knowledge,get_document,list_collections",
+            ).split(",")
+            if item.strip()
+        }
+        mcp_gateway = MCPKnowledgeGateway(
+            server_url=mcp_server_url,
+            tenant_tokens=tenant_tokens,
+            allowed_tools=allowed_tools,
+        )
+        tools = CompositeToolGateway(github, mcp_gateway)
+    elif tenant_tokens_raw:
+        raise RuntimeError("RUSA_MCP_TENANT_TOKENS requires RUSA_MCP_SERVER_URL")
+
+    workers = [AgentWorker(role, provider, memory_reader) for role in WorkerRole]
     orchestrator = AICodeOrchestrator(
         workers=workers,
-        tools=github,
+        tools=tools,
         audit=audit,
         worker_timeout_seconds=float(os.getenv("RUSA_AGENT_WORKER_TIMEOUT", "120")),
         max_repair_cycles=int(os.getenv("RUSA_AGENT_MAX_REPAIR_CYCLES", "2")),
@@ -255,6 +305,7 @@ def build_worker() -> QueueWorker:
         queue=queue,
         orchestrator=orchestrator,
         memory=memory,
+        memory_reader=memory_reader,
         poll_interval_seconds=float(os.getenv("RUSA_AGENT_POLL_INTERVAL", "1")),
         lease_seconds=int(os.getenv("RUSA_AGENT_QUEUE_LEASE_SECONDS", "300")),
         heartbeat_interval_seconds=float(os.getenv("RUSA_AGENT_QUEUE_HEARTBEAT_SECONDS", "60")),
@@ -271,7 +322,10 @@ async def _serve() -> None:
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop_event.set)
-    await worker.run_forever(stop_event)
+    try:
+        await worker.run_forever(stop_event)
+    finally:
+        worker.close()
 
 
 def main() -> None:
