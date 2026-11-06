@@ -4,6 +4,7 @@ set -eu
 : "${RUSA_AGENT_WORKER_DB_PASSWORD:?RUSA_AGENT_WORKER_DB_PASSWORD is required}"
 : "${RUSA_AGENT_API_DB_PASSWORD:?RUSA_AGENT_API_DB_PASSWORD is required}"
 : "${RUSA_WEB_DB_PASSWORD:?RUSA_WEB_DB_PASSWORD is required}"
+: "${RUSA_AGENT_BACKUP_DB_PASSWORD:?RUSA_AGENT_BACKUP_DB_PASSWORD is required}"
 
 case "$RUSA_AGENT_WORKER_DB_PASSWORD" in
   *[!A-Za-z0-9_-]*|'') echo "Worker DB password must be URL-safe alphanumeric, underscore, or dash" >&2; exit 1 ;;
@@ -14,6 +15,13 @@ esac
 case "$RUSA_WEB_DB_PASSWORD" in
   *[!A-Za-z0-9_-]*|'') echo "Web DB password must be URL-safe alphanumeric, underscore, or dash" >&2; exit 1 ;;
 esac
+case "$RUSA_AGENT_BACKUP_DB_PASSWORD" in
+  *[!A-Za-z0-9_-]*|'') echo "Backup DB password must be URL-safe alphanumeric, underscore, or dash" >&2; exit 1 ;;
+esac
+if [ "${#RUSA_AGENT_BACKUP_DB_PASSWORD}" -lt 32 ]; then
+  echo "Backup DB password must contain at least 32 characters" >&2
+  exit 1
+fi
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE ROLE rusa_agent_worker
@@ -25,6 +33,10 @@ CREATE ROLE rusa_agent_api
 CREATE ROLE rusa_web_api
     LOGIN PASSWORD '$RUSA_WEB_DB_PASSWORD'
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+-- Backup can read every tenant's data for pg_dump but cannot mutate application data.
+CREATE ROLE rusa_agent_backup
+    LOGIN PASSWORD '$RUSA_AGENT_BACKUP_DB_PASSWORD'
+    INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
 CREATE ROLE rusa_knowledge_worker
     NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
@@ -33,7 +45,8 @@ GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker;
 
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM rusa_agent_api;
-GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api, rusa_web_api;
+GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api, rusa_web_api, rusa_agent_backup;
+GRANT pg_read_all_data TO rusa_agent_backup;
 GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker;
 GRANT USAGE ON SCHEMA public TO rusa_agent_api;
 
