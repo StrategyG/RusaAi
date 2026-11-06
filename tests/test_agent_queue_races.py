@@ -98,6 +98,7 @@ def test_competing_workers_claim_distinct_tasks():
 def test_cancel_racing_with_success_ack_never_resurrects_terminal_task():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
+    queue.configure_api_permissions()
     tenant = f"rusa-test-cancel-ack-race-{uuid4().hex}"
     task = make_task(tenant, f"cancel-ack-{uuid4().hex}")
     task_id = queue.enqueue(task)
