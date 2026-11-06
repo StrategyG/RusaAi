@@ -160,6 +160,51 @@ class CodingTask:
         )
 
 
+def _checkpoint_safe_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
+    """Bound checkpoint size and avoid persisting raw file-write payloads."""
+    if depth >= 6:
+        return "[nested checkpoint content omitted]"
+    if isinstance(value, str):
+        if key.lower() == "content":
+            digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+            return {
+                "preview": value[:6000],
+                "truncated": len(value) > 6000,
+                "sha256": digest,
+                "characters": len(value),
+            }
+        if len(value) > 6000:
+            return value[:6000] + "\n[checkpoint content truncated]"
+        return value
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for child_key, child_value in list(value.items())[:100]:
+            if (
+                child_key.lower() == "content"
+                and isinstance(child_value, str)
+            ):
+                safe["content_omitted"] = True
+                safe["content_sha256"] = hashlib.sha256(
+                    child_value.encode("utf-8")
+                ).hexdigest()
+                safe["content_bytes"] = len(child_value.encode("utf-8"))
+                continue
+            safe[str(child_key)[:128]] = _checkpoint_safe_value(
+                child_value,
+                key=str(child_key),
+                depth=depth + 1,
+            )
+        return safe
+    if isinstance(value, (list, tuple)):
+        return [
+            _checkpoint_safe_value(item, depth=depth + 1)
+            for item in list(value)[:30]
+        ]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:6000]
+
+
 @dataclass(frozen=True)
 class ToolCall:
     name: str
@@ -240,7 +285,10 @@ class TaskRecord:
                     "role": item.role.value,
                     "summary": item.summary,
                     "tool_calls": [
-                        {"name": call.name, "arguments": dict(call.arguments)}
+                        {
+                            "name": call.name,
+                            "arguments": _checkpoint_safe_value(dict(call.arguments)),
+                        }
                         for call in item.tool_calls
                     ],
                     "blockers": list(item.blockers),
@@ -249,8 +297,8 @@ class TaskRecord:
                         {
                             "name": result.name,
                             "success": result.success,
-                            "data": dict(result.data),
-                            "evidence": dict(result.evidence),
+                            "data": _checkpoint_safe_value(dict(result.data)),
+                            "evidence": _checkpoint_safe_value(dict(result.evidence)),
                         }
                         for result in item.tool_results
                     ],
