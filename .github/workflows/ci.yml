@@ -350,9 +350,7 @@ jobs:
           POSTGRES_HIGH: ${{ steps.postgres-high-scan.outcome }}
           PRODUCTION_SMOKE: ${{ steps.production-compose-smoke.outcome }}
         run: |
-          printf 'API critical: %s\\nAPI high: %s\\nAgent critical: %s\\nAgent high: %s\\nPostgreSQL critical: %s\\nPostgreSQL high: %s\\nProduction smoke: %s\\n' \\
-            "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" \\
-            "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE"
+          printf 'API critical: %s | API high: %s | Agent critical: %s | Agent high: %s | PostgreSQL critical: %s | PostgreSQL high: %s | Production smoke: %s\n' "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE"
           test "$API_CRITICAL" = "success"
           test "$API_HIGH" = "success"
           test "$AGENT_CRITICAL" = "success"
