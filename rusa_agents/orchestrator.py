@@ -40,6 +40,8 @@ class AICodeOrchestrator:
         "list_files": "repo_read", "write_file": "repo_write",
         "create_pull_request": "pull_request_create", "get_ci_status": "ci_read",
         "get_branch_diff": "repo_read",
+        "search_knowledge": "knowledge_read", "get_document": "knowledge_read",
+        "list_collections": "knowledge_read",
     }
 
     def __init__(
@@ -105,7 +107,7 @@ class AICodeOrchestrator:
             raise _ApprovalRequired(f"{role.value} assessed task risk as {result.risk.value}")
         tool_results = []
         for call in result.tool_calls:
-            if call.name not in self.ROLE_TOOLS[role]:
+            if call.name not in self.workers[role].allowed_tools:
                 raise _TaskBlocked(f"{role.value} is not authorized to use {call.name}")
             action = self.ACTIONS[call.name]
             path = (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -314,34 +315,120 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def request_context_middleware(request: Request, call_next):
-    request_id = uuid.uuid4().hex
-    request.state.request_id = request_id
+class RequestGuardMiddleware:
+    """Bound every ASGI request body, including chunked requests without Content-Length."""
 
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            request_size = int(content_length)
-        except ValueError:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Invalid Content-Length header"},
-                headers={"X-Request-ID": request_id},
-            )
-        if request_size > MAX_REQUEST_BYTES:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={"detail": "Request body exceeds the configured size limit"},
-                headers={"X-Request-ID": request_id},
-            )
+    def __init__(
+        self,
+        app,
+        max_request_bytes: int,
+        request_timeout_seconds: float = 15.0,
+    ) -> None:
+        if type(max_request_bytes) is not int or max_request_bytes <= 0:
+            raise ValueError("request body size limit must be a positive integer")
+        if request_timeout_seconds <= 0:
+            raise ValueError("request body timeout must be positive")
+        self.app = app
+        self.max_request_bytes = max_request_bytes
+        self.request_timeout_seconds = request_timeout_seconds
 
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
 
+        request_id = uuid.uuid4().hex
+        scope.setdefault("state", {})["request_id"] = request_id
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() not in {
+                        b"x-request-id", b"x-content-type-options", b"cache-control",
+                    }
+                ]
+                headers.extend([
+                    (b"x-request-id", request_id.encode("ascii")),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"cache-control", b"no-store"),
+                ])
+                message["headers"] = headers
+            await send(message)
+
+        async def send_error(code: int, detail: str) -> None:
+            response = JSONResponse(status_code=code, content={"detail": detail})
+            await response(scope, receive, send_with_headers)
+
+        request_headers = scope.get("headers", [])
+        lengths = [
+            value for key, value in request_headers
+            if key.lower() == b"content-length"
+        ]
+        transfer_encodings = [
+            value for key, value in request_headers
+            if key.lower() == b"transfer-encoding"
+        ]
+        if len(lengths) > 1 or (lengths and transfer_encodings):
+            await send_error(400, "Ambiguous request framing headers")
+            return
+        if lengths:
+            try:
+                declared_text = lengths[0].decode("ascii")
+            except UnicodeDecodeError:
+                await send_error(400, "Invalid Content-Length header")
+                return
+            if not declared_text.isdigit():
+                await send_error(400, "Invalid Content-Length header")
+                return
+            if int(declared_text) > self.max_request_bytes:
+                await send_error(413, "Request body exceeds the configured size limit")
+                return
+
+        buffered_messages = []
+        received_bytes = 0
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.request_timeout_seconds
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                await send_error(408, "Request body was not received before the timeout")
+                return
+            try:
+                message = await asyncio.wait_for(receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await send_error(408, "Request body was not received before the timeout")
+                return
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body = message.get("body", b"")
+            received_bytes += len(body)
+            if received_bytes > self.max_request_bytes:
+                await send_error(413, "Request body exceeds the configured size limit")
+                return
+            buffered_messages.append({
+                "type": "http.request",
+                "body": bytes(body),
+                "more_body": bool(message.get("more_body", False)),
+            })
+            if not message.get("more_body", False):
+                break
+
+        async def replay_receive():
+            if buffered_messages:
+                return buffered_messages.pop(0)
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(scope, replay_receive, send_with_headers)
+
+
+app.add_middleware(
+    RequestGuardMiddleware,
+    max_request_bytes=MAX_REQUEST_BYTES,
+)
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):

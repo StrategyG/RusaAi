@@ -6,17 +6,29 @@ import json
 import re
 import os
 import signal
+from typing import Any
 
 from .audit import HMACAuditLog
 from .contracts import WorkerRole, TaskState
 from .github import GitHubToolGateway
 from .memory import PostgresMemoryStore
+from .rag_memory import CompositeMemoryReader
+from .mcp_gateway import KNOWLEDGE_TOOLS, LocalKnowledgeGateway, MCPKnowledgeGateway
+from .tool_router import CompositeToolGateway
+from rusa_knowledge.service import KnowledgeService
 from .orchestrator import AICodeOrchestrator
 from .provider import OpenAICompatibleProvider
 from .queue import PostgresTaskQueue
 from .workers import AgentWorker
 
 logger = logging.getLogger("rusa-agent-worker")
+
+
+def _enabled_tool_set(knowledge_tools: set[str]) -> set[str]:
+    selected = set(knowledge_tools)
+    if not selected.issubset(KNOWLEDGE_TOOLS):
+        raise ValueError("configured knowledge tools contain an unapproved tool")
+    return (set(AgentWorker.TOOL_NAMES) - set(KNOWLEDGE_TOOLS)) | selected
 
 
 class QueueWorker:
@@ -26,6 +38,7 @@ class QueueWorker:
         queue: PostgresTaskQueue,
         orchestrator: AICodeOrchestrator,
         memory: PostgresMemoryStore,
+        memory_reader: Any | None = None,
         poll_interval_seconds: float = 1.0,
         maintenance_interval_seconds: float = 3600.0,
         lease_seconds: int = 300,
@@ -40,10 +53,16 @@ class QueueWorker:
         self.queue = queue
         self.orchestrator = orchestrator
         self.memory = memory
+        self.memory_reader = memory_reader or memory
         self.poll_interval_seconds = poll_interval_seconds
         self.maintenance_interval_seconds = maintenance_interval_seconds
         self.lease_seconds = lease_seconds
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
+
+    def close(self) -> None:
+        close = getattr(self.memory_reader, "close", None)
+        if callable(close):
+            close()
 
     async def _run_with_lease(self, task, checkpoint, tenant_id, task_id, lease_token):
         stop_event = asyncio.Event()
@@ -147,7 +166,8 @@ class QueueWorker:
                     f"{result.role.value}: {result.summary}"
                     for result in record.worker_results
                 )
-                self.memory.store(
+                await asyncio.to_thread(
+                    self.memory.store,
                     tenant_id,
                     f"Objective: {task.objective}\nOutcome: {record.state.value}\n{summary}"[:7900],
                     source=f"task:{task_id}",
@@ -163,8 +183,10 @@ class QueueWorker:
         while not stop_event.is_set():
             if loop.time() >= next_maintenance:
                 try:
-                    removed_tasks = self.queue.purge_terminal(retention_days=30)
-                    removed_memory = self.memory.purge_expired()
+                    removed_tasks, removed_memory = await asyncio.gather(
+                        asyncio.to_thread(self.queue.purge_terminal, retention_days=30),
+                        asyncio.to_thread(self.memory.purge_expired),
+                    )
                     logger.info(
                         "agent maintenance completed removed_tasks=%s removed_memory=%s",
                         removed_tasks,
@@ -243,10 +265,76 @@ def build_worker() -> QueueWorker:
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
         os.environ["RUSA_AGENT_AUDIT_KEY"],
     )
-    workers = [AgentWorker(role, provider, memory) for role in WorkerRole]
+
+    memory_reader: Any = memory
+    knowledge_service = None
+    knowledge_collection = os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent")
+    rag_enabled = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    if rag_enabled:
+        knowledge_service = KnowledgeService.from_env(check_ready=True)
+        memory_reader = CompositeMemoryReader(
+            memory,
+            knowledge_service,
+            collection=knowledge_collection,
+        )
+
+    tools: Any = github
+    enabled_tools = set(AgentWorker.TOOL_NAMES) - set(KNOWLEDGE_TOOLS)
+    mcp_server_url = os.getenv("RUSA_MCP_SERVER_URL", "").strip()
+    tenant_tokens_raw = os.getenv("RUSA_MCP_TENANT_TOKENS", "").strip()
+    if mcp_server_url:
+        try:
+            tenant_tokens = json.loads(tenant_tokens_raw) if tenant_tokens_raw else {}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must be valid JSON") from exc
+        if not isinstance(tenant_tokens, dict) or not tenant_tokens:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must map tenant IDs to bearer tokens")
+        allowed_tools = {
+            item.strip()
+            for item in os.getenv(
+                "RUSA_MCP_ALLOWED_TOOLS",
+                "search_knowledge,get_document,list_collections",
+            ).split(",")
+            if item.strip()
+        }
+        unauthorized_tenants = set(tenant_tokens) - set(tenant_repositories)
+        missing_tenants = set(tenant_repositories) - set(tenant_tokens)
+        if unauthorized_tenants:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS contains tenants outside the repository allowlist")
+        if missing_tenants:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must include every configured repository tenant")
+        internal_http_hosts = {
+            item.strip().lower()
+            for item in os.getenv("RUSA_MCP_INTERNAL_HTTP_HOSTS", "").split(",")
+            if item.strip()
+        }
+        mcp_gateway = MCPKnowledgeGateway(
+            server_url=mcp_server_url,
+            tenant_tokens=tenant_tokens,
+            allowed_tools=allowed_tools,
+            allow_http_hosts=internal_http_hosts,
+        )
+        tools = CompositeToolGateway(github, mcp_gateway)
+        enabled_tools = _enabled_tool_set(allowed_tools)
+    elif tenant_tokens_raw:
+        raise RuntimeError("RUSA_MCP_TENANT_TOKENS requires RUSA_MCP_SERVER_URL")
+    elif knowledge_service is not None:
+        tools = CompositeToolGateway(
+            github,
+            LocalKnowledgeGateway(
+                knowledge_service,
+                default_collection=knowledge_collection,
+            ),
+        )
+        enabled_tools = _enabled_tool_set(set(KNOWLEDGE_TOOLS))
+
+    workers = [
+        AgentWorker(role, provider, memory_reader, enabled_tools=enabled_tools)
+        for role in WorkerRole
+    ]
     orchestrator = AICodeOrchestrator(
         workers=workers,
-        tools=github,
+        tools=tools,
         audit=audit,
         worker_timeout_seconds=float(os.getenv("RUSA_AGENT_WORKER_TIMEOUT", "120")),
         max_repair_cycles=int(os.getenv("RUSA_AGENT_MAX_REPAIR_CYCLES", "2")),
@@ -255,6 +343,7 @@ def build_worker() -> QueueWorker:
         queue=queue,
         orchestrator=orchestrator,
         memory=memory,
+        memory_reader=memory_reader,
         poll_interval_seconds=float(os.getenv("RUSA_AGENT_POLL_INTERVAL", "1")),
         lease_seconds=int(os.getenv("RUSA_AGENT_QUEUE_LEASE_SECONDS", "300")),
         heartbeat_interval_seconds=float(os.getenv("RUSA_AGENT_QUEUE_HEARTBEAT_SECONDS", "60")),
@@ -271,7 +360,10 @@ async def _serve() -> None:
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop_event.set)
-    await worker.run_forever(stop_event)
+    try:
+        await worker.run_forever(stop_event)
+    finally:
+        worker.close()
 
 
 def main() -> None:

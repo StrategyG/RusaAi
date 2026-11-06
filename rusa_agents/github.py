@@ -20,6 +20,14 @@ _SECRET_PATTERNS = (
     (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
 )
 
+_WRITE_SECRET_PATTERNS = (
+    _SECRET_PATTERNS[0][0],
+    _SECRET_PATTERNS[1][0],
+    _SECRET_PATTERNS[2][0],
+    re.compile(r"\bsk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}\b"),
+    _SECRET_PATTERNS[3][0],
+)
+
 
 def redact_sensitive_text(value: str) -> str:
     for pattern, replacement in _SECRET_PATTERNS:
@@ -164,8 +172,6 @@ class GitHubToolGateway:
         path = str(arguments.get("path", ""))
         if not AutonomyPolicy.safe_repository_path(path):
             raise PermissionError("repository path is protected or unsafe")
-        if self.policy.requires_human_review_path(path):
-            raise PermissionError("agent control-plane files require human approval before modification")
         ref = str(arguments.get("ref", task.repository.base_branch))
         if ref not in {task.repository.base_branch, task.repository.work_branch}:
             raise PermissionError("read ref is outside the task repository scope")
@@ -195,8 +201,12 @@ class GitHubToolGateway:
         content = arguments.get("content")
         if not AutonomyPolicy.safe_repository_path(path):
             raise PermissionError("repository path is protected or unsafe")
+        if AutonomyPolicy.requires_human_review_path(path):
+            raise PermissionError("agent control-plane files require human review")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
             raise ValueError("file content must be text within the configured size limit")
+        if any(pattern.search(content) for pattern in _WRITE_SECRET_PATTERNS):
+            raise ValueError("file content contains credential material; write was blocked")
         await self._ensure_branch(task)
         endpoint = f"{self._root(task)}/contents/{quote(path, safe='/')}"
         current = await self._request(

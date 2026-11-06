@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import time
 from collections import deque
 
 import pytest
@@ -50,6 +52,7 @@ class FakeProvider:
 class ScriptedWorker:
     def __init__(self, role: WorkerRole, results: list[WorkerResult]) -> None:
         self.role = role
+        self.allowed_tools = frozenset(AgentWorker.ROLE_TOOLS[role])
         self.results = deque(results)
 
     async def run(self, task, prior_results):
@@ -160,6 +163,30 @@ def make_orchestrator(tools, overrides=None, audit=None):
         worker_timeout_seconds=2,
         max_repair_cycles=2,
     )
+
+
+def test_worker_memory_search_does_not_block_the_event_loop():
+    class SlowMemory:
+        def search(self, tenant_id, query, *, limit=5):
+            time.sleep(0.05)
+            return []
+
+    task = make_task()
+    response = json.dumps({
+        "summary": "analyst completed",
+        "tool_calls": [],
+        "blockers": [],
+        "risk": "low",
+        "criteria_results": {criterion: True for criterion in task.acceptance_criteria},
+    })
+    worker = AgentWorker(WorkerRole.ANALYST, FakeProvider(response), memory=SlowMemory())
+
+    async def exercise():
+        ticker = asyncio.create_task(asyncio.sleep(0.01))
+        await worker.run(task, [])
+        assert ticker.done(), "synchronous memory I/O blocked the worker event loop"
+
+    asyncio.run(exercise())
 
 
 def test_task_contract_round_trip_preserves_tenant_and_repository():
@@ -432,6 +459,118 @@ def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
         )))
 
 
+def test_gateway_reads_regular_file_without_missing_policy_attribute(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+    raw = b"# RUSA-AI repository guide"
+
+    async def request(method, path, *, json_body=None, params=None, allow_not_found=False):
+        assert method == "GET"
+        assert path.endswith("/contents/README.md")
+        return {
+            "type": "file",
+            "size": len(raw),
+            "encoding": "base64",
+            "content": base64.b64encode(raw).decode("ascii"),
+            "sha": "file-sha",
+        }
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("read_file", {"path": "README.md"})))
+    assert result.success is True
+    assert result.data["content"] == raw.decode("utf-8")
+
+
+def test_gateway_can_read_human_review_control_plane_files(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+    raw = b"tenant-safe knowledge implementation"
+
+    async def request(method, path, *, json_body=None, params=None, allow_not_found=False):
+        assert method == "GET"
+        assert path.endswith("/contents/rusa_knowledge/store.py")
+        return {
+            "type": "file",
+            "size": len(raw),
+            "encoding": "base64",
+            "content": base64.b64encode(raw).decode("ascii"),
+            "sha": "knowledge-file-sha",
+        }
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(
+        make_task(),
+        ToolCall("read_file", {"path": "rusa_knowledge/store.py"}),
+    ))
+    assert result.success is True
+    assert result.data["content"] == raw.decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "rusa_knowledge/store.py",
+        "rusa_mcp/server.py",
+        "migrations/005_rag_knowledge_pgvector.sql",
+        "Dockerfile.worker",
+        "Dockerfile.rag-mcp",
+        "Containerfile",
+        ".dockerignore",
+        "docker-compose.override.yml",
+        "compose.override.yaml",
+    ],
+)
+def test_gateway_blocks_control_plane_and_container_writes_before_network(monkeypatch, path):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Protected files must be rejected before a GitHub request")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    monkeypatch.setattr(gateway, "_ensure_branch", no_network)
+    with pytest.raises(PermissionError):
+        asyncio.run(gateway.execute(
+            make_task(),
+            ToolCall("write_file", {"path": path, "content": "safe content"}),
+        ))
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "token = ghp_" + ("a" * 36),
+        "api_key = sk-proj-" + ("b" * 36),
+        "password = \"sensitive-password-value\"",
+        "api_key = ordinary-provider-secret-value",
+        "-----BEGIN RSA PRIVATE KEY-----\\n" + ("C" * 64) + "\\n-----END RSA PRIVATE KEY-----",
+        "jwt = eyJ" + ("a" * 16) + "." + ("b" * 16) + "." + ("c" * 16),
+    ],
+)
+def test_gateway_blocks_credential_material_before_file_write(monkeypatch, content):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Credential-bearing content must be rejected before a GitHub request")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    monkeypatch.setattr(gateway, "_ensure_branch", no_network)
+    with pytest.raises(ValueError, match="credential material"):
+        asyncio.run(gateway.execute(
+            make_task(),
+            ToolCall("write_file", {"path": "README.md", "content": content}),
+        ))
+
+
 @pytest.mark.parametrize("total_count,expected", [(1, True), (2, False), (None, False)])
 def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, expected):
     gateway = GitHubToolGateway(token="test-token", allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}})
@@ -534,6 +673,12 @@ def test_changed_head_after_security_requires_reverification():
         "requirements-agent.txt",
         "scripts/postgres/init-agent-db.sh",
         "docker-compose.yml",
+        "Dockerfile.worker",
+        "Dockerfile.rag-mcp",
+        "Containerfile",
+        ".dockerignore",
+        "docker-compose.override.yml",
+        "compose.override.yaml",
         "package-lock.json",
     ],
 )

@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: rusa_test
           POSTGRES_USER: rusa_test
@@ -44,15 +44,20 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-agent.txt
+            requirements-rag-mcp.txt
             requirements-dev.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents tests
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents tests
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+      - name: Validate PostgreSQL migration scripts
+        run: |
+          sh -n scripts/postgres/init-agent-db.sh
+          sh -n scripts/postgres/apply-rag-migration.sh
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -61,6 +66,7 @@ jobs:
         run: |
           pip-audit -r requirements.txt
           pip-audit -r requirements-agent.txt
+          pip-audit -r requirements-rag-mcp.txt
 
   container:
     name: Build and smoke-test containers
@@ -73,12 +79,186 @@ jobs:
           if [ -f .env.example ]; then
             cp .env.example .env
             docker compose config --quiet
-            rm -f .env
+            docker compose --profile migrate config --quiet
           fi
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Build knowledge MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Start PostgreSQL for migration smoke test
+        run: docker compose up -d rusa-agent-db
+      - name: Apply RAG migration through Compose
+        run: docker compose --profile migrate run --rm rusa-knowledge-migrate
+      - name: Verify RAG roles, grants, and forced RLS
+        run: |
+          docker compose exec -T rusa-agent-db psql --no-psqlrc --set ON_ERROR_STOP=1 -U rusa_agent_owner -d rusa_agent <<'SQL'
+          DO $verify$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+              RAISE EXCEPTION 'pgvector extension is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_roles
+              WHERE rolname = 'rusa_knowledge_worker'
+                AND NOT rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
+            ) THEN
+              RAISE EXCEPTION 'restricted knowledge worker role is missing or unsafe';
+            END IF;
+            IF NOT pg_has_role('rusa_agent_worker', 'rusa_knowledge_worker', 'MEMBER') THEN
+              RAISE EXCEPTION 'agent worker is not a member of the restricted knowledge role';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_auth_members
+              WHERE roleid = 'rusa_knowledge_worker'::regrole
+                AND member = 'rusa_agent_worker'::regrole
+                AND NOT admin_option
+                AND NOT inherit_option
+                AND set_option
+            ) THEN
+              RAISE EXCEPTION 'RAG role membership must disable INHERIT and permit explicit SET ROLE';
+            END IF;
+            IF has_table_privilege(
+              'rusa_agent_worker', 'public.rusa_knowledge_documents', 'SELECT'
+            ) OR has_table_privilege(
+              'rusa_agent_worker', 'public.rusa_knowledge_chunks', 'SELECT'
+            ) THEN
+              RAISE EXCEPTION 'worker login must not inherit direct RAG table privileges';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_class
+              WHERE oid = 'public.rusa_knowledge_documents'::regclass
+                AND relrowsecurity AND relforcerowsecurity
+            ) OR NOT EXISTS (
+              SELECT 1 FROM pg_class
+              WHERE oid = 'public.rusa_knowledge_chunks'::regclass
+                AND relrowsecurity AND relforcerowsecurity
+            ) THEN
+              RAISE EXCEPTION 'knowledge tables do not enforce row-level security';
+            END IF;
+            IF NOT has_table_privilege(
+              'rusa_agent_api', 'public.rusa_knowledge_documents', 'SELECT'
+            ) OR has_table_privilege(
+              'rusa_agent_api', 'public.rusa_knowledge_documents', 'INSERT'
+            ) THEN
+              RAISE EXCEPTION 'MCP API role is not read-only';
+            END IF;
+            IF NOT has_table_privilege(
+              'rusa_knowledge_worker', 'public.rusa_knowledge_documents', 'INSERT'
+            ) THEN
+              RAISE EXCEPTION 'restricted knowledge worker lacks ingestion privileges';
+            END IF;
+          END;
+          $verify$;
+          SQL
+      - name: Verify worker must explicitly assume the RAG role
+        run: |
+          docker compose exec -T rusa-agent-db sh -c 'PGPASSWORD="$RUSA_AGENT_WORKER_DB_PASSWORD" psql --no-psqlrc --set ON_ERROR_STOP=1 -h 127.0.0.1 -U rusa_agent_worker -d rusa_agent' <<'SQL'
+          DO $verify$
+          BEGIN
+            BEGIN
+              PERFORM 1 FROM public.rusa_knowledge_documents;
+              RAISE EXCEPTION 'worker login unexpectedly has direct RAG table access';
+            EXCEPTION WHEN insufficient_privilege THEN
+              NULL;
+            END;
+          END;
+          $verify$;
+          BEGIN;
+          SET ROLE rusa_knowledge_worker;
+          SET LOCAL rusa.tenant_id = 'ci-role-check';
+          INSERT INTO public.rusa_knowledge_documents
+              (tenant_id, collection, source_uri, title, content_hash)
+          VALUES
+              ('ci-role-check', 'agent', 'ci://role-check', 'Role check', repeat('a', 64));
+          DO $verify$
+          BEGIN
+            IF current_user <> 'rusa_knowledge_worker' THEN
+              RAISE EXCEPTION 'worker did not assume the restricted RAG role';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM public.rusa_knowledge_documents
+              WHERE tenant_id = 'ci-role-check' AND source_uri = 'ci://role-check'
+            ) THEN
+              RAISE EXCEPTION 'restricted RAG role could not read its tenant-scoped row';
+            END IF;
+          END;
+          $verify$;
+          DELETE FROM public.rusa_knowledge_documents
+          WHERE tenant_id = 'ci-role-check' AND source_uri = 'ci://role-check';
+          COMMIT;
+          SQL
+      - name: Seed isolated MCP tenant fixtures
+        run: |
+          docker compose exec -T rusa-agent-db psql --no-psqlrc --set ON_ERROR_STOP=1 -U rusa_agent_owner -d rusa_agent <<'SQL'
+          INSERT INTO public.rusa_knowledge_documents
+              (tenant_id, document_id, collection, source_uri, title, content_hash)
+          VALUES
+              ('ci-tenant', '00000000-0000-0000-0000-0000000000a1', 'agent', 'ci://tenant-a', 'Tenant A fixture', repeat('a', 64)),
+              ('other-tenant', '00000000-0000-0000-0000-0000000000b2', 'agent', 'ci://tenant-b', 'Tenant B fixture', repeat('b', 64));
+          SQL
+      - name: Run knowledge MCP service with a CI tenant credential
+        run: |
+          CI_MCP_TOKEN='ci-mcp-token-that-is-at-least-32-characters-long-0001'
+          CI_MCP_HASH="$(printf '%s' "$CI_MCP_TOKEN" | sha256sum | cut -d ' ' -f1)"
+          RUSA_MCP_TENANT_KEYS="{\"$CI_MCP_HASH\":\"ci-tenant\"}" docker compose --profile knowledge up -d rusa-mcp
+      - name: Verify MCP readiness, authentication, and tenant isolation
+        env:
+          CI_MCP_TOKEN: ci-mcp-token-that-is-at-least-32-characters-long-0001
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8002/health/ready; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              docker compose logs rusa-mcp
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose exec -T -e CI_MCP_TOKEN="$CI_MCP_TOKEN" rusa-mcp python - <<'PY'
+          import asyncio
+          import os
+
+          from rusa_mcp.client import MCPToolClient
+
+          async def main():
+              allowed = {"search_knowledge", "get_document", "list_collections"}
+              client = MCPToolClient(
+                  server_url="http://127.0.0.1:8002/mcp",
+                  api_key=os.environ["CI_MCP_TOKEN"],
+                  allowed_tools=allowed,
+              )
+              tools = await client.list_tools()
+              assert {tool["name"] for tool in tools} == allowed
+              collections = await client.call_tool("list_collections", {})
+              assert collections == {
+                  "collections": [{"collection": "agent", "document_count": 1}]
+              }, collections
+              other_tenant = await client.call_tool(
+                  "get_document",
+                  {
+                      "document_id": "00000000-0000-0000-0000-0000000000b2",
+                      "collection": "agent",
+                  },
+              )
+              assert other_tenant.get("found") is False, other_tenant
+
+              invalid = MCPToolClient(
+                  server_url="http://127.0.0.1:8002/mcp",
+                  api_key="invalid-ci-token-that-is-at-least-32-characters",
+                  allowed_tools=allowed,
+              )
+              try:
+                  await invalid.list_tools()
+              except Exception:
+                  pass
+              else:
+                  raise AssertionError("MCP accepted an invalid tenant bearer token")
+
+          asyncio.run(main())
+          PY
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \
@@ -97,4 +277,7 @@ jobs:
           exit 1
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci || true
+        run: |
+          docker rm -f rusa-ai-ci rusa-mcp-ci || true
+          docker compose down -v --remove-orphans || true
+          rm -f .env

@@ -16,6 +16,7 @@ class PolicyDecision:
 class AutonomyPolicy:
     ALLOWED_ACTIONS = {
         "repo_read", "branch_create", "repo_write", "pull_request_create", "ci_read",
+        "knowledge_read",
     }
     APPROVAL_ACTIONS = {
         "merge", "deploy", "release", "secret_change", "permission_change",
@@ -34,6 +35,7 @@ class AutonomyPolicy:
         "rusa_agents/audit.py", "rusa_agents/queue.py", "rusa_agents/contracts.py",
         "rusa_agents/orchestrator.py", "rusa_agents/worker.py", "rusa_agents/workers.py",
         "rusa_agents/memory.py", "rusa_agents/provider.py", "rusa_agents/healthcheck.py",
+        "rusa_agents/rag_memory.py", "rusa_agents/mcp_gateway.py", "rusa_agents/tool_router.py",
     }
     PROTECTED_FILES = {
         "codeowners", "dockerfile", "docker-compose.yml", "docker-compose.yaml",
@@ -43,6 +45,7 @@ class AutonomyPolicy:
         "go.mod", "go.sum", "gemfile", "gemfile.lock",
         "composer.json", "composer.lock", ".npmrc", ".pypirc", ".netrc",
         ".git-credentials", "credentials.json", "secrets.json",
+        "containerfile", ".dockerignore", ".containerignore", "docker-bake.hcl",
     }
 
     def __init__(self, allowed_actions: set[str] | None = None) -> None:
@@ -65,7 +68,9 @@ class AutonomyPolicy:
         ):
             return False
         filename = parts[-1].lower()
-        if filename in AutonomyPolicy.PROTECTED_FILES:
+        if filename in AutonomyPolicy.PROTECTED_FILES or filename.startswith(
+            ("dockerfile.", "containerfile.", "docker-compose.", "compose.")
+        ):
             return False
         if filename.startswith("requirements") and filename.endswith(".txt"):
             return False
@@ -82,7 +87,9 @@ class AutonomyPolicy:
     @staticmethod
     def requires_human_review_path(path: str) -> bool:
         normalized = path.strip("/").lower()
-        return normalized in AutonomyPolicy.HUMAN_REVIEW_FILES
+        if normalized in AutonomyPolicy.HUMAN_REVIEW_FILES:
+            return True
+        return normalized.startswith(("rusa_knowledge/", "rusa_mcp/", "migrations/"))
 
     def evaluate(
         self,
