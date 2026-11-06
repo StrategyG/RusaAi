@@ -260,7 +260,18 @@ class AICodeOrchestrator:
         semaphore: asyncio.Semaphore,
         roles: tuple[WorkerRole, ...],
     ) -> None:
+        completed_roles = {
+            result.role for result in prior_results + list(record.results)
+        }
         for role in roles:
+            missing_dependencies = set(self.EXECUTION_DAG[role]) - completed_roles
+            if missing_dependencies:
+                record.errors.append(
+                    f"{role.value} is missing DAG dependencies: "
+                    + ", ".join(sorted(item.value for item in missing_dependencies))
+                )
+                record.transition(TaskState.BLOCKED)
+                return
             action = "workspace_write" if role == WorkerRole.DEVELOPER else "repo_read"
             decision = self.policy.evaluate(action)
             if not decision.allowed:
@@ -346,6 +357,26 @@ class AICodeOrchestrator:
                 semaphore,
                 self.PRIMARY_ROLES,
             )
+
+            if record.state == TaskState.EXECUTING:
+                completed_roles = {
+                    result.role for result in previous_attempt_results + record.results
+                }
+                missing_quality_dependencies = {
+                    role: set(self.EXECUTION_DAG[role]) - completed_roles
+                    for role in self.QUALITY_ROLES
+                }
+                if any(missing_quality_dependencies.values()):
+                    missing = sorted({
+                        dependency.value
+                        for dependencies in missing_quality_dependencies.values()
+                        for dependency in dependencies
+                    })
+                    record.errors.append(
+                        "Quality DAG dependencies were not satisfied: " + ", ".join(missing)
+                    )
+                    record.transition(TaskState.BLOCKED)
+                    await self._persist(record)
 
             if record.state == TaskState.EXECUTING:
                 for repair_cycle in range(self.max_repair_cycles + 1):
