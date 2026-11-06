@@ -64,7 +64,7 @@ jobs:
       - name: Security static analysis
         run: bandit -q -r rusa_agents llm-project/serve --severity-level medium --confidence-level medium
       - name: Dependency vulnerability audit
-        run: pip-audit
+        run: pip-audit --strict
       - name: Tests with coverage report
         run: python -m pytest -q --cov=rusa_agents --cov=app --cov-report=term-missing
 
