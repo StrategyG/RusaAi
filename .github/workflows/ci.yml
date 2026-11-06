@@ -217,7 +217,7 @@ jobs:
             fi
             sleep 2
           done
-          PYTHONPATH="$GITHUB_WORKSPACE" python - <<'PY'
+          docker compose exec -T -e CI_MCP_TOKEN="$CI_MCP_TOKEN" rusa-mcp python - <<'PY'
           import asyncio
           import os
 
