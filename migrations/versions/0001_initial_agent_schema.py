@@ -22,6 +22,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=36), primary_key=True),
         sa.Column("tenant_id", sa.String(length=128), nullable=False),
         sa.Column("idempotency_key", sa.String(length=128), nullable=False),
+        sa.Column("request_hash", sa.String(length=64), nullable=False),
         sa.Column("objective", sa.Text(), nullable=False),
         sa.Column("repository", sa.String(length=255), nullable=False),
         sa.Column("base_branch", sa.String(length=255), nullable=False),
