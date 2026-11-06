@@ -369,6 +369,7 @@ class GitHubPublisher:
         lease_guard: Callable[[], bool] | None = None,
     ) -> str:
         import asyncio
+
         import httpx
 
         owner = repository.split("/", 1)[0]
