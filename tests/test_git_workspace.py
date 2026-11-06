@@ -1,0 +1,91 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from rusa_agents.contracts import CodingTask, RepositoryTarget
+from rusa_agents.git_workspace import GitHubPublisher, GitWorkspaceManager
+
+
+def git(*args, cwd=None):
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_github_origin_must_match_exact_repository():
+    GitHubPublisher.validate_origin_url(
+        "https://github.com/StrategyG/RusaAi.git",
+        "StrategyG/RusaAi",
+    )
+    with pytest.raises(RuntimeError):
+        GitHubPublisher.validate_origin_url(
+            "https://github.com.attacker.invalid/StrategyG/RusaAi.git",
+            "StrategyG/RusaAi",
+        )
+    with pytest.raises(RuntimeError):
+        GitHubPublisher.validate_origin_url(
+            "https://token@github.com/StrategyG/RusaAi.git",
+            "StrategyG/RusaAi",
+        )
+    with pytest.raises(RuntimeError):
+        GitHubPublisher.validate_origin_url(
+            "https://github.com/Other/Repo.git",
+            "StrategyG/RusaAi",
+        )
+
+
+def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    workspace_root = tmp_path / "workspaces"
+    manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
+    task = CodingTask(
+        objective="test worktree",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi", "main", "feature/aicode/test-task-1"
+        ),
+        acceptance_criteria=["worktree exists"],
+    )
+
+    workspace = manager.create(task, "tenant-a")
+    assert workspace.is_dir()
+    assert git("branch", "--show-current", cwd=workspace).stdout.strip() == task.repository.work_branch
+
+    other_tenant = manager.create(task, "tenant-b")
+    assert other_tenant != workspace
+    assert other_tenant.is_dir()
+
+    manager.cleanup(task, "tenant-a")
+    assert not workspace.exists()
+    assert git(
+        "--git-dir", str(mirror), "show-ref", "--verify",
+        "refs/heads/feature/aicode/test-task-1",
+    ).returncode == 0
+
+
+def test_workspace_manager_rejects_unsafe_branch_before_checkout(tmp_path):
+    manager = GitWorkspaceManager(str(tmp_path / "mirrors"), str(tmp_path / "workspaces"))
+    task = CodingTask(
+        objective="unsafe branch",
+        repository=RepositoryTarget("StrategyG/RusaAi", "main", "feature/../../main"),
+        acceptance_criteria=["must be rejected"],
+    )
+    with pytest.raises(ValueError, match="safe feature"):
+        manager.create(task, "tenant-a")
