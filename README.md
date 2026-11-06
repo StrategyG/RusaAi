@@ -6,6 +6,7 @@ RUSA-AI is a model-serving and agent-task validation repository. The repository 
 
 - **Inference implementation:** local Hugging Face-compatible checkpoint loading, OpenAI-compatible chat completions, SSE streaming, bounded tensor batching, GPU/CPU dtype selection, concurrency limits and readiness probes.
 - **Security:** fail-closed production startup, API-key authentication, request-size limits, per-process rate limiting, request IDs and fail-closed A2A schema validation.
+- **Benchmarking:** reproducible local model benchmark and concurrent HTTP load-test scripts are included.
 - **Model artifact:** not included in this repository. A real, compatible RUSA-AI checkpoint and tokenizer must be supplied at deployment.
 - **Production acceptance:** not complete until real-checkpoint inference, streaming, batch, load, security and deployment tests pass on the target hardware.
 
@@ -24,6 +25,8 @@ RusaAi/
 │       ├── app.py               # FastAPI API, auth, validation and controls
 │       └── inference.py         # Real local checkpoint runtime
 ├── schemas/a2a/task-envelope.schema.json
+├── scripts/benchmark_inference.py
+├── scripts/load_test.py
 ├── tests/test_app.py
 ├── .env.example
 ├── Dockerfile
