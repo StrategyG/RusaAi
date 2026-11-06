@@ -1,127 +1,84 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+FastAPI serving API and Agent-to-Agent (A2A) task-envelope validation.
 
----
+## Scope and runtime status
 
-## Key Features & Architecture
+- `llm-project/serve/app.py`: FastAPI application and liveness endpoint.
+- `llm-project/model/blueprint.py`: architecture blueprint only; it is not an inference runtime.
+- `schemas/a2a/task-envelope.schema.json`: A2A JSON Schema Draft 2020-12 contract.
+- `tests/test_app.py`: API and schema-validation tests.
+- `requirements-serve.txt`: minimal serving dependencies.
+- `requirements-test.txt`: serving and test dependencies.
+- `requirements.txt`: full project/training dependencies.
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+**Important:** `POST /v1/chat/completions` currently returns a deterministic placeholder response. No trained model or inference backend is connected. Do not represent this branch as production model inference until a real backend has been configured and smoke-tested.
 
----
+## Requirements
 
-## Repository Structure
+Python 3.10+; Docker is optional for containerized operation.
 
-```
-RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
-├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
-```
+## Local setup
 
----
-
-## Quick Start & Local Setup
-
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
-
-### 2. Environment Setup
 ```bash
-# Clone the repository
-git clone StrategyG/RusaAi
+git clone https://github.com/StrategyG/RusaAi.git
 cd RusaAi
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-test.txt
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
+## Configuration
+
+Set `RUSA_API_KEY` to enable API-key authentication for
+`POST /v1/chat/completions`. When configured, provide it using the
+`X-API-Key` header. If unset, the endpoint is unauthenticated; configure it
+before exposing the service beyond a trusted local environment.
+
+## Run
+
 ```bash
-cp .env.example .env
+uvicorn app:app --app-dir llm-project/serve --host 0.0.0.0 --port 8000
 ```
 
----
+`GET /health` is a liveness check. It returns HTTP 200 and
+`{"status":"healthy"}` when the API process is alive. It does not assert
+inference-backend readiness.
 
-## Running the Application
+The A2A schema is loaded and checked at application startup. Missing, malformed,
+or invalid schema configuration prevents the application from starting. Task
+requests are validated against the cached Draft 2020-12 validator with format
+checking enabled.
 
-### Running Locally with Uvicorn
+## API smoke tests
+
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+curl -i http://localhost:8000/health
+curl http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: YOUR_RUSA_API_KEY' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-### Running with Docker & Docker Compose
+## Quality checks
+
 ```bash
-# Build and start container
-docker-compose up --build -d
-
-# Verify server status
-curl localhost:8000/health
+python -m pip install flake8
+flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
+python -m pytest -q tests
 ```
 
----
+GitHub Actions runs lint, pytest, and Docker build independently for pushes
+and pull requests targeting `main`. Fatal lint findings fail CI; no
+failure-suppressing shell fallback is used.
 
-## Running Tests
+## Docker
 
-Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+docker build -t rusa-ai:local .
+docker run --rm -p 8000:8000 -e RUSA_API_KEY=replace-me rusa-ai:local
 ```
 
----
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
-
----
-
-## Security & Governance
-
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
-
----
-
-## License
-This project is licensed under the MIT License.
+The serving image installs only `requirements-serve.txt`; training dependencies
+such as PyTorch are intentionally excluded from the API runtime image.
