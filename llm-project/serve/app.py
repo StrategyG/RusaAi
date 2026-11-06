@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -18,7 +19,7 @@ from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from rusa_agents.audit import record_task_policy
+from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
@@ -53,6 +54,7 @@ async def lifespan(application: FastAPI):
     application.state.config = config
     application.state.queue = None
     application.state.rate_limiter = None
+    application.state.task_policy_audit = None
     if config.model_base_url:
         set_inference_provider(
             OpenAIChatInferenceProvider(
@@ -70,6 +72,10 @@ async def lifespan(application: FastAPI):
         limiter = PostgresRateLimiter(config.api_database_url)
         limiter.initialize()
         application.state.rate_limiter = limiter
+        task_policy_audit = PostgresTaskPolicyAudit(config.api_database_url)
+        if config.environment == "production":
+            task_policy_audit.verify_ready("rusa_api_runtime")
+        application.state.task_policy_audit = task_policy_audit
     yield
     set_inference_provider(None)
 
@@ -230,18 +236,36 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
 
 def authenticate_api_key(request: Request, api_key: str | None, *, require_key: bool = False) -> str:
     config = RuntimeConfig.from_env()
-    if not config.api_keys:
+    if not config.api_key_principals and not config.api_keys:
         if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
         return os.getenv("RUSA_DEFAULT_TENANT", "development")
-    if not api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key")
-    tenant_id = None
-    for candidate, mapped_tenant in config.api_keys.items():
-        if hmac.compare_digest(api_key.encode("utf-8"), candidate.encode("utf-8")):
-            tenant_id = mapped_tenant
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    if not api_key or len(api_key.encode("utf-8")) < 32:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+    supplied_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    principal = None
+    for stored_digest, candidate in config.api_key_principals.items():
+        if hmac.compare_digest(supplied_digest, stored_digest):
+            principal = candidate
+            break
+
+    # Raw-key mappings are retained only as a development compatibility path.
+    if principal is None and config.environment != "production":
+        for candidate, mapped_tenant in config.api_keys.items():
+            if hmac.compare_digest(api_key.encode("utf-8"), candidate.encode("utf-8")):
+                from rusa_agents.config import ApiPrincipal
+                principal = ApiPrincipal(
+                    subject=f"legacy:{mapped_tenant}",
+                    tenant_id=mapped_tenant,
+                    roles=("tenant_admin",),
+                )
+                break
+    if principal is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+    request.state.principal = principal
+    tenant_id = principal.tenant_id
 
     limiter = getattr(request.app.state, "rate_limiter", None)
     if limiter is not None:
@@ -269,21 +293,74 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     return tenant_id
 
 
-def verify_task_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
+TASK_ROLE_PERMISSIONS = {
+    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "developer": frozenset({"task:create", "task:read"}),
+    "read_only": frozenset({"task:read"}),
+}
+
+
+def _request_task_id(request: Request) -> str | None:
     try:
-        return authenticate_api_key(request, api_key, require_key=True)
-    except HTTPException as exc:
-        if exc.status_code == 401 or exc.detail == "API authentication is not configured":
+        return str(UUID(request.path_params.get("task_id", "")))
+    except (TypeError, ValueError):
+        return None
+
+
+def audit_api_task(
+    request: Request,
+    tenant_id: str | None,
+    task_id: str | None,
+    action: str,
+    allowed: bool,
+) -> None:
+    principal = getattr(request.state, "principal", None)
+    actor = principal.subject if principal is not None else "unauthenticated"
+    config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
+    sink = getattr(request.app.state, "task_policy_audit", None)
+    record_task_policy(
+        tenant_id, task_id, actor, action, allowed,
+        sink=sink, required=config.environment == "production",
+    )
+
+
+def require_task_permission(permission: str):
+    def dependency(
+        request: Request,
+        api_key: str | None = Depends(api_key_header),
+    ) -> str:
+        try:
+            tenant_id = authenticate_api_key(request, api_key, require_key=True)
+        except HTTPException:
             try:
-                task_id = str(UUID(request.path_params.get("task_id", "")))
-            except ValueError:
-                task_id = None
-            record_task_policy(None, task_id, "unauthenticated", "task.authenticate", False)
-        raise
+                audit_api_task(
+                    request, None, _request_task_id(request), "task.authenticate", False
+                )
+            except RuntimeError:
+                raise HTTPException(
+                    status_code=503, detail="Task policy audit is unavailable"
+                ) from None
+            raise
 
+        principal = request.state.principal
+        permissions = frozenset().union(
+            *(TASK_ROLE_PERMISSIONS[role] for role in principal.roles)
+        )
+        if permission not in permissions:
+            try:
+                audit_api_task(
+                    request, tenant_id, _request_task_id(request),
+                    permission.replace(":", "."), False,
+                )
+            except RuntimeError:
+                raise HTTPException(
+                    status_code=503, detail="Task policy audit is unavailable"
+                ) from None
+            raise HTTPException(status_code=403, detail="Insufficient task permissions")
+        return tenant_id
 
-def audit_api_task(tenant_id: str, task_id: str, action: str, allowed: bool) -> None:
-    record_task_policy(tenant_id, task_id, f"tenant:{tenant_id}", action, allowed)
+    return dependency
 
 
 def verify_metrics_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -322,8 +399,18 @@ async def readiness_check():
     if config is None:
         config = RuntimeConfig.from_env()
     queue = getattr(app.state, "queue", None)
+    task_policy_audit = getattr(app.state, "task_policy_audit", None)
     if config.environment == "production" and queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    if config.environment == "production" and task_policy_audit is None:
+        raise HTTPException(status_code=503, detail="Task policy audit is not configured")
+    if task_policy_audit is not None:
+        try:
+            if not await asyncio.to_thread(task_policy_audit.ping):
+                raise RuntimeError("Task policy audit ping failed")
+        except Exception:
+            logger.exception("Task policy audit readiness probe failed")
+            raise HTTPException(status_code=503, detail="Task policy audit store is unavailable") from None
     if queue is not None:
         try:
             if not await asyncio.to_thread(queue.ping):
@@ -403,21 +490,24 @@ def validate_task_envelope(request: TaskValidationRequest):
 @app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
 def create_aicode_task(
     request: AICodeTaskRequest,
-    tenant_id: str = Depends(verify_task_api_key),
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:create")),
 ):
     config = RuntimeConfig.from_env()
     task_id = str(uuid4())
     allowed_repositories = config.tenant_repositories.get(tenant_id)
     if config.environment == "production" and not allowed_repositories:
-        audit_api_task(tenant_id, task_id, "task.create", False)
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
     if allowed_repositories is not None and request.repository.full_name not in allowed_repositories:
-        audit_api_task(tenant_id, task_id, "task.create", False)
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
     if not config.aicode_enabled:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     payload = {
@@ -433,8 +523,9 @@ def create_aicode_task(
         created = queue.enqueue(task_id, tenant_id, payload)
     except Exception:
         logger.exception("Could not enqueue AICode task")
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(tenant_id, task_id, "task.create", created)
+    audit_api_task(http_request, tenant_id, task_id, "task.create", created)
     if not created:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
     return AICodeTaskResponse(
@@ -446,16 +537,22 @@ def create_aicode_task(
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
-def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
+def get_aicode_task(
+    task_id: UUID,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
     queue = getattr(app.state, "queue", None)
     if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.read", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
         result = queue.get(str(task_id), tenant_id)
     except Exception:
         logger.exception("Could not read AICode task")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.read", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(tenant_id, str(task_id), "task.read", result is not None)
+    audit_api_task(http_request, tenant_id, str(task_id), "task.read", result is not None)
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
@@ -463,35 +560,48 @@ def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)
 
 
 @app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
-def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
-    """Require an explicit tenant-authenticated retry after failure or human review."""
+def retry_aicode_task(
+    task_id: UUID,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:retry")),
+):
+    """Require a tenant-authorized retry after failure or human review."""
     if not RuntimeConfig.from_env().aicode_enabled:
-        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
+        raise HTTPException(status_code=503, detail="Task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
         retried = queue.retry(str(task_id), tenant_id)
     except Exception:
         logger.exception("Could not retry AICode task")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(tenant_id, str(task_id), "task.retry", retried)
+    audit_api_task(http_request, tenant_id, str(task_id), "task.retry", retried)
     if not retried:
         raise HTTPException(status_code=409, detail="Task is unavailable or not in a retryable state")
     return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
 
 
 @app.delete("/v1/aicode/tasks/{task_id}", status_code=202)
-def cancel_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
+def cancel_aicode_task(
+    task_id: UUID,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:cancel")),
+):
     queue = getattr(app.state, "queue", None)
     if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
         cancelled = queue.cancel(str(task_id), tenant_id)
     except Exception:
         logger.exception("Could not cancel AICode task")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(tenant_id, str(task_id), "task.cancel", cancelled)
+    audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", cancelled)
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
     return {"task_id": str(task_id), "status": "cancelled"}
