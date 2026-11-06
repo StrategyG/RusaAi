@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 import os
 import re
 import shutil
@@ -294,7 +295,15 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        *,
+        lease_guard: Callable[[], bool] | None = None,
+    ) -> str | None:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
             raise ValueError("Publishing is restricted to task feature branches")
@@ -332,6 +341,8 @@ class GitHubPublisher:
         )
         askpass.chmod(0o700)
         try:
+            if lease_guard is not None and not lease_guard():
+                raise RuntimeError("Task lease was lost before GitHub push; refusing publication")
             pushed = self._run(
                 ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{branch}"],
                 str(root),
@@ -341,9 +352,23 @@ class GitHubPublisher:
             askpass.unlink(missing_ok=True)
         if pushed.returncode:
             raise RuntimeError(f"Git push failed: {pushed.stderr[-3000:]}")
+        if lease_guard is not None and not lease_guard():
+            raise RuntimeError(
+                "Task lease was lost during GitHub push; refusing draft pull-request publication"
+            )
         return sha
 
-    async def create_or_get_draft_pr(self, repository: str, branch: str, base: str, title: str, body: str) -> str:
+    async def create_or_get_draft_pr(
+        self,
+        repository: str,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        *,
+        lease_guard: Callable[[], bool] | None = None,
+    ) -> str:
+        import asyncio
         import httpx
 
         owner = repository.split("/", 1)[0]
@@ -352,7 +377,22 @@ class GitHubPublisher:
             "Authorization": f"Bearer {self.token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        async def ensure_lease(stage: str) -> None:
+            if lease_guard is None:
+                return
+            try:
+                current = await asyncio.to_thread(lease_guard)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not verify task lease before {stage}"
+                ) from exc
+            if not current:
+                raise RuntimeError(
+                    f"Task lease was lost before {stage}; refusing publication"
+                )
+
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            await ensure_lease("pull-request lookup")
             existing = await client.get(
                 f"https://api.github.com/repos/{repository}/pulls",
                 headers=headers,
@@ -361,13 +401,16 @@ class GitHubPublisher:
             existing.raise_for_status()
             items = existing.json()
             if items:
+                await ensure_lease("pull-request reuse")
                 return items[0]["html_url"]
+            await ensure_lease("pull-request creation")
             created = await client.post(
                 f"https://api.github.com/repos/{repository}/pulls",
                 headers=headers,
                 json={"title": title, "head": branch, "base": base, "body": body, "draft": True},
             )
             created.raise_for_status()
+            await ensure_lease("pull-request completion")
             return created.json()["html_url"]
 
 
