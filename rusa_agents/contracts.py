@@ -79,7 +79,7 @@ class TaskRecord:
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     TRANSITIONS = {
-        TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.CANCELLED},
+        TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.FAILED, TaskState.BLOCKED, TaskState.CANCELLED},
         TaskState.OBSERVING: {TaskState.PLANNING, TaskState.BLOCKED, TaskState.FAILED},
         TaskState.PLANNING: {TaskState.EXECUTING, TaskState.BLOCKED, TaskState.FAILED},
         TaskState.EXECUTING: {TaskState.VERIFYING, TaskState.BLOCKED, TaskState.FAILED},
