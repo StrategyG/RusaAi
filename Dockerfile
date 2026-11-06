@@ -12,8 +12,7 @@ RUN if [ "$RUSA_INSTALL_VLLM" = "1" ]; then \
     else \
       python -m pip install --no-cache-dir --prefix=/install \
         --index-url https://download.pytorch.org/whl/cpu \
-        --extra-index-url https://pypi.org/simple "torch==2.13.0" \
-      && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt; \
+        --extra-index-url https://pypi.org/simple -r requirements.txt; \
     fi
 
 FROM python:3.11-slim AS runtime
