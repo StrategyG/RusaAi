@@ -14,6 +14,14 @@ TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
 
+def validate_scope(tenant_id: str, collection: str) -> None:
+    """Validate tenant and collection before any external embedding request."""
+    if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+        raise ValueError("tenant_id is invalid")
+    if not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection):
+        raise ValueError("collection is invalid")
+
+
 def _vector_literal(vector: list[float], dimensions: int) -> str:
     if len(vector) != dimensions:
         raise ValueError("embedding dimension does not match the pgvector column")
@@ -62,10 +70,7 @@ class PostgresKnowledgeStore:
 
     @staticmethod
     def _validate_scope(tenant_id: str, collection: str) -> None:
-        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
-            raise ValueError("tenant_id is invalid")
-        if not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection):
-            raise ValueError("collection is invalid")
+        validate_scope(tenant_id, collection)
 
     def _set_db_role(self, connection: Any) -> None:
         if self.db_role:
