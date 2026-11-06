@@ -302,6 +302,7 @@ class AICodeOrchestrator:
         }:
             return record
 
+        resume_external = record.state == TaskState.WAITING_EXTERNAL
         try:
             self._event(
                 "task.started",
@@ -338,11 +339,27 @@ class AICodeOrchestrator:
                 if record.state != target:
                     record.transition(target)
                     await self._persist(record, checkpoint_callback)
-                result = await self._run_worker(
-                    record,
-                    role,
-                    checkpoint_callback,
+                force_refresh = resume_external and stage == 3
+                if stage == 3:
+                    resume_external = False
+                previous = record.worker_results[-1] if record.worker_results else None
+                can_reuse_checkpointed_result = (
+                    not force_refresh
+                    and previous is not None
+                    and previous.role == role
+                    and (
+                        role in {WorkerRole.ANALYST, WorkerRole.ARCHITECT}
+                        or bool(previous.tool_results)
+                    )
                 )
+                if can_reuse_checkpointed_result:
+                    result = previous
+                else:
+                    result = await self._run_worker(
+                        record,
+                        role,
+                        checkpoint_callback,
+                    )
 
                 if stage in {0, 1}:
                     record.stage_index += 1
