@@ -62,6 +62,16 @@ class KnowledgeService:
     ) -> dict[str, Any]:
         if not isinstance(metadata, (dict, type(None))):
             raise ValueError("document metadata must be an object")
+        if (
+            not isinstance(source_uri, str)
+            or not source_uri.strip()
+            or len(source_uri) > 2048
+            or len(source_uri.encode("utf-8")) > 2048
+            or any(ord(character) < 32 for character in source_uri)
+        ):
+            raise ValueError("source_uri must be a bounded UTF-8 string without control characters")
+        if not isinstance(title, str) or not title.strip() or len(title) > 256:
+            raise ValueError("title must contain 1 to 256 characters")
         normalized = normalize_text(content)
         if not normalized:
             raise ValueError("document content is empty")
@@ -71,7 +81,13 @@ class KnowledgeService:
         chunks = chunk_text(normalized, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             raise ValueError("document did not produce any searchable chunks")
-        vectors = self.embeddings.embed(chunks)
+        # The provider caps each request at 64 inputs. Batch larger documents
+        # without changing chunk order so the stored vectors remain aligned.
+        vectors: list[list[float]] = []
+        for offset in range(0, len(chunks), 64):
+            vectors.extend(self.embeddings.embed(chunks[offset : offset + 64]))
+        if len(vectors) != len(chunks):
+            raise RuntimeError("embedding provider returned an incomplete document vector set")
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         document_id = self.store.ingest_document(
             tenant_id=tenant_id,
