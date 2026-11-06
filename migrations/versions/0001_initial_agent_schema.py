@@ -72,10 +72,23 @@ def upgrade() -> None:
         sa.Column("task_id", sa.String(length=36), nullable=False),
         sa.Column("actor", sa.String(length=128), nullable=False),
         sa.Column("event", sa.String(length=128), nullable=False),
+        sa.Column("sequence", sa.BigInteger(), nullable=False),
         sa.Column("details", sa.JSON(), nullable=False),
         sa.Column("previous_hash", sa.String(length=64), nullable=False),
         sa.Column("event_hash", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "sequence",
+            name="uq_agent_audit_tenant_sequence",
+        ),
+    )
+    op.create_table(
+        "agent_audit_heads",
+        sa.Column("tenant_id", sa.String(length=128), primary_key=True),
+        sa.Column("last_sequence", sa.BigInteger(), nullable=False),
+        sa.Column("last_hash", sa.String(length=64), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index(
         "ix_agent_audit_tenant_task",
@@ -166,6 +179,7 @@ def downgrade() -> None:
     op.drop_index("ix_agent_memory_tenant_namespace", table_name="agent_memory")
     op.drop_table("agent_memory")
     op.drop_index("ix_agent_audit_tenant_task", table_name="agent_audit_events")
+    op.drop_table("agent_audit_heads")
     op.drop_table("agent_audit_events")
     op.drop_index("ix_agent_tasks_tenant_created", table_name="agent_tasks")
     op.drop_index("ix_agent_tasks_claim", table_name="agent_tasks")
