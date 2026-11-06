@@ -93,7 +93,10 @@ services:
                 END;
                 $$rusa$$;
             """)
-            connection.execute("GRANT rusa_knowledge_worker TO rusa_agent_worker")
+            connection.execute("ALTER ROLE rusa_agent_worker NOINHERIT")
+            connection.execute(
+                "GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE"
+            )
             connection.execute("GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker")
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
         queue = PostgresTaskQueue(dsn)

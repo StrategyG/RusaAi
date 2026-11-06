@@ -49,11 +49,22 @@ class FakeGitHub:
 
 
 def _task():
+    tenant_id = "tenant-a"
+    task_id = "knowledge-task-1"
+    idempotency_key = "knowledge-test-key"
+    work_branch = CodingTask.expected_work_branch_for(
+        tenant_id, idempotency_key, task_id
+    )
     return CodingTask(
-        tenant_id="tenant-a",
+        tenant_id=tenant_id,
         objective="Inspect the repository",
-        repository=RepositoryTarget("StrategyG/RusaAi"),
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi",
+            work_branch=work_branch,
+        ),
         acceptance_criteria=("Evidence is retrieved",),
+        idempotency_key=idempotency_key,
+        task_id=task_id,
     )
 
 

@@ -49,6 +49,7 @@ class FakeProvider:
 class ScriptedWorker:
     def __init__(self, role: WorkerRole, results: list[WorkerResult]) -> None:
         self.role = role
+        self.allowed_tools = frozenset(AgentWorker.ROLE_TOOLS[role])
         self.results = deque(results)
         self.calls = 0
 

@@ -96,7 +96,11 @@ BEGIN
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker') THEN
-        GRANT rusa_knowledge_worker TO rusa_agent_worker;
+        -- The task worker bypasses RLS for queue lifecycle operations. Do not
+        -- let it inherit knowledge-table privileges; it must SET ROLE to the
+        -- restricted, NOBYPASSRLS knowledge role for RAG access.
+        ALTER ROLE rusa_agent_worker NOINHERIT;
+        GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE;
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api') THEN
