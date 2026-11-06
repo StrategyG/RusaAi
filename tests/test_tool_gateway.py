@@ -75,6 +75,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         assert not (snapshot_path / "linked-secret.txt").exists()
         return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
 
+    monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
     monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
