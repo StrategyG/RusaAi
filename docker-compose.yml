@@ -25,6 +25,8 @@ services:
       RUSA_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
     ports:
       - "127.0.0.1:8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +45,8 @@ services:
     command: ["python", "-m", "rusa_agents.worker_main"]
     restart: unless-stopped
     init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file: .env
     environment:
       RUSA_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
