@@ -50,8 +50,10 @@ class ScriptedWorker:
     def __init__(self, role: WorkerRole, results: list[WorkerResult]) -> None:
         self.role = role
         self.results = deque(results)
+        self.calls = 0
 
     async def run(self, task, prior_results, *, review_only=False):
+        self.calls += 1
         if not self.results:
             return worker_result(self.role)
         return self.results.popleft()
@@ -893,3 +895,33 @@ def test_github_gateway_enforces_tenant_repository_assignment_before_network(mon
     monkeypatch.setattr(gateway, "_request", no_network)
     with pytest.raises(PermissionError, match="assigned to this tenant"):
         asyncio.run(gateway.execute(make_task(), ToolCall("list_files")))
+
+
+def test_orchestrator_reuses_checkpointed_worker_result_after_restart():
+    task = make_task()
+    analyst = ScriptedWorker(WorkerRole.ANALYST, [worker_result(WorkerRole.ANALYST)])
+    orchestrator = make_orchestrator(
+        FakeTools(["passed", "passed"]),
+        {WorkerRole.ANALYST: analyst},
+    )
+    record = TaskRecord(task=task)
+    failed_once = False
+
+    async def fail_after_analyst_checkpoint(current):
+        nonlocal failed_once
+        if current.stage_index == 0 and current.worker_results and not failed_once:
+            failed_once = True
+            raise RuntimeError("temporary checkpoint failure")
+
+    with pytest.raises(Exception, match="checkpoint"):
+        asyncio.run(orchestrator.run(
+            task,
+            record,
+            checkpoint_callback=fail_after_analyst_checkpoint,
+        ))
+
+    assert record.stage_index == 0
+    assert record.worker_results[-1].role == WorkerRole.ANALYST
+    resumed = asyncio.run(orchestrator.run(task, record))
+    assert resumed.state == TaskState.SUCCEEDED
+    assert analyst.calls == 1
