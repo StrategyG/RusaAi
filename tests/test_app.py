@@ -84,7 +84,10 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
             self.items = {}
 
         def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
-            self.items[(tenant_id, task_id)] = payload
+            key = (tenant_id, task_id)
+            if key in self.items:
+                return False
+            self.items[key] = payload
             return True
 
         def get(self, task_id, tenant_id, *, audit_actor=None):
@@ -96,6 +99,7 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
                 "tenant_id": tenant_id,
                 "payload": payload,
                 "result": None,
+                "status": "queued",
             }
 
         def retry(self, task_id, tenant_id, *, audit_actor=None):
@@ -109,7 +113,7 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
 
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": "tenant-key"},
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-intake-001"},
         json={
             "objective": "Add a health endpoint test",
             "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
@@ -122,6 +126,97 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert data["work_branch_prefix"].startswith("feature/aicode/")
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
+
+
+def test_aicode_task_requires_idempotency_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Create one task",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["The task is accepted"],
+        },
+    )
+    assert response.status_code == 400
+    assert "Idempotency-Key" in response.json()["detail"]
+
+
+def test_aicode_task_idempotency_is_tenant_scoped_and_rejects_payload_conflicts(monkeypatch):
+    class IdempotentQueue:
+        def __init__(self):
+            self.items = {}
+
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            key = (tenant_id, task_id)
+            if key in self.items:
+                return False
+            self.items[key] = payload
+            return True
+
+        def get(self, task_id, tenant_id, *, audit_actor=None):
+            payload = self.items.get((tenant_id, task_id))
+            if payload is None:
+                return None
+            return {
+                "task_id": task_id,
+                "tenant_id": tenant_id,
+                "payload": payload,
+                "status": "queued",
+                "result": None,
+            }
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv(
+        "RUSA_API_KEYS",
+        '{"tenant-alpha-key":"tenant-alpha","tenant-beta-key":"tenant-beta"}',
+    )
+    monkeypatch.setenv(
+        "RUSA_TENANT_REPOSITORIES",
+        '{"tenant-alpha":["StrategyG/RusaAi"],"tenant-beta":["StrategyG/RusaAi"]}',
+    )
+    queue = IdempotentQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    payload = {
+        "objective": "Add one health test",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The test passes"],
+    }
+    alpha_headers = {
+        "X-API-Key": "tenant-alpha-key",
+        "Idempotency-Key": "stable-request-001",
+    }
+
+    first = client.post("/v1/aicode/tasks", headers=alpha_headers, json=payload)
+    replay = client.post("/v1/aicode/tasks", headers=alpha_headers, json=payload)
+    assert first.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json()["task_id"] == first.json()["task_id"]
+    assert len(queue.items) == 1
+
+    changed_payload = {**payload, "objective": "A different logical request"}
+    conflict = client.post(
+        "/v1/aicode/tasks", headers=alpha_headers, json=changed_payload
+    )
+    assert conflict.status_code == 409
+
+    beta = client.post(
+        "/v1/aicode/tasks",
+        headers={
+            "X-API-Key": "tenant-beta-key",
+            "Idempotency-Key": "stable-request-001",
+        },
+        json=payload,
+    )
+    assert beta.status_code == 202
+    assert beta.json()["task_id"] != first.json()["task_id"]
+    assert len(queue.items) == 2
 
 
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
@@ -145,7 +240,7 @@ def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": production_key},
+        headers={"X-API-Key": production_key, "Idempotency-Key": "unauthorized-repository-001"},
         json={
             "objective": "Try another repository",
             "repository": {"full_name": "someone/private-repo"},
@@ -249,7 +344,7 @@ def test_aicode_task_intake_respects_kill_switch(monkeypatch):
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": "tenant-key"},
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "kill-switch-001"},
         json={
             "objective": "Add a test",
             "repository": {"full_name": "StrategyG/RusaAi"},
@@ -326,7 +421,7 @@ def test_task_rbac_denies_read_only_principal_and_audits_decision(monkeypatch, c
 
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": key},
+        headers={"X-API-Key": key, "Idempotency-Key": "read-only-denied-001"},
         json={
             "objective": "This must be denied",
             "repository": {"full_name": "StrategyG/RusaAi"},
