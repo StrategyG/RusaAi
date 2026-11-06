@@ -214,3 +214,34 @@ def test_readiness_fails_when_database_is_unavailable(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Task database is unavailable"
+
+
+def test_aicode_task_intake_respects_kill_switch(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "false")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Add a test",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AICode task intake is disabled"
+
+
+def test_aicode_retry_respects_kill_switch(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "off")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+    response = client.post(
+        "/v1/aicode/tasks/00000000-0000-4000-8000-000000000001/retry",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AICode task intake is disabled"
