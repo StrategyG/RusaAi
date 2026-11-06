@@ -93,6 +93,18 @@ jobs:
         run: |
           docker run --rm rusa-agent-runtime:${{ github.sha }} \
             python -c "import rusa_agents.api, rusa_agents.worker; print('agent runtime imports ok')"
+      - name: Run MCP server container
+        run: docker run -d --name rusa-mcp-ci -p 127.0.0.1:8002:8002 rusa-knowledge-mcp:${{ github.sha }}
+      - name: Verify MCP server liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8002/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-mcp-ci
+          exit 1
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \
@@ -102,7 +114,7 @@ jobs:
       - name: Verify liveness
         run: |
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8000/health/live; then
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
               exit 0
             fi
             sleep 2
@@ -114,7 +126,7 @@ jobs:
       - name: Verify web workspace liveness
         run: |
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:3000/health/live; then
+            if curl --fail --silent --max-time 3 http://127.0.0.1:3000/health/live; then
               exit 0
             fi
             sleep 2
@@ -123,4 +135,4 @@ jobs:
           exit 1
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci rusa-web-ci || true
+        run: docker rm -f rusa-ai-ci rusa-web-ci rusa-mcp-ci || true
