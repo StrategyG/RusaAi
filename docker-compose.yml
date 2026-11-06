@@ -1,0 +1,68 @@
+services:
+  rusa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUSA_INSTALL_VLLM: ${RUSA_INSTALL_VLLM:-0}
+    image: rusa-ai:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${RUSA_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
+      RUSA_MODEL_MANIFEST_SHA256: ${RUSA_MODEL_MANIFEST_SHA256:?Set RUSA_MODEL_MANIFEST_SHA256 in .env}
+      RUSA_INFERENCE_BACKEND: ${RUSA_INFERENCE_BACKEND:-transformers}
+      RUSA_MAX_MODEL_LEN: ${RUSA_MAX_MODEL_LEN:-8192}
+      RUSA_MAX_CONCURRENT_REQUESTS: ${RUSA_MAX_CONCURRENT_REQUESTS:-8}
+      RUSA_MAX_QUEUED_REQUESTS: ${RUSA_MAX_QUEUED_REQUESTS:-32}
+      RUSA_QUEUE_TIMEOUT_SECONDS: ${RUSA_QUEUE_TIMEOUT_SECONDS:-10}
+      RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-180}
+      RUSA_MODEL_LOAD_RETRIES: ${RUSA_MODEL_LOAD_RETRIES:-2}
+      RUSA_INFERENCE_RETRIES: ${RUSA_INFERENCE_RETRIES:-1}
+      RUSA_BODY_READ_TIMEOUT_SECONDS: ${RUSA_BODY_READ_TIMEOUT_SECONDS:-15}
+      RUSA_MAX_NUM_SEQS: ${RUSA_MAX_NUM_SEQS:-16}
+      RUSA_MAX_NUM_BATCHED_TOKENS: ${RUSA_MAX_NUM_BATCHED_TOKENS:-8192}
+      RUSA_TENSOR_PARALLEL_SIZE: ${RUSA_TENSOR_PARALLEL_SIZE:-1}
+      RUSA_GPU_MEMORY_UTILIZATION: ${RUSA_GPU_MEMORY_UTILIZATION:-0.9}
+      HOME: /tmp
+      TMPDIR: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+      HF_HOME: /tmp/hf
+      TORCHINDUCTOR_CACHE_DIR: /tmp/torchinductor
+      TRITON_CACHE_DIR: /tmp/triton
+      RUSA_MODEL_PATH: /models
+      RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
+      TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
+    volumes:
+      - type: bind
+        source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
+        target: /models
+        read_only: true
+    read_only: true
+    shm_size: ${RUSA_SHM_SIZE:-8gb}
+    tmpfs:
+      - /tmp:rw,nosuid,size=${RUSA_TMPFS_SIZE:-4g}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: ${RUSA_START_PERIOD:-30m}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

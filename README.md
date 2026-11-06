@@ -1,127 +1,107 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI is an AI model and agent platform under active development. This repository provides an authenticated FastAPI serving API, a local Transformers runtime, an optional vLLM continuous-batching runtime, model-artifact integrity checks, and A2A task validation.
 
----
+## Verified scope and release status
 
-## Key Features & Architecture
+The serving implementation rejects simulated output and will not report readiness until a real local model artifact has passed manifest and file checksum verification and has loaded successfully. The repository does not include trained RUSA-AI safetensors model weights. Pickle-based checkpoint files are rejected by the production artifact verifier. The actual RUSA-AI checkpoint, license, tokenizer, target GPU/CPU hardware, and deployment secrets must be supplied by the model owner.
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+**This branch is an inference implementation candidate, not production certification.** No real checkpoint or target hardware was supplied in this work session, so model quality, actual inference, GPU performance, sustained capacity, and production SLOs remain unverified.
 
----
+## Inference backends
 
-## Repository Structure
+- transformers: local Hugging Face Transformers baseline. Uses CUDA automatically when the installed PyTorch build supports it, otherwise CPU. The default Docker image installs CPU-only PyTorch to keep the baseline image smaller. It serializes generation per model process and is not a continuous-batching backend.
+- vLLM: optional GPU-oriented runtime with continuous batching, paged KV cache, and async token streaming. Install the separately maintained optional runtime requirements and validate the exact model, CUDA, driver, and GPU combination before staging.
+- auto: chooses vLLM when it is installed and CUDA is available; otherwise chooses Transformers.
 
-```
-RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
-├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
-```
+For production GPU throughput, use vLLM after target-hardware validation. Multiple API replicas must be sized against the GPU memory budget; do not start multiple independent model processes on the same GPU without an explicit capacity plan.
 
----
+## Model artifact requirements
 
-## Quick Start & Local Setup
+The API loads only a local model directory. Remote downloads and trust_remote_code are disabled. The directory must contain a compatible causal language model, tokenizer chat template, config.json, and model weights.
 
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
+Generate a checksummed manifest after placing the approved checkpoint and tokenizer in the model directory:
 
-### 2. Environment Setup
-```bash
-# Clone the repository
-git clone StrategyG/RusaAi
-cd RusaAi
+    python scripts/create_model_manifest.py \
+      --model-dir ./models/rusa-ai \
+      --model-id rusa-ai \
+      --revision <immutable-checkpoint-revision> \
+      --license <license-id-or-reference> \
+      --tokenizer-id rusa-ai-tokenizer \
+      --tokenizer-revision <immutable-tokenizer-revision>
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+The command prints the manifest SHA-256. Set that exact digest as RUSA_MODEL_MANIFEST_SHA256 in the secret/configuration store. Production startup fails closed if the digest is missing or mismatched. The manifest records checksums for model files and tokenizer artifacts; do not modify any file after generating it.
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## Environment configuration
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
-```bash
-cp .env.example .env
-```
+Required:
+- RUSA_API_KEY: random service key of at least 32 characters, injected by a secret manager.
+- RUSA_MODEL_PATH: local directory containing the approved model artifact.
+- RUSA_MODEL_MANIFEST_SHA256: pinned SHA-256 of rusa-model-manifest.json.
 
----
+Common inference settings:
+- RUSA_MODEL_NAME: API model name.
+- RUSA_INFERENCE_BACKEND: transformers, vllm, or auto.
+- RUSA_MAX_MODEL_LEN: verified maximum context length. Do not set above the checkpoint's supported limit.
+- RUSA_GENERATION_TIMEOUT_SECONDS: per-request generation deadline.
+- RUSA_MAX_CONCURRENT_REQUESTS, RUSA_MAX_QUEUED_REQUESTS, RUSA_QUEUE_TIMEOUT_SECONDS: bounded admission controls.
+- RUSA_MAX_NUM_SEQS, RUSA_MAX_NUM_BATCHED_TOKENS: vLLM continuous-batching limits.
+- RUSA_TENSOR_PARALLEL_SIZE, RUSA_GPU_MEMORY_UTILIZATION: vLLM GPU configuration.
 
-## Running the Application
+See docs/INFERENCE_OPERATIONS.md for the complete deployment and benchmark procedure.
 
-### Running Locally with Uvicorn
-```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
-```
+## API endpoints
 
-### Running with Docker & Docker Compose
-```bash
-# Build and start container
-docker-compose up --build -d
+- GET /health/live: process liveness only.
+- GET /health/ready: readiness; returns HTTP 200 only when a verified model, API key, and A2A schema are available.
+- GET /v1/models: authenticated list of the loaded model.
+- POST /v1/chat/completions: authenticated OpenAI-compatible completion; supports stream=true using Server-Sent Events.
+- POST /v1/validate-task: authenticated A2A schema validation; missing or invalid schema fails closed with HTTP 503.
 
-# Verify server status
-curl localhost:8000/health
-```
+The API returns HTTP 503 when no model is loaded, HTTP 429 when inference admission capacity is exhausted, HTTP 504 on generation timeout, and HTTP 502 for backend failures. It never fabricates a completion.
 
----
+## Local setup
 
-## Running Tests
+    python -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -r requirements.txt
+    python -m pip install -r requirements-dev.txt
+    export ENVIRONMENT=development
+    export RUSA_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+    export RUSA_MODEL_PATH="$PWD/models/rusa-ai"
+    export RUSA_MODEL_MANIFEST_SHA256="<manifest-sha256>"
+    uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
 
-Execute the automated test suite using pytest:
-```bash
-pytest llm-project/tests/ -v
-```
+For GPU deployment with vLLM 0.32.x, ensure the host model directory is readable by container UID 10001, configure NVIDIA Container Toolkit and a supported driver, then use docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d. The GPU override installs the audited vLLM/PyTorch combination; the default Docker image intentionally uses CPU-only PyTorch. The GPU override builds the optional vLLM runtime and requests NVIDIA devices. Verify the vLLM, PyTorch, CUDA, driver, and GPU combination on staging before production. The default image remains the Transformers baseline.
 
----
+## Benchmark
 
-## API Endpoints
+The bounded benchmark uses streaming requests and records latency p50/p95/p99, time-to-first-token, request throughput, completion tokens/second, error rate, model, Git revision, and hardware metadata:
 
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
+    RUSA_API_KEY="$RUSA_API_KEY" python scripts/benchmark_inference.py \
+      --base-url http://127.0.0.1:8000 \
+      --requests 20 --concurrency 2 --max-tokens 128 \
+      --environment local --output benchmark-report.json
 
----
+Remote runs require --environment staging --allow-remote-staging. The script intentionally does not support production targets. It is a repeatable smoke benchmark, not a sustained load/soak test.
 
-## Security & Governance
+## Verification
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
+    ruff check llm-project/serve tests scripts
+    python -m compileall -q llm-project tests scripts
+    pytest -q
+    pip-audit -r requirements.txt
+    docker compose config
 
----
+CI also builds and smoke-tests the CPU serving container. A green CI run proves code-level and container checks only; it does not prove the model artifact, GPU runtime, model quality, capacity, or production readiness.
 
-## License
-This project is licensed under the MIT License.
+## Release blockers
+
+- [ ] Supply approved RUSA-AI model weights, immutable revision, license, and matching tokenizer/chat template.
+- [ ] Generate and pin the model manifest SHA-256 in the production secret/configuration store.
+- [ ] Run real inference on the exact artifact and confirm outputs are model-generated.
+- [ ] Validate GPU driver/CUDA/PyTorch/vLLM compatibility on target hardware.
+- [ ] Benchmark latency, TTFT, throughput, tokens/second, memory, and concurrency against owner-approved SLOs.
+- [ ] Run sustained load/soak, overload, timeout, cancellation, and recovery tests.
+- [ ] Complete gateway TLS, distributed rate limiting, secret rotation, network policy, monitoring, backup/restore, rollback, and operational sign-off.
+- [ ] Obtain human review and approval before merge or production deployment.
