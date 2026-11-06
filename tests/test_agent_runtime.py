@@ -17,7 +17,7 @@ from rusa_agents.memory import MemoryStore
 from rusa_agents.messaging import AgentMessageBus
 from rusa_agents.orchestrator import HierarchicalOrchestrator, PlanRejected
 from rusa_agents.policy import AutonomyPolicy
-from rusa_agents.storage import Database, TaskRow, utcnow
+from rusa_agents.storage import AuditRow, Database, TaskRow, utcnow
 from rusa_agents.tools import ToolError, ToolRegistry
 from rusa_agents.worker import AgentRuntime
 
