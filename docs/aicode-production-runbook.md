@@ -23,9 +23,10 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, and forced row-level security (RLS). Apply migrations 001, 002, 003 task-results, and 004 tenant-RLS in that order. The API and worker fail closed if the expected columns, RLS flags, or required policies are missing.
+The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–005 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -39,7 +40,7 @@ Use `rusa_api_login` only in `RUSA_API_DATABASE_URL` and `rusa_worker_login` onl
 
 Runtime permissions:
 - API role: tenant-scoped SELECT, INSERT, UPDATE on jobs; tenant-scoped rate-limit maintenance.
-- Worker role: cross-tenant SELECT/UPDATE on the durable queue; tenant-scoped memory; append/read audit ledger.
+- Worker role: cross-tenant SELECT/UPDATE on the durable queue; tenant-scoped memory; append to the immutable audit ledger and task policy event table.
 - Neither role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
@@ -120,7 +121,7 @@ API settings:
 ENVIRONMENT=production
 RUSA_AICODE_ENABLED=false  # fail-closed; set true only after all release gates pass
 RUSA_API_DATABASE_URL=postgresql://rusa_api_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
-RUSA_API_KEYS={"LONG_RANDOM_API_KEY_AT_LEAST_32_BYTES":"tenant-acme"}
+RUSA_API_KEYS_JSON='{"<64-character-sha256-digest>":{"subject":"service-acme","tenant_id":"tenant-acme","roles":["tenant_admin"]}}'
 RUSA_METRICS_API_KEY=LONG_RANDOM_OPERATOR_ONLY_KEY_AT_LEAST_32_BYTES
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
@@ -152,7 +153,7 @@ The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Comp
 
 Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is not forcibly terminated; cancel it through the API or let it reach a safe checkpoint. Existing task status, cancellation, health, and metrics endpoints remain available.
 
-API keys and the audit HMAC key must each contain at least 32 UTF-8 bytes. Use a secret manager. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
+Generate raw API keys with a cryptographically secure generator, give each raw key only to its client through a secret manager, and configure only its lowercase SHA-256 digest in `RUSA_API_KEYS_JSON`. Each registry claim must include a unique subject, tenant_id, and one or more supported roles (`platform_admin`, `tenant_admin`, `developer`, `read_only`). Production rejects legacy raw `RUSA_API_KEYS` and `RUSA_API_KEY`. Keep the audit HMAC key at least 32 UTF-8 bytes. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
 
 ## 8. Compose deployment
 
@@ -299,7 +300,7 @@ These controls limit in-process concurrency and repair attempts; they do not aut
 
 The current code still requires independent verification before it can be certified production-ready:
 
-- Database RLS and separate API/worker database identities are implemented through migration 004 and fail-closed startup checks. Before certification, execute adversarial cross-tenant tests against the production login roles and verify grants and policies on the target PostgreSQL instance.
+- Database RLS and separate API/worker database identities are implemented through migrations 004–005 and fail-closed startup checks. Before certification, execute adversarial cross-tenant tests against the actual production login roles and verify grants, policies, audit immutability, and off-host retention on the target PostgreSQL instance.
 - The current `docker-compose.yml` uses the bootstrap PostgreSQL account `rusa` for both API and worker connections. Treat this compose profile as development-only; do not use it as a production credential model.
 - The runtime still uses the custom PostgreSQL lease queue rather than Temporal. Agent manager dispatch is currently in-process (no external A2A transport), and the workspace tool gateway is not yet exposed through an MCP server/client implementation.
 - Production rollout still requires independent verification of the least-privilege role split, tenant RLS policies, TLS-enabled database URLs, and a migration/rollback plan. The Compose syntax check does not certify these controls.
