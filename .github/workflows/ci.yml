@@ -55,6 +55,19 @@ jobs:
         run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+      - name: Deterministic agent runtime benchmark
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          RUSA_BENCH_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
+        run: |
+          set -o pipefail
+          python tests/benchmark_runtime.py --require-postgres --repeats 5 | tee "$RUNNER_TEMP/agent-benchmark.json"
+      - name: Upload agent runtime evaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-runtime-evaluation
+          path: ${{ runner.temp }}/agent-benchmark.json
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
