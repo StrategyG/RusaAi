@@ -56,6 +56,12 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     (workspace / "linked-secret.txt").symlink_to(secret_target)
 
     captured_command = []
+    chown_calls = []
+    monkeypatch.setenv("RUSA_DOCKER_GID", "1001")
+    monkeypatch.setattr(
+        "rusa_agents.tool_gateway.os.chown",
+        lambda path, uid, gid: chown_calls.append((path, uid, gid)),
+    )
 
     def fake_run(command, **kwargs):
         captured_command.extend(command)
@@ -64,6 +70,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         snapshot_path = Path(snapshot)
         assert mount.endswith(",readonly")
         assert snapshot_path.stat().st_mode & 0o777 == 0o555
+        assert snapshot_path.parent.stat().st_mode & 0o777 == 0o750
         assert (snapshot_path / "src.py").stat().st_mode & 0o777 == 0o444
         assert (snapshot_path / "src.py").is_file()
         assert not (snapshot_path / ".env").exists()
@@ -80,6 +87,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
     assert result.evidence["profile"] == "pytest"
+    assert chown_calls and chown_calls[0][2] == 1001
     assert "PYTHONPYCACHEPREFIX=/run/rusa-tmp/pycache" in captured_command
 
 
