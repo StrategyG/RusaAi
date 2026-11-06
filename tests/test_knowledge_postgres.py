@@ -1,5 +1,4 @@
 import os
-import pathlib
 import secrets
 import uuid
 
@@ -17,7 +16,7 @@ def knowledge_store():
     from psycopg import sql
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-    migration = pathlib.Path("migrations/007_rag_knowledge_pgvector.sql").read_text(encoding="utf-8")
+    migration = open("migrations/007_rag_knowledge_pgvector.sql", encoding="utf-8").read()
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
