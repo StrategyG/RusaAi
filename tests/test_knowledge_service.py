@@ -65,3 +65,29 @@ def test_search_embeds_query_and_returns_store_results():
     assert results[0]["content"] == "evidence"
     assert store.search_args["tenant_id"] == "tenant-a"
     assert store.search_args["query_embedding"] == [0.1, 0.2, 0.3]
+
+
+
+def test_ingestion_blocks_high_confidence_credentials_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    secret_document = (
+        "Internal notes\n-----BEGIN RSA PRIVATE KEY-----\n"
+        + ("A" * 64)
+        + "\n-----END RSA PRIVATE KEY-----"
+    )
+    try:
+        service.ingest_text(
+            tenant_id="tenant-a",
+            collection="agent",
+            source_uri="file:///secrets.txt",
+            title="Secrets",
+            content=secret_document,
+        )
+    except ValueError as exc:
+        assert "private-key material" in str(exc)
+    else:
+        raise AssertionError("credential-bearing document was ingested")
+    assert embeddings.inputs == []
+    assert store.ingested is None
