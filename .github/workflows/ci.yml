@@ -52,9 +52,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp scripts/postgres tests
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp scripts/postgres tests
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
