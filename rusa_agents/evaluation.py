@@ -1,7 +1,7 @@
 """Tenant-scoped operational evaluation metrics for agent task runs."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Any
 
 from sqlalchemy import select
