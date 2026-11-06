@@ -655,6 +655,112 @@ class PostgresTaskQueue:
             ).fetchone()
         return bool(row and row[0])
 
+    @staticmethod
+    def _workspace_record(row: tuple[Any, ...], tenant_id: str) -> dict[str, Any]:
+        task_id, state, payload, result, attempts, max_attempts, last_error, created_at, updated_at = row
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if isinstance(result, str):
+            result = json.loads(result)
+        return {
+            "task_id": str(task_id),
+            "tenant_id": tenant_id,
+            "state": state,
+            "status": state,
+            "payload": payload or {},
+            "result": result,
+            "attempts": attempts,
+            "max_attempts": max_attempts,
+            "last_error": last_error,
+            "created_at": created_at.isoformat() if created_at else None,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+        }
+
+    def list_tasks(
+        self,
+        tenant_id: str,
+        *,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if not tenant_id or not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("task list scope or pagination is invalid")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            rows = connection.execute(
+                """
+                SELECT task_id, status, payload, result, attempts, max_attempts,
+                       last_error, created_at, updated_at
+                FROM public.rusa_agent_tasks
+                WHERE tenant_id=%s
+                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                ORDER BY created_at DESC, task_id
+                LIMIT %s OFFSET %s
+                """,
+                (tenant_id, user_id, user_id, limit, offset),
+            ).fetchall()
+        return [self._workspace_record(row, tenant_id) for row in rows]
+
+    def stats(self, tenant_id: str, *, user_id: str | None = None) -> dict[str, Any]:
+        if not tenant_id:
+            raise ValueError("tenant_id is required")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE status IN ('queued', 'retry')) AS queued,
+                    COUNT(*) FILTER (WHERE status='running') AS running,
+                    COUNT(*) FILTER (WHERE status='succeeded') AS succeeded,
+                    COUNT(*) FILTER (WHERE status='failed') AS failed,
+                    COUNT(*) FILTER (WHERE status='blocked') AS blocked,
+                    COUNT(*) FILTER (WHERE status='cancelled') AS cancelled,
+                    COUNT(*) FILTER (WHERE status='waiting_external') AS waiting_external,
+                    COALESCE(
+                        EXTRACT(EPOCH FROM (now() - MIN(created_at)
+                            FILTER (WHERE status IN ('queued', 'retry'))))::bigint,
+                        0
+                    ) AS oldest_queued_age_seconds
+                FROM public.rusa_agent_tasks
+                WHERE tenant_id=%s
+                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                """,
+                (tenant_id, user_id, user_id),
+            ).fetchone()
+        keys = ("queued", "running", "succeeded", "failed", "blocked", "cancelled", "waiting_external")
+        counts = {key: int(value or 0) for key, value in zip(keys, row[:len(keys)])}
+        return {"counts": counts, "oldest_queued_age_seconds": int(row[-1] or 0)}
+
+    def list_dead_letters(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not tenant_id or not 1 <= limit <= 100:
+            raise ValueError("dead-letter scope or limit is invalid")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            rows = connection.execute(
+                """
+                SELECT task_id, status, payload, result, attempts, max_attempts,
+                       last_error, created_at, updated_at
+                FROM public.rusa_agent_tasks
+                WHERE tenant_id=%s AND status='failed'
+                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                ORDER BY updated_at DESC, task_id
+                LIMIT %s
+                """,
+                (tenant_id, user_id, user_id, limit),
+            ).fetchall()
+        return [self._workspace_record(row, tenant_id) for row in rows]
+
+    def retry_dead_letter(self, tenant_id: str, task_id: str) -> bool:
+        """Compatibility name for the secure, tenant-checked failed-task requeue operation."""
+        return self.requeue_failed(tenant_id, task_id)
+
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute(
@@ -662,21 +768,14 @@ class PostgresTaskQueue:
                 (tenant_id,),
             )
             row = connection.execute("""
-                SELECT status, result, attempts, last_error, created_at, updated_at
+                SELECT task_id, status, payload, result, attempts, max_attempts,
+                       last_error, created_at, updated_at
                 FROM rusa_agent_tasks
                 WHERE tenant_id=%s AND task_id=%s
             """, (tenant_id, task_id)).fetchone()
         if row is None:
             return None
-        result = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-        return {
-            "status": row[0],
-            "result": result,
-            "attempts": row[2],
-            "last_error": row[3],
-            "created_at": row[4].isoformat() if row[4] else None,
-            "updated_at": row[5].isoformat() if row[5] else None,
-        }
+        return self._workspace_record(row, tenant_id)
 
     def purge_terminal(self, retention_days: int = 30) -> int:
         if not 1 <= retention_days <= 3650:
