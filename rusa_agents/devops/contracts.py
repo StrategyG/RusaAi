@@ -7,8 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from jsonschema.exceptions import SchemaError
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
 
 
 _REPOSITORY_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "devops"
