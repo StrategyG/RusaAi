@@ -407,3 +407,25 @@ def test_chat_completion_uses_tenant_scoped_rag_evidence(client, monkeypatch):
     assert "library://tenant-a/guide.pdf" in system_context
     assert "doc-123" in system_context
     assert "documented review before release" in system_context
+
+
+def test_a2a_accepts_absolute_https_evidence_uri(client):
+    envelope = valid_envelope()
+    envelope["evidence"] = [
+        {
+            "kind": "artifact",
+            "uri": "https://artifacts.example.test/models/rusa-manifest.json",
+            "sha": "a" * 64,
+            "description": "Verified model artifact manifest",
+        }
+    ]
+
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": envelope},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    assert response.json()["errors"] == []
