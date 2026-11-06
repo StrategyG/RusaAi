@@ -160,6 +160,15 @@ def _client_validation_message(error: jsonschema.ValidationError) -> str:
     if error.validator == "pattern":
         return f"{path}: does not match the required pattern"
     if error.validator == "additionalProperties":
+        if isinstance(error.instance, dict):
+            allowed_fields = error.schema.get("properties", {})
+            unsupported = sorted(set(error.instance) - set(allowed_fields))
+            if unsupported:
+                names = ", ".join(str(field)[:80] for field in unsupported[:10])
+                remainder = len(unsupported) - 10
+                if remainder > 0:
+                    names += f", and {remainder} more"
+                return f"{path}: unsupported field(s): {names}"
         return f"{path}: contains an unsupported field"
     return f"{path}: does not satisfy the schema"
 
