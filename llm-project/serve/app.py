@@ -20,7 +20,7 @@ from fastapi.security import APIKeyHeader
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
 
-from inference import InferenceNotReady, ModelRuntime
+from inference import InferenceCapacityError, InferenceNotReady, ModelRuntime
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -420,6 +420,15 @@ async def chat_completions(
                         "usage": usage,
                     }) + "\n\n"
                 yield "data: [DONE]\n\n"
+            except InferenceCapacityError:
+                yield "data: " + json.dumps({
+                    "error": {
+                        "message": "Model is temporarily at capacity",
+                        "type": "server_error",
+                        "request_id": request_id,
+                    }
+                }) + "\n\n"
+                yield "data: [DONE]\n\n"
             except Exception as exc:
                 logger.error(
                     "stream_inference_failed request_id=%s error_type=%s",
@@ -458,6 +467,12 @@ async def chat_completions(
         return make_completion(result, runtime.model_name, request_id, payload.max_tokens)
     except InferenceNotReady as exc:
         raise HTTPException(status_code=503, detail="Inference model is not ready") from exc
+    except InferenceCapacityError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is temporarily at capacity",
+            headers={"Retry-After": "5"},
+        ) from exc
     except Exception as exc:
         logger.error(
             "inference_failed request_id=%s error_type=%s",
@@ -507,6 +522,12 @@ async def batch_chat_completions(
             )
             data.append(completion.model_dump())
         return {"object": "list", "data": data, "created": created}
+    except InferenceCapacityError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is temporarily at capacity",
+            headers={"Retry-After": "5"},
+        ) from exc
     except Exception as exc:
         logger.error(
             "batch_inference_failed request_id=%s error_type=%s",
