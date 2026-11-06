@@ -20,11 +20,15 @@ class MCPKnowledgeGateway:
         server_url: str,
         tenant_tokens: dict[str, str],
         allowed_tools: set[str] | None = None,
+        allow_http_hosts: set[str] | None = None,
         client_factory: Any = MCPToolClient,
     ) -> None:
         if not server_url:
             raise ValueError("MCP server URL is required")
-        validate_server_url(server_url)
+        self.allow_http_hosts = {
+            host.strip().lower() for host in (allow_http_hosts or set()) if host.strip()
+        }
+        validate_server_url(server_url, allow_http_hosts=self.allow_http_hosts)
         if not tenant_tokens:
             raise ValueError("per-tenant MCP bearer tokens are required")
         if any(
@@ -53,6 +57,7 @@ class MCPKnowledgeGateway:
             server_url=self.server_url,
             api_key=token,
             allowed_tools=set(self.allowed_tools),
+            allow_http_hosts=set(self.allow_http_hosts),
         )
         result = await client.call_tool(call.name, dict(call.arguments))
         hostname = urlsplit(self.server_url).hostname or "unknown"
