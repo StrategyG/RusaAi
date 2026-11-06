@@ -23,6 +23,7 @@ _SECRET_PATTERNS = (
 _WRITE_SECRET_PATTERNS = (
     _SECRET_PATTERNS[0][0],
     _SECRET_PATTERNS[1][0],
+    _SECRET_PATTERNS[2][0],
     re.compile(r"\bsk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}\b"),
     _SECRET_PATTERNS[3][0],
 )
@@ -171,8 +172,6 @@ class GitHubToolGateway:
         path = str(arguments.get("path", ""))
         if not AutonomyPolicy.safe_repository_path(path):
             raise PermissionError("repository path is protected or unsafe")
-        if AutonomyPolicy.requires_human_review_path(path):
-            raise PermissionError("agent control-plane files require human review")
         ref = str(arguments.get("ref", task.repository.base_branch))
         if ref not in {task.repository.base_branch, task.repository.work_branch}:
             raise PermissionError("read ref is outside the task repository scope")
