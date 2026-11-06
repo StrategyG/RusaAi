@@ -61,6 +61,47 @@ class GitWorkspaceManager:
             args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
         return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
+    def refresh(self, repository: str) -> None:
+        owner, repo = repository.split("/", 1)
+        mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
+        if self.mirror_root not in mirror.parents or not mirror.is_dir():
+            raise FileNotFoundError(f"Authorized bare Git mirror is missing: {repository}")
+        remote = self._run(["git", "--git-dir", str(mirror), "remote", "get-url", "origin"])
+        if remote.returncode:
+            raise RuntimeError("Git mirror origin is unavailable")
+        GitHubPublisher.validate_origin_url(remote.stdout, repository)
+
+        askpass_path = None
+        extra_env: dict[str, str] = {}
+        try:
+            if self.github_token:
+                askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-fetch-askpass-")
+                os.close(askpass_fd)
+                askpass = Path(askpass_name)
+                askpass.write_text(
+                    '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; *) printf "%s" "$GITHUB_TOKEN" ;; esac\n',
+                    encoding="utf-8",
+                )
+                os.chmod(askpass, 0o700)
+                askpass_path = askpass
+                extra_env = {
+                    "GIT_ASKPASS": str(askpass),
+                    "GIT_ASKPASS_REQUIRE": "force",
+                    "GITHUB_TOKEN": self.github_token,
+                }
+            fetched = self._run(
+                [
+                    "git", "-c", "credential.helper=", "--git-dir", str(mirror),
+                    "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*",
+                ],
+                extra_env=extra_env,
+            )
+            if fetched.returncode:
+                raise RuntimeError(f"Git mirror refresh failed: {fetched.stderr[-2000:]}")
+        finally:
+            if askpass_path:
+                askpass_path.unlink(missing_ok=True)
+
     def create(self, task: CodingTask, tenant_id: str) -> Path:
         owner, repo = task.repository.full_name.split("/", 1)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
@@ -76,6 +117,7 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
+        self.refresh(task.repository.full_name)
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
             raise ValueError("Repository mirror must be a valid bare Git repository")
