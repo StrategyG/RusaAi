@@ -38,21 +38,26 @@ backup_file="$(
     BACKUP_DIR="$BACKUP_DIR" \
     BACKUP_AGE_RECIPIENT="$BACKUP_AGE_RECIPIENT" \
     BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}" \
+    RUSA_BACKUP_REQUIRE_REMOTE="${RUSA_BACKUP_REQUIRE_REMOTE:-false}" \
     RUSA_BACKUP_S3_URI="${RUSA_BACKUP_S3_URI:-}" \
     RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
     "$script_dir/backup.sh"
 )"
 backup_finished_at="$(date +%s)"
+restore_backup_file="$backup_file"
+if [[ -n "${RUSA_BACKUP_S3_URI:-}" ]]; then
+    restore_backup_file="${RUSA_BACKUP_S3_URI%/}/$(basename "$backup_file")"
+fi
 
 RESTORE_DATABASE_URL="$RESTORE_DATABASE_URL" \
-BACKUP_FILE="$backup_file" \
+BACKUP_FILE="$restore_backup_file" \
 BACKUP_AGE_IDENTITY_FILE="$BACKUP_AGE_IDENTITY_FILE" \
 RESTORE_CONFIRM_DATABASE="$RESTORE_CONFIRM_DATABASE" \
 RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
 "$script_dir/restore.sh"
 restore_finished_at="$(date +%s)"
 
-printf 'BACKUP_FILE=%s\n' "$backup_file"
+printf 'BACKUP_FILE=%s\n' "$restore_backup_file"
 printf 'BACKUP_SECONDS=%s\n' "$((backup_finished_at - backup_started_at))"
 printf 'RESTORE_SECONDS=%s\n' "$((restore_finished_at - backup_finished_at))"
 printf 'TOTAL_RECOVERY_SECONDS=%s\n' "$((restore_finished_at - started_at))"
