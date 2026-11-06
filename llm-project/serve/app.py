@@ -263,6 +263,8 @@ def _load_task_validator(schema_path: str) -> jsonschema.protocols.Validator:
     path = Path(schema_path)
     with path.open("r", encoding="utf-8") as schema_file:
         schema = json.load(schema_file)
+    if not isinstance(schema, dict):
+        raise jsonschema.SchemaError("The schema root must be a JSON object")
 
     validator_class = jsonschema.validators.validator_for(schema)
     validator_class.check_schema(schema)
@@ -305,9 +307,13 @@ def _client_validation_message(error: jsonschema.ValidationError) -> str:
         return "does not match the required value"
     if error.validator == "pattern":
         return "does not match the required pattern"
-    if error.validator in {"minLength", "minItems"}:
+    if error.validator == "minLength":
+        return f"must contain at least {error.validator_value} characters"
+    if error.validator == "maxLength":
+        return f"must contain no more than {error.validator_value} characters"
+    if error.validator == "minItems":
         return f"must contain at least {error.validator_value} item(s)"
-    if error.validator in {"maxLength", "maxItems"}:
+    if error.validator == "maxItems":
         return f"must contain no more than {error.validator_value} item(s)"
     return "does not satisfy the schema constraints"
 
