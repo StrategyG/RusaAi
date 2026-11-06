@@ -17,6 +17,7 @@ RUN apt-get update \
     && python -m pip install --no-cache-dir -r requirements-rag-mcp.txt \
     && python -m pip install --no-cache-dir --upgrade "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
     && python -c "import setuptools, wheel; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (84, 1); assert tuple(map(int, wheel.__version__.split('.')[:2])) >= (0, 46)" \
+    && rm -rf /usr/local/lib/python3.11/ensurepip \
     && groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
 
