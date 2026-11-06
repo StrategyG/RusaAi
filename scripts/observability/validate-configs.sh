@@ -6,6 +6,9 @@ cd "$ROOT_DIR"
 
 docker run --rm \
   -v "$ROOT_DIR/observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+  -v /:/hostfs:ro \
+  -v /proc:/hostfs/proc:ro \
+  -v /sys:/hostfs/sys:ro \
   otel/opentelemetry-collector-contrib:0.120.0 \
   validate --config=/etc/otelcol-contrib/config.yaml
 
