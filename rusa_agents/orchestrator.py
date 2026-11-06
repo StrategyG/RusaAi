@@ -27,7 +27,8 @@ class HierarchicalOrchestrator:
             "secret changes, permission changes, or destructive actions. "
             "Return JSON matching {steps:[{tool,arguments,purpose}],expected_outcome:string}. "
             "The first step must inspect the repository on base_branch. Create work_branch before "
-            "any write. Use $latest_write_commit as commit_sha for the CI status step."
+            "any write. Open the draft pull request after all writes, then run CI on the latest "
+            "write commit as the final verification step using $latest_write_commit."
         )
         prompt = json.dumps(
             {
@@ -117,6 +118,8 @@ class HierarchicalOrchestrator:
                 ]
                 if not ci_indexes or ci_indexes[-1] <= write_indexes[-1]:
                     raise PlanRejected("CI verification must follow all repository writes")
+                if task["require_pull_request"] and pr_indexes and ci_indexes[-1] <= pr_indexes[-1]:
+                    raise PlanRejected("CI verification must be the final step after draft PR creation")
 
     @staticmethod
     def role_for_tool(tool_name: str) -> WorkerRole:
