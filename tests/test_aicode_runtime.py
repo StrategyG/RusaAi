@@ -113,7 +113,16 @@ def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
 def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
     class HistoryWorker(StubWorker):
         def __init__(self, role):
-            super().__init__(role)
+            evidence = {}
+            if role == WorkerRole.TESTER:
+                evidence = {"check:pytest": {"exit_code": 0}}
+            elif role == WorkerRole.SECURITY:
+                evidence = {
+                    "check:bandit": {"exit_code": 0},
+                    "check:ruff": {"exit_code": 0},
+                    "check:compile": {"exit_code": 0},
+                }
+            super().__init__(role, evidence)
             self.seen_prior = []
 
         async def run(self, task, prior_results):
