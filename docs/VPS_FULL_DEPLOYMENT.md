@@ -14,6 +14,8 @@ The current repository does **not** include trained RUSA-AI model weights, a bro
 
 This is a production-candidate deployment guide, not a certification. Keep `RUSA_AICODE_ENABLED=false` until every release gate in this guide passes.
 
+**Scope clarification:** “Full stack” here means the currently implemented API, AICode worker/sandbox, PostgreSQL queue, pgvector knowledge service, and MCP service. It does **not** mean the proposed eight-agent DevOps lifecycle is already implemented. The Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor specialists, DevOps Orchestrator, Security Guard, and their durable inter-agent event workflow remain a separate phased implementation.
+
 ## 1. Proposed topology
 
 | Service | Placement | Public exposure |
@@ -29,6 +31,8 @@ This is a production-candidate deployment guide, not a certification. Keep `RUSA
 | Metrics | External Prometheus-compatible scraper | Private only |
 
 Do not expose PostgreSQL, worker metrics (9100), Docker sockets, or sandbox ports to the public internet.
+
+**Egress is an open production gate.** The current Compose bridge named `rusa-egress` provides outbound connectivity; it is not an allowlist or egress proxy. Before enabling autonomous work for untrusted tenants, enforce deny-by-default outbound policy for the worker and sandbox, permitting only explicitly approved model, GitHub, embedding, database, DNS, and telemetry destinations through controlled gateways/proxies. Validate the policy with negative tests. Do not treat a Docker bridge network alone as egress isolation.
 
 ## 2. VPS and external prerequisites
 
@@ -194,5 +198,8 @@ Local Transformers/vLLM serving requires an approved checkpoint, tokenizer/chat 
 - Maintain encrypted database backups/PITR, off-host copy, disk alerts, queue-age alerts, worker lease alerts, API error/latency alerts, MCP readiness alerts, and incident/restore runbooks.
 
 ## 11. Remaining release gates
+
+- Implement and verify the eight-stage Agentic DevOps workflow as a separate phased delivery; do not advertise the target lifecycle as deployed until each agent contract, orchestrator state transition, QA gate, audit event, and approval boundary is evidenced.
+- Apply deny-by-default egress controls to worker and sandbox traffic, and test that unapproved destinations are unreachable.
 
 Production certification is blocked until the exact VPS and provider configuration is known and tested. Required evidence includes exact image digests, database migration and role verification, real model/provider smoke and task-quality tests, sandbox adversarial tests, TLS verification, tenant-isolation review, backup/restore, monitoring/alerts, and operator approval. A successful GitHub CI run is necessary but is not production certification.
