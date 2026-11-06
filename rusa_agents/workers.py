@@ -62,10 +62,16 @@ class AgentWorker:
         role: WorkerRole,
         provider: CompletionProvider,
         memory: MemoryReader | None = None,
+        *,
+        enabled_tools: set[str] | None = None,
     ) -> None:
         self.role = role
         self.provider = provider
         self.memory = memory
+        role_tools = set(self.ROLE_TOOLS[role])
+        if enabled_tools is not None:
+            role_tools.intersection_update(enabled_tools)
+        self.allowed_tools = frozenset(role_tools)
 
     async def run(
         self,
@@ -113,7 +119,7 @@ class AgentWorker:
                 "supplied file paths and patch content; do not invent findings."
             )
         else:
-            allowed_tools = set(self.ROLE_TOOLS[self.role])
+            allowed_tools = set(self.allowed_tools)
             security_instruction = ""
             if self.role == WorkerRole.SECURITY:
                 security_instruction = (
