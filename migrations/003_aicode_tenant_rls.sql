@@ -29,8 +29,7 @@ GRANT USAGE, SELECT ON SEQUENCE public.aicode_jobs_id_seq TO rusa_api_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.aicode_rate_limits TO rusa_api_runtime;
 
 -- Worker: cross-tenant queue consumption is an explicit trusted service capability.
-GRANT SELECT, INSERT, UPDATE ON public.aicode_jobs TO rusa_worker_runtime;
-GRANT USAGE, SELECT ON SEQUENCE public.aicode_jobs_id_seq TO rusa_worker_runtime;
+GRANT SELECT, UPDATE ON public.aicode_jobs TO rusa_worker_runtime;
 GRANT SELECT, INSERT, UPDATE ON public.aicode_memory TO rusa_worker_runtime;
 GRANT SELECT, INSERT ON public.aicode_audit_events TO rusa_worker_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.aicode_audit_events_id_seq TO rusa_worker_runtime;
