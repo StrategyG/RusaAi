@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
 from datetime import timedelta, timezone, datetime
 from pathlib import Path
 from typing import Any
@@ -231,7 +232,7 @@ def _task(scenario: str) -> TaskCreate:
         "context": f"scenario={scenario}",
         "acceptance_criteria": [f"Scenario {scenario} reaches its expected state"],
         "allowed_tools": _allowed_tools(scenario),
-        "max_attempts": 2 if scenario == "tool_failure" else 1,
+        "max_attempts": 2 if scenario in {"tool_failure", "worker_recovery"} else 1,
         "require_ci": True,
         "require_pull_request": True,
     })
@@ -288,7 +289,7 @@ async def run(output: Path) -> dict[str, Any]:
     scenarios = manifest["cases"]
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    with __import__("tempfile").TemporaryDirectory(prefix="rusa-agent-benchmark-") as directory:
+    with tempfile.TemporaryDirectory(prefix="rusa-agent-benchmark-") as directory:
         database = Database(f"sqlite+aiosqlite:///{Path(directory) / 'benchmark.db'}")
         await database.initialize()
         results: list[dict[str, Any]] = []
