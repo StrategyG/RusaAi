@@ -268,7 +268,7 @@ class AICodeRuntime:
             outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id,
+                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     f"{type(exc).__name__}: {exc}",
                 )
         finally:
