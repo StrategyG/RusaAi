@@ -24,7 +24,7 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     assert job is not None
     assert job.task_id == task_id
     assert job.tenant_id == "tenant-alpha"
-    assert queue.heartbeat(job.id, job.tenant_id, "pytest-worker", 30)
+    assert queue.heartbeat(job.id, job.tenant_id, "pytest-worker", job.lease_token, 30)
     assert queue.complete(job.id, job.tenant_id, "pytest-worker")
     assert queue.get(task_id, "tenant-alpha")["status"] == "succeeded"
 
