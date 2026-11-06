@@ -1,5 +1,5 @@
 """Low-cardinality Prometheus metrics for API and autonomous workers."""
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 
 API_REQUESTS = Counter(
     "rusa_api_requests_total",
@@ -30,4 +30,11 @@ TOOL_EXECUTIONS = Counter(
     "rusa_aicode_tool_executions_total",
     "Registered tool executions",
     ("tool", "outcome"),
+)
+
+
+
+WORKER_READY = Gauge(
+    "rusa_aicode_worker_ready",
+    "Whether the autonomous worker has completed startup validation",
 )
