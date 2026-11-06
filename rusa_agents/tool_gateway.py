@@ -57,12 +57,14 @@ class DockerSandbox:
         memory_limit: str = "2g",
         cpu_limit: str = "2",
         max_snapshot_bytes: int = 100_000_000,
+        max_snapshot_files: int = 50_000,
     ) -> None:
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
+        self.max_snapshot_files = max_snapshot_files
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
@@ -101,8 +103,12 @@ class DockerSandbox:
             raise ToolDenied("Sandbox workspace must be a directory")
 
         totals = [0]
+        file_count = [0]
 
         def bounded_copy(source: str, destination: str) -> str:
+            file_count[0] += 1
+            if file_count[0] > self.max_snapshot_files:
+                raise ToolDenied("Sandbox snapshot exceeds configured file-count limit")
             size = Path(source).stat().st_size
             totals[0] += size
             if totals[0] > self.max_snapshot_bytes:
@@ -226,14 +232,20 @@ class WorkspaceToolGateway:
         ".git", ".env", ".env.local", ".env.production", ".secrets",
         ".ssh", ".aws", ".azure", "secrets", "credentials",
         ".gitattributes", ".gitmodules", ".lfsconfig",
+        ".terraform", ".venv", "venv", "node_modules",
+        "__pycache__", ".pytest_cache", ".ruff_cache",
     }
     PROTECTED_PREFIXES = (".github/workflows/",)
     PROTECTED_NAMES = {
         "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
         "credentials.json", "service-account.json", ".npmrc", ".pypirc",
         ".netrc", "secrets.json", "token.json", ".gitattributes", ".gitmodules", ".lfsconfig",
+        "kubeconfig", "serviceaccount.json", ".dockerconfigjson",
     }
-    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk", ".tfstate", ".tfvars"}
+    PROTECTED_SUFFIXES = {
+        ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der",
+        ".ppk", ".tfstate", ".tfvars", ".kubeconfig", ".secret", ".secrets",
+    }
     PROTECTED_WRITE_NAMES = {
         ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
         "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
@@ -274,7 +286,12 @@ class WorkspaceToolGateway:
             for part in candidate.parts
         ):
             raise ToolDenied("Access to protected paths is prohibited")
-        if any(part.lower() in self.PROTECTED_NAMES for part in candidate.parts):
+        if any(
+            part.lower() in self.PROTECTED_NAMES
+            or part.lower().startswith(("secret.", "secrets.", "credential.", "credentials."))
+            or part.lower().endswith((".secret", ".secrets"))
+            for part in candidate.parts
+        ):
             raise ToolDenied("Access to credential-like files is prohibited")
         if any(PurePosixPath(part).suffix.lower() in self.PROTECTED_SUFFIXES for part in candidate.parts):
             raise ToolDenied("Access to private-key and certificate files is prohibited")
@@ -352,6 +369,8 @@ class WorkspaceToolGateway:
                 part in self.PROTECTED_PARTS
                 or (part.startswith(".env") and part != ".env.example")
                 or part in self.PROTECTED_NAMES
+                or part.startswith(("secret.", "secrets.", "credential.", "credentials."))
+                or part.endswith((".secret", ".secrets"))
                 for part in parts
             ):
                 continue
