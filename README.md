@@ -22,11 +22,31 @@ The agent does not expose arbitrary shell execution, unrestricted network access
 
 See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md) and [Security and Operations](docs/architecture/SECURITY_AND_OPERATIONS.md).
 
+## RAG and MCP Knowledge Plane
+
+The optional knowledge plane adds document ingestion, 1,536-dimensional embeddings, PostgreSQL/pgvector vector search, PostgreSQL full-text search, weighted hybrid retrieval, source provenance, and a tenant-authenticated MCP Streamable HTTP server.
+
+- RAG ingestion supports local TXT, Markdown, HTML, PDF, and DOCX files. Remote URLs are not fetched.
+- Retrieval combines vector and lexical ranks and returns source URI, document ID, title, and chunk metadata.
+- MCP exposes only three read-only tools: search_knowledge, get_document, and list_collections.
+- The MCP client and agent gateway enforce HTTPS/loopback transport, per-tenant bearer tokens, and a fixed tool allowlist.
+- The existing specialist workers can consume RAG results alongside episodic memory when RUSA_RAG_ENABLED=true; MCP tools can be enabled with RUSA_MCP_SERVER_URL.
+- The service is optional and does not make the full product production-certified. Apply migration 005, configure a real embedding provider, set tenant credentials, and complete retrieval/security evaluation before production.
+
+Install the optional runtime dependencies with python -m pip install -r requirements-rag-mcp.txt in Python 3.11+. Apply migrations/005_rag_knowledge_pgvector.sql using a migration identity, then ingest a local file with python -m rusa_knowledge.cli ingest --file ./docs/guide.pdf --tenant-id tenant-a --collection agent.
+
+Start the MCP service with docker compose --profile knowledge up --build rusa-mcp. Configure RUSA_MCP_TENANT_KEYS as a JSON map from SHA-256 bearer-token digests to tenant IDs; configure the corresponding plaintext tokens only in the agent worker secret store.
+
+See [RAG and MCP Enterprise Architecture](docs/architecture/RAG_MCP_ENTERPRISE.md) for deployment, isolation, evaluation, and release gates.
+
 ## Repository layout
 
 - llm-project/model/: model architecture blueprint; not trained weights.
 - llm-project/serve/: inference API and local Transformers adapter.
-- rusa_agents/: contracts, policy, provider, GitHub tools, queue, memory, audit, orchestrator, task API, and worker process.
+- rusa_agents/: contracts, policy, provider, GitHub tools, queue, episodic/RAG memory adapters, MCP gateway, audit, orchestrator, task API, and worker process.
+- rusa_knowledge/: document parsers, chunking, embeddings, PostgreSQL/pgvector store, retrieval service, and ingestion CLI.
+- rusa_mcp/: tenant-authenticated MCP Streamable HTTP server and allowlisted MCP client.
+- migrations/: versioned PostgreSQL and pgvector schema migrations.
 - schemas/a2a/: A2A task-envelope JSON Schema.
 - docs/architecture/: agent architecture, worker contract, and security/operations model.
 - tests/: API, contract, policy, orchestration, and security regression tests.
