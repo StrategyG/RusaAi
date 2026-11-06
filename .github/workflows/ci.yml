@@ -110,6 +110,22 @@ jobs:
               RAISE EXCEPTION 'agent worker is not a member of the restricted knowledge role';
             END IF;
             IF NOT EXISTS (
+              SELECT 1 FROM pg_auth_members
+              WHERE roleid = 'rusa_knowledge_worker'::regrole
+                AND member = 'rusa_agent_worker'::regrole
+                AND NOT inherit_option
+                AND set_option
+            ) THEN
+              RAISE EXCEPTION 'RAG role membership must disable INHERIT and permit explicit SET ROLE';
+            END IF;
+            IF has_table_privilege(
+              'rusa_agent_worker', 'public.rusa_knowledge_documents', 'SELECT'
+            ) OR has_table_privilege(
+              'rusa_agent_worker', 'public.rusa_knowledge_chunks', 'SELECT'
+            ) THEN
+              RAISE EXCEPTION 'worker login must not inherit direct RAG table privileges';
+            END IF;
+            IF NOT EXISTS (
               SELECT 1 FROM pg_class
               WHERE oid = 'public.rusa_knowledge_documents'::regclass
                 AND relrowsecurity AND relforcerowsecurity
@@ -134,6 +150,43 @@ jobs:
             END IF;
           END;
           $verify$;
+          SQL
+      - name: Verify worker must explicitly assume the RAG role
+        run: |
+          docker compose exec -T rusa-agent-db sh -c 'PGPASSWORD="$RUSA_AGENT_WORKER_DB_PASSWORD" psql --no-psqlrc --set ON_ERROR_STOP=1 -h 127.0.0.1 -U rusa_agent_worker -d rusa_agent' <<'SQL'
+          DO $verify$
+          BEGIN
+            BEGIN
+              PERFORM 1 FROM public.rusa_knowledge_documents;
+              RAISE EXCEPTION 'worker login unexpectedly has direct RAG table access';
+            EXCEPTION WHEN insufficient_privilege THEN
+              NULL;
+            END;
+          END;
+          $verify$;
+          BEGIN;
+          SET ROLE rusa_knowledge_worker;
+          SET LOCAL rusa.tenant_id = 'ci-role-check';
+          INSERT INTO public.rusa_knowledge_documents
+              (tenant_id, collection, source_uri, title, content_hash)
+          VALUES
+              ('ci-role-check', 'agent', 'ci://role-check', 'Role check', repeat('a', 64));
+          DO $verify$
+          BEGIN
+            IF current_user <> 'rusa_knowledge_worker' THEN
+              RAISE EXCEPTION 'worker did not assume the restricted RAG role';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM public.rusa_knowledge_documents
+              WHERE tenant_id = 'ci-role-check' AND source_uri = 'ci://role-check'
+            ) THEN
+              RAISE EXCEPTION 'restricted RAG role could not read its tenant-scoped row';
+            END IF;
+          END;
+          $verify$;
+          DELETE FROM public.rusa_knowledge_documents
+          WHERE tenant_id = 'ci-role-check' AND source_uri = 'ci://role-check';
+          COMMIT;
           SQL
       - name: Run knowledge MCP container
         run: |
