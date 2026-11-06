@@ -66,6 +66,7 @@ Values above are initial configuration examples, not capacity guarantees. Measur
 5. GET /v1/models with X-API-Key must return the expected configured model ID.
 6. Run one non-streaming request and one streaming request using a controlled test prompt.
 7. Confirm response usage counts are present and streaming terminates with data: [DONE].
+8. The manifest generator and runtime accept safetensors weights only; convert any pickle-based checkpoint through a trusted, isolated conversion workflow before intake.
 
 If any readiness check fails, keep the instance out of the load balancer. The API returns 503 rather than generating a substitute answer when the model is missing or unverified.
 
@@ -94,6 +95,7 @@ Run the smoke benchmark only against local or staging. It deliberately rejects r
 
 Store the report with:
 - Git commit and container digest
+- Server GPU model/VRAM, driver, CUDA, and device utilization captured on the serving host (the report's client hardware field describes the benchmark runner)
 - model manifest digest and model/tokenizer revisions
 - GPU model, VRAM, driver, CUDA, PyTorch and vLLM versions
 - backend settings, context length, max output tokens and concurrency
