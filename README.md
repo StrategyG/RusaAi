@@ -100,7 +100,7 @@ curl localhost:8000/health
 
 Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+python -m pytest -v
 ```
 
 ---
@@ -109,7 +109,7 @@ pytest llm-project/tests/ -v
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
+| `/health` | `GET` | Liveness check. Returns HTTP 200 with `"status": "healthy"` and service metadata. |
 | `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
 | `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
 
