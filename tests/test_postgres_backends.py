@@ -137,3 +137,56 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     assert queue.complete(
         current.id, tenant_id, "current-worker", current.lease_token
     )
+
+
+
+def test_postgres_rls_and_service_role_separation():
+    import psycopg
+
+    task_id = str(uuid4())
+    with psycopg.connect(DSN) as conn:
+        conn.execute("SET LOCAL ROLE rusa_api_runtime")
+        conn.execute(
+            "SELECT set_config('rusa.tenant_id', %s, true)",
+            ("tenant-rls-alpha",),
+        )
+        conn.execute(
+            """
+            INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
+            VALUES (%s, %s, '{}'::jsonb)
+            """,
+            (task_id, "tenant-rls-alpha"),
+        )
+        visible = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert visible == ("tenant-rls-alpha",)
+
+        conn.execute(
+            "SELECT set_config('rusa.tenant_id', %s, true)",
+            ("tenant-rls-beta",),
+        )
+        hidden = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert hidden is None
+
+        conn.execute("SET LOCAL ROLE rusa_worker_runtime")
+        worker_visible = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert worker_visible == ("tenant-rls-alpha",)
+
+        privileges = conn.execute(
+            """
+            SELECT
+                has_table_privilege('rusa_api_runtime', 'public.aicode_memory', 'SELECT'),
+                has_table_privilege('rusa_api_runtime', 'public.aicode_audit_events', 'SELECT'),
+                has_table_privilege('rusa_worker_runtime', 'public.aicode_rate_limits', 'SELECT'),
+                has_table_privilege('rusa_worker_runtime', 'public.aicode_jobs', 'INSERT')
+            """
+        ).fetchone()
+        assert privileges == (False, False, False, False)
