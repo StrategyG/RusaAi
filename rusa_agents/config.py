@@ -55,21 +55,35 @@ class RuntimeConfig:
             tenant_repositories=tenant_repositories,
         )
 
-    def validate(self) -> None:
+    def validate_api(self) -> None:
         if self.environment != "production":
             return
         required = {
             "RUSA_DATABASE_URL": self.database_url,
-            "RUSA_AUDIT_HMAC_KEY": self.audit_hmac_key,
             "RUSA_API_KEYS or RUSA_API_KEY": self.api_keys,
+            "RUSA_TENANT_REPOSITORIES": self.tenant_repositories,
+            "RUSA_MODEL_BASE_URL": self.model_base_url,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
+
+    def validate_worker(self) -> None:
+        self.validate_api()
+        if self.environment != "production":
+            return
+        required = {
+            "RUSA_AUDIT_HMAC_KEY": self.audit_hmac_key,
             "RUSA_WORKSPACE_ROOT": self.workspace_root,
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
             "RUSA_GITHUB_TOKEN": self.github_token,
-            "RUSA_MODEL_BASE_URL": self.model_base_url,
-            "RUSA_TENANT_REPOSITORIES": self.tenant_repositories,
         }
         missing = [name for name, value in required.items() if not value]
         if not self.sandbox_image or "@sha256:" not in self.sandbox_image:
             missing.append("RUSA_SANDBOX_IMAGE pinned by immutable sha256 digest")
         if missing:
-            raise RuntimeError("Production configuration is incomplete: " + ", ".join(missing))
+            raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
+
+    def validate(self) -> None:
+        """Backward-compatible alias for validating the complete worker runtime."""
+        self.validate_worker()
