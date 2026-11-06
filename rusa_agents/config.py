@@ -232,6 +232,8 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
+        if os.getenv("RUSA_METRICS_PORT", "9100") != "9100":
+            missing.append("RUSA_METRICS_PORT must remain 9100 for the worker health check")
         for variable, default, minimum, maximum in (
             ("RUSA_TASK_TIMEOUT_SECONDS", "3600", 60, 3600),
             ("RUSA_CI_TIMEOUT_SECONDS", "900", 60, 3600),
