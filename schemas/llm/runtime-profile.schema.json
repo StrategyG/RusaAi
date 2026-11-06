@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa-ai.local/schemas/llm/runtime-profile.schema.json",
+  "title": "RUSA-AI Runtime Profile",
+  "description": "A proposed execution profile. It is not proof that the required hardware, checkpoint, or runtime is available.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile", "status", "purpose", "hardware", "model", "training", "inference", "notes"],
+  "properties": {
+    "profile": { "enum": ["local_dev", "single_gpu", "multi_gpu"] },
+    "status": { "const": "proposed" },
+    "purpose": { "type": "string", "minLength": 10 },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "gpu_count", "distributed_backend"],
+      "properties": {
+        "device": { "enum": ["cpu", "cuda"] },
+        "gpu_count": { "type": "integer", "minimum": 0 },
+        "distributed_backend": { "enum": ["none", "nccl"] }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "max_context_tokens", "context_mode"],
+      "properties": {
+        "source": { "enum": ["blueprint_only", "pretrained_checkpoint", "trained_checkpoint"] },
+        "max_context_tokens": { "type": "integer", "minimum": 1 },
+        "context_mode": { "enum": ["smoke", "standard", "extended", "long_context_target"] }
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "strategy", "precision", "micro_batch_size", "gradient_accumulation_steps"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "strategy": { "enum": ["none", "full", "lora", "qlora", "fsdp"] },
+        "precision": { "enum": ["fp32", "fp16", "bf16"] },
+        "micro_batch_size": { "type": "integer", "minimum": 1 },
+        "gradient_accumulation_steps": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "backend", "quantization", "max_batch_size"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "backend": { "enum": ["none", "transformers", "vllm"] },
+        "quantization": { "enum": ["none", "int8", "fp8", "4bit"] },
+        "max_batch_size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
