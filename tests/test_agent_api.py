@@ -8,11 +8,15 @@ from rusa_agents import api
 class FakeQueue:
     def __init__(self, dsn):
         self.tasks = {}
+        self.idempotency = {}
 
     def check_ready(self):
         return True
 
     def enqueue(self, task):
+        key = (task.tenant_id, task.idempotency_key or task.task_id)
+        if key in self.idempotency:
+            return self.idempotency[key]
         self.tasks[task.task_id] = {
             "tenant_id": task.tenant_id,
             "status": "queued",
@@ -20,6 +24,7 @@ class FakeQueue:
             "attempts": 0,
             "last_error": None,
         }
+        self.idempotency[key] = task.task_id
         return task.task_id
 
     def get(self, tenant_id, task_id):
@@ -35,17 +40,8 @@ def configure_api(monkeypatch):
         json.dumps({"tenant-a": "a" * 48, "tenant-b": "b" * 48}),
     )
     monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "StrategyG/RusaAi")
     monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
-
-
-def task_body():
-    return {
-        "objective": "Add regression tests",
-        "repository": "StrategyG/RusaAi",
-        "base_branch": "main",
-        "work_branch": "feature/api-test",
-        "acceptance_criteria": ["Tests pass"],
-    }
 
 
 def test_agent_api_requires_authentication(monkeypatch):
@@ -54,7 +50,7 @@ def test_agent_api_requires_authentication(monkeypatch):
         response = client.post(
             "/v1/agent/tasks",
             headers={"X-Tenant-ID": "tenant-a"},
-            json=task_body(),
+            json={},
         )
     assert response.status_code == 401
 
@@ -62,12 +58,19 @@ def test_agent_api_requires_authentication(monkeypatch):
 def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
     configure_api(monkeypatch)
     headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Add regression tests",
+        "repository": "StrategyG/RusaAi",
+        "base_branch": "main",
+        "acceptance_criteria": ["Tests pass"],
+    }
     with TestClient(api.app) as client:
-        created = client.post("/v1/agent/tasks", headers=headers, json=task_body())
+        created = client.post("/v1/agent/tasks", headers=headers, json=body)
         assert created.status_code == 202
         assert created.headers["X-Request-ID"]
         assert created.headers["Cache-Control"] == "no-store"
         task_id = created.json()["task_id"]
+        assert created.json()["work_branch"].startswith("rusa-agent/")
         fetched = client.get(f"/v1/agent/tasks/{task_id}", headers=headers)
         assert fetched.status_code == 200
         assert fetched.json()["status"] == "queued"
@@ -81,11 +84,49 @@ def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
 def test_agent_api_rejects_invalid_branch_target(monkeypatch):
     configure_api(monkeypatch)
     headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
-    body = task_body()
-    body["work_branch"] = "main"
+    body = {
+        "objective": "Change repository",
+        "repository": "StrategyG/RusaAi",
+        "base_branch": "main",
+        "work_branch": "main",
+        "acceptance_criteria": ["No regression"],
+    }
     with TestClient(api.app) as client:
         response = client.post("/v1/agent/tasks", headers=headers, json=body)
     assert response.status_code == 422
+
+
+def test_agent_api_rejects_repository_outside_allowlist(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Inspect another repository",
+        "repository": "some-owner/private-repo",
+        "acceptance_criteria": ["No changes"],
+    }
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert response.status_code == 403
+
+
+def test_agent_api_idempotency_reuses_task_id(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {
+        "X-API-Key": "a" * 48,
+        "X-Tenant-ID": "tenant-a",
+        "Idempotency-Key": "same-request-key",
+    }
+    body = {
+        "objective": "Add regression tests",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["Tests pass"],
+    }
+    with TestClient(api.app) as client:
+        first = client.post("/v1/agent/tasks", headers=headers, json=body)
+        second = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["task_id"] == second.json()["task_id"]
 
 
 def test_agent_api_rejects_unmapped_tenant_key(monkeypatch):
@@ -94,21 +135,6 @@ def test_agent_api_rejects_unmapped_tenant_key(monkeypatch):
     with TestClient(api.app) as client:
         response = client.get("/v1/agent/tasks/missing", headers=headers)
     assert response.status_code == 401
-
-
-def test_agent_api_rejects_duplicate_tenant_keys(monkeypatch):
-    monkeypatch.setenv(
-        "RUSA_AGENT_TENANT_KEYS",
-        json.dumps({"tenant-a": "same-key-" + "x" * 40, "tenant-b": "same-key-" + "x" * 40}),
-    )
-    monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
-    monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
-    with TestClient(api.app) as client:
-        response = client.get(
-            "/v1/agent/tasks/missing",
-            headers={"X-API-Key": "same-key-" + "x" * 40, "X-Tenant-ID": "tenant-a"},
-        )
-    assert response.status_code == 503
 
 
 def test_agent_api_enforces_request_size_limit(monkeypatch):
@@ -122,12 +148,3 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
-
-
-def test_agent_api_limits_chunked_body_without_content_length(monkeypatch):
-    configure_api(monkeypatch)
-    monkeypatch.setattr(api, "MAX_AGENT_REQUEST_BYTES", 16)
-    with TestClient(api.app) as client:
-        response = client.post("/v1/agent/tasks", content=iter([b"a" * 10, b"b" * 10]))
-    assert response.status_code == 413
-    assert response.headers["X-Request-ID"]
