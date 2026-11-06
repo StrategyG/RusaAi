@@ -33,13 +33,20 @@ BLOCKED_WRITE_PREFIXES = (
 class GitWorkspaceManager:
     """Creates one Git worktree per task from a pre-fetched local bare mirror."""
 
-    def __init__(self, mirror_root: str, workspace_root: str):
+    def __init__(
+        self, mirror_root: str, workspace_root: str, github_token: str | None = None
+    ):
         self.mirror_root = Path(mirror_root).resolve()
         self.workspace_root = Path(workspace_root).resolve()
+        self.github_token = github_token
         self.workspace_root.mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
+    def _run(
+        self,
+        args: list[str],
+        cwd: str | None = None,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess:
         env = {
             "PATH": os.getenv("PATH", "/usr/bin:/bin"),
             "HOME": tempfile.gettempdir(),
@@ -48,6 +55,8 @@ class GitWorkspaceManager:
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_LFS_SKIP_SMUDGE": "1",
         }
+        if extra_env:
+            env.update(extra_env)
         if args and args[0] == "git":
             args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
         return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
