@@ -62,6 +62,8 @@ class AuditLog:
         tenant_id: str = "default",
     ) -> None:
         with self._lock:
+            if self.path.exists() and not self.verify():
+                raise RuntimeError("Audit log integrity check failed; refusing to append")
             previous = "GENESIS"
             if self.path.exists() and self.path.stat().st_size:
                 with self.path.open("r", encoding="utf-8") as stream:
