@@ -4,12 +4,16 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 
 class IdempotencyConflictError(ValueError):
     """An idempotency key was reused for a different tenant task payload."""
+
+
+class LeaseLostError(RuntimeError):
+    """A worker attempted a side effect without holding its current task lease."""
 
 
 @dataclass(frozen=True)
@@ -403,6 +407,85 @@ class PostgresTaskQueue:
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
+
+    def publish_if_lease_owned(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        publish: Callable[[], str | None],
+        *,
+        lease_seconds: int = 900,
+    ) -> str | None:
+        """Hold the queue row lock across remote publication to prevent lease handoff races.
+
+        The bounded Git operation runs while the active lease row is locked. A replacement
+        worker uses SKIP LOCKED and cannot reclaim this task until publication has finished.
+        The lease is extended before publication and refreshed again before the transaction
+        releases the row. The publisher must use a task/lease-specific branch.
+        """
+        if (
+            type(job_id) is not int
+            or job_id <= 0
+            or not tenant_id
+            or not worker_id
+            or len(worker_id) > 128
+            or not lease_token
+            or not callable(publish)
+            or not 15 <= lease_seconds <= 3600
+        ):
+            raise ValueError("Publication lease identity or duration is invalid")
+
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            owned = conn.execute(
+                """
+                SELECT 1 FROM public.aicode_jobs
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                  AND lease_until > NOW()
+                FOR UPDATE
+                """,
+                (job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if owned is None:
+                raise LeaseLostError("Refusing repository publication without the active task lease")
+
+            extended = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                  AND lease_until > NOW()
+                RETURNING id
+                """,
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if extended is None:
+                raise LeaseLostError("Task lease expired before repository publication")
+
+            # Keep this transaction/row lock open while the bounded Git push runs.
+            # Queue.claim() uses FOR UPDATE SKIP LOCKED, so a replacement worker
+            # cannot take ownership between this check and the remote side effect.
+            result = publish()
+
+            refreshed = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (180 * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                RETURNING id
+                """,
+                (job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if refreshed is None:
+                raise LeaseLostError("Task lease changed during repository publication")
+            return result
 
     def complete(
         self,
