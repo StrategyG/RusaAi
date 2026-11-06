@@ -6,6 +6,7 @@ import pytest
 from rusa_agents.audit import PostgresAuditLog
 from rusa_agents.memory import PostgresMemory
 from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.rate_limit import PostgresRateLimiter
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -59,3 +60,13 @@ def test_postgres_memory_and_audit_integrity():
     audit.record("test.event", task_id, "pytest", {"result": "pass"}, tenant_id="tenant-memory")
     assert audit.verify()
     assert not PostgresAuditLog(DSN, "wrong-key-" + "x" * 32).verify()
+
+
+
+def test_postgres_rate_limiter_is_tenant_scoped():
+    limiter = PostgresRateLimiter(DSN)
+    limiter.initialize()
+    route = "pytest:" + str(uuid4())
+    assert limiter.hit("tenant-rate-a", route, 1)[0] is True
+    assert limiter.hit("tenant-rate-a", route, 1)[0] is False
+    assert limiter.hit("tenant-rate-b", route, 1)[0] is True
