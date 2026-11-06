@@ -47,7 +47,7 @@ jobs:
       - name: Verify lint gate rejects violations
         run: |
           probe="$(mktemp --suffix=.py)"
-          printf 'def lint_probe():\\n    return undefined_name\\n' > "$probe"
+          printf 'def lint_probe():\n    return undefined_name\n' > "$probe"
           if python -m flake8 "$probe" --select=F821; then
             echo "Lint accepted an undefined name." >&2
             exit 1
