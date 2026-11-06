@@ -23,6 +23,7 @@ class Job:
 @dataclass(frozen=True)
 class EnqueueResult:
     task_id: str
+    status: str
     created: bool
     conflict: bool
 
@@ -317,16 +318,16 @@ class PostgresTaskQueue:
                 ON CONFLICT (tenant_id, idempotency_key)
                     WHERE idempotency_key IS NOT NULL
                 DO NOTHING
-                RETURNING task_id::text
+                RETURNING task_id::text, status
             """, (
                 task_id, tenant_id, json.dumps(payload), max_attempts, priority,
                 idempotency_key, request_hash,
             )).fetchone()
             if row is not None:
-                result = EnqueueResult(row[0], created=True, conflict=False)
+                result = EnqueueResult(row[0], row[1], created=True, conflict=False)
             else:
                 existing = conn.execute("""
-                    SELECT task_id::text, request_hash
+                    SELECT task_id::text, request_hash, status
                     FROM aicode_jobs
                     WHERE tenant_id=%s AND idempotency_key=%s
                 """, (tenant_id, idempotency_key)).fetchone()
@@ -334,6 +335,7 @@ class PostgresTaskQueue:
                     raise RuntimeError("Idempotency conflict could not be reconciled")
                 result = EnqueueResult(
                     existing[0],
+                    existing[2],
                     created=False,
                     conflict=existing[1] != request_hash,
                 )
