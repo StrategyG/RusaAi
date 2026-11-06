@@ -15,10 +15,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
-from .queue import PostgresTaskQueue
 from .http_limits import BodyLimitMiddleware
+from .queue import PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
+if MAX_AGENT_REQUEST_BYTES <= 0:
+    raise RuntimeError("RUSA_AGENT_MAX_REQUEST_BYTES must be positive")
 
 
 class CreateAgentTaskRequest(BaseModel):
@@ -27,9 +29,28 @@ class CreateAgentTaskRequest(BaseModel):
     objective: str = Field(min_length=1, max_length=4000)
     repository: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     base_branch: str = Field(default="main", min_length=1, max_length=128)
-    work_branch: str = Field(min_length=1, max_length=128)
+    # Accepted only for compatibility; the server derives and verifies the isolated branch.
+    work_branch: str | None = Field(default=None, min_length=1, max_length=128)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
     context: str = Field(default="", max_length=16000)
+
+
+def configured_repositories() -> set[str]:
+    raw = os.getenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "")
+    repositories = {
+        item.strip().lower()
+        for item in raw.split(",")
+        if item.strip()
+    }
+    if not repositories or any(
+        not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", item)
+        for item in repositories
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RUSA_AGENT_ALLOWED_REPOSITORIES is missing or invalid",
+        )
+    return repositories
 
 
 def authenticate_tenant(
@@ -88,9 +109,11 @@ async def lifespan(application: FastAPI):
     dsn = os.getenv("RUSA_AGENT_API_DATABASE_URL", "")
     if not dsn:
         raise RuntimeError("RUSA_AGENT_API_DATABASE_URL is required")
+    if not configured_repositories():
+        raise RuntimeError("GitHub repository allowlist is required")
     queue = PostgresTaskQueue(dsn)
     if not queue.check_ready():
-        raise RuntimeError("Agent task schema is not initialized")
+        raise RuntimeError("Agent task schema or tenant RLS policy is not initialized")
     application.state.queue = queue
     yield
 
@@ -102,9 +125,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
-    lifespan=lifespan,
 )
-
 
 app.add_middleware(BodyLimitMiddleware, max_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
 
@@ -171,6 +192,19 @@ def create_task(
         r"[A-Za-z0-9_.:-]{1,128}", idempotency_key
     ):
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
+    if body.repository.lower() not in configured_repositories():
+        raise HTTPException(status_code=403, detail="Repository is not allowed for this agent")
+    task_id = uuid.uuid4().hex
+    expected_branch = CodingTask.expected_work_branch_for(
+        tenant_id,
+        idempotency_key or "",
+        task_id,
+    )
+    if body.work_branch is not None and body.work_branch != expected_branch:
+        raise HTTPException(
+            status_code=422,
+            detail="work_branch is server-generated and must use the tenant-scoped task namespace",
+        )
     try:
         task = CodingTask(
             tenant_id=tenant_id,
@@ -178,16 +212,22 @@ def create_task(
             repository=RepositoryTarget(
                 full_name=body.repository,
                 base_branch=body.base_branch,
-                work_branch=body.work_branch,
+                work_branch=expected_branch,
             ),
             acceptance_criteria=tuple(body.acceptance_criteria),
             context=body.context,
             idempotency_key=idempotency_key or "",
+            task_id=task_id,
         )
         task_id = request.app.state.queue.enqueue(task)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"task_id": task_id, "status": "queued", "tenant_id": tenant_id}
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "tenant_id": tenant_id,
+        "work_branch": expected_branch,
+    }
 
 
 @app.get("/v1/agent/tasks/{task_id}")
