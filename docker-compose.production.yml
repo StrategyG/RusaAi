@@ -63,6 +63,38 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  rusa-agent-migrate:
+    image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
+    command:
+      - -c
+      - |
+        import os
+        from rusa_agents.memory import PostgresMemoryStore
+        from rusa_agents.queue import PostgresTaskQueue
+
+        database_url = os.environ["RUSA_AGENT_DATABASE_URL"]
+        queue = PostgresTaskQueue(database_url)
+        queue.initialize()
+        memory = PostgresMemoryStore(database_url)
+        memory.initialize()
+
+        if not queue.check_ready() or not memory.check_ready():
+            raise SystemExit("PostgreSQL agent schema or tenant RLS policy is not ready")
+    restart: "no"
+    environment:
+      RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
   rusa-agent-api:
     image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
     command: ["-m", "uvicorn", "rusa_agents.api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
@@ -135,6 +167,8 @@ services:
     depends_on:
       rusa-agent-db:
         condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
