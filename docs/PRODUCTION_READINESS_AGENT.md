@@ -5,7 +5,7 @@ Status: IMPLEMENTATION ADVANCED — NOT PRODUCTION CERTIFIED.
 ## Implemented in the feature branch
 - Typed task contracts and guarded task-state transitions.
 - Async SQLAlchemy persistence for tasks, tenant-scoped memory, agent messages, and audit events.
-- Tenant-scoped idempotent task submission, worker leases, heartbeat renewal, expired-lease recovery, retries, cancellation, and persisted step cursors.
+- Tenant-scoped idempotent task submission, worker leases, heartbeat renewal, expired-lease recovery, retries, cancellation, approver-controlled resume for supported blockers, and persisted step cursors.
 - OpenAI-compatible planner adapter; no fabricated model completions.
 - Hierarchical supervisor, logical specialist-role routing, persisted message bus, and plan validation.
 - JSON Schema-validated tool registry with GitHub branch-scoped operations.
