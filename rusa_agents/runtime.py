@@ -28,16 +28,16 @@ class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
         self.config.validate_worker()
-        if not self.config.database_url or not self.config.workspace_root or not self.config.git_mirror_root:
+        if not self.config.worker_database_url or not self.config.workspace_root or not self.config.git_mirror_root:
             raise RuntimeError("Database, workspace root, and Git mirror root are required")
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
             raise RuntimeError("Production worker requires DOCKER_HOST connected to a dedicated rootless sandbox daemon")
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
-        self.queue = PostgresTaskQueue(self.config.database_url)
-        self.memory = PostgresMemory(self.config.database_url)
+        self.queue = PostgresTaskQueue(self.config.worker_database_url)
+        self.memory = PostgresMemory(self.config.worker_database_url)
         if not self.config.audit_hmac_key:
             raise RuntimeError("RUSA_AUDIT_HMAC_KEY is required by the worker runtime")
-        self.audit = PostgresAuditLog(self.config.database_url, self.config.audit_hmac_key)
+        self.audit = PostgresAuditLog(self.config.worker_database_url, self.config.audit_hmac_key)
         self.workspace_manager = GitWorkspaceManager(
             self.config.git_mirror_root,
             self.config.workspace_root,
