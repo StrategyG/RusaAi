@@ -11,7 +11,6 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-
 _SENSITIVE_KEY = re.compile(
     r"(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|credential|private[_-]?key)",
     re.IGNORECASE,
