@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -92,7 +93,10 @@ class DockerSandbox:
             totals[0] += size
             if totals[0] > self.max_snapshot_bytes:
                 raise ToolDenied("Sandbox snapshot exceeds configured size limit")
-            return shutil.copy2(source, destination)
+            copied = shutil.copy2(source, destination)
+            mode = stat.S_IMODE(Path(copied).stat().st_mode)
+            os.chmod(copied, (mode | 0o444) & ~0o222)
+            return copied
 
         sensitive_parts = {
             ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
@@ -132,6 +136,13 @@ class DockerSandbox:
                     workspace, snapshot, symlinks=True, ignore=ignore_sensitive,
                     copy_function=bounded_copy,
                 )
+                for directory, subdirectories, filenames in os.walk(snapshot):
+                    os.chmod(directory, 0o555)
+                    for filename in filenames:
+                        path = Path(directory) / filename
+                        if not path.is_symlink():
+                            mode = stat.S_IMODE(path.stat().st_mode)
+                            os.chmod(path, (mode | 0o444) & ~0o222)
             except (OSError, ToolDenied) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
@@ -148,7 +159,7 @@ class DockerSandbox:
                 f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-                "--mount", f"type=bind,src={snapshot},dst=/workspace,rw",
+                "--mount", f"type=bind,src={snapshot},dst=/workspace,readonly",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--env", "PYTHONPYCACHEPREFIX=/tmp/pycache",
                 "--env", "HOME=/tmp",
