@@ -169,6 +169,25 @@ class PostgresTaskQueue:
             """, (lease_seconds, tenant_id, task_id, lease_token))
         return cursor.rowcount == 1
 
+    def checkpoint(
+        self, tenant_id: str, task_id: str, lease_token: str, record: TaskRecord,
+    ) -> bool:
+        if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
+            raise ValueError("checkpoint identity does not match its queue envelope")
+        with self._psycopg.connect(self.dsn) as connection:
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET result=%s::jsonb, updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s AND status='running'
+                  AND lease_token=%s AND lease_until > now()
+            """, (
+                json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True),
+                tenant_id,
+                task_id,
+                lease_token,
+            ))
+        return cursor.rowcount == 1
+
     def acknowledge(
         self, tenant_id: str, task_id: str, record: TaskRecord, lease_token: str,
     ) -> None:

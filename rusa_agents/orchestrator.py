@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from typing import Awaitable, Callable
 from dataclasses import replace
 from typing import Any, Protocol
 
@@ -23,6 +24,13 @@ class AuditSink(Protocol):
     ) -> None: ...
 
     def verify(self) -> bool: ...
+
+
+CheckpointCallback = Callable[[TaskRecord], Awaitable[None]]
+
+
+class CheckpointPersistenceError(RuntimeError):
+    """Raised when a durable task checkpoint cannot be persisted."""
 
 
 class AICodeOrchestrator:
@@ -61,6 +69,18 @@ class AICodeOrchestrator:
             event, tenant_id=record.task.tenant_id, task_id=record.task.task_id,
             actor=actor, details=details,
         )
+
+    async def _persist(
+        self, record: TaskRecord, callback: CheckpointCallback | None,
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            await callback(record)
+        except Exception as exc:
+            raise CheckpointPersistenceError(
+                "durable task checkpoint could not be persisted"
+            ) from exc
 
     @staticmethod
     def _criteria_passed(task: CodingTask, result: WorkerResult) -> bool:
@@ -146,7 +166,13 @@ class AICodeOrchestrator:
             return "failed"
         return "passed"
 
-    async def run(self, task: CodingTask, record: TaskRecord | None = None) -> TaskRecord:
+    async def run(
+        self,
+        task: CodingTask,
+        record: TaskRecord | None = None,
+        *,
+        checkpoint_callback: CheckpointCallback | None = None,
+    ) -> TaskRecord:
         record = record or TaskRecord(task=task)
         if record.task.task_id != task.task_id or record.task.tenant_id != task.tenant_id:
             raise ValueError("checkpoint does not belong to the supplied task")
@@ -157,8 +183,10 @@ class AICodeOrchestrator:
             return record
         self._event("task.started", record, "rusa-master", {"repository": task.repository.full_name})
         try:
+            await self._persist(record, checkpoint_callback)
             if record.state == TaskState.WAITING_EXTERNAL:
                 record.transition(TaskState.VERIFYING)
+                await self._persist(record, checkpoint_callback)
             while True:
                 stage = record.stage_index
                 if stage == 0:
@@ -180,10 +208,13 @@ class AICodeOrchestrator:
 
                 if record.state != target:
                     record.transition(target)
+                    await self._persist(record, checkpoint_callback)
                 result = await self._run_worker(record, role)
+                await self._persist(record, checkpoint_callback)
 
                 if stage in {0, 1, 2}:
                     record.stage_index += 1
+                    await self._persist(record, checkpoint_callback)
                     continue
                 if stage == 3:
                     ci = next(
@@ -196,6 +227,8 @@ class AICodeOrchestrator:
                     if outcome == "pending":
                         record.stage_index = 3
                         record.transition(TaskState.WAITING_EXTERNAL)
+                        await self._persist(record, checkpoint_callback)
+                        await self._persist(record, checkpoint_callback)
                         self._event(
                             "task.waiting_external", record, "rusa-master", {"reason": "CI pending"},
                         )
@@ -205,16 +238,20 @@ class AICodeOrchestrator:
                             raise _TaskBlocked("CI failed after the maximum repair cycles")
                         record.stage_index = 5
                         record.repair_cycles += 1
+                        await self._persist(record, checkpoint_callback)
                         continue
                     if not self._criteria_passed(task, result):
                         raise _TaskBlocked("tester did not verify every acceptance criterion")
                     record.stage_index = 4
+                    await self._persist(record, checkpoint_callback)
                     continue
                 if stage == 5:
                     record.stage_index = 6
+                    await self._persist(record, checkpoint_callback)
                     continue
                 if stage == 6:
                     record.stage_index = 3
+                    await self._persist(record, checkpoint_callback)
                     continue
                 if stage == 4:
                     if result.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL} or result.blockers:
@@ -261,6 +298,7 @@ class AICodeOrchestrator:
                         )
                         return record
                     record.stage_index = 7
+                    await self._persist(record, checkpoint_callback)
                     continue
 
             if record.stage_index == 7:
@@ -275,6 +313,8 @@ class AICodeOrchestrator:
                 if not audit_valid:
                     raise _TaskBlocked("audit integrity verification failed")
                 record.transition(TaskState.SUCCEEDED)
+        except CheckpointPersistenceError:
+            raise
         except _ApprovalRequired as exc:
             record.errors.append(str(exc))
             if record.state != TaskState.AWAITING_APPROVAL:
@@ -296,6 +336,7 @@ class AICodeOrchestrator:
                 "task.checkpoint", record, "rusa-master",
                 {"state": record.state.value, "stage_index": record.stage_index},
             )
+            await self._persist(record, checkpoint_callback)
         return record
 
 

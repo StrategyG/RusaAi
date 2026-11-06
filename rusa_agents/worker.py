@@ -66,7 +66,24 @@ class QueueWorker:
                     if not renewed:
                         raise RuntimeError("worker lease was lost; execution must stop")
 
-        process = asyncio.create_task(self.orchestrator.run(task, checkpoint))
+        async def persist_checkpoint(record):
+            saved = await asyncio.to_thread(
+                self.queue.checkpoint,
+                tenant_id,
+                task_id,
+                lease_token,
+                record,
+            )
+            if not saved:
+                raise RuntimeError("task checkpoint rejected because the lease is no longer valid")
+
+        process = asyncio.create_task(
+            self.orchestrator.run(
+                task,
+                checkpoint,
+                checkpoint_callback=persist_checkpoint,
+            )
+        )
         heartbeat = asyncio.create_task(maintain_lease())
         try:
             done, _ = await asyncio.wait(

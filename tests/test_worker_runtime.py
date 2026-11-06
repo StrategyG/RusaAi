@@ -23,6 +23,7 @@ class FakeQueue:
         self.renewals = 0
         self.acknowledged = None
         self.retried = None
+        self.checkpointed = None
 
     def claim(self, lease_seconds):
         return {
@@ -40,6 +41,10 @@ class FakeQueue:
         self.renewals += 1
         return True
 
+    def checkpoint(self, tenant_id, task_id, lease_token, record):
+        self.checkpointed = (tenant_id, task_id, lease_token, record.state)
+        return True
+
     def acknowledge(self, tenant_id, task_id, record, lease_token):
         self.acknowledged = (tenant_id, task_id, record.state, lease_token)
 
@@ -48,7 +53,7 @@ class FakeQueue:
 
 
 class FakeOrchestrator:
-    async def run(self, task, checkpoint=None):
+    async def run(self, task, checkpoint=None, *, checkpoint_callback=None):
         await asyncio.sleep(0.06)
         record = TaskRecord(task=task)
         record.transition(TaskState.OBSERVING)
@@ -56,6 +61,8 @@ class FakeOrchestrator:
         record.transition(TaskState.EXECUTING)
         record.transition(TaskState.VERIFYING)
         record.transition(TaskState.BLOCKED)
+        if checkpoint_callback is not None:
+            await checkpoint_callback(record)
         return record
 
 
@@ -80,6 +87,9 @@ def test_worker_renews_lease_during_long_task():
         task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test",
     )
     assert queue.retried is None
+    assert queue.checkpointed == (
+        task.tenant_id, task.task_id, "lease-token-for-test", TaskState.BLOCKED,
+    )
 
 
 

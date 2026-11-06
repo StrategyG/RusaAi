@@ -162,6 +162,12 @@ def test_postgres_queue_fences_expired_lease_owners():
         record.transition(TaskState.OBSERVING)
         with pytest.raises(RuntimeError, match="lease was lost"):
             queue.acknowledge(task.tenant_id, task_id, record, first["lease_token"])
+        assert not queue.checkpoint(
+            task.tenant_id, task_id, first["lease_token"], record,
+        )
+        assert queue.checkpoint(
+            task.tenant_id, task_id, second["lease_token"], record,
+        )
         assert not queue.renew_lease(
             task.tenant_id, task_id, first["lease_token"], lease_seconds=10,
         )

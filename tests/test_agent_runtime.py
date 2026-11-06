@@ -524,3 +524,36 @@ def test_worker_can_list_repository_root_without_file_path():
     result = asyncio.run(orchestrator._run_worker(record, WorkerRole.ANALYST))
     assert result.success is True
     assert tools.calls[0].name == "list_files"
+
+
+
+def test_orchestrator_persists_stage_checkpoints():
+    snapshots = []
+
+    async def persist(record):
+        snapshots.append((record.state, record.stage_index))
+
+    result = asyncio.run(
+        make_orchestrator(FakeTools()).run(
+            make_task(),
+            checkpoint_callback=persist,
+        )
+    )
+    assert result.state == TaskState.SUCCEEDED
+    assert snapshots
+    assert (TaskState.SUCCEEDED, 7) in snapshots
+
+
+def test_checkpoint_persistence_failure_is_not_reported_as_task_success():
+    from rusa_agents.orchestrator import CheckpointPersistenceError
+
+    async def fail(_record):
+        raise RuntimeError("database checkpoint unavailable")
+
+    with pytest.raises(CheckpointPersistenceError):
+        asyncio.run(
+            make_orchestrator(FakeTools()).run(
+                make_task(),
+                checkpoint_callback=fail,
+            )
+        )
