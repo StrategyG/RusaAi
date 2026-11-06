@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .contracts import CodingTask, WorkerRole
+from .contracts import WorkerRole
 
 
 class ToolDenied(PermissionError):
@@ -55,6 +55,7 @@ class DockerSandbox:
             "docker", "run", "--rm",
             "--network=none",
             "--read-only",
+            "--user", "10001:10001",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true",
             "--pids-limit=128",
@@ -73,7 +74,8 @@ class DockerSandbox:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,
-                env={"PATH": os.getenv("PATH", "/usr/bin:/bin"), "DOCKER_CONFIG": os.getenv("DOCKER_CONFIG", "")},
+                env={key: value for key, value in os.environ.items()
+                     if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
             )
         except FileNotFoundError as exc:
             return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
@@ -119,9 +121,17 @@ class WorkspaceToolGateway:
         normalized = candidate.as_posix()
         if any(normalized.startswith(prefix) for prefix in self.PROTECTED_PREFIXES):
             raise ToolDenied("CI workflow files require a separate human-reviewed change")
-        target = (self.workspace / Path(*candidate.parts)).resolve()
-        if target != self.workspace and self.workspace not in target.parents:
+        target = self.workspace.joinpath(*candidate.parts)
+        current = self.workspace
+        for part in candidate.parts:
+            current = current / part
+            if current.is_symlink():
+                raise ToolDenied("Symbolic links are not accessible through the agent gateway")
+        resolved = target.resolve(strict=False)
+        if resolved != self.workspace and self.workspace not in resolved.parents:
             raise ToolDenied("Path escapes the assigned workspace")
+        if any(part.lower() in self.PROTECTED_PARTS for part in resolved.relative_to(self.workspace).parts):
+            raise ToolDenied("Resolved path points to protected content")
         return target
 
     def read_file(self, raw_path: str) -> ToolResult:
@@ -139,8 +149,6 @@ class WorkspaceToolGateway:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
         target = self._resolve(raw_path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and target.is_symlink():
-            raise ToolDenied("Writing through symbolic links is prohibited")
         target.write_text(content, encoding="utf-8")
         return ToolResult(True, f"Wrote {raw_path}", {"path": raw_path, "bytes": len(content.encode("utf-8"))})
 
