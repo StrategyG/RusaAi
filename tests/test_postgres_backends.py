@@ -26,8 +26,17 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     assert job.tenant_id == "tenant-alpha"
     assert job.lease_token
     assert queue.heartbeat(job.id, job.tenant_id, "pytest-worker", job.lease_token, 30)
-    assert queue.complete(job.id, job.tenant_id, "pytest-worker", job.lease_token)
-    assert queue.get(task_id, "tenant-alpha")["status"] == "succeeded"
+    result = {
+        "pull_request_url": "https://github.com/StrategyG/RusaAi/pull/99",
+        "commit_sha": "a" * 40,
+        "branch": "feature/aicode/test-deadbeef",
+    }
+    assert queue.complete(
+        job.id, job.tenant_id, "pytest-worker", job.lease_token, result
+    )
+    stored = queue.get(task_id, "tenant-alpha")
+    assert stored["status"] == "succeeded"
+    assert stored["result"] == result
 
 
 def test_postgres_queue_retries_then_dead_letters():
@@ -81,11 +90,19 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     assert queue.enqueue(task_id, "tenant-approval", {"objective": "approval test"})
     job = queue.claim("approval-worker", lease_seconds=30)
     assert job is not None and job.task_id == task_id
-    assert queue.await_approval(job.id, job.tenant_id, "approval-worker", job.lease_token, "review required")
-    assert queue.get(task_id, "tenant-approval")["status"] == "awaiting_approval"
+    review_result = {"branch": "feature/aicode/review-deadbeef"}
+    assert queue.await_approval(
+        job.id, job.tenant_id, "approval-worker", job.lease_token,
+        "review required", review_result,
+    )
+    awaiting = queue.get(task_id, "tenant-approval")
+    assert awaiting["status"] == "awaiting_approval"
+    assert awaiting["result"] == review_result
     assert queue.retry(task_id, "wrong-tenant") is False
     assert queue.retry(task_id, "tenant-approval") is True
-    assert queue.get(task_id, "tenant-approval")["status"] == "queued"
+    retried = queue.get(task_id, "tenant-approval")
+    assert retried["status"] == "queued"
+    assert retried["result"] is None
 
 
 
