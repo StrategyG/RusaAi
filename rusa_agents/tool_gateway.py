@@ -100,6 +100,7 @@ class DockerSandbox:
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,rw",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
+                "--env", "PYTHONPYCACHEPREFIX=/tmp/pycache",
                 "--env", "HOME=/tmp",
                 "--env", "XDG_CACHE_HOME=/tmp/.cache",
                 "--env", "RUFF_CACHE_DIR=/tmp/.cache/ruff",
