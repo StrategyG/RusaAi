@@ -254,10 +254,14 @@ class GitHubToolGateway:
         github: GitHubRepositoryGateway,
         policy: AutonomyPolicy | None = None,
         max_file_bytes: int = 262144,
+        allowed_repositories: set[str] | frozenset[str] | None = None,
     ) -> None:
         self.github = github
         self.policy = policy or AutonomyPolicy()
         self.max_file_bytes = max_file_bytes
+        self.allowed_repositories = frozenset(allowed_repositories or set())
+        if not self.allowed_repositories:
+            raise ValueError("an explicit GitHub repository allowlist is required")
 
     async def execute(
         self,
@@ -266,6 +270,8 @@ class GitHubToolGateway:
         task: CodingTask,
         role: WorkerRole,
     ) -> dict[str, Any]:
+        if task.repository.full_name not in self.allowed_repositories:
+            return {"ok": False, "error": "repository is not in the configured GitHub allowlist"}
         if action not in self.ROLE_ACTIONS.get(role, set()):
             return {"ok": False, "error": f"{role.value} is not allowed to use {action}"}
         policy_action = self.POLICY_ACTIONS.get(action)
