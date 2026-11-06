@@ -44,6 +44,15 @@ jobs:
             --show-source \
             --statistics
 
+      - name: Verify lint gate rejects violations
+        run: |
+          probe="$(mktemp --suffix=.py)"
+          printf 'def lint_probe():\\n    return undefined_name\\n' > "$probe"
+          if python -m flake8 "$probe" --select=F821; then
+            echo "Lint accepted an undefined name." >&2
+            exit 1
+          fi
+
       - name: Compile Python package
         run: python -m compileall -q llm-project
 
@@ -60,3 +69,60 @@ jobs:
 
       - name: Build Docker image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
+
+      - name: Smoke test container startup and A2A validation
+        run: |
+          set -euo pipefail
+          image="rusa-ai:${GITHUB_SHA}"
+          container="rusa-ai-smoke-${GITHUB_RUN_ID}"
+          cleanup() {
+            docker logs "$container" || true
+            docker rm -f "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d --name "$container" -p 127.0.0.1:8000:8000 "$image"
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/tmp/health.json; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Container did not become healthy." >&2
+            exit 1
+          fi
+          grep -q '"status":"healthy"' /tmp/health.json
+
+          response="$(curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            --data-binary @- \
+            http://127.0.0.1:8000/v1/validate-task <<'JSON'
+          {
+            "envelope": {
+              "protocol_version": "1.0",
+              "task_id": "123e4567-e89b-12d3-a456-426614174000",
+              "message_id": "123e4567-e89b-12d3-a456-426614174001",
+              "type": "task.create",
+              "from": {"agent_id": "ci-client", "role": "human"},
+              "to": {"agent_id": "rusa-orchestrator", "role": "rusa_orchestrator"},
+              "created_at": "2026-11-06T12:00:00Z",
+              "task": {
+                "objective": "Container A2A smoke test",
+                "acceptance_criteria": ["Envelope is accepted"],
+                "repository": "StrategyG/RusaAi",
+                "base_branch": "main",
+                "work_branch": "fix/ci-smoke"
+              },
+              "policy": {
+                "allowed_actions": ["read"],
+                "prohibited_actions": ["deploy"],
+                "human_approval_required": ["merge"]
+              }
+            }
+          }
+          JSON
+          )"
+          printf '%s' "$response" | grep -q '"valid":true'
