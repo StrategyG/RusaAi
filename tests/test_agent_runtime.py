@@ -1182,3 +1182,26 @@ def test_github_gateway_rejects_diff_limits_above_review_context_capacity():
             allowed_repositories={"strategyg/rusaai"},
             max_diff_files=21,
         )
+
+
+def test_github_write_blocks_secret_material_before_creating_branch(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Secret-bearing file content must be blocked before GitHub access")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    with pytest.raises(PermissionError, match="potential secret material"):
+        asyncio.run(gateway.execute(
+            make_task(),
+            ToolCall(
+                "write_file",
+                {
+                    "path": "src/config.py",
+                    "content": 'API_KEY = "raw-secret-value-123456"',
+                },
+            ),
+        ))
