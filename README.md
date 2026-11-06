@@ -52,8 +52,18 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 6. Configure RUSA_AGENT_TENANT_REPOSITORIES as a JSON map assigning each tenant only its permitted repositories. Every tenant in this map must have a unique API key and every assigned repository must also appear in the global allowlist.
 7. Restrict the GitHub App or fine-grained token to the same global repository set. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
 8. Start the services with docker compose up --build -d.
+9. Compose runs the one-shot `rusa-agent-migrate` service before starting the agent API and worker. Published API ports bind to host loopback; terminate TLS at a trusted reverse proxy rather than exposing the containers directly.
 
-The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. All agent task endpoints require X-API-Key and X-Tenant-ID; the API validates the key against RUSA_AGENT_TENANT_KEYS and enforces each tenant's repository assignment.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | /v1/agent/tasks | Submit an idempotent coding task |
+| GET | /v1/agent/tasks/{task_id} | Read task status and checkpoint summary within the tenant |
+| POST | /v1/agent/tasks/{task_id}/retry | Explicitly requeue a failed task |
+| DELETE | /v1/agent/tasks/{task_id} | Cancel a queued, waiting, or running task and revoke its worker lease |
+
+Cancellation clears the active lease token. A worker that loses ownership must stop before its next repository tool action. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
 
 Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
 
