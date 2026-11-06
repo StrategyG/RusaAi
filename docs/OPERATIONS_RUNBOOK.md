@@ -34,18 +34,23 @@ For a multi-tenant deployment:
 3. Set `RUSA_GITHUB_TENANT_REPOSITORIES_JSON` with an explicit owner/repo list for every tenant.
 4. Do not use a shared global repository allowlist as a substitute for per-tenant lists.
 
-Example structure (replace all example values):
+Example values (set each environment variable separately; replace all example values):
+
+`RUSA_API_KEY_TENANTS_JSON`:
 
 ```json
 {
-  "RUSA_API_KEY_TENANTS_JSON": {
-    "<sha256-api-key-a>": "tenant-a",
-    "<sha256-api-key-b>": "tenant-b"
-  },
-  "RUSA_GITHUB_TENANT_REPOSITORIES_JSON": {
-    "tenant-a": ["org-a/repo-a"],
-    "tenant-b": ["org-b/repo-b"]
-  }
+  "<sha256-api-key-a>": "tenant-a",
+  "<sha256-api-key-b>": "tenant-b"
+}
+```
+
+`RUSA_GITHUB_TENANT_REPOSITORIES_JSON`:
+
+```json
+{
+  "tenant-a": ["org-a/repo-a"],
+  "tenant-b": ["org-b/repo-b"]
 }
 ```
 
@@ -100,7 +105,7 @@ All task operations require the tenant's API key in the `X-API-Key` header.
 - Dead letters: `GET /v1/agent/dead-letters`.
 - Replay: `POST /v1/agent/tasks/{task_id}/retry`. Only dead-letter tasks can be replayed; replay resets the attempt counter. Review the task failure before replaying.
 
-A task may finish as `succeeded`, `failed`, `blocked` (stored as a terminal queue failure), `dead_letter`, or `cancelled`. A draft PR and successful CI evidence do not authorize merging or deployment.
+The orchestrator can classify work as `succeeded`, `blocked`, `failed`, or `cancelled`. The durable queue exposes `queued`, `running`, `succeeded`, `failed`, `dead_letter`, and `cancelled`; a blocked orchestration is persisted as a non-retryable queue failure. A draft PR and successful CI evidence do not authorize merging or deployment.
 
 ## 5. Database backup and restore
 
