@@ -94,6 +94,24 @@ class MemoryRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class AgentMessageRow(Base):
+    __tablename__ = "agent_messages"
+    __table_args__ = (
+        Index("ix_agent_messages_tenant_task_created", "tenant_id", "task_id", "created_at"),
+        Index("ix_agent_messages_correlation", "correlation_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    from_agent: Mapped[str] = mapped_column(String(32), nullable=False)
+    to_agent: Mapped[str] = mapped_column(String(32), nullable=False)
+    message_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class Database:
     def __init__(self, url: str | None = None):
         self.url = url or os.getenv(
