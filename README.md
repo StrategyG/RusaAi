@@ -1,83 +1,48 @@
 # RUSA-AI
 
-RUSA-AI is an AI model and agent platform under active development. This repository currently provides an API serving foundation, an A2A task-envelope contract, a local Transformers adapter, and engineering scaffolding.
+RUSA-AI is an AI model and agent platform under active development. The repository separates the model-serving foundation from the autonomous agent control plane.
 
-## Verified scope and status
+## Current verified boundary
+The complete product is NOT production-ready until the release gates in docs/PRODUCTION_READINESS.md and docs/PRODUCTION_READINESS_AGENT.md have objective evidence. No trained RUSA-AI foundation-model weights are included. Model inference requires a compatible local model artifact. The enterprise agent runtime requires a configured model-planning endpoint, tenant API keys, and GitHub credentials.
 
-The complete RUSA-AI product is NOT production-ready yet. This repository does not currently contain trained RUSA-AI model weights, a verified training pipeline, a deployed multi-agent runtime, persistent memory/RAG, or production benchmark evidence. The serving API can load a compatible local causal language model, but the model artifact must be supplied and evaluated separately.
+## Architecture
+- Model platform: local Transformers inference adapter and model blueprint.
+- Agent platform: hierarchical supervisor, typed task contracts, persistent task store, bounded worker process, policy engine, tool registry, approval workflow, and audit events.
+- RAG/vector memory and sandboxed code execution are planned integrations and are not claimed as implemented.
 
-## Serving foundation
+See docs/enterprise-agent-architecture.md for topology, worker communication, memory, tools, orchestration, and evaluation design.
 
-- FastAPI serving API with mandatory API-key authentication that fails closed when misconfigured.
-- Local-only Hugging Face Transformers loading. Model files must already exist on disk; remote code execution and implicit downloads are disabled.
-- OpenAI-style non-streaming chat completion response with token usage.
-- A2A task-envelope validation using the schema-declared JSON Schema draft and format checks.
-- Separate liveness and readiness endpoints.
-- Request IDs, response security headers, request content-length guard, non-root container, and hardened Compose example.
-- CI for lint, compile, tests, dependency audit, container build, and liveness smoke test.
+## Serving API
+Install production dependencies with python -m pip install -r requirements.txt. Configure RUSA_API_KEY and a local RUSA_MODEL_PATH. Run:
+uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
 
-Mock model responses are intentionally not supported. Inference returns HTTP 503 until a real local model is loaded. Streaming returns HTTP 501 until implemented.
+## Agent runtime
+Install agent dependencies with python -m pip install -r requirements-agent.txt.
+Configure:
+- RUSA_DATABASE_URL (PostgreSQL recommended; SQLite is local single-process development only)
+- RUSA_TENANT_API_KEYS as JSON mapping tenant IDs to random secrets of at least 32 characters
+- RUSA_AGENT_MODEL_BASE_URL and RUSA_AGENT_MODEL_NAME for an OpenAI-compatible model endpoint
+- GITHUB_TOKEN with least-privilege repository access
 
-## Repository layout
+Run API:
+uvicorn rusa_agents.api:app --host 127.0.0.1 --port 8010
 
-- llm-project/model/: model architecture blueprint; not trained weights.
-- llm-project/serve/: API and local inference adapter.
-- schemas/a2a/: A2A task envelope JSON Schema.
-- tests/: API, authentication, readiness, and schema tests.
-- docs/: architecture, integration, and production-readiness documentation.
+Run worker separately:
+python -m rusa_agents.worker_cli
 
-## Requirements
-
-- Python 3.11 for the supported container and CI baseline.
-- A compatible local causal language model directory with a tokenizer chat template.
-- Adequate RAM/VRAM for the selected model.
-- A random API key of at least 32 characters.
-- Docker Compose is optional.
-
-## Local setup
-
-1. Create and activate a Python virtual environment.
-2. Install production dependencies with: python -m pip install -r requirements.txt
-3. Install development dependencies with: python -m pip install -r requirements-dev.txt
-4. Copy .env.example to .env, generate a real secret, and set RUSA_MODEL_PATH to a local model directory.
-5. Run: uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
-
-The API deliberately reports not-ready and returns HTTP 503 for inference until a valid local model is loaded. It never returns fabricated model output.
-
-## Docker Compose
-
-Set RUSA_API_KEY to a random secret and RUSA_MODEL_DIR to the directory containing model files. Then run docker compose up --build -d. The model directory is mounted read-only at /models.
-
-The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only root filesystem under Compose, and exposes port 8000. Put it behind a TLS-terminating reverse proxy or gateway. Configure distributed rate limiting, request timeouts, and connection limits at that gateway; an in-process limiter is not sufficient across replicas.
-
-## Health endpoints
-
-- GET /health/live: process liveness; does not imply that a model is loaded.
-- GET /health: backward-compatible liveness endpoint.
-- GET /health/ready: returns HTTP 200 only when a model, API-key configuration, and task schema are available.
-
-## API endpoints
-
-- POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
-- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
+Submit tasks using X-API-Key and Idempotency-Key headers at POST /v1/agent/tasks. Query GET /v1/agent/tasks/{task_id}. Human approvals and cancellation have dedicated endpoints. Never expose API/worker directly to the public internet; use a TLS gateway and distributed rate limiting.
 
 ## Quality gates
+Install agent dependencies and run:
+ruff check rusa_agents tests
+python -m compileall -q rusa_agents tests
+pytest -q
 
-Run ruff check llm-project/serve tests, python -m compileall -q llm-project tests, pytest -q, and pip-audit -r requirements.txt.
+The agent CI workflow executes these checks. A green unit-test run does not establish model quality, tenant-isolation certification, or production SLO compliance.
 
-A green CI run validates the serving foundation. It does not prove model quality, model capacity, multi-agent correctness, or production SLOs.
-
-## Production acceptance checklist
-
-- [ ] Licensed model artifact, revision, checksum, tokenizer, and chat template are recorded.
-- [ ] Model correctness, p50/p95 latency, throughput, RAM/VRAM, and context limits are benchmarked on target hardware.
-- [ ] A suitable high-throughput serving strategy is selected. The current Transformers adapter serializes generation in one process and is a baseline adapter.
-- [ ] Streaming is implemented and tested if required.
-- [ ] Distributed rate limiting, TLS, ingress body limits, timeouts, and network policy are configured at the gateway.
-- [ ] Secret rotation, access audit, backup/restore, incident response, and rollback are tested.
-- [ ] Multi-agent orchestration, queueing, idempotency, retries, cancellation, and worker isolation are implemented and tested.
-- [ ] Persistent memory/RAG includes tenant isolation, data provenance, retention, and deletion controls.
-- [ ] Evaluation, safety, prompt-injection, tool authorization, and adversarial tests meet documented thresholds.
-- [ ] Staging soak test, canary rollout, monitoring, alerting, and operational runbook are approved.
-
-See docs/PRODUCTION_READINESS.md for the evidence ledger and remaining release gates.
+## Security
+- Never commit credentials, model weights, or private datasets.
+- Do not expose arbitrary shell execution to model output.
+- Keep merge, deploy, release, secret/permission changes, and destructive actions under human approval.
+- Treat repository content and tool output as untrusted data.
+- Use PostgreSQL, schema migrations, immutable audit export, monitoring, backup/restore, and security testing before production rollout.
