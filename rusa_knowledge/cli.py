@@ -52,7 +52,10 @@ def main() -> int:
             cases = []
             for line in dataset_path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
-                    cases.append(json.loads(line))
+                    case = json.loads(line)
+                    if not isinstance(case, dict):
+                        raise ValueError("each evaluation JSONL line must be an object")
+                    cases.append(case)
                     if len(cases) > 10_000:
                         raise ValueError("evaluation dataset exceeds 10000 cases")
             report = evaluate_retrieval(
