@@ -21,7 +21,7 @@ _REQUIRED_TOKENIZER_FILES = (
     "spiece.model",
     "vocab.json",
 )
-_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth")
+_WEIGHT_SUFFIXES = (".safetensors",)
 
 
 class ModelArtifactError(RuntimeError):
@@ -138,7 +138,7 @@ def verify_model_artifact(
     )
     if not isinstance(manifest, dict) or any(field not in manifest for field in required_fields):
         raise ModelArtifactError("Model manifest is missing required metadata")
-    if manifest["schema_version"] != 1:
+    if type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1:
         raise ModelArtifactError("Unsupported model manifest schema_version")
     for field in required_fields[1:6]:
         if not isinstance(manifest[field], str) or not manifest[field].strip():
@@ -220,7 +220,15 @@ class TransformersBackend:
     name = "transformers"
     supports_batching = False
 
-    def __init__(self, model: Any, tokenizer: Any, torch: Any, device: str, timeout_seconds: float, max_model_len: int):
+    def __init__(
+        self,
+        model: Any,
+        tokenizer: Any,
+        torch: Any,
+        device: str,
+        timeout_seconds: float,
+        max_model_len: int,
+    ):
         self.model = model
         self.tokenizer = tokenizer
         self.torch = torch
@@ -230,7 +238,13 @@ class TransformersBackend:
         self._generation_lock = threading.Lock()
 
     @classmethod
-    def from_pretrained(cls, model_path: str, *, timeout_seconds: float, max_model_len: int) -> "TransformersBackend":
+    def from_pretrained(
+        cls,
+        model_path: str,
+        *,
+        timeout_seconds: float,
+        max_model_len: int,
+    ) -> "TransformersBackend":
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -261,6 +275,7 @@ class TransformersBackend:
             "trust_remote_code": False,
             "torch_dtype": dtype,
             "low_cpu_mem_usage": True,
+            "use_safetensors": True,
         }
         if use_cuda:
             try:
@@ -344,7 +359,7 @@ class TransformersBackend:
             self.tokenizer,
             skip_prompt=True,
             skip_special_tokens=True,
-            timeout=self.timeout_seconds,
+            timeout=min(1.0, self.timeout_seconds),
         )
         cancel_event = threading.Event()
         result_holder: dict[str, Any] = {}
@@ -359,6 +374,8 @@ class TransformersBackend:
         def run_generation() -> None:
             try:
                 with self._generation_lock:
+                    if cancel_event.is_set():
+                        return
                     with self.torch.inference_mode():
                         output = self.model.generate(
                             **encoded,
@@ -406,7 +423,11 @@ class TransformersBackend:
                         asyncio.to_thread(next_text),
                         timeout=self.timeout_seconds,
                     )
-                except (asyncio.TimeoutError, queue.Empty) as exc:
+                except queue.Empty:
+                    if cancel_event.is_set():
+                        return
+                    continue
+                except asyncio.TimeoutError as exc:
                     raise TimeoutError("Timed out waiting for the next generated token") from exc
                 if item is sentinel:
                     break
