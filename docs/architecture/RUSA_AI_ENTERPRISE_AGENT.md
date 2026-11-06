@@ -224,3 +224,54 @@ Use a TLS reverse proxy/API gateway in production. Enforce distributed rate limi
 ## 10. Production status boundary
 
 This implementation is an enterprise-oriented runtime foundation, not a claim that the full RUSA-AI product is production-certified. A real provider, GitHub token with minimum repository permissions, PostgreSQL instance, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested. A green CI pipeline proves code checks for the commit; it does not prove model quality, capacity, security certification, or production SLOs.
+
+## 11. Implementation precision — review revision 2026-11-06
+
+This section qualifies the target architecture above. A declared design control is
+not evidence that the control is implemented or operationally verified.
+
+| Boundary | Enforced behavior | Evidence / remaining limitation |
+|---|---|---|
+| API intake | Count actual body bytes before parsing; default 262144 bytes; reject overflow with 413 and a body exceeding 15 seconds with 408 | Chunked, misleading header, exact-limit, disconnect and timeout regressions; global concurrency/rate limits remain gateway responsibilities |
+| Task routing | Master selects fixed specialist stages; role allowlists constrain tools | No recursive worker spawning; workers are logical roles, not separate security sandboxes |
+| CI evidence | Successful gateway result, source identifier, matching 40-character commit SHA, complete check result set and named required checks | Source field is adapter provenance, not a cryptographic attestation or trusted GitHub App identity check |
+| Finalization | Master re-fetches CI after Security; changed head or nonpassing evidence returns to Tester, then Security | A remote commit can still change after the last read; deployment must bind to the immutable verified commit and independently re-check release gates |
+| Acceptance criteria | Exact criterion keys and true values from Tester and Security | These booleans are model assessments, not independent functional proof; benchmark/test artifact mapping remains a release blocker |
+| Persistence | Queue lease/checkpoint and tenant-scoped PostgreSQL memory | Tool writes and queue checkpoints are not one transaction; exactly-once execution is not claimed |
+| Autonomy | Routine allowlisted repository edits and draft PRs | SUCCEEDED means task verification completed; it never authorizes merge or deployment |
+
+### Completion decision
+
+```mermaid
+flowchart TD
+    T[Tester CI evidence] --> C{Complete and passing?}
+    C -->|No| W[Wait or bounded repair]
+    C -->|Yes| S[Security review]
+    S --> F{Fresh CI and same commit?}
+    F -->|No| W
+    F -->|Yes| A[Verify audit chain]
+    A --> R[Record task success]
+    W --> T
+```
+
+### Code ownership and contracts
+
+- `rusa_agents/api.py`: authentication, request correlation and task HTTP contracts.
+- `rusa_agents/http_limits.py`: bounded ASGI body intake before application parsing.
+- `rusa_agents/orchestrator.py`: stages, permissions, CI gates and completion revalidation.
+- `rusa_agents/github.py`: repository-scoped operations and CI evidence acquisition.
+- `rusa_agents/queue.py`, `memory.py`, `audit.py`: durable state, tenant memory and audit integrity.
+- `tests/test_http_limits.py`, `test_agent_api.py`, `test_agent_runtime.py`: regression evidence.
+
+### Release evidence still required
+
+Before promotion, independently validate trusted CI producer identity, immutable
+artifact-to-commit mapping, real acceptance-test artifacts, tenant isolation on
+production-equivalent PostgreSQL roles, stale lease recovery, concurrent writes,
+audit behavior across worker replicas, load/soak limits, backup/restore, and model
+quality. Do not derive a production readiness percentage from unit-test counts.
+
+This revision integrates upstream commit f6df656 (including the pytest import
+fix observed in the failed PR #8 CI run). Local verification after refinement:
+71 passed, 3 PostgreSQL tests skipped; Ruff and compileall passed. Remote CI,
+container builds and model/provider evaluation are separate evidence gates.

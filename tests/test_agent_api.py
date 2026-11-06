@@ -122,3 +122,12 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
+
+
+def test_agent_api_limits_chunked_body_without_content_length(monkeypatch):
+    configure_api(monkeypatch)
+    monkeypatch.setattr(api, "MAX_AGENT_REQUEST_BYTES", 16)
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", content=iter([b"a" * 10, b"b" * 10]))
+    assert response.status_code == 413
+    assert response.headers["X-Request-ID"]

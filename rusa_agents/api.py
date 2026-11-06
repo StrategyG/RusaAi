@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
 from .queue import PostgresTaskQueue
+from .http_limits import BodyLimitMiddleware
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 
@@ -103,6 +104,9 @@ app = FastAPI(
     openapi_url=None,
     lifespan=lifespan,
 )
+
+
+app.add_middleware(BodyLimitMiddleware, max_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
 
 
 @app.middleware("http")

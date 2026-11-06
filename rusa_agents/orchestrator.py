@@ -1,11 +1,12 @@
 """Hierarchical master orchestrator with checkpointed CI verification and bounded repair."""
 
 import asyncio
+import re
 from dataclasses import replace
 from typing import Any, Protocol
 
 from .contracts import (
-    CodingTask, RiskLevel, TaskRecord, TaskState, ToolResult, WorkerResult, WorkerRole,
+    CodingTask, RiskLevel, TaskRecord, TaskState, ToolCall, ToolResult, WorkerResult, WorkerRole,
 )
 from .policy import AutonomyPolicy
 from .workers import AgentWorker
@@ -37,7 +38,7 @@ class AICodeOrchestrator:
         policy: AutonomyPolicy | None = None, worker_timeout_seconds: float = 120.0,
         max_repair_cycles: int = 2,
         required_ci_checks: tuple[str, ...] = (
-            "Lint, test, and audit dependencies", "Build and smoke-test container",
+            "Lint, test, and audit dependencies", "Build and smoke-test containers",
         ),
     ) -> None:
         self.workers = {worker.role: worker for worker in workers}
@@ -116,8 +117,15 @@ class AICodeOrchestrator:
         return completed
 
     def _ci_outcome(self, result: ToolResult) -> str:
+        if (
+            not result.success
+            or result.evidence.get("source") != "github_check_runs_api"
+            or not re.fullmatch(r"[0-9a-f]{40}", str(result.data.get("head_sha", "")))
+            or result.evidence.get("head_sha") != result.data.get("head_sha")
+        ):
+            return "pending"
         checks = result.data.get("checks", [])
-        if not checks:
+        if not checks or result.data.get("checks_complete") is not True:
             return "pending"
         if any(item.get("status") != "completed" for item in checks):
             return "pending"
@@ -210,6 +218,26 @@ class AICodeOrchestrator:
                     continue
 
             if record.stage_index == 7:
+                tester = next(
+                    (worker for worker in reversed(record.worker_results)
+                     if worker.role == WorkerRole.TESTER), None,
+                )
+                prior_ci = next(
+                    (item for item in reversed(tester.tool_results)
+                     if item.name == "get_ci_status"), None,
+                ) if tester else None
+                current_ci = await asyncio.wait_for(
+                    self.tools.execute(task, ToolCall("get_ci_status")),
+                    timeout=self.worker_timeout_seconds,
+                )
+                self._event("task.final_ci", record, "rusa-master", dict(current_ci.evidence))
+                if (
+                    prior_ci is None or self._ci_outcome(current_ci) != "passed"
+                    or prior_ci.data.get("head_sha") != current_ci.data.get("head_sha")
+                ):
+                    record.stage_index = 3
+                    record.transition(TaskState.WAITING_EXTERNAL)
+                    return record
                 self._event(
                     "task.completion_candidate", record, "rusa-master",
                     {"worker_count": len(record.worker_results), "repair_cycles": record.repair_cycles},

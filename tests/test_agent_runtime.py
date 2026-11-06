@@ -65,7 +65,7 @@ class FakeTools:
             checks = []
             for name in (
                 "Lint, test, and audit dependencies",
-                "Build and smoke-test container",
+                "Build and smoke-test containers",
             ):
                 checks.append({
                     "name": name,
@@ -77,8 +77,8 @@ class FakeTools:
             return ToolResult(
                 name=call.name,
                 success=True,
-                data={"checks": checks, "all_checks_success": outcome == "passed"},
-                evidence={"source": "fake-ci"},
+                data={"head_sha": "a" * 40, "checks": checks, "checks_complete": True, "all_checks_success": outcome == "passed"},
+                evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
             )
         return ToolResult(
             name=call.name,
@@ -314,7 +314,12 @@ def test_orchestrator_blocks_when_acceptance_criteria_are_not_verified():
 
 
 def test_orchestrator_blocks_when_audit_integrity_fails():
-    orchestrator = make_orchestrator(FakeTools(["passed"]), audit=FakeAudit(valid=False))
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    orchestrator = make_orchestrator(
+        FakeTools(["passed"]), {WorkerRole.TESTER: tester}, audit=FakeAudit(valid=False)
+    )
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.BLOCKED
     assert "audit integrity" in record.errors[-1]
@@ -366,3 +371,96 @@ def test_agent_tools_do_not_expose_merge_or_deployment():
     for role_tools in AgentWorker.ROLE_TOOLS.values():
         assert "merge" not in role_tools
         assert "deploy" not in role_tools
+
+
+@pytest.mark.parametrize("path", [
+    ".env.production", "config/.env", "config/.env.local",
+    "config/.ENV.production", "config/.git/config", "config/.GIT/config",
+])
+def test_policy_blocks_nested_secrets_and_git_metadata(path):
+    assert not AutonomyPolicy.safe_repository_path(path)
+
+
+@pytest.mark.parametrize("operation", ["read_file", "write_file"])
+def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
+    gateway = GitHubToolGateway(token="test-token")
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Protected paths must be rejected before a GitHub request")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    with pytest.raises(PermissionError):
+        asyncio.run(gateway.execute(make_task(), ToolCall(
+            operation, {"path": "config/.env.production", "content": "secret"},
+        )))
+
+
+@pytest.mark.parametrize("total_count,expected", [(1, True), (2, False), (None, False)])
+def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, expected):
+    gateway = GitHubToolGateway(token="test-token")
+
+    async def request(method, path, **kwargs):
+        if "/branches/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        return {
+            "total_count": total_count,
+            "check_runs": [{"name": "tests", "status": "completed", "conclusion": "success"}],
+        }
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("get_ci_status")))
+    assert result.data["all_checks_success"] is expected
+
+
+def test_orchestrator_waits_for_complete_ci_evidence():
+    orchestrator = make_orchestrator(FakeTools())
+    result = asyncio.run(FakeTools().execute(make_task(), ToolCall("get_ci_status")))
+    incomplete = ToolResult(
+        name=result.name, success=True,
+        data={**result.data, "checks_complete": False}, evidence=result.evidence,
+    )
+    assert orchestrator._ci_outcome(incomplete) == "pending"
+    assert orchestrator._ci_outcome(result) == "passed"
+
+
+def test_default_required_checks_match_repository_workflow():
+    from pathlib import Path
+
+    workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
+    for name in make_orchestrator(FakeTools()).required_ci_checks:
+        assert f"name: {name}\n" in workflow
+
+
+@pytest.mark.parametrize("tamper", ["sha", "source", "failure"])
+def test_ci_gate_rejects_unverifiable_evidence(tamper):
+    from dataclasses import replace
+
+    result = asyncio.run(FakeTools().execute(make_task(), ToolCall("get_ci_status")))
+    if tamper == "sha":
+        result = replace(result, evidence={**result.evidence, "head_sha": "b" * 40})
+    elif tamper == "source":
+        result = replace(result, evidence={**result.evidence, "source": "model_claim"})
+    else:
+        result = replace(result, success=False)
+    assert make_orchestrator(FakeTools())._ci_outcome(result) == "pending"
+
+
+def test_changed_head_after_security_requires_reverification():
+    from dataclasses import replace
+
+    class MovingHeadTools(FakeTools):
+        async def execute(self, task, call):
+            result = await super().execute(task, call)
+            if len(self.calls) > 1:
+                return replace(result, data={**result.data, "head_sha": "b" * 40},
+                               evidence={**result.evidence, "head_sha": "b" * 40})
+            return result
+
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    record = asyncio.run(make_orchestrator(
+        MovingHeadTools(), {WorkerRole.TESTER: tester}
+    ).run(make_task()))
+    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.stage_index == 3
