@@ -44,7 +44,7 @@ The current migration fixes dimensions at 1,536 to match text-embedding-3-small.
 
 ## MCP surface
 
-Transport: MCP Streamable HTTP using the official MCP Python SDK v2.
+Transport: stateless MCP Streamable HTTP in JSON response mode using the official MCP Python SDK v2. Stateless requests avoid per-process MCP session affinity and support horizontal scaling; server-initiated client callbacks are intentionally not used.
 
 Read-only tools:
 - search_knowledge(query, collection, limit)
