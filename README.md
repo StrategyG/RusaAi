@@ -90,7 +90,7 @@ The `--app-dir` option is required because `llm-project` contains a hyphen and i
 curl --fail http://127.0.0.1:8000/health
 ```
 
-The liveness response reports `"status": "ok"`. It does not claim that model inference is ready.
+The liveness response reports `"status": "healthy"`. It does not claim that model inference is ready.
 
 ### Send an authenticated chat request
 
@@ -110,7 +110,7 @@ With `RUSA_ENABLE_MOCK_INFERENCE=true` in development, this returns a response l
 
 ### Validate an A2A task
 
-`POST /v1/validate-task` validates the `envelope` against `schemas/a2a/task-envelope.schema.json`. The schema is loaded and checked during application startup; a missing or malformed schema prevents startup. Validation uses Draft 2020-12 and checks declared formats, including UUID and date-time. The endpoint returns at most ten actionable validation errors.
+`POST /v1/validate-task` validates the `envelope` against `schemas/a2a/task-envelope.schema.json`. The schema is loaded and checked during application startup; a missing or malformed schema prevents startup. Validation uses Draft 2020-12 and checks declared formats, including UUID and date-time. The endpoint returns at most ten actionable validation errors without echoing submitted field values.
 
 When `RUSA_API_KEY` is set, this endpoint also requires `X-API-Key`.
 
@@ -156,7 +156,7 @@ The CI workflow at `.github/workflows/ci.yml` runs lint, compilation, pytest, co
 
 | Method | Path | Authentication | Behavior |
 | --- | --- | --- | --- |
-| GET | `/health` | None | Liveness; returns `status: ok` |
+| GET | `/health` | None | Liveness; returns `status: healthy` |
 | POST | `/v1/chat/completions` | `X-API-Key` when configured | Development mock only when explicitly enabled; otherwise HTTP 503 until an inference backend is integrated |
 | POST | `/v1/validate-task` | `X-API-Key` when configured | Validates an A2A envelope against the startup-loaded JSON Schema |
 
