@@ -151,6 +151,8 @@ class AICodeRuntime:
         )
 
     async def run_once(self) -> bool:
+        if not self.config.aicode_enabled:
+            return False
         job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
         if job is None:
             return False
