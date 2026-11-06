@@ -148,6 +148,10 @@ def test_task_requires_safe_feature_branch():
 def test_task_requires_branch_separation():
     with pytest.raises(ValidationError):
         make_task(base_branch="main", work_branch="main")
+    with pytest.raises(ValidationError):
+        make_task(base_branch="../main")
+    with pytest.raises(ValidationError):
+        make_task(work_branch="feature/unsafe branch")
 
 
 def test_state_machine_rejects_invalid_transition():
