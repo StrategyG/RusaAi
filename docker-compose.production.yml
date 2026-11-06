@@ -63,6 +63,7 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Idempotent schema bootstrap; worker startup is gated on successful completion.
   rusa-agent-migrate:
     image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
     command:
