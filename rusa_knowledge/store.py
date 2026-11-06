@@ -102,6 +102,10 @@ class PostgresKnowledgeStore:
                     ),
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_chunks', 'SELECT'
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM pg_roles
+                        WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
                     )
                 """
             ).fetchone()
