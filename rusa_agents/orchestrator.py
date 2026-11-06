@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from .audit import AuditLog
-from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
+from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
 from .memory import SQLiteMemory
 from .metrics import WORKER_STEPS
 from .policy import AutonomyPolicy
@@ -114,7 +114,42 @@ class AICodeOrchestrator:
 
     async def run(self, task: CodingTask) -> TaskRecord:
         record = TaskRecord(task=task)
+        previous_attempt_results: list[WorkerResult] = []
         try:
+            previous = await asyncio.to_thread(
+                self.memory.get,
+                task.task_id,
+                tenant_id=self._tenant_id(task),
+            )
+            if previous:
+                previous_payload = previous.get("payload", {})
+                for item in previous_payload.get("results", []):
+                    try:
+                        previous_attempt_results.append(
+                            WorkerResult(
+                                role=WorkerRole(item["role"]),
+                                summary=str(item.get("summary", ""))[:4000],
+                                success=bool(item.get("success", False)),
+                                artifacts=list(item.get("artifacts", []))[:100],
+                                evidence=dict(item.get("evidence", {})),
+                                blockers=list(item.get("blockers", []))[:30],
+                            )
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                prior_errors = previous_payload.get("errors", [])
+                if prior_errors:
+                    previous_attempt_results.append(
+                        WorkerResult(
+                            role=WorkerRole.ANALYST,
+                            summary="Previous attempt ended in state "
+                            + str(previous.get("state", "unknown"))
+                            + "; errors: "
+                            + "; ".join(str(error) for error in prior_errors)[:3000],
+                            success=False,
+                            blockers=[str(error) for error in prior_errors[:10]],
+                        )
+                    )
             await self._audit(
                 "task.received", task, "aicode-master",
                 {"repository": task.repository.full_name},
@@ -136,7 +171,7 @@ class AICodeOrchestrator:
                     record.errors.append(decision.reason)
                     record.transition(TaskState.BLOCKED)
                     break
-                result = await self.workers[role].run(task, list(record.results))
+                result = await self.workers[role].run(task, previous_attempt_results + list(record.results))
                 WORKER_STEPS.labels(
                     role.value, "success" if result.success else "failure"
                 ).inc()
