@@ -153,55 +153,57 @@ async def lifespan(application: FastAPI):
     application.state.task_policy_audit = None
     application.state.inference_admission = _new_inference_admission_controller()
     local_backend = None
-    local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH")
-    if local_model_path:
-        from model_runtime import load_inference_backend, verify_model_artifact
-
-        try:
-            max_model_len = int(os.getenv("RUSA_MODEL_MAX_LENGTH", "4096"))
-            manifest_digest = os.getenv("RUSA_MODEL_MANIFEST_SHA256")
-            verified = verify_model_artifact(
-                local_model_path,
-                expected_manifest_sha256=manifest_digest,
-                require_pinned_manifest=config.environment == "production",
-            )
-            local_backend = load_inference_backend(
-                str(verified.root),
-                backend_name=os.getenv("RUSA_INFERENCE_BACKEND", "transformers"),
-                timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS", "120")),
-                max_model_len=max_model_len,
-                max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS", "8")),
-                max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS", "8192")),
-                tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE", "1")),
-                gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION", "0.9")),
-            )
-        except (ImportError, ValueError, RuntimeError, OSError) as exc:
-            set_inference_provider(None)
-            raise RuntimeError("Configured local model runtime failed closed during startup") from exc
-        set_inference_provider(LocalModelInferenceProvider(local_backend))
-    elif config.model_base_url:
-        set_inference_provider(
-            OpenAIChatInferenceProvider(
-                config.model_base_url,
-                default_model=config.model_name,
-                api_key=os.getenv("RUSA_MODEL_API_KEY"),
-            )
-        )
-    else:
-        set_inference_provider(None)
-    if config.api_database_url:
-        queue = PostgresTaskQueue(config.api_database_url)
-        queue.initialize()
-        application.state.queue = queue
-        limiter = PostgresRateLimiter(config.api_database_url)
-        limiter.initialize()
-        application.state.rate_limiter = limiter
-        task_policy_audit = PostgresTaskPolicyAudit(config.api_database_url)
-        if config.environment == "production":
-            task_policy_audit.verify_ready("rusa_api_runtime")
-        application.state.task_policy_audit = task_policy_audit
+    local_backend = None
     try:
+        local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH")
+        if local_model_path:
+            from model_runtime import load_inference_backend, verify_model_artifact
+
+            try:
+                max_model_len = int(os.getenv("RUSA_MODEL_MAX_LENGTH", "4096"))
+                manifest_digest = os.getenv("RUSA_MODEL_MANIFEST_SHA256")
+                verified = verify_model_artifact(
+                    local_model_path,
+                    expected_manifest_sha256=manifest_digest,
+                    require_pinned_manifest=config.environment == "production",
+                )
+                local_backend = load_inference_backend(
+                    str(verified.root),
+                    backend_name=os.getenv("RUSA_INFERENCE_BACKEND", "transformers"),
+                    timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS", "120")),
+                    max_model_len=max_model_len,
+                    max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS", "8")),
+                    max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS", "8192")),
+                    tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE", "1")),
+                    gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION", "0.9")),
+                )
+            except (ImportError, ValueError, RuntimeError, OSError) as exc:
+                set_inference_provider(None)
+                raise RuntimeError("Configured local model runtime failed closed during startup") from exc
+            set_inference_provider(LocalModelInferenceProvider(local_backend))
+        elif config.model_base_url:
+            set_inference_provider(
+                OpenAIChatInferenceProvider(
+                    config.model_base_url,
+                    default_model=config.model_name,
+                    api_key=os.getenv("RUSA_MODEL_API_KEY"),
+                )
+            )
+        else:
+            set_inference_provider(None)
+        if config.api_database_url:
+            queue = PostgresTaskQueue(config.api_database_url)
+            queue.initialize()
+            application.state.queue = queue
+            limiter = PostgresRateLimiter(config.api_database_url)
+            limiter.initialize()
+            application.state.rate_limiter = limiter
+            task_policy_audit = PostgresTaskPolicyAudit(config.api_database_url)
+            if config.environment == "production":
+                task_policy_audit.verify_ready("rusa_api_runtime")
+            application.state.task_policy_audit = task_policy_audit
         yield
+
     finally:
         if local_backend is not None:
             await local_backend.close()
