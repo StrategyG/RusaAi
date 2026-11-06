@@ -83,7 +83,7 @@ CREATE POLICY rusa_knowledge_chunks_tenant_isolation
     USING (tenant_id = current_setting('rusa.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true));
 
-DO $$
+DO $rusa$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api') THEN
         GRANT USAGE ON SCHEMA public TO rusa_agent_api;
@@ -99,6 +99,6 @@ BEGIN
             ON public.rusa_knowledge_chunks TO rusa_agent_worker;
     END IF;
 END;
-$;
+$rusa$;
 
 COMMIT;
