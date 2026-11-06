@@ -82,3 +82,18 @@ def test_stream_usage_is_counted_from_prompt_and_output():
     assert usage["prompt_tokens"] > 0
     assert usage["completion_tokens"] == 5
     assert usage["total_tokens"] == usage["prompt_tokens"] + 5
+
+
+
+def test_generation_kwargs_include_deadline_and_deterministic_mode(monkeypatch):
+    runtime = ModelRuntime()
+    runtime.tokenizer = FakeTokenizer()
+    monkeypatch.setenv("RUSA_GENERATION_TIMEOUT_SECONDS", "45")
+    kwargs = runtime._generation_kwargs(
+        temperature=0.0,
+        top_p=0.9,
+        max_tokens=32,
+    )
+    assert kwargs["max_time"] == 45.0
+    assert kwargs["do_sample"] is False
+    assert "temperature" not in kwargs
