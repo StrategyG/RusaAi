@@ -37,7 +37,7 @@ class AICodeOrchestrator:
         policy: AutonomyPolicy | None = None, worker_timeout_seconds: float = 120.0,
         max_repair_cycles: int = 2,
         required_ci_checks: tuple[str, ...] = (
-            "Lint, test, and audit dependencies", "Build and smoke-test container",
+            "Lint, test, and audit dependencies", "Build and smoke-test containers",
         ),
     ) -> None:
         self.workers = {worker.role: worker for worker in workers}
@@ -117,7 +117,7 @@ class AICodeOrchestrator:
 
     def _ci_outcome(self, result: ToolResult) -> str:
         checks = result.data.get("checks", [])
-        if not checks:
+        if not checks or result.data.get("checks_complete") is not True:
             return "pending"
         if any(item.get("status") != "completed" for item in checks):
             return "pending"

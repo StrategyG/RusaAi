@@ -256,11 +256,22 @@ class GitHubToolGateway:
                 }
                 for item in checks.get("check_runs", [])
             ]
-            complete = bool(items) and all(item["status"] == "completed" for item in items)
+            checks_complete = (
+                type(checks.get("total_count")) is int
+                and checks["total_count"] == len(items)
+            )
+            complete = checks_complete and bool(items) and all(
+                item["status"] == "completed" for item in items
+            )
             passed = complete and all(item["conclusion"] == "success" for item in items)
             return ToolResult(
                 name=call.name, success=True,
-                data={"head_sha": sha, "checks": items, "all_checks_success": passed},
+                data={
+                    "head_sha": sha,
+                    "checks": items,
+                    "checks_complete": checks_complete,
+                    "all_checks_success": passed,
+                },
                 evidence={"source": "github_check_runs_api", "head_sha": sha},
             )
         raise PermissionError(f"tool '{call.name}' is not implemented")
