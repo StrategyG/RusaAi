@@ -105,7 +105,7 @@ services:
 
   rusa-agent-worker:
     image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
-    command: ["python", "-m", "rusa_agents.worker"]
+    command: ["-m", "rusa_agents.worker"]
     restart: unless-stopped
     init: true
     environment:
