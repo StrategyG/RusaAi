@@ -238,7 +238,7 @@ class GitHubPublisher:
                 or path.name.lower() in {"id_rsa", "id_ed25519"}
                 or path.name.lower() in BLOCKED_WRITE_NAMES
                 or path.name.lower().startswith(("requirements", "dockerfile."))
-                or any(raw_path.startswith(prefix) for prefix in BLOCKED_WRITE_PREFIXES)
+                or any(raw_path.lower().startswith(prefix.lower()) for prefix in BLOCKED_WRITE_PREFIXES)
             ):
                 continue
             candidate = (workspace / path).resolve(strict=False)
