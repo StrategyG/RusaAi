@@ -227,6 +227,22 @@ class PostgresTaskQueue:
             """, (lease_seconds, tenant_id, task_id, worker_id))
         return cursor.rowcount == 1
 
+    def owns_lease(self, tenant_id: str, task_id: str, worker_id: str) -> bool:
+        if not worker_id:
+            return False
+        with self._psycopg.connect(self.dsn) as connection:
+            row = connection.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM rusa_agent_tasks
+                    WHERE tenant_id=%s AND task_id=%s AND status='running'
+                      AND lease_owner=%s AND lease_until > now()
+                )
+                """,
+                (tenant_id, task_id, worker_id),
+            ).fetchone()
+        return bool(row and row[0])
+
     def checkpoint(
         self,
         tenant_id: str,
