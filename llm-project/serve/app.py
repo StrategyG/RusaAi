@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import jsonschema
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
+
+from rusa_agents.queue import PostgresTaskQueue
 
 logger = logging.getLogger("rusa-ai-serve")
 logging.basicConfig(
@@ -81,6 +83,11 @@ class TaskValidationRequest(BaseModel):
 class TaskValidationResponse(BaseModel):
     valid: bool
     errors: list[str] = Field(default_factory=list)
+
+
+class AgentTaskSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    envelope: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -299,6 +306,8 @@ async def lifespan(application: FastAPI):
             application.state.backend_error = "Model initialization failed"
             logger.exception("Local inference model initialization failed")
 
+    database_url = os.getenv("DATABASE_URL", "")
+    application.state.task_queue = PostgresTaskQueue(database_url) if database_url else None
     yield
 
 
