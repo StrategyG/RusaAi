@@ -289,7 +289,7 @@ class GitHubTools:
                 "".join(data["content"].split()),
                 validate=True,
             ).decode("utf-8")
-        except (ValueError, UnicodeDecodeError, KeyError) as exc:
+        except (ValueError, UnicodeDecodeError, KeyError, TypeError) as exc:
             raise ToolError("File is not a valid UTF-8 text file") from exc
         return {
             "path": path,
