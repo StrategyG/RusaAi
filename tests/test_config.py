@@ -110,3 +110,21 @@ def test_aicode_kill_switch_rejects_ambiguous_values(monkeypatch):
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "sometimes")
     with pytest.raises(ValueError, match="RUSA_AICODE_ENABLED"):
         RuntimeConfig.from_env()
+
+
+
+def test_production_api_rejects_database_url_without_host(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_API_DATABASE_URL",
+        "postgresql://rusa_api_login:secret@/rusa?sslmode=verify-full",
+    )
+    with pytest.raises(RuntimeError, match="database host"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_api_rejects_unmapped_api_key_tenant(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-b":["StrategyG/RusaAi"]}')
+    with pytest.raises(RuntimeError, match="repository allowlist"):
+        RuntimeConfig.from_env().validate_api()
