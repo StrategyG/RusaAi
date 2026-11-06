@@ -64,7 +64,10 @@ jobs:
         run: python -m compileall -q llm-project rusa_agents tests
 
       - name: Validate deployment shell scripts
-        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh
+        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh tests/test_deploy_scripts.sh
+
+      - name: Test deployment and rollback behavior
+        run: bash tests/test_deploy_scripts.sh
 
       - name: Test
         env:

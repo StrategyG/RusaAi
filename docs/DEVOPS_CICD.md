@@ -65,7 +65,7 @@ The release workflow copies only the Compose manifest and required initializatio
 - snapshots the current `.env` with restrictive permissions;
 - updates API and worker image references to the release digests;
 - validates Compose configuration, pulls images, and updates services;
-- waits for container health and verifies the API liveness endpoint;
+- waits for container health, verifies model readiness at `/health/ready`, and verifies PostgreSQL-backed agent API readiness at `/health/ready`;
 - automatically restores the previous configuration and restarts the previous images if any deployment or health-check step fails.
 
 Manual rollback:

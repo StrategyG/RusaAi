@@ -21,11 +21,18 @@ compose() {
 }
 
 health_check() {
-  local port
+  local port agent_port
   port="$(awk -F= '$1 == "RUSA_PORT" { value=$2 } END { print value }' "$ENV_FILE")"
+  agent_port="$(awk -F= '$1 == "RUSA_AGENT_PORT" { value=$2 } END { print value }' "$ENV_FILE")"
   port="${port:-8000}"
+  agent_port="${agent_port:-8001}"
+
+  # Liveness alone is insufficient: verify that the model is loaded and the
+  # tenant-scoped agent API can reach its initialized PostgreSQL schema.
   curl --retry 12 --retry-delay 5 --retry-connrefused --fail --silent --show-error \
-    "http://127.0.0.1:$port/health/live" >/dev/null
+    "http://127.0.0.1:$port/health/ready" >/dev/null
+  curl --retry 12 --retry-delay 5 --retry-connrefused --fail --silent --show-error \
+    "http://127.0.0.1:$agent_port/health/ready" >/dev/null
 }
 
 cp -p "$ENV_FILE" "$CURRENT_FILE"
