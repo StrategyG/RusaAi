@@ -105,6 +105,11 @@ class AuditLog:
 
     async def verify_chain(self, tenant_id: str) -> bool:
         async with self.database.session() as session:
+            head = await session.scalar(
+                select(AuditHeadRow)
+                .where(AuditHeadRow.tenant_id == tenant_id)
+                .with_for_update()
+            )
             rows = (
                 await session.scalars(
                     select(AuditRow)
@@ -112,9 +117,6 @@ class AuditLog:
                     .order_by(AuditRow.sequence.asc())
                 )
             ).all()
-            head = await session.scalar(
-                select(AuditHeadRow).where(AuditHeadRow.tenant_id == tenant_id)
-            )
 
         previous_hash = ZERO_HASH
         expected_sequence = 1
