@@ -74,8 +74,15 @@ services:
       - -c
       - |
         import os
+        import psycopg
         from rusa_agents.memory import PostgresMemoryStore
         from rusa_agents.queue import PostgresTaskQueue
+        owner_dsn = os.environ["RUSA_AGENT_OWNER_DATABASE_URL"]
+        with psycopg.connect(owner_dsn) as connection:
+            connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+            connection.execute("REVOKE CREATE ON SCHEMA public FROM rusa_agent_api")
+            connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
+            connection.execute("GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker")
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
         queue = PostgresTaskQueue(dsn)
         queue.initialize()
@@ -83,6 +90,7 @@ services:
         queue.configure_api_permissions()
     restart: "no"
     environment:
+      RUSA_AGENT_OWNER_DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
     depends_on:
       rusa-agent-db:
