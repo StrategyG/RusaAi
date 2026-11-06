@@ -306,6 +306,8 @@ async def run(
         records: list[dict[str, Any]] = []
         task_costs: list[float] = []
         task_cost_missing = 0
+    task_usage_missing = 0
+    task_price_missing = 0
         scenario_pass_counts = {scenario: 0 for scenario in scenarios}
         try:
             for scenario in scenarios:
@@ -363,6 +365,13 @@ async def run(
                     )
                     if cost is None:
                         task_cost_missing += 1
+                        if (
+                            usage_delta["usage_missing_calls"] > 0
+                            or usage_delta["usage_calls"] != usage_delta["requests"]
+                        ):
+                            task_usage_missing += 1
+                        elif input_rate is None or output_rate is None:
+                            task_price_missing += 1
                     else:
                         task_costs.append(cost)
 
@@ -483,7 +492,7 @@ async def run(
                     if all_costs_measured
                     else (
                         "NOT_MEASURED: provider usage was absent for one or more calls"
-                        if task_cost_missing
+                        if task_usage_missing
                         else "NOT_MEASURED: input/output per-million-token price rates are not configured"
                     )
                 ),
@@ -496,6 +505,11 @@ async def run(
                     *(
                         ["provider_token_usage"]
                         if provider.usage_calls != provider.request_count
+                        else []
+                    ),
+                    *(
+                        ["provider_price_rates"]
+                        if task_price_missing
                         else []
                     ),
                 ],
