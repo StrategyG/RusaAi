@@ -124,6 +124,7 @@ class PostgresKnowledgeStore:
             not isinstance(source_uri, str)
             or not source_uri.strip()
             or len(source_uri) > 2048
+            or len(source_uri.encode("utf-8")) > 2048
             or any(ord(character) < 32 for character in source_uri)
         ):
             raise ValueError("source_uri must be a bounded string without control characters")
