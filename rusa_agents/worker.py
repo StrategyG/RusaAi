@@ -210,7 +210,7 @@ class AgentRuntime:
             error = row.error or ""
             if "CI checks" in error:
                 target_tool = "github.get_ci_status"
-            elif "pull request" in error:
+            elif error == "Code changes require a pull request":
                 target_tool = "github.create_pull_request"
             else:
                 raise ValueError("This blocker requires operator review and cannot be auto-resumed")
@@ -664,9 +664,12 @@ class AgentRuntime:
                 item for item in results if item["tool"] == "github.write_file"
             ]
             has_write = bool(writes)
-            has_pr = any(
-                item["tool"] == "github.create_pull_request" for item in results
-            )
+            pr_results = [
+                item["result"] for item in results
+                if item["tool"] == "github.create_pull_request"
+            ]
+            has_pr = bool(pr_results)
+            has_draft_pr = bool(pr_results and pr_results[-1].get("draft") is True)
             ci_results = [
                 item["result"] for item in results
                 if item["tool"] == "github.get_ci_status"
@@ -706,6 +709,9 @@ class AgentRuntime:
             elif has_write and row.require_pull_request and not has_pr:
                 target = TaskStatus.BLOCKED
                 error = "Code changes require a pull request"
+            elif has_write and row.require_pull_request and not has_draft_pr:
+                target = TaskStatus.BLOCKED
+                error = "Existing pull request is not draft; operator review required"
             elif has_write and row.require_ci and not checks_ok:
                 target = TaskStatus.BLOCKED
                 error = "CI checks for the latest write have not all passed"
