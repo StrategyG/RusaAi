@@ -105,7 +105,7 @@ class DockerSandbox:
         }
         sensitive_suffixes = {
             ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt",
-            ".cer", ".der", ".ppk",
+            ".cer", ".der", ".ppk", ".tfstate", ".tfvars",
         }
 
         def ignore_sensitive(directory: str, names: list[str]) -> set[str]:
@@ -204,7 +204,7 @@ class WorkspaceToolGateway:
         "credentials.json", "service-account.json", ".npmrc", ".pypirc",
         ".netrc", "secrets.json", "token.json", ".gitattributes", ".gitmodules", ".lfsconfig",
     }
-    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk"}
+    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk", ".tfstate", ".tfvars"}
     PROTECTED_WRITE_NAMES = {
         ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
         "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
