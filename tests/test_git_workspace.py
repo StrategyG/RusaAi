@@ -54,7 +54,7 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace_root = tmp_path / "workspaces"
     manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
-    monkeypatch.setattr(manager, "refresh", lambda repository: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
     task = CodingTask(
         objective="test worktree",
         repository=RepositoryTarget(
@@ -114,4 +114,4 @@ def test_workspace_manager_refuses_untrusted_mirror_origin(tmp_path):
     git("clone", "--bare", str(source), str(mirror))
     manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
     with pytest.raises(RuntimeError, match="credential-free HTTPS"):
-        manager.refresh("StrategyG/RusaAi")
+        manager.refresh("StrategyG/RusaAi", "main")
