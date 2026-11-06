@@ -1000,6 +1000,7 @@ async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database,
         row1 = await session.scalar(select(TaskRow).where(TaskRow.id == first))
         row2 = await session.scalar(select(TaskRow).where(TaskRow.id == second))
         row1.status = TaskStatus.SUCCEEDED.value
+        row1.attempts = 1
         row1.plan = {"steps": [{"tool": "github.list_files"}]}
         row1.tool_results = [
             {"tool": "agent.review_diff", "result": {"approved": True}},
@@ -1025,6 +1026,13 @@ async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database,
     assert metrics["sample_size"] == 3
     assert metrics["completion_rate"] == pytest.approx(2 / 3, rel=1e-3)
     assert metrics["success_rate"] == pytest.approx(1 / 2, rel=1e-3)
+    assert metrics["first_attempt_success_rate"] == pytest.approx(1 / 2, rel=1e-3)
+    assert metrics["first_attempt_success_count"] == 1
+    assert metrics["retry_count"] == 1
+    assert metrics["terminal_sample_size"] == 2
+    assert metrics["latency_sample_size"] == 2
+    assert metrics["latency_p95_ms"] == metrics["latency_ms_p95"]
+    assert metrics["policy_decision_accuracy"] is None
     assert metrics["retry_rate"] == pytest.approx(1 / 3, rel=1e-3)
     assert metrics["validated_plan_rate"] == pytest.approx(2 / 3, rel=1e-3)
     assert metrics["reviewer_approval_rate"] == pytest.approx(1 / 3, rel=1e-3)
