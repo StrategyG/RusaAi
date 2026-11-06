@@ -31,6 +31,9 @@ def record_task_policy(
         "action": action,
         "decision": "allow" if allowed else "deny",
     }
+    logging.getLogger("rusa-ai.task-policy").info(
+        "%s", json.dumps(event, separators=(",", ":"), sort_keys=True)
+    )
     if sink is not None:
         try:
             sink.record(tenant_id, task_id, actor, action, event["decision"])
@@ -42,9 +45,6 @@ def record_task_policy(
                 raise RuntimeError("Task policy audit store is unavailable") from None
     elif required:
         raise RuntimeError("Task policy audit store is not configured")
-    logging.getLogger("rusa-ai.task-policy").info(
-        "%s", json.dumps(event, separators=(",", ":"), sort_keys=True)
-    )
 
 
 class PostgresTaskPolicyAudit:
