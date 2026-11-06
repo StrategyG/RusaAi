@@ -134,6 +134,34 @@ class OpenAICompatibleProvider:
         raise RuntimeError("Model provider request failed")
 
 
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[InferenceStreamEvent]:
+        """Expose the same bounded SSE transport to agent-side callers."""
+        provider = OpenAIChatInferenceProvider(
+            self.base_url,
+            default_model=self.model,
+            api_key=self.api_key,
+            timeout_seconds=self.timeout_seconds,
+            max_response_bytes=self.max_response_bytes,
+            transport=self.transport,
+        )
+        async for event in provider.stream(
+            messages,
+            model=model,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+        ):
+            yield event
+
+
 class OpenAIChatInferenceProvider:
     """OpenAI-compatible chat adapter for the public inference endpoint."""
 
