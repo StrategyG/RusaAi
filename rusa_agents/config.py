@@ -9,6 +9,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
+KNOWN_API_ROLES = {"platform_admin", "tenant_admin", "developer", "read_only"}
+
+
+@dataclass(frozen=True)
+class ApiPrincipal:
+    subject: str
+    tenant_id: str
+    roles: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     environment: str
@@ -19,6 +29,7 @@ class RuntimeConfig:
     worker_database_url_explicit: bool
     audit_hmac_key: str | None
     api_keys: dict[str, str]
+    api_key_principals: dict[str, ApiPrincipal]
     metrics_api_key: str | None
     workspace_root: str | None
     sandbox_image: str | None
@@ -68,6 +79,37 @@ class RuntimeConfig:
             raise ValueError("RUSA_API_KEYS must map string API keys to string tenant IDs")
 
         try:
+            raw_registry = json.loads(os.getenv("RUSA_API_KEYS_JSON", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("RUSA_API_KEYS_JSON must be a JSON object") from exc
+        if not isinstance(raw_registry, dict):
+            raise ValueError("RUSA_API_KEYS_JSON must be a JSON object keyed by SHA-256 digest")
+        api_key_principals: dict[str, ApiPrincipal] = {}
+        for digest, claims in raw_registry.items():
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ValueError("RUSA_API_KEYS_JSON contains an invalid SHA-256 digest")
+            if not isinstance(claims, dict):
+                raise ValueError("RUSA_API_KEYS_JSON claims must be objects")
+            subject = claims.get("subject")
+            tenant_id = claims.get("tenant_id")
+            roles = claims.get("roles")
+            if not isinstance(subject, str) or not subject.strip() or len(subject) > 128:
+                raise ValueError("RUSA_API_KEYS_JSON subject is missing or invalid")
+            if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+                raise ValueError("RUSA_API_KEYS_JSON tenant_id is missing or invalid")
+            if (
+                not isinstance(roles, list)
+                or not roles
+                or any(not isinstance(role, str) or role not in KNOWN_API_ROLES for role in roles)
+            ):
+                raise ValueError("RUSA_API_KEYS_JSON roles are missing or invalid")
+            api_key_principals[digest] = ApiPrincipal(
+                subject=subject.strip(),
+                tenant_id=tenant_id.strip(),
+                roles=tuple(sorted(set(roles))),
+            )
+
+        try:
             tenant_repositories = json.loads(os.getenv("RUSA_TENANT_REPOSITORIES", "{}"))
         except json.JSONDecodeError as exc:
             raise ValueError("RUSA_TENANT_REPOSITORIES must be a JSON object") from exc
@@ -95,6 +137,7 @@ class RuntimeConfig:
             worker_database_url_explicit=bool(worker_dsn),
             audit_hmac_key=os.getenv("RUSA_AUDIT_HMAC_KEY"),
             api_keys=keys,
+            api_key_principals=api_key_principals,
             metrics_api_key=os.getenv("RUSA_METRICS_API_KEY"),
             workspace_root=os.getenv("RUSA_WORKSPACE_ROOT"),
             sandbox_image=os.getenv("RUSA_SANDBOX_IMAGE"),
@@ -165,14 +208,10 @@ class RuntimeConfig:
                 self.api_database_url, "RUSA_API_DATABASE_URL", "rusa_api_login"
             )
         )
-        if not self.api_keys:
-            missing.append("RUSA_API_KEYS")
-        if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
-            missing.append("API keys of at least 32 UTF-8 bytes")
-        if any(self._looks_placeholder(key) for key in self.api_keys):
-            missing.append("API keys must not contain example placeholders")
-        if any(not tenant.strip() for tenant in self.api_keys.values()):
-            missing.append("non-empty API-key tenant mappings")
+        if not self.api_key_principals:
+            missing.append("RUSA_API_KEYS_JSON with at least one tenant-bound principal")
+        if self.api_keys:
+            missing.append("legacy RUSA_API_KEYS/RUSA_API_KEY is forbidden in production; use hashed RUSA_API_KEYS_JSON")
         if not self.metrics_api_key:
             missing.append("RUSA_METRICS_API_KEY")
         elif len(self.metrics_api_key.encode("utf-8")) < 32 or self._looks_placeholder(self.metrics_api_key):
