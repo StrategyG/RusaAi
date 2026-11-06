@@ -45,8 +45,23 @@ services:
     command: ["python", "-m", "rusa_agents.worker_main"]
     environment:
       ENVIRONMENT: production
-      RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the dedicated TLS API database DSN}
+      RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the dedicated TLS worker database DSN}
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      RUSA_TENANT_REPOSITORIES: ${RUSA_TENANT_REPOSITORIES:?Set tenant repository allowlists}
+      RUSA_MODEL_BASE_URL: ${RUSA_MODEL_BASE_URL:?Set HTTPS model endpoint}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai}
+      RUSA_MODEL_API_KEY: ${RUSA_MODEL_API_KEY:-}
+      RUSA_AUDIT_HMAC_KEY: ${RUSA_AUDIT_HMAC_KEY:?Set worker audit HMAC key}
+      RUSA_WORKSPACE_ROOT: ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}
+      RUSA_GIT_MIRROR_ROOT: ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}
+      RUSA_GITHUB_TOKEN: ${RUSA_GITHUB_TOKEN:?Set least-privilege GitHub token}
+      RUSA_SANDBOX_IMAGE: ${RUSA_SANDBOX_IMAGE:?Set immutable sandbox image digest}
+      RUSA_TASK_TIMEOUT_SECONDS: ${RUSA_TASK_TIMEOUT_SECONDS:-3600}
+      RUSA_CI_TIMEOUT_SECONDS: ${RUSA_CI_TIMEOUT_SECONDS:-900}
+      RUSA_CI_POLL_SECONDS: ${RUSA_CI_POLL_SECONDS:-15}
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-4}
+      RUSA_MAX_REPAIR_CYCLES: ${RUSA_MAX_REPAIR_CYCLES:-2}
+      RUSA_METRICS_PORT: ${RUSA_METRICS_PORT:-9100}
       DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
     read_only: true
