@@ -211,6 +211,7 @@ def test_sandbox_snapshot_enforces_file_count_limit(tmp_path, monkeypatch):
     workspace.mkdir()
     (workspace / "one.py").write_text("print('one')")
     (workspace / "two.py").write_text("print('two')")
+    monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
     sandbox = DockerSandbox(max_snapshot_files=1)
     result = sandbox.run(workspace, "pytest")
     assert result.ok is False
