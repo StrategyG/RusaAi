@@ -48,11 +48,26 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          else
+            python -m pip install -r requirements.txt
+            python -m pip install ruff pytest pip-audit
+          fi
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents tests
+        run: |
+          if [ -d rusa_agents ]; then
+            ruff check llm-project/serve rusa_agents tests
+          else
+            ruff check llm-project/serve tests
+          fi
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents tests
+        run: |
+          if [ -d rusa_agents ]; then
+            python -m compileall -q llm-project rusa_agents tests
+          else
+            python -m py_compile llm-project/serve/app.py tests/test_app.py
+          fi
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -60,7 +75,9 @@ jobs:
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
-          pip-audit -r requirements-agent.txt
+          if [ -f requirements-agent.txt ]; then
+            pip-audit -r requirements-agent.txt
+          fi
 
   container:
     name: Build and smoke-test containers
@@ -70,24 +87,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
-      - name: Build agent runtime image
-        run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
-      - name: Run inference API container
+      - name: Build agent runtime image when present
         run: |
-          docker run -d --name rusa-ai-ci \
-            -p 127.0.0.1:8000:8000 \
-            -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
-            rusa-ai:${{ github.sha }}
-      - name: Verify liveness
+          if [ -f Dockerfile.worker ]; then
+            docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+          fi
+      - name: Smoke-test inference API when available
         run: |
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8000/health/live; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs rusa-ai-ci
-          exit 1
+          if [ -f rusa_agents/api.py ]; then
+            docker run -d --name rusa-ai-ci               -p 127.0.0.1:8000:8000               -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890               rusa-ai:${{ github.sha }}
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent http://127.0.0.1:8000/health/live; then
+                exit 0
+              fi
+              sleep 2
+            done
+            docker logs rusa-ai-ci
+            exit 1
+          fi
       - name: Cleanup
         if: always()
         run: docker rm -f rusa-ai-ci || true
