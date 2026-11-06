@@ -10,7 +10,7 @@ The serving implementation rejects simulated output and will not report readines
 
 ## Inference backends
 
-- transformers: local Hugging Face Transformers baseline. Uses CUDA automatically when PyTorch reports a compatible GPU, otherwise CPU. It serializes generation per model process and is not a continuous-batching backend.
+- transformers: local Hugging Face Transformers baseline. Uses CUDA automatically when the installed PyTorch build supports it, otherwise CPU. The default Docker image installs CPU-only PyTorch to keep the baseline image smaller. It serializes generation per model process and is not a continuous-batching backend.
 - vLLM: optional GPU-oriented runtime with continuous batching, paged KV cache, and async token streaming. Install the separately maintained optional runtime requirements and validate the exact model, CUDA, driver, and GPU combination before staging.
 - auto: chooses vLLM when it is installed and CUDA is available; otherwise chooses Transformers.
 
@@ -72,7 +72,7 @@ The API returns HTTP 503 when no model is loaded, HTTP 429 when inference admiss
     export RUSA_MODEL_MANIFEST_SHA256="<manifest-sha256>"
     uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
 
-For GPU deployment with vLLM, ensure the host model directory is readable by container UID 10001, configure NVIDIA Container Toolkit and a supported driver, then use docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d. The GPU override builds the optional vLLM runtime and requests NVIDIA devices. Verify the vLLM, PyTorch, CUDA, driver, and GPU combination on staging before production. The default image remains the Transformers baseline.
+For GPU deployment with vLLM 0.32.x, ensure the host model directory is readable by container UID 10001, configure NVIDIA Container Toolkit and a supported driver, then use docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d. The GPU override installs the audited vLLM/PyTorch combination; the default Docker image intentionally uses CPU-only PyTorch. The GPU override builds the optional vLLM runtime and requests NVIDIA devices. Verify the vLLM, PyTorch, CUDA, driver, and GPU combination on staging before production. The default image remains the Transformers baseline.
 
 ## Benchmark
 
