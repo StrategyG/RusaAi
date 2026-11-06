@@ -278,8 +278,8 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert "sensitive objective sentinel" not in caplog.text
     assert key_a not in caplog.text and key_b not in caplog.text
 
-    worker_audit.record(
-        "audit-b", task_id, "worker:policy-test-worker", "task.execute", "allow"
+    assert worker.authorize_execution(
+        job.id, task_id, "audit-b", "policy-test-worker", job.lease_token
     )
     with psycopg.connect(worker_dsn) as conn:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("audit-b",))
