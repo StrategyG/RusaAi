@@ -66,6 +66,20 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
         run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
+      - name: Inspect sandbox Python package origins
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python "rusa-ai-agent-sandbox:${{ github.sha }}" -c '
+          import importlib.metadata as metadata
+          import sys
+          print("sys.path:", *sys.path, sep="\\n  ")
+          for dist in metadata.distributions():
+              if (dist.metadata.get("Name") or "").lower() == "setuptools":
+                  print("setuptools distribution:", dist.version, "metadata:", dist._path)
+          '
+          docker run --rm --entrypoint sh "rusa-ai-agent-sandbox:${{ github.sha }}" -c \
+            "find /usr/local /usr/lib /usr/share /opt /root -iname '*setuptools*' -print 2>/dev/null || true"
       - name: Install sandbox launcher
         run: python -m pip install -e .
       - name: Run full test suite in isolated sandbox
@@ -90,7 +104,6 @@ jobs:
         with:
           version: v0.70.0
           cache: true
-      # Keep unfixable CRITICAL/HIGH findings visible for risk tracking.
       - name: Report all CRITICAL and HIGH image vulnerabilities
         shell: bash
         run: |
@@ -103,7 +116,6 @@ jobs:
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
             echo "::endgroup::"
           done
-      # Emit the exact package location for any remaining setuptools finding.
       - name: Diagnose setuptools package location in sandbox image
         shell: bash
         run: |
@@ -120,22 +132,15 @@ jobs:
           for result in report.get("Results", []):
               for package in result.get("Packages", []):
                   if package.get("Name", "").lower() == "setuptools":
-                      print(json.dumps({
-                          "target": result.get("Target"),
-                          "package": package,
-                      }, indent=2))
+                      print(json.dumps({"target": result.get("Target"), "package": package}, indent=2))
                       found = True
               for vulnerability in result.get("Vulnerabilities", []):
                   if vulnerability.get("PkgName", "").lower() == "setuptools":
-                      print(json.dumps({
-                          "target": result.get("Target"),
-                          "vulnerability": vulnerability,
-                      }, indent=2))
+                      print(json.dumps({"target": result.get("Target"), "vulnerability": vulnerability}, indent=2))
                       found = True
           if not found:
               print("No setuptools package entry found in the sandbox image JSON report.")
           PY
-      # Fail only when a CRITICAL/HIGH finding has a vendor fix available.
       - name: Block on fixable CRITICAL and HIGH image vulnerabilities
         shell: bash
         run: |
