@@ -17,7 +17,7 @@ from .contracts import TaskCreate
 from .memory import MemoryStore
 from .rag import RAGService
 from .storage import Database
-from .worker import AgentRuntime
+from .worker import AgentRuntime, IdempotencyConflict
 
 logger = logging.getLogger("rusa-agent-api")
 key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -192,7 +192,10 @@ async def create_task(
         max_length=128,
     ),
 ) -> dict[str, str]:
-    task_id = await runtime.submit(tenant, idempotency_key, payload.model_dump())
+    try:
+        task_id = await runtime.submit(tenant, idempotency_key, payload.model_dump())
+    except IdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"task_id": task_id, "status": "queued"}
 
 
