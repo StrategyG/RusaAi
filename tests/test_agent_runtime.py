@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from collections import deque
 
 import pytest
@@ -161,6 +162,30 @@ def make_orchestrator(tools, overrides=None, audit=None):
         worker_timeout_seconds=2,
         max_repair_cycles=2,
     )
+
+
+def test_worker_memory_search_does_not_block_the_event_loop():
+    class SlowMemory:
+        def search(self, tenant_id, query, *, limit=5):
+            time.sleep(0.05)
+            return []
+
+    task = make_task()
+    response = json.dumps({
+        "summary": "analyst completed",
+        "tool_calls": [],
+        "blockers": [],
+        "risk": "low",
+        "criteria_results": {criterion: True for criterion in task.acceptance_criteria},
+    })
+    worker = AgentWorker(WorkerRole.ANALYST, FakeProvider(response), memory=SlowMemory())
+
+    async def exercise():
+        ticker = asyncio.create_task(asyncio.sleep(0.01))
+        await worker.run(task, [])
+        assert ticker.done(), "synchronous memory I/O blocked the worker event loop"
+
+    asyncio.run(exercise())
 
 
 def test_task_contract_round_trip_preserves_tenant_and_repository():
