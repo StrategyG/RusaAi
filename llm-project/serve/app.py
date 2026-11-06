@@ -479,6 +479,8 @@ def submit_agent_task(
     if queue is None:
         raise HTTPException(status_code=503, detail="Agent task queue is not configured")
     envelope = request.envelope
+    if envelope.get("type") != "task.create":
+        raise HTTPException(status_code=422, detail="Only task.create envelopes may be submitted")
     errors = list(get_task_validator().iter_errors(envelope))
     if errors:
         details = [str(error.message) for error in errors]
