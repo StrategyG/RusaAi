@@ -21,6 +21,8 @@ RUN groupadd --system --gid 10002 rusa-agent \
 
 COPY --from=builder /install /usr/local
 COPY rusa_agents /app/rusa_agents
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
 
 USER 10002:10002
 
