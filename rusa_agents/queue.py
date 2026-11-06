@@ -51,11 +51,23 @@ class PostgresTaskQueue:
             """)
 
     def check_ready(self) -> bool:
+        """Fail closed unless forced tenant RLS and its policy are active."""
         with self._psycopg.connect(self.dsn) as connection:
-            row = connection.execute(
-                "SELECT to_regclass('public.rusa_agent_tasks')"
-            ).fetchone()
-        return bool(row and row[0])
+            row = connection.execute("""
+                SELECT c.relrowsecurity, c.relforcerowsecurity,
+                       EXISTS (
+                           SELECT 1 FROM pg_policies
+                           WHERE schemaname='public'
+                             AND tablename='rusa_agent_tasks'
+                             AND policyname='rusa_agent_tenant_isolation'
+                             AND COALESCE(qual, '') LIKE '%rusa.tenant_id%'
+                             AND COALESCE(with_check, '') LIKE '%rusa.tenant_id%'
+                       )
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid=c.relnamespace
+                WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
+            """).fetchone()
+        return bool(row and row[0] and row[1] and row[2])
 
     @staticmethod
     def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -152,6 +164,24 @@ class PostgresTaskQueue:
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
                   AND lease_token=%s AND lease_until > now()
             """, (lease_seconds, tenant_id, task_id, lease_token))
+        return cursor.rowcount == 1
+
+    def checkpoint(
+        self, tenant_id: str, task_id: str, lease_token: str, record: TaskRecord,
+    ) -> bool:
+        """Persist progress only while this exact worker still owns an unexpired lease."""
+        if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
+            raise ValueError("checkpoint identity does not match its queue envelope")
+        if not lease_token:
+            raise ValueError("lease_token is required for checkpoint persistence")
+        payload = json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True)
+        with self._psycopg.connect(self.dsn) as connection:
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET result=%s::jsonb, updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s AND status='running'
+                  AND lease_token=%s AND lease_until > now()
+            """, (payload, tenant_id, task_id, lease_token))
         return cursor.rowcount == 1
 
     def acknowledge(
