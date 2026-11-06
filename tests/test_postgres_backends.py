@@ -5,7 +5,7 @@ import pytest
 
 from rusa_agents.audit import PostgresAuditLog
 from rusa_agents.memory import PostgresMemory
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import IdempotencyConflictError, PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
 
 DSN = os.getenv("RUSA_DATABASE_URL")
@@ -190,3 +190,47 @@ def test_postgres_rls_and_service_role_separation():
             """
         ).fetchone()
         assert privileges == (False, False, False, False)
+
+
+def test_postgres_queue_idempotency_key_replays_and_rejects_payload_changes():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"tenant-idempotency-{uuid4().hex}"
+    first_id, second_id = str(uuid4()), str(uuid4())
+    key = f"request-{uuid4().hex}"
+    original = {
+        "objective": "Create a health check",
+        "repository": {
+            "full_name": "StrategyG/RusaAi",
+            "base_branch": "main",
+            "work_branch_prefix": f"feature/aicode/{first_id[:12]}",
+        },
+    }
+    replay = {
+        "objective": "Create a health check",
+        "repository": {
+            "full_name": "StrategyG/RusaAi",
+            "base_branch": "main",
+            "work_branch_prefix": f"feature/aicode/{second_id[:12]}",
+        },
+    }
+    try:
+        created_id, created = queue.enqueue_idempotent(
+            first_id, tenant, original, key
+        )
+        replayed_id, replay_created = queue.enqueue_idempotent(
+            second_id, tenant, replay, key
+        )
+        assert created is True
+        assert replay_created is False
+        assert created_id == replayed_id == first_id
+
+        changed = {**replay, "objective": "A different task"}
+        with pytest.raises(IdempotencyConflictError, match="different task payload"):
+            queue.enqueue_idempotent(str(uuid4()), tenant, changed, key)
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
+                (tenant, key),
+            )
