@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import uuid
@@ -10,7 +11,7 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import GenerationResult, app, _load_task_validator  # noqa: E402
+from app import GenerationResult, RequestGuardMiddleware, app, _load_task_validator  # noqa: E402
 
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
@@ -225,3 +226,107 @@ def test_a2a_validation_requires_api_key(client):
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 401
+
+
+
+def test_request_guard_limits_chunked_body_without_content_length():
+    received = iter([
+        {"type": "http.request", "body": b"123", "more_body": True},
+        {"type": "http.request", "body": b"456", "more_body": False},
+    ])
+    called = False
+    sent = []
+
+    async def receive():
+        return next(received)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        nonlocal called
+        called = True
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": [],
+        "state": {},
+    }
+    middleware = RequestGuardMiddleware(downstream, max_request_bytes=5)
+    asyncio.run(middleware(scope, receive, send))
+
+    assert sent[0]["status"] == 413
+    assert called is False
+    assert dict(sent[0]["headers"])[b"x-request-id"]
+
+
+def test_request_guard_replays_small_chunked_body():
+    received = iter([
+        {"type": "http.request", "body": b"rus", "more_body": True},
+        {"type": "http.request", "body": b"a", "more_body": False},
+    ])
+    sent = []
+    observed = bytearray()
+
+    async def receive():
+        return next(received)
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            observed.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": [],
+        "state": {},
+    }
+    middleware = RequestGuardMiddleware(downstream, max_request_bytes=8)
+    asyncio.run(middleware(scope, receive, send))
+
+    assert bytes(observed) == b"rusa"
+    assert sent[0]["status"] == 200
+    response_headers = dict(sent[0]["headers"])
+    assert response_headers[b"x-request-id"]
+    assert response_headers[b"x-content-type-options"] == b"nosniff"
+
+
+def test_request_guard_times_out_slow_chunked_body():
+    sent = []
+
+    async def receive():
+        await asyncio.sleep(0.05)
+        return {"type": "http.request", "body": b"x", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    async def downstream(scope, receive, send):
+        raise AssertionError("timed-out request must not reach the application")
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": [],
+        "state": {},
+    }
+    middleware = RequestGuardMiddleware(
+        downstream,
+        max_request_bytes=8,
+        request_timeout_seconds=0.005,
+    )
+    asyncio.run(middleware(scope, receive, send))
+
+    assert sent[0]["status"] == 408
