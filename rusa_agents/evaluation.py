@@ -45,7 +45,7 @@ class AgentEvaluator:
                     select(AuditRow).where(
                         AuditRow.tenant_id == tenant_id,
                         AuditRow.event == "task.awaiting_approval",
-                    )
+                    ).order_by(AuditRow.created_at.desc()).limit(bounded_limit * 10)
                 )
             ).all()
 
