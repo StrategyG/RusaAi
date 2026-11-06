@@ -4,9 +4,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
-import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
