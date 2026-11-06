@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 AGENT_IMAGE_TAG="${1:?Pass the built agent runtime image tag as the first argument}"
 REGISTRY_HOST="127.0.0.1:5000"
-REGISTRY_IMAGE="registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
+REGISTRY_IMAGE="registry:3.1.1@sha256:38907510915c3f1604c7e83d6ab602ab3020d092f73bdaed8696773693ff768c"
 REGISTRY_NAME="rusa-ci-registry-$$"
 PROJECT_NAME="rusa-rollback-ci-$$"
 TMP_ROOT="$(mktemp -d)"
