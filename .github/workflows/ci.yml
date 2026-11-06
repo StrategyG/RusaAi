@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
     branches:
       - main
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rusa-ai-ci-${{ github.workflow }}-${{ github.ref }}
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -67,6 +67,11 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          rm .env
       - name: Build API, model, and worker images
         run: |
           docker build --pull --target api -t rusa-ai-api:${{ github.sha }} .
@@ -95,6 +100,11 @@ jobs:
           done
           docker logs rusa-ai-ci
           exit 1
+      - name: Verify readiness fails closed without a model artifact
+        run: |
+          status=$(curl --silent --output /tmp/rusa-ready.json --write-out "%{http_code}" http://127.0.0.1:8000/health/ready)
+          test "$status" = "503"
+          python -c "import json; data=json.load(open('/tmp/rusa-ready.json')); assert data['status']=='not_ready' and data['checks']['model_loaded'] is False"
       - name: Cleanup
         if: always()
         run: docker rm -f rusa-ai-ci || true
