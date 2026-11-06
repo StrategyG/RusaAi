@@ -82,7 +82,7 @@ The previous environment snapshot is retained as `.env.previous`. A rollback fai
 
 ## Required GitHub branch rules
 
-The repository currently has no active rulesets and the observed branches are not protected. This must be configured in **GitHub → Settings → Rules → Rulesets**; repository write access through the current integration does not expose the ruleset mutation API.
+The repository Rulesets API currently returns an empty list. The current integration cannot read classic branch-protection settings (GitHub returns 403), so classic protection is unverified. An administrator must verify and configure this in **GitHub → Settings → Rules → Rulesets**; repository access through the current integration does not expose ruleset mutation.
 
 Create an active branch ruleset targeting `main` and `release/**` with:
 
