@@ -14,7 +14,7 @@ RUSA-AI has three implementation layers: local-model inference API, hierarchical
 - Least-privilege GitHub gateway for allowlisted repositories, isolated work branches, protected path checks, draft pull requests, CI status, and complete branch-diff evidence. Arbitrary shell, unrestricted network, merge, deployment, release, secret changes, permission changes, and workflow changes are not exposed to workers.
 - Independent tester and security verification stages, commit-SHA matching, required CI check validation, and bounded repair cycles.
 - Optional local-document RAG ingestion (TXT, Markdown, HTML, PDF, DOCX), chunking, 1,536-dimensional embeddings, PostgreSQL/pgvector vector retrieval, PostgreSQL full-text retrieval, weighted hybrid ranking, source provenance, and offline retrieval metrics.
-- Optional stateless MCP Streamable HTTP knowledge service with read-only tools, per-tenant bearer-token authentication, request-local tenant context, PostgreSQL RLS, and a restricted NOBYPASSRLS knowledge role.
+- Optional stateless MCP Streamable HTTP knowledge service with read-only tools, per-tenant bearer-token authentication, request-local tenant context, PostgreSQL RLS, and a restricted NOBYPASSRLS knowledge role. The worker membership uses INHERIT FALSE / SET TRUE so RAG table grants are available only after an explicit role switch.
 - Non-root container images, read-only runtime filesystems where applicable, healthchecks, Compose deployment topology, CI lint/compile/test/dependency-audit gates, image builds, and container smoke tests.
 
 ## Verification boundary
