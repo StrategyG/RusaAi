@@ -11,6 +11,11 @@ def test_rag_migration_runner_uses_database_owner_and_is_fail_fast():
     assert "DROP TABLE" not in script.upper()
 
 
+def test_database_bootstrap_disables_implicit_rag_role_inheritance():
+    script = Path("scripts/postgres/init-agent-db.sh").read_text(encoding="utf-8")
+    assert "GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE, SET TRUE" in script
+
+
 def test_compose_migration_job_is_opt_in_and_waits_for_database():
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     start = compose.index("  rusa-knowledge-migrate:")
