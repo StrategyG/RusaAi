@@ -168,6 +168,10 @@ def make_orchestrator(tools, overrides=None, audit=None):
             workers.append(ScriptedWorker(role, [
                 worker_result(role, [ToolCall("create_pull_request", {"title": "Task PR"})])
             ]))
+        elif role == WorkerRole.TESTER:
+            workers.append(ScriptedWorker(role, [
+                worker_result(role, [ToolCall("get_ci_status")])
+            ]))
         elif role == WorkerRole.SECURITY:
             workers.append(ScriptedWorker(role, [
                 worker_result(role, [
