@@ -63,7 +63,8 @@ jobs:
         run: bash -n scripts/postgres/*.sh
       - name: Run encrypted PostgreSQL backup and restore drill
         env:
-          SOURCE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_test
+          ADMIN_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_test
+          SOURCE_DATABASE_URL: postgresql://rusa_backup_ci:rusa_backup_ci_password_1234567890@127.0.0.1:5432/rusa_test
           RESTORE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_restore_test
           RESTORE_CONFIRM_DATABASE: rusa_restore_test
         run: |
@@ -72,6 +73,7 @@ jobs:
           docker run --rm -i --network host --user "$(id -u):$(id -g)" \
             -v "$RUNNER_TEMP/rusa-agent-backups:/backups" \
             -v "$RUNNER_TEMP/rusa-backup-drill:/drill" \
+            -e ADMIN_DATABASE_URL \
             -e SOURCE_DATABASE_URL \
             -e RESTORE_DATABASE_URL \
             -e RESTORE_CONFIRM_DATABASE \
@@ -80,7 +82,12 @@ jobs:
             --entrypoint bash rusa-agent-db-backup:dr -euo pipefail -s <<'DRILL'
           age-keygen -o "$BACKUP_AGE_IDENTITY_FILE" 2>/dev/null
           export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE rusa_backup_ci
+              LOGIN PASSWORD 'rusa_backup_ci_password_1234567890'
+              INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+          GRANT pg_read_all_data TO rusa_backup_ci;
+          GRANT CONNECT ON DATABASE rusa_test TO rusa_backup_ci;
           CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
               id INTEGER PRIMARY KEY,
               value TEXT NOT NULL
@@ -89,11 +96,17 @@ jobs:
           INSERT INTO public.rusa_drill_probe (id, value)
           VALUES (1, 'encrypted-restore-drill-ok');
           SQL
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE rusa_restore_test"
+          role_flags="$(psql "$ADMIN_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN NOT rolsuper AND rolbypassrls THEN 'ok' ELSE 'bad' END FROM pg_roles WHERE rolname='rusa_backup_ci'")"
+          test "$role_flags" = "ok"
+          if psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO public.rusa_drill_probe (id, value) VALUES (2, 'must-not-write')" >/dev/null 2>&1; then
+              echo "Backup role unexpectedly has write access" >&2
+              exit 1
+          fi
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE rusa_restore_test"
           bash /app/scripts/postgres/restore_drill.sh
           restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT value FROM public.rusa_drill_probe WHERE id=1")"
           test "$restored_value" = "encrypted-restore-drill-ok"
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE rusa_restore_test"
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE rusa_restore_test"
           DRILL
       - name: Audit production dependencies
         run: |
