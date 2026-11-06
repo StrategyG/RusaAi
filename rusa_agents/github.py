@@ -54,6 +54,10 @@ class GitHubToolGateway:
             raise ValueError("GitHub API URL must use HTTPS without credentials or query")
         if not token:
             raise ValueError("GitHub token is required")
+        if not isinstance(allowed_repositories, (set, list, tuple)) or not all(
+            isinstance(item, str) for item in allowed_repositories
+        ):
+            raise ValueError("global repository allowlist must contain strings")
         repositories = {item.strip().lower() for item in allowed_repositories if item.strip()}
         if not repositories or any(
             not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", item)
@@ -69,7 +73,9 @@ class GitHubToolGateway:
                 if (
                     not isinstance(tenant_id, str)
                     or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tenant_id)
+                    or not isinstance(values, (set, list, tuple))
                     or not values
+                    or not all(isinstance(item, str) for item in values)
                 ):
                     raise ValueError("tenant repository mapping contains an invalid entry")
                 normalized = {item.strip().lower() for item in values if item.strip()}
