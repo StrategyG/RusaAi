@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
-from urllib.parse import urlsplit
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class MCPToolError(RuntimeError):
@@ -27,11 +28,12 @@ def validate_server_url(
     allow_http_hosts: set[str] | frozenset[str] = frozenset(),
 ) -> str:
     parsed = urlsplit(server_url)
+    trusted_http_hosts = {host.strip().lower() for host in allow_http_hosts}
     secure = parsed.scheme == "https"
     local = (
         parsed.scheme == "http"
         and bool(parsed.hostname)
-        and (_is_loopback(parsed.hostname) or parsed.hostname.lower() in allow_http_hosts)
+        and (_is_loopback(parsed.hostname) or parsed.hostname.lower() in trusted_http_hosts)
     )
     if (
         not (secure or local)
@@ -60,12 +62,15 @@ class MCPToolClient:
         max_argument_bytes: int = 32_768,
         max_response_bytes: int = 1_000_000,
     ) -> None:
+        trusted_http_hosts = frozenset(host.strip().lower() for host in allow_http_hosts)
+        if any(not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}", host) for host in trusted_http_hosts):
+            raise ValueError("MCP internal HTTP host allowlist is invalid")
         self.server_url = validate_server_url(
             server_url,
-            allow_http_hosts=frozenset(host.lower() for host in allow_http_hosts),
+            allow_http_hosts=trusted_http_hosts,
         )
         if not api_key or len(api_key) < 32 or len(api_key) > 512:
-            raise ValueError("MCP bearer key must contain at least 32 characters")
+            raise ValueError("MCP bearer key must contain 32 to 512 characters")
         if not allowed_tools or any(not isinstance(name, str) or not name for name in allowed_tools):
             raise ValueError("an explicit non-empty MCP tool allowlist is required")
         if timeout_seconds <= 0 or max_argument_bytes < 1024 or max_response_bytes < 1024:
@@ -87,7 +92,11 @@ class MCPToolClient:
             follow_redirects=False,
             trust_env=False,
         ) as http_client:
-            transport = streamable_http_client(self.server_url, http_client=http_client)
+            transport = streamable_http_client(
+                self.server_url,
+                http_client=http_client,
+                max_sse_event_size=self.max_response_bytes,
+            )
             async with Client(transport) as client:
                 result = await client.list_tools()
                 return [
