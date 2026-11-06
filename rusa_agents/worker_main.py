@@ -6,10 +6,16 @@ import logging
 import os
 import signal
 
-from prometheus_client import start_http_server
+from prometheus_client import Gauge, start_http_server
 
 from .metrics import WORKER_READY
 from .runtime import AICodeRuntime
+
+
+WORKER_READY = Gauge(
+    "rusa_aicode_worker_ready",
+    "Whether the autonomous worker has completed startup validation",
+)
 
 
 async def serve() -> None:
