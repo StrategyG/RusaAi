@@ -40,6 +40,7 @@ class RuntimeConfig:
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
             "api_image_digest", "worker_image_digest", "model_host", "db_host",
+            "managed-secret",
         )
         return any(marker in lowered for marker in markers)
 
