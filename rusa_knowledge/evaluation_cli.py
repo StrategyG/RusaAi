@@ -36,7 +36,11 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 
-def _push_report(report: dict[str, Any], endpoint: str) -> None:
+def _push_report(
+    report: dict[str, Any],
+    endpoint: str,
+    minimum_recall: float,
+) -> None:
     registry = CollectorRegistry()
     k = str(report["k"])
     Gauge(
@@ -67,6 +71,11 @@ def _push_report(report: dict[str, Any], endpoint: str) -> None:
         "Number of cases in the latest curated retrieval evaluation.",
         registry=registry,
     ).set(int(report["queries"]))
+    Gauge(
+        "rusa_rag_eval_min_recall_at_k",
+        "Configured minimum acceptable Recall@k for the latest retrieval evaluation.",
+        registry=registry,
+    ).set(minimum_recall)
     push_to_gateway(endpoint, job="rusa-rag-evaluation", registry=registry)
 
 
@@ -101,13 +110,12 @@ def main() -> int:
         service.close()
 
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-    push_endpoint = os.getenv("RUSA_PROMETHEUS_PUSHGATEWAY", "").strip()
-    if push_endpoint:
-        _push_report(report, push_endpoint)
-
     minimum_recall = float(os.getenv("RUSA_RAG_MIN_RECALL_AT_K", "0.80"))
     if not 0.0 <= minimum_recall <= 1.0:
         raise ValueError("RUSA_RAG_MIN_RECALL_AT_K must be between 0 and 1")
+    push_endpoint = os.getenv("RUSA_PROMETHEUS_PUSHGATEWAY", "").strip()
+    if push_endpoint:
+        _push_report(report, push_endpoint, minimum_recall)
     return 0 if report["recall_at_k"] >= minimum_recall else 2
 
 

@@ -175,6 +175,30 @@ services:
                     ).format(sql.Literal(web_password))
                 )
             connection.execute("GRANT CONNECT ON DATABASE rusa_agent TO rusa_web_api")
+            monitor_password = os.getenv("RUSA_MONITOR_DB_PASSWORD", "")
+            if monitor_password:
+                monitor_role = connection.execute(
+                    "SELECT 1 FROM pg_roles WHERE rolname='rusa_monitor'"
+                ).fetchone()
+                if monitor_role:
+                    connection.execute(
+                        sql.SQL(
+                            "ALTER ROLE rusa_monitor WITH LOGIN PASSWORD {} "
+                            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+                        ).format(sql.Literal(monitor_password))
+                    )
+                else:
+                    connection.execute(
+                        sql.SQL(
+                            "CREATE ROLE rusa_monitor LOGIN PASSWORD {} "
+                            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+                        ).format(sql.Literal(monitor_password))
+                    )
+                connection.execute("GRANT pg_monitor TO rusa_monitor")
+                connection.execute("GRANT CONNECT ON DATABASE rusa_agent TO rusa_monitor")
+                connection.execute(
+                    "ALTER ROLE rusa_monitor SET default_transaction_read_only = on"
+                )
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
         queue = PostgresTaskQueue(dsn)
         queue.initialize()
@@ -191,6 +215,7 @@ services:
       RUSA_AGENT_OWNER_DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
       RUSA_WEB_DB_PASSWORD: ${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}
+      RUSA_MONITOR_DB_PASSWORD: ${RUSA_MONITOR_DB_PASSWORD:-}
     depends_on:
       rusa-agent-db:
         condition: service_healthy

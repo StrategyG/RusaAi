@@ -16,7 +16,10 @@ class PrometheusASGIMiddleware:
     def __init__(self, app: Any, service_name: str) -> None:
         self.app = app
         self.service_name = service_name
-        self.metrics_token = os.getenv("RUSA_METRICS_BEARER_TOKEN", "")
+        configured_token = os.getenv("RUSA_METRICS_BEARER_TOKEN", "")
+        self.metrics_token = (
+            configured_token if len(configured_token.encode("utf-8")) >= 32 else ""
+        )
         self.metrics_app = make_asgi_app()
 
     async def _metrics_error(self, send: Any, status_code: int) -> None:

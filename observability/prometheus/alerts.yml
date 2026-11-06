@@ -130,7 +130,7 @@ groups:
   - name: rusa-retrieval
     rules:
       - alert: RAGEvaluationRecallLow
-        expr: rusa_rag_eval_recall_at_k{k="5",job="rusa-rag-evaluation"} < 0.80
+        expr: rusa_rag_eval_recall_at_k{k="5",job="rusa-rag-evaluation"} < on() max(rusa_rag_eval_min_recall_at_k{job="rusa-rag-evaluation"})
         for: 10m
         labels:
           severity: critical

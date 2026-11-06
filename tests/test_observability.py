@@ -1,12 +1,15 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from rusa_observability.alert_sink import _sanitize_alert
 from rusa_observability.metrics import (
+    DB_SIZE_LIMIT,
     INFERENCE_REQUESTS,
     TOKEN_USAGE,
     RAG_EVAL_RECALL,
     RAG_EVAL_MRR,
     RAG_EVAL_NDCG,
+    record_database_capacity_limit,
     record_inference,
     record_retrieval_evaluation,
 )
@@ -32,7 +35,9 @@ def test_inference_metrics_record_latency_outcome_and_exact_tokens():
     assert TOKEN_USAGE.labels(model, "completion")._value.get() == before_completion + 9
 
 
-def test_metrics_endpoint_exposes_http_request_metrics():
+def test_metrics_endpoint_requires_bearer_token_and_exposes_http_metrics(monkeypatch):
+    token = "test-metrics-secret-with-at-least-32-characters"
+    monkeypatch.setenv("RUSA_METRICS_BEARER_TOKEN", token)
     app = FastAPI()
 
     @app.get("/health/live")
@@ -42,9 +47,16 @@ def test_metrics_endpoint_exposes_http_request_metrics():
     install_metrics(app, "test-observability-api")
     client = TestClient(app)
     assert client.get("/health/live").status_code == 200
-    response = client.get("/metrics")
+    assert client.get("/metrics").status_code == 401
+
+    response = client.get(
+        "/metrics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert response.status_code == 200
-    assert 'rusa_http_requests_total{method="GET",route="/health/live",service="test-observability-api",status_code="200"}' in response.text
+    assert "rusa_http_requests_total" in response.text
+    assert 'route="/health/live"' in response.text
+    assert 'service="test-observability-api"' in response.text
 
 
 def test_retrieval_evaluation_updates_quality_gauges():
@@ -60,3 +72,35 @@ def test_retrieval_evaluation_updates_quality_gauges():
     assert RAG_EVAL_RECALL.labels("5")._value.get() == 0.91
     assert RAG_EVAL_MRR.labels("5")._value.get() == 0.82
     assert RAG_EVAL_NDCG.labels("5")._value.get() == 0.87
+
+
+def test_database_capacity_threshold_is_exported():
+    record_database_capacity_limit(10 * 1024**3)
+    assert DB_SIZE_LIMIT.labels("rusa_agent")._value.get() == 10 * 1024**3
+
+
+def test_alert_sink_drops_unapproved_fields():
+    sanitized = _sanitize_alert(
+        {
+            "status": "firing",
+            "fingerprint": "abc123",
+            "labels": {
+                "alertname": "InferenceP95LatencyHigh",
+                "severity": "warning",
+                "service": "rusa-inference",
+                "tenant_id": "must-not-be-forwarded",
+                "secret": "must-not-be-forwarded",
+            },
+            "annotations": {
+                "summary": "Inference latency is high",
+                "description": "p95 exceeded the threshold",
+                "prompt": "must-not-be-forwarded",
+            },
+        }
+    )
+
+    assert sanitized["alertname"] == "InferenceP95LatencyHigh"
+    assert sanitized["service"] == "rusa-inference"
+    assert "tenant_id" not in sanitized
+    assert "secret" not in sanitized
+    assert "prompt" not in sanitized

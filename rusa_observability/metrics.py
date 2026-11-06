@@ -120,6 +120,10 @@ RAG_EVAL_QUERIES = Gauge(
     "rusa_rag_eval_queries",
     "Number of cases in the latest curated retrieval evaluation.",
 )
+RAG_EVAL_MIN_RECALL = Gauge(
+    "rusa_rag_eval_min_recall_at_k",
+    "Configured minimum acceptable Recall@k for the latest retrieval evaluation.",
+)
 AGENT_QUEUE_DEPTH = Gauge(
     "rusa_agent_queue_depth",
     "Tenant-aggregated agent task queue depth by state; no tenant labels.",
