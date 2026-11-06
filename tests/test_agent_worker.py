@@ -5,15 +5,23 @@ from rusa_agents.worker import QueueWorker
 
 
 def make_task():
+    tenant_id = "tenant-worker-test"
+    task_id = "worker-lease-task"
+    idempotency_key = "worker-lease-idempotency"
+    work_branch = CodingTask.expected_work_branch_for(
+        tenant_id, idempotency_key, task_id
+    )
     return CodingTask(
-        tenant_id="tenant-worker-test",
+        tenant_id=tenant_id,
         objective="Verify worker lease fencing",
         repository=RepositoryTarget(
             full_name="StrategyG/RusaAi",
             base_branch="main",
-            work_branch="feature/worker-lease-test",
+            work_branch=work_branch,
         ),
         acceptance_criteria=("Lease token is persisted",),
+        idempotency_key=idempotency_key,
+        task_id=task_id,
     )
 
 
