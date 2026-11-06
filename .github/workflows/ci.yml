@@ -6,7 +6,7 @@ on:
       - "**"
   pull_request:
     branches:
-      - main
+      - "**"
 
 permissions:
   contents: read
@@ -19,6 +19,7 @@ jobs:
   test:
     name: Lint, test, and audit dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16-alpine
@@ -63,9 +64,25 @@ jobs:
   container:
     name: Build and smoke-test containers
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: test
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: |
+          export RUSA_API_KEY=ci-only-inference-key-123456789012345678901234567890
+          export RUSA_MODEL_DIR=.
+          export RUSA_AGENT_DB_PASSWORD=ciownerpassword123456789
+          export RUSA_AGENT_WORKER_DB_PASSWORD=ciworkerpassword123456789
+          export RUSA_AGENT_API_DB_PASSWORD=ciapipassword123456789
+          export RUSA_AGENT_TENANT_KEYS='{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          export RUSA_AGENT_TENANT_REPOSITORIES='{"tenant-a":["StrategyG/RusaAi"]}'
+          export RUSA_AGENT_PROVIDER_BASE_URL=https://provider.example.invalid/v1
+          export RUSA_AGENT_PROVIDER_API_KEY=ci-provider-placeholder
+          export RUSA_AGENT_MODEL=ci-model
+          export RUSA_AGENT_GITHUB_TOKEN=ci-github-placeholder
+          export RUSA_AGENT_AUDIT_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          docker compose config --quiet
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
