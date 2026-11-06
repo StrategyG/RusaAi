@@ -99,14 +99,6 @@ def valid_plan() -> AgentPlan:
                     "purpose": "Write the requested change",
                 },
                 {
-                    "tool": "github.get_ci_status",
-                    "arguments": {
-                        "repository": "StrategyG/RusaAi",
-                        "commit_sha": "$latest_write_commit",
-                    },
-                    "purpose": "Verify CI on the latest commit",
-                },
-                {
                     "tool": "github.create_pull_request",
                     "arguments": {
                         "repository": "StrategyG/RusaAi",
@@ -116,6 +108,14 @@ def valid_plan() -> AgentPlan:
                         "base": "main",
                     },
                     "purpose": "Open a draft pull request",
+                },
+                {
+                    "tool": "github.get_ci_status",
+                    "arguments": {
+                        "repository": "StrategyG/RusaAi",
+                        "commit_sha": "$latest_write_commit",
+                    },
+                    "purpose": "Verify CI on the latest commit after PR creation",
                 },
             ],
             "expected_outcome": "A reviewed draft pull request with passing checks",
