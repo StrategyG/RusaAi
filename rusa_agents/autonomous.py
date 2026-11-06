@@ -13,12 +13,12 @@ class AutonomousCodeWorker:
     """Executes a role-scoped agent loop through a strict tool gateway."""
 
     ROLE_TOOLS = {
-        WorkerRole.ANALYST: {"list_files", "read_file", "git_diff"},
-        WorkerRole.ARCHITECT: {"list_files", "read_file", "git_diff"},
-        WorkerRole.DEVELOPER: {"list_files", "read_file", "write_file", "git_diff"},
-        WorkerRole.DEBUGGER: {"list_files", "read_file", "run_check", "git_diff"},
-        WorkerRole.TESTER: {"list_files", "read_file", "run_check", "git_diff"},
-        WorkerRole.SECURITY: {"list_files", "read_file", "run_check", "git_diff"},
+        WorkerRole.ANALYST: {"list_files", "read_file", "git_diff"
+        WorkerRole.ARCHITECT: {"list_files", "read_file", "git_diff"
+        WorkerRole.DEVELOPER: {"list_files", "read_file", "write_file", "git_diff"
+        WorkerRole.DEBUGGER: {"list_files", "read_file", "run_check", "git_diff"
+        WorkerRole.TESTER: {"list_files", "read_file", "run_check", "git_diff"
+        WorkerRole.SECURITY: {"list_files", "read_file", "run_check", "git_diff"
     }
 
     def __init__(
