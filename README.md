@@ -30,7 +30,7 @@ The optional knowledge plane adds document ingestion, 1,536-dimensional embeddin
 - Retrieval combines vector and lexical ranks and returns source URI, document ID, title, and chunk metadata.
 - MCP exposes only three read-only tools: search_knowledge, get_document, and list_collections.
 - The MCP client and agent gateway enforce HTTPS by default, with loopback or explicitly allowlisted private service HTTP for local/container networking, per-tenant bearer tokens, and a fixed tool allowlist.
-- RAG worker transactions switch from the existing agent-worker login into the dedicated NOBYPASSRLS role `rusa_knowledge_worker`; MCP uses the read-only `rusa_agent_api` role.
+- RAG worker transactions explicitly switch from the existing agent-worker login into the dedicated NOBYPASSRLS role `rusa_knowledge_worker`; its membership disables privilege inheritance and permits SET ROLE only. MCP uses the read-only `rusa_agent_api` role. The current custom-GUC RLS policy is defense in depth, not a hard boundary against a compromised shared worker credential; see the architecture security boundary before production use.
 - The existing specialist workers can consume RAG results alongside episodic memory when RUSA_RAG_ENABLED=true; MCP tools can be enabled with RUSA_MCP_SERVER_URL.
 - The service is optional and does not make the full product production-certified. Apply migration 005, configure a real embedding provider, set tenant credentials, and complete retrieval/security evaluation before production.
 
