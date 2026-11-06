@@ -37,6 +37,8 @@ Install the optional runtime dependencies with python -m pip install -r requirem
 
 Start the MCP service with docker compose --profile knowledge up --build rusa-mcp. Configure RUSA_MCP_TENANT_KEYS as a JSON map from SHA-256 bearer-token digests to tenant IDs; configure the corresponding plaintext tokens only in the agent worker secret store.
 
+A JSONL relevance dataset can be evaluated with python -m rusa_knowledge.cli evaluate --dataset ./eval.jsonl --tenant-id tenant-a --collection agent --k 5; the report includes Recall@K, MRR@K, and nDCG@K.
+
 See [RAG and MCP Enterprise Architecture](docs/architecture/RAG_MCP_ENTERPRISE.md) for deployment, isolation, evaluation, and release gates.
 
 ## Repository layout
