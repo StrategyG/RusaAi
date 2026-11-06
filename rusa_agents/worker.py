@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from datetime import timedelta
 from typing import Any
@@ -25,6 +27,10 @@ logger = logging.getLogger("rusa-agent-worker")
 
 class LeaseLost(RuntimeError):
     """Raised when a worker no longer owns a task lease."""
+
+
+class IdempotencyConflict(ValueError):
+    """Raised when an idempotency key is reused with a different request."""
 
 
 class AgentRuntime:
@@ -87,6 +93,13 @@ class AgentRuntime:
         safe_objective = redact_sensitive_data(task.objective)
         safe_context = redact_sensitive_data(task.context)
         safe_acceptance_criteria = redact_sensitive_data(task.acceptance_criteria)
+        safe_payload = task.model_dump(mode="json")
+        safe_payload["objective"] = safe_objective
+        safe_payload["context"] = safe_context
+        safe_payload["acceptance_criteria"] = safe_acceptance_criteria
+        request_hash = hashlib.sha256(
+            json.dumps(safe_payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
         async with self.database.session() as session:
             existing = await session.scalar(
                 select(TaskRow).where(
@@ -95,11 +108,16 @@ class AgentRuntime:
                 )
             )
             if existing:
+                if existing.request_hash != request_hash:
+                    raise IdempotencyConflict(
+                        "Idempotency-Key was already used with a different task payload"
+                    )
                 return existing.id
             row = TaskRow(
                 id=str(uuid4()),
                 tenant_id=tenant_id,
                 idempotency_key=idempotency_key,
+                request_hash=request_hash,
                 objective=safe_objective,
                 repository=task.repository,
                 base_branch=task.base_branch,
@@ -124,6 +142,10 @@ class AgentRuntime:
                     )
                 )
                 if existing:
+                    if existing.request_hash != request_hash:
+                        raise IdempotencyConflict(
+                            "Idempotency-Key was already used with a different task payload"
+                        )
                     return existing.id
                 raise
             task_id = row.id
