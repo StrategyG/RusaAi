@@ -14,7 +14,7 @@ from rusa_agents.worker import AgentRuntime
 from rusa_agents.contracts import TaskStatus
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.storage import TaskRow
-from rusa_agents.tools import ToolError, ToolRegistry
+from rusa_agents.tools import ToolRegistry
 
 
 class FakeProvider:
