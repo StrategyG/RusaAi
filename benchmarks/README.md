@@ -1,59 +1,68 @@
 # RUSA-AI agent evaluation benchmark
 
-## Benchmark identity
+## Benchmark identity and evidence
 
-- Dataset: `rusa-agent-flow-v1` (`benchmarks/scenarios.json`)
-- Deterministic sample: 5 scenario classes, one fixture per class. These are contract tests, not a statistically representative production sample.
-- Model sample: 10 repetitions per scenario by default; run separately from merge-blocking CI.
-- Every report must record candidate Git SHA, model name + immutable revision, policy version, dataset version, timestamp, and sample counts.
+- Dataset: `rusa-agent-flow-v1` (`benchmarks/scenarios.json`).
+- Deterministic lifecycle sample: 5 scenarios, one executed fixture per class.
+- Labeled policy sample: 5 expected allow/deny/approval decisions.
+- CI report: `benchmark-report.json`, uploaded as a workflow artifact.
+- Every report records candidate SHA, dataset version, model/provider identity, policy version, sample sizes, and unmeasured metrics.
+
+The deterministic provider is a test double. Its task success rate and in-process SQLite latency are correctness diagnostics, **not production model-quality or production SLO baselines**.
 
 ## Deterministic merge gate
 
-The benchmark contract tests exercise the existing runtime components directly:
-1. A successful task path must satisfy its evidence gates before terminal success.
-2. Prohibited policy actions remain denied even if allowlisted and pre-approved.
-3. Tool failures are surfaced and cannot be silently counted as success.
-4. QA/evidence failures remain blocked.
-5. Expired worker leases recover to queued while retry budget remains.
-
-Run:
+Run locally:
 
 ```bash
+python -m pip install -r requirements-agent.txt pytest pytest-asyncio ruff
+ruff check rusa_agents tests/test_benchmark_contract.py tests/test_agent_runtime.py benchmarks/run_deterministic.py
 PYTHONPATH=. python -m pytest -q tests/test_benchmark_contract.py tests/test_agent_runtime.py
+PYTHONPATH=. python benchmarks/run_deterministic.py --output benchmark-report.json
 ```
 
-CI must fail on any test failure. Do not mark these tests as xfail or swallow failures.
+The executable runner exercises:
+1. Normal task completion with deterministic provider and tool fixtures.
+2. A prohibited policy action, which must not execute.
+3. A failing tool with a bounded retry budget, ending in failure.
+4. Failed latest-commit CI evidence, which must block task success.
+5. An expired worker lease, which must recover to queued while retry budget remains.
 
-## Model benchmark (non-blocking / repeated)
+The runner also evaluates five independently labeled policy cases. It fails closed if any lifecycle scenario has an unexpected outcome, policy accuracy is below 100%, or a prohibited action is allowed.
 
-Run only after a real provider is configured and the model revision is pinned. Execute each scenario at least 10 times; increase to 30+ for promotion decisions. Record per-attempt outcome, first-attempt success, policy expected/actual decision, elapsed milliseconds, retry count, input/output tokens, and provider-reported cost when available. Store raw JSONL results as a CI artifact; aggregate p50/p95 and confidence intervals from raw observations.
+GitHub Actions runs lint, compile, the deterministic pytest suite, and the executable report generator. Configure the check named **Deterministic agent regression benchmark** as a required status check in repository branch protection; workflow presence alone does not make it a protected-branch requirement.
 
-A run without model revision or policy version is invalid for model-quality comparison. Do not infer token usage or cost from prompt length.
+## Model benchmark (separate, repeated, non-blocking)
+
+Model evaluation must use a real configured provider and an immutable model revision. Run at least 10 repetitions per case for exploratory comparison and 30+ per case before promotion decisions. Record each attempt's outcome, first-attempt success, policy expected/actual decision, elapsed time, retry count, input/output tokens, and provider-reported cost when available.
+
+Do not compare runs unless dataset version, model revision, policy version, provider/hardware configuration, and evaluation settings match. Keep raw per-attempt JSONL and the aggregate report together. Missing revision identifiers invalidate a model-quality comparison.
 
 ## Metric definitions
 
-- Task success rate = succeeded tasks / terminal tasks (also report completion rate separately).
+- Task success rate = succeeded tasks / terminal tasks.
 - First-attempt success rate = tasks succeeding on attempt 1 / terminal tasks.
-- Policy decision accuracy = correct allow/deny/approval decisions / labeled policy decisions. Report false-allow and false-deny counts separately.
-- p95 latency = nearest-rank p95 of end-to-end task duration; state sample size.
-- Retry rate = tasks with attempts > 1 / all sampled tasks; also report total retries.
-- Cost per task = sum of provider-reported costs / completed tasks. If usage/cost telemetry is absent, report `NOT_MEASURED`.
+- Policy decision accuracy = correct allow/deny/approval outcomes / independently labeled policy decisions. Report false-allow and false-deny counts separately.
+- p95 latency = nearest-rank p95 of end-to-end terminal task duration. Always include the latency sample size.
+- Retry rate = tasks with attempts greater than one / all sampled tasks; retry count = sum(attempts - 1).
+- Cost per task = provider-reported cost sum / completed tasks. Never infer cost from prompt length.
+
+For the deterministic fixture report, negative scenarios intentionally end in failed/blocked states; use `scenario_pass_rate` to judge whether expected failure handling worked. Do not interpret its task success rate as the expected pass rate of the whole scenario matrix.
 
 ## Initial regression thresholds (provisional)
 
-These are proposed guardrails, not measured baselines:
+These are proposed guardrails, not measured production baselines:
 - Deterministic gate: 100% pass; any failure blocks merge.
 - Policy false-allow: 0; any prohibited action allowed blocks merge.
-- Task success: no decrease greater than 5 percentage points versus a same-dataset baseline, with at least 30 model attempts per case before promotion decisions.
-- First-attempt success: no decrease greater than 5 percentage points.
-- p95 latency: no increase greater than 20% against a comparable pinned-model baseline.
-- Retry rate: no increase greater than 10 percentage points.
-- Cost per task: no increase greater than 15% when provider usage and price data are available.
+- Model task success and first-attempt success: maximum 5 percentage-point regression against a comparable pinned-model baseline.
+- p95 latency: maximum 20% regression against a comparable provider/hardware baseline.
+- Retry rate: maximum 10 percentage-point regression.
+- Cost per task: maximum 15% regression when provider usage and price data are available.
 
-Do not apply model thresholds until a real baseline with matching dataset, model revision, policy version, and hardware/provider configuration exists. Until then, status is `BASELINE_PENDING`.
+Do not apply model thresholds until a real baseline with matching dataset, model revision, policy version, and provider/hardware configuration exists. Until then, model status is `BASELINE_PENDING`.
 
-## Required report schema
+## Metric availability
 
-`benchmark_id`, `dataset_version`, `candidate_sha`, `model_name`, `model_revision`, `policy_version`, `sample_size`, `scenario_counts`, `task_success_rate`, `first_attempt_success_rate`, `policy_decision_accuracy`, `false_allow_count`, `false_deny_count`, `latency_p95_ms`, `retry_rate`, `retry_count`, `cost_per_task`, and `unmeasured_metrics`.
+The operational endpoint `/v1/agent/evaluation/metrics` exposes tenant-scoped task success, first-attempt success, retry count/rate, nearest-rank p50/p95 latency, audited policy-decision counts, labeled policy accuracy, model identity, and explicit unmeasured values.
 
-Use explicit `null` + a reason or `NOT_MEASURED` for unavailable metrics. Never publish zero for an unmeasured metric.
+Policy accuracy remains `null` unless independent labeled `policy.benchmark_decision` events exist. Provider cost remains `null` until input/output token usage and pricing are persisted per task. Never publish zero for an unmeasured metric.
