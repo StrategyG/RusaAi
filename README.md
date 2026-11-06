@@ -37,10 +37,13 @@ RusaAi/
 git clone https://github.com/StrategyG/RusaAi.git
 cd RusaAi
 
-python3.12 -m venv .venv
 # Linux/macOS
+python3.12 -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
+
+# Windows PowerShell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
@@ -53,16 +56,25 @@ The runtime dependencies are intentionally limited to FastAPI, Uvicorn, Pydantic
 The application reads environment variables from the process. It does not automatically load `.env`.
 
 ```bash
+# Linux/macOS
 cp .env.example .env
 set -a
 . ./.env
 set +a
+
+# Windows PowerShell (the app does not import .env automatically)
+$env:ENVIRONMENT = "development"
+$env:RUSA_ENABLE_MOCK_INFERENCE = "true"
 ```
 
 The example file enables the development-only mock response. To enable API-key authentication locally, set a key before starting the server:
 
 ```bash
+# Linux/macOS
 export RUSA_API_KEY="$(openssl rand -hex 32)"
+
+# Windows PowerShell
+$env:RUSA_API_KEY = (python -c "import secrets; print(secrets.token_hex(32))").Trim()
 ```
 
 | Variable | Behavior |
