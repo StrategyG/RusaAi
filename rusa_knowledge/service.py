@@ -22,8 +22,10 @@ class KnowledgeService:
         self.embeddings = embeddings
 
     @classmethod
-    def from_env(cls, *, check_ready: bool = True) -> KnowledgeService:
-        dsn = os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or os.getenv("RUSA_AGENT_DATABASE_URL")
+    def from_env(
+        cls, *, check_ready: bool = True, database_url: str | None = None
+    ) -> KnowledgeService:
+        dsn = database_url or os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or os.getenv("RUSA_AGENT_DATABASE_URL")
         if not dsn:
             raise RuntimeError("RUSA_KNOWLEDGE_DATABASE_URL is required")
         provider = OpenAICompatibleEmbeddingProvider(
