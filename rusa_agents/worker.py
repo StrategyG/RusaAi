@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -407,7 +408,7 @@ class AgentRuntime:
             "task.started",
             {
                 "model_name": getattr(self.provider, "model", None),
-                "model_revision": __import__("os").getenv("RUSA_AGENT_MODEL_REVISION"),
+                "model_revision": os.getenv("RUSA_AGENT_MODEL_REVISION"),
                 "policy_version": POLICY_VERSION,
             },
         )
