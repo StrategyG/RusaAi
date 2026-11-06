@@ -96,10 +96,22 @@ def configured_tenant_repository_map() -> dict[str, set[str]]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Agent tenant credential configuration is invalid",
         ) from exc
-    if not isinstance(keys, dict) or not set(tenant_map).issubset(keys):
+    if (
+        not isinstance(keys, dict)
+        or set(tenant_map) != set(keys)
+        or any(
+            not isinstance(key, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", key)
+            or not isinstance(value, str)
+            or len(value) < 32
+            or not value.isascii()
+            for key, value in keys.items()
+        )
+        or len(set(keys.values())) != len(keys)
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Every repository-mapped tenant must have an API credential",
+            detail="Every tenant must have one unique API credential and one repository assignment",
         )
     return tenant_map
 
