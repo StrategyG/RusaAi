@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
@@ -227,8 +228,19 @@ class AICodeOrchestrator:
             (item for item in reversed(record.results) if item.role == WorkerRole.SECURITY),
             None,
         )
+        reviewer = next(
+            (
+                item for item in reversed(record.results)
+                if item.role == WorkerRole.ANALYST
+                and "acceptance_criteria" in item.evidence
+            ),
+            None,
+        )
         if tester is None or security is None:
             record.errors.append("Tester or security worker did not produce a result.")
+            return None
+        if reviewer is None:
+            record.errors.append("Final acceptance reviewer did not produce criterion evidence.")
             return None
         required = [
             (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
@@ -250,6 +262,36 @@ class AICodeOrchestrator:
         ]
         if failed:
             record.errors.append("Validation checks failed: " + ", ".join(failed))
+            return False
+
+        reviews = reviewer.evidence.get("acceptance_criteria")
+        expected = record.task.acceptance_criteria
+        if not isinstance(reviews, list) or len(reviews) != len(expected):
+            record.errors.append("Acceptance review evidence is missing or incomplete.")
+            return None
+        reviewed: dict[str, dict] = {}
+        for item in reviews:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"criterion", "passed", "evidence"}
+                or not isinstance(item.get("criterion"), str)
+                or type(item.get("passed")) is not bool
+                or not isinstance(item.get("evidence"), str)
+                or not item["evidence"].strip()
+            ):
+                record.errors.append("Acceptance review evidence has an invalid structure.")
+                return None
+            criterion = item["criterion"]
+            if criterion not in expected or criterion in reviewed:
+                record.errors.append("Acceptance review criteria do not match the task contract.")
+                return None
+            reviewed[criterion] = item
+        if set(reviewed) != set(expected):
+            record.errors.append("Acceptance review omitted one or more required criteria.")
+            return None
+        unmet = [criterion for criterion in expected if not reviewed[criterion]["passed"]]
+        if unmet:
+            record.errors.append("Acceptance criteria not met: " + "; ".join(unmet))
             return False
         return True
 
@@ -410,7 +452,24 @@ class AICodeOrchestrator:
                         )
                         evidence_result = False
                     else:
-                        evidence_result = self._verify_evidence(record)
+                        review_task = replace(
+                            task,
+                            metadata={**task.metadata, "aicode_phase": "acceptance_review"},
+                        )
+                        review_result = await self._execute(
+                            WorkerRole.ANALYST,
+                            review_task,
+                            previous_attempt_results + list(record.results),
+                            semaphore,
+                        )
+                        await self._record_result(record, review_result)
+                        if not review_result.success or review_result.blockers:
+                            record.errors.append(
+                                "Final acceptance review could not be completed."
+                            )
+                            evidence_result = None
+                        else:
+                            evidence_result = self._verify_evidence(record)
 
                     if evidence_result is True:
                         record.transition(TaskState.SUCCEEDED)
