@@ -6,7 +6,8 @@ import logging
 import os
 import socket
 import time
-from typing import Any, Coroutine
+from collections.abc import Coroutine
+from typing import Any
 
 from .audit import PostgresAuditLog
 from .autonomous import AutonomousCodeWorker
