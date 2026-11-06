@@ -81,3 +81,19 @@ def test_autonomous_worker_stops_on_explicit_blocker():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert result.blockers == ["Access denied"]
+
+
+def test_autonomous_worker_cannot_supply_forged_test_evidence():
+    worker = AutonomousCodeWorker(
+        WorkerRole.TESTER,
+        StubProvider(json.dumps({
+            "message": "All tests passed",
+            "actions": [],
+            "done": True,
+            "evidence": {"check:pytest": {"exit_code": 0}},
+        })),
+        StubGateway(),
+    )
+    result = asyncio.run(worker.run(make_task(), []))
+    assert not result.success
+    assert not result.evidence
