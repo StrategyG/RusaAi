@@ -16,7 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
 from .http_limits import BodyLimitMiddleware
-from .queue import IdempotencyConflictError, PostgresTaskQueue
+from .queue import (
+    IdempotencyConflictError,
+    PostgresTaskQueue,
+    QueueCapacityExceededError,
+)
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 if MAX_AGENT_REQUEST_BYTES <= 0:
@@ -287,6 +291,12 @@ def create_task(
             task_id=task_id,
         )
         task_id = request.app.state.queue.enqueue(task)
+    except QueueCapacityExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task capacity is full; retry after outstanding work drains",
+            headers={"Retry-After": "10"},
+        ) from exc
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
@@ -332,6 +342,12 @@ def retry_failed_task(
         if request.app.state.queue.requeue_failed(tenant_id, task_id):
             return {"task_id": task_id, "tenant_id": tenant_id, "status": "queued"}
         result = request.app.state.queue.get(tenant_id, task_id)
+    except QueueCapacityExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task capacity is full; retry after outstanding work drains",
+            headers={"Retry-After": "10"},
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=503,

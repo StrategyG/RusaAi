@@ -3,7 +3,7 @@ import json
 from fastapi.testclient import TestClient
 
 from rusa_agents import api
-from rusa_agents.queue import IdempotencyConflictError
+from rusa_agents.queue import IdempotencyConflictError, QueueCapacityExceededError
 
 
 class FakeQueue:
@@ -235,6 +235,53 @@ def test_agent_api_maps_queue_outage_to_retryable_503(monkeypatch):
     assert response.status_code == 503
     assert response.json()["detail"] == "Agent task queue is temporarily unavailable"
 
+
+
+
+
+
+def test_agent_api_applies_backpressure_to_new_tasks(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Submit under queue saturation",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["The queue rejects excess work safely"],
+    }
+
+    with TestClient(api.app) as client:
+        def reject_when_full(task):
+            raise QueueCapacityExceededError("tenant capacity is full")
+
+        client.app.state.queue.enqueue = reject_when_full
+        response = client.post("/v1/agent/tasks", headers=headers, json=body)
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "10"
+    assert "capacity is full" in response.json()["detail"]
+
+
+def test_agent_api_applies_backpressure_to_failed_task_retry(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Retry under queue saturation",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["Retry cannot bypass admission control"],
+    }
+
+    with TestClient(api.app) as client:
+        created = client.post("/v1/agent/tasks", headers=headers, json=body)
+        task_id = created.json()["task_id"]
+
+        def reject_retry(tenant_id, task_id):
+            raise QueueCapacityExceededError("tenant capacity is full")
+
+        client.app.state.queue.requeue_failed = reject_retry
+        response = client.post(f"/v1/agent/tasks/{task_id}/retry", headers=headers)
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "10"
 
 
 def test_agent_api_cancels_task_and_is_idempotent_for_own_tenant(monkeypatch):
