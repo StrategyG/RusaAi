@@ -124,7 +124,7 @@ class AICodeRuntime:
             await asyncio.sleep(60)
             try:
                 renewed = await asyncio.to_thread(
-                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, 180
+                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
                 )
             except Exception:
                 logger.exception("Lease heartbeat failed for job %s", job.id)
