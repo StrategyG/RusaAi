@@ -104,21 +104,21 @@ class HierarchicalOrchestrator:
                 raise PlanRejected("CI status must be checked against the latest write commit")
 
         if write_indexes:
+            pr_indexes = [
+                index for index, step in enumerate(plan.steps)
+                if step.tool == "github.create_pull_request"
+            ]
+            ci_indexes = [
+                index for index, step in enumerate(plan.steps)
+                if step.tool == "github.get_ci_status"
+            ]
             if task["require_pull_request"]:
-                pr_indexes = [
-                    index for index, step in enumerate(plan.steps)
-                    if step.tool == "github.create_pull_request"
-                ]
                 if not pr_indexes or pr_indexes[-1] <= write_indexes[-1]:
                     raise PlanRejected("A pull request must follow all repository writes")
             if task["require_ci"]:
-                ci_indexes = [
-                    index for index, step in enumerate(plan.steps)
-                    if step.tool == "github.get_ci_status"
-                ]
                 if not ci_indexes or ci_indexes[-1] <= write_indexes[-1]:
                     raise PlanRejected("CI verification must follow all repository writes")
-                if task["require_pull_request"] and pr_indexes and ci_indexes[-1] <= pr_indexes[-1]:
+                if task["require_pull_request"] and ci_indexes[-1] <= pr_indexes[-1]:
                     raise PlanRejected("CI verification must be the final step after draft PR creation")
 
     @staticmethod
