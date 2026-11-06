@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import logging
 import queue
@@ -505,6 +506,7 @@ class VLLMBackend:
             gpu_memory_utilization=gpu_memory_utilization,
             dtype="auto",
             disable_log_stats=True,
+            enable_log_requests=False,
         )
         engine = AsyncLLMEngine.from_engine_args(engine_args)
         tokenizer = AutoTokenizer.from_pretrained(
@@ -604,10 +606,13 @@ class VLLMBackend:
                     logger.warning("Could not abort cancelled vLLM request")
 
     async def close(self) -> None:
-        shutdown = getattr(self.engine, "shutdown_background_loop", None)
+        shutdown = (
+            getattr(self.engine, "shutdown_background_loop", None)
+            or getattr(self.engine, "shutdown", None)
+        )
         if shutdown:
             result = shutdown()
-            if asyncio.iscoroutine(result):
+            if inspect.isawaitable(result):
                 await result
 
 
