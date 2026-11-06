@@ -72,3 +72,9 @@ def test_user_admin_workspace_is_loopback_published_and_migration_gated():
     assert "rusa-agent-audit-data:/var/lib/rusa-agent" in services["rusa-api"]["volumes"]
     assert "RUSA_AUTH_SCHEMA_MANAGED_EXTERNALLY" in services["rusa-api"]["environment"]
     assert "006_user_identity.sql" in " ".join(services["rusa-agent-migrate"]["command"])
+    assert services["rusa-agent-db"]["environment"]["RUSA_WEB_DB_PASSWORD"] == "${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}"
+    assert services["rusa-agent-migrate"]["environment"]["RUSA_WEB_DB_PASSWORD"] == "${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}"
+
+    init_script = (ROOT / "scripts/postgres/init-agent-db.sh").read_text(encoding="utf-8")
+    assert "RUSA_WEB_DB_PASSWORD is required" in init_script
+    assert 'case "$RUSA_WEB_DB_PASSWORD" in' in init_script
