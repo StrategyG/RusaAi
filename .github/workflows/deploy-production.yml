@@ -76,6 +76,48 @@ jobs:
             echo "MCP_DIGEST=$MCP_DIGEST"
           } >> "$GITHUB_ENV"
 
+      - name: Verify requested digests against the signed release manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_dir="$(mktemp -d)"
+          trap 'rm -rf "$manifest_dir"' EXIT
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \\
+            --pattern release-manifest.txt --dir "$manifest_dir"
+          manifest="$manifest_dir/release-manifest.txt"
+          manifest_value() {
+            local key="$1"
+            awk -F= -v key="$key" '
+              $1 == key {
+                sub(/^[^=]*=/, "")
+                value = $0
+                count++
+              }
+              END {
+                if (count != 1) exit 1
+                print value
+              }
+            ' "$manifest"
+          }
+          [[ "$(manifest_value release_tag)" == "$RELEASE_TAG" ]]
+          source_commit="$(manifest_value source_commit)"
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ && "$source_commit" == "$tag_commit" ]] || {
+            echo "Release manifest source commit does not match the checked-out release tag." >&2
+            exit 1
+          }
+          [[ "$(manifest_value api_image)" == "$API_IMAGE" ]]
+          [[ "$(manifest_value api_digest)" == "$API_DIGEST" ]]
+          [[ "$(manifest_value worker_image)" == "$WORKER_IMAGE" ]]
+          [[ "$(manifest_value worker_digest)" == "$WORKER_DIGEST" ]]
+          [[ "$(manifest_value sandbox_image)" == "$SANDBOX_IMAGE" ]]
+          [[ "$(manifest_value sandbox_digest)" == "$SANDBOX_DIGEST" ]]
+          [[ "$(manifest_value mcp_image)" == "$MCP_IMAGE" ]]
+          [[ "$(manifest_value mcp_digest)" == "$MCP_DIGEST" ]]
+          echo "All requested image digests match the immutable release manifest."
+
       - name: Authenticate to GHCR for signature verification
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
@@ -152,6 +194,10 @@ jobs:
         run: |
           set -euo pipefail
           : "${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
+          [[ "$GHCR_PULL_USERNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]] || {
+            echo "GHCR_PULL_USERNAME must be a valid 1-39 character GitHub username." >&2
+            exit 1
+          }
           : "${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
           remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
           printf '%s' "$GHCR_PULL_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
