@@ -108,9 +108,9 @@ class AgentEvaluator:
             "average_attempts": round(attempts / total, 2) if total else None,
             "validated_plan_rate": round(planned / total, 4) if total else None,
             "reviewer_approval_rate": round(
-                reviewer_approved / reviewer_results,
+                reviewer_approved / reviewer_decisions,
                 4,
-            ) if reviewer_results else None,
+            ) if reviewer_decisions else None,
             "human_override_count": human_overrides,
             "reviewer_rejection_count": reviewed_rejections,
             "reviewer_decision_count": reviewer_decisions,
