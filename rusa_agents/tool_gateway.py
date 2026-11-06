@@ -94,17 +94,41 @@ class DockerSandbox:
                 raise ToolDenied("Sandbox snapshot exceeds configured size limit")
             return shutil.copy2(source, destination)
 
-        ignore = shutil.ignore_patterns(
-            ".git", ".env*", ".secrets", "secrets", "credentials",
-            ".ssh", ".aws", ".azure", ".rusa-ai", ".venv", "venv",
-            "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules",
-        )
+        sensitive_parts = {
+            ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
+            ".azure", ".rusa-ai", ".venv", "venv", "node_modules",
+        }
+        sensitive_names = {
+            ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
+            "authorized_keys", "known_hosts", "credentials.json",
+            "service-account.json", "secrets.json", "token.json",
+        }
+        sensitive_suffixes = {
+            ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt",
+            ".cer", ".der", ".ppk",
+        }
+
+        def ignore_sensitive(directory: str, names: list[str]) -> set[str]:
+            ignored = set()
+            for name in names:
+                candidate = Path(directory) / name
+                lowered = name.lower()
+                if (
+                    candidate.is_symlink()
+                    or lowered in sensitive_parts
+                    or lowered in sensitive_names
+                    or (lowered.startswith(".env") and lowered != ".env.example")
+                    or candidate.suffix.lower() in sensitive_suffixes
+                    or lowered in {"__pycache__", ".pytest_cache", ".ruff_cache"}
+                ):
+                    ignored.add(name)
+            return ignored
         # The real checkout and Git metadata are never mounted into test containers.
         with tempfile.TemporaryDirectory(prefix=".rusa-sandbox-", dir=workspace.parent) as temp_root:
             snapshot = Path(temp_root) / "workspace"
             try:
                 shutil.copytree(
-                    workspace, snapshot, symlinks=True, ignore=ignore,
+                    workspace, snapshot, symlinks=True, ignore=ignore_sensitive,
                     copy_function=bounded_copy,
                 )
             except (OSError, ToolDenied) as exc:
