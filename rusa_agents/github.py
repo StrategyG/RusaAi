@@ -280,6 +280,7 @@ class GitHubToolGateway:
             raise RuntimeError("GitHub returned an invalid work-branch SHA")
 
         total_count = None
+        pagination_valid = True
         raw_items = []
         for page in range(1, self.max_check_pages + 1):
             payload = await self._request(
@@ -291,7 +292,9 @@ class GitHubToolGateway:
                 raise RuntimeError("GitHub check-runs response was invalid")
             page_total = payload.get("total_count")
             if type(page_total) is not int or page_total < 0:
-                raise RuntimeError("GitHub check-runs response omitted a valid total_count")
+                total_count = None
+                pagination_valid = False
+                break
             if total_count is None:
                 total_count = page_total
             elif page_total != total_count:
@@ -316,7 +319,9 @@ class GitHubToolGateway:
             if len(raw_items) >= total_count:
                 break
 
-        checks_complete = total_count is not None and len(raw_items) == total_count
+        checks_complete = (
+            pagination_valid and total_count is not None and len(raw_items) == total_count
+        )
         latest = await self._request(
             "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='')}",
         )

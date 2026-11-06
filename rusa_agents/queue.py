@@ -43,21 +43,31 @@ class PostgresTaskQueue:
             """)
             connection.execute("ALTER TABLE rusa_agent_tasks ENABLE ROW LEVEL SECURITY")
             connection.execute("ALTER TABLE rusa_agent_tasks FORCE ROW LEVEL SECURITY")
-            connection.execute("""
-                DO $
-                BEGIN
-                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
-                        EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE rusa_agent_tasks FROM rusa_agent_api';
-                        EXECUTE 'GRANT SELECT, INSERT ON TABLE rusa_agent_tasks TO rusa_agent_api';
-                        EXECUTE 'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api';
-                    END IF;
-                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api')
-                       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker') THEN
-                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE ALL ON TABLES FROM rusa_agent_api';
-                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE ALL ON SEQUENCES FROM rusa_agent_api';
-                    END IF;
-                END $;
-            """)
+            api_role_exists = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api')"
+            ).fetchone()[0]
+            worker_role_exists = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker')"
+            ).fetchone()[0]
+            if api_role_exists:
+                connection.execute(
+                    "REVOKE ALL PRIVILEGES ON TABLE rusa_agent_tasks FROM rusa_agent_api"
+                )
+                connection.execute(
+                    "GRANT SELECT, INSERT ON TABLE rusa_agent_tasks TO rusa_agent_api"
+                )
+                connection.execute(
+                    "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api"
+                )
+            if api_role_exists and worker_role_exists:
+                connection.execute(
+                    "ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public "
+                    "REVOKE ALL ON TABLES FROM rusa_agent_api"
+                )
+                connection.execute(
+                    "ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public "
+                    "REVOKE ALL ON SEQUENCES FROM rusa_agent_api"
+                )
             connection.execute("DROP POLICY IF EXISTS rusa_agent_tenant_isolation ON rusa_agent_tasks")
             connection.execute("""
                 CREATE POLICY rusa_agent_tenant_isolation ON rusa_agent_tasks

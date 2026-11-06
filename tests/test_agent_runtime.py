@@ -558,7 +558,8 @@ def test_worker_can_list_repository_root_without_file_path():
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
     result = asyncio.run(orchestrator._run_worker(record, WorkerRole.ANALYST))
-    assert result.success is True
+    assert result.blockers == ()
+    assert [item.name for item in result.tool_results] == ["list_files"]
     assert tools.calls[0].name == "list_files"
 
 
@@ -575,7 +576,7 @@ def test_orchestrator_persists_stage_checkpoints():
             checkpoint_callback=persist,
         )
     )
-    assert result.state == TaskState.SUCCEEDED
+    assert result.state == TaskState.SUCCEEDED, result.errors
     assert snapshots
     assert (TaskState.SUCCEEDED, 7) in snapshots
 
@@ -676,7 +677,7 @@ def test_security_stage_blocks_incomplete_repository_diff():
 
     record = asyncio.run(make_orchestrator(IncompleteDiffTools()).run(make_task()))
     assert record.state == TaskState.BLOCKED
-    assert any("complete" in error.lower() for error in record.errors)
+    assert any("complete" in error.lower() for error in record.errors), record.errors
 
 
 

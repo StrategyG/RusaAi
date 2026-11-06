@@ -32,15 +32,16 @@ class PostgresMemoryStore:
             """)
             connection.execute("ALTER TABLE rusa_agent_memory ENABLE ROW LEVEL SECURITY")
             connection.execute("ALTER TABLE rusa_agent_memory FORCE ROW LEVEL SECURITY")
-            connection.execute("""
-                DO $
-                BEGIN
-                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
-                        EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE rusa_agent_memory FROM rusa_agent_api';
-                        EXECUTE 'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api';
-                    END IF;
-                END $;
-            """)
+            api_role_exists = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api')"
+            ).fetchone()[0]
+            if api_role_exists:
+                connection.execute(
+                    "REVOKE ALL PRIVILEGES ON TABLE rusa_agent_memory FROM rusa_agent_api"
+                )
+                connection.execute(
+                    "REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM rusa_agent_api"
+                )
             connection.execute("DROP POLICY IF EXISTS rusa_memory_tenant_isolation ON rusa_agent_memory")
             connection.execute("""
                 CREATE POLICY rusa_memory_tenant_isolation ON rusa_agent_memory

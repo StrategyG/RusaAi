@@ -186,14 +186,11 @@ def test_postgres_queue_fences_expired_lease_owners():
 
 def test_api_database_role_has_only_task_submit_and_read_privileges():
     with psycopg.connect(DSN) as connection:
-        connection.execute("""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
-                    CREATE ROLE rusa_agent_api NOLOGIN NOBYPASSRLS;
-                END IF;
-            END $$;
-        """)
+        role_exists = connection.execute(
+            "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api')"
+        ).fetchone()[0]
+        if not role_exists:
+            connection.execute("CREATE ROLE rusa_agent_api NOLOGIN NOBYPASSRLS")
         connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
     PostgresTaskQueue(DSN).initialize()
     PostgresMemoryStore(DSN).initialize()
