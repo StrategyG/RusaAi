@@ -1,0 +1,67 @@
+services:
+  # Extend the existing production worker with tenant-scoped, read-only retrieval.
+  api:
+    environment:
+      # The base service loads .env; explicitly remove RAG/MCP-only secrets.
+      RUSA_WORKER_KNOWLEDGE_DATABASE_URL: ""
+      RUSA_MCP_DATABASE_URL: ""
+      RUSA_MCP_TENANT_KEYS: ""
+      RUSA_MCP_IMAGE: ""
+      RUSA_MCP_ALLOWED_HOSTS: ""
+      RUSA_MCP_BIND_PORT: ""
+      RUSA_KNOWLEDGE_DATABASE_URL: ""
+      RUSA_KNOWLEDGE_DB_ROLE: ""
+      RUSA_RAG_ENABLED: ""
+      RUSA_EMBEDDING_BASE_URL: ""
+      RUSA_EMBEDDING_API_KEY: ""
+      RUSA_EMBEDDING_MODEL: ""
+
+  worker:
+    environment:
+      RUSA_RAG_ENABLED: ${RUSA_RAG_ENABLED:-false}
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_WORKER_KNOWLEDGE_DATABASE_URL:?Set a worker knowledge DB login DSN}
+      RUSA_KNOWLEDGE_DB_ROLE: ${RUSA_KNOWLEDGE_DB_ROLE:-rusa_knowledge_reader}
+      RUSA_KNOWLEDGE_COLLECTION: ${RUSA_KNOWLEDGE_COLLECTION:-agent}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:?Set an OpenAI-compatible embeddings endpoint}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:?Set the embeddings API key}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-text-embedding-3-small}
+      # These credentials belong only to the MCP service.
+      RUSA_WORKER_KNOWLEDGE_DATABASE_URL: ""
+      RUSA_MCP_DATABASE_URL: ""
+      RUSA_MCP_TENANT_KEYS: ""
+      RUSA_MCP_IMAGE: ""
+      RUSA_MCP_ALLOWED_HOSTS: ""
+      RUSA_MCP_BIND_PORT: ""
+
+  # No .env_file: only MCP's dedicated DB login and tenant token hashes are injected.
+  rusa-mcp:
+    image: ${RUSA_MCP_IMAGE:?Set RUSA_MCP_IMAGE to an immutable registry digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    environment:
+      ENVIRONMENT: production
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_MCP_DATABASE_URL:?Set the dedicated read-only MCP DB login DSN}
+      RUSA_KNOWLEDGE_DB_ROLE: ${RUSA_KNOWLEDGE_DB_ROLE:-rusa_knowledge_reader}
+      RUSA_MCP_TENANT_KEYS: ${RUSA_MCP_TENANT_KEYS:?Set SHA-256 tenant bearer-token digests}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:?Set an OpenAI-compatible embeddings endpoint}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:?Set the embeddings API key}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-text-embedding-3-small}
+      RUSA_MCP_ALLOWED_HOSTS: ${RUSA_MCP_ALLOWED_HOSTS:-rusa-mcp,rusa-mcp:*}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:${RUSA_MCP_BIND_PORT:-8002}:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/ready', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 60s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
