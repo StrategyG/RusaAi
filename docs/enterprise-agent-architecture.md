@@ -36,11 +36,11 @@ The model-serving API and agent control plane are separate processes and contain
 - Analyst: repository inspection and information gathering.
 - Architect: design and implementation sequencing.
 - Developer: branch-scoped code and documentation writes.
-- Reviewer: review-oriented analysis and acceptance-criteria checks.
+- Reviewer: compares the work branch against the base branch, reviews bounded diff patches against the objective and acceptance criteria, and returns a typed risk assessment. Medium/high/critical findings pause execution for an approver.
 - Tester: CI evidence inspection.
 - Security: policy, tenant, source ACL, and prompt-injection checks.
 
-The current runtime persists typed WorkerMessage envelopes in agent_messages, including protocol version, message ID, task/correlation IDs, sender, recipient, type, timestamp, and payload. Tool actions are routed to logical roles and reported to the supervisor. These roles are not yet independently autoscaled agent services; they currently execute within the supervisor-controlled worker process.
+The current runtime persists typed WorkerMessage envelopes in agent_messages, including protocol version, message ID, task/correlation IDs, sender, recipient, type, timestamp, and payload. Tool actions are routed to logical roles and reported to the supervisor. The reviewer uses a separate review prompt and typed result contract through the configured model provider; it is a logical specialist, not a separately hosted model. Reviewer rejection pauses the task for a separate approver credential, and any human override is recorded in task evidence. These roles are not yet independently autoscaled agent services; they currently execute within the supervisor-controlled worker process.
 
 ## Worker orchestration
 
@@ -69,7 +69,7 @@ The MCP gateway supports Streamable HTTP servers. Administrators configure serve
 
 ## Tools and safety
 
-Only registered tools execute. Tool arguments are validated against JSON Schema. GitHub operations are constrained to the task repository and exact work branch. MCP endpoints and tool names are administrator-configured. RAG retrieval receives tenant identity from trusted worker context, never from model-controlled arguments. No arbitrary shell or filesystem tool is registered.
+Only registered tools execute. Tool arguments are validated against JSON Schema. GitHub operations are constrained to the task repository and exact work branch. Code changes require a bounded branch comparison, reviewer result, draft PR, and final CI check on the latest write commit. MCP endpoints and tool names are administrator-configured. RAG retrieval receives tenant identity from trusted worker context, never from model-controlled arguments. No arbitrary shell or filesystem tool is registered.
 
 Approver credentials are separate from tenant API credentials. Merge, deploy, release, secrets, permissions, migrations, and destructive actions remain prohibited or require a future separately reviewed protected-tool implementation.
 
