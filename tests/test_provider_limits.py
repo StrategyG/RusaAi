@@ -99,9 +99,9 @@ def test_inference_provider_streams_bounded_sse_deltas_and_usage():
         {"choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 2}},
     ]
     body = b"".join(
-        b"data: " + json.dumps(payload).encode("utf-8") + b"\\n\\n"
+        b"data: " + json.dumps(payload).encode("utf-8") + b"\n\n"
         for payload in payloads
-    ) + b"data: [DONE]\\n\\n"
+    ) + b"data: [DONE]\n\n"
 
     def handler(request):
         sent = json.loads(request.content)
@@ -137,7 +137,7 @@ def test_inference_provider_streams_bounded_sse_deltas_and_usage():
 
 
 def test_inference_provider_rejects_oversized_sse_stream():
-    body = b"data: " + b"x" * 128 + b"\\n\\n"
+    body = b"data: " + b"x" * 128 + b"\n\n"
     provider = OpenAIChatInferenceProvider(
         base_url="https://model.example/v1",
         transport=httpx.MockTransport(
@@ -165,7 +165,7 @@ def test_inference_provider_rejects_oversized_sse_stream():
 
 
 def test_inference_provider_rejects_stream_without_terminal_reason():
-    body = b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\\n\\n'
+    body = b'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}\n\n'
     provider = OpenAIChatInferenceProvider(
         base_url="https://model.example/v1",
         transport=httpx.MockTransport(
