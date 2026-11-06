@@ -154,12 +154,12 @@ async def lifespan(application: FastAPI):
     application.state.inference_admission = _new_inference_admission_controller()
     local_backend = None
     try:
-        local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH")
+        local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH") or os.getenv("RUSA_MODEL_PATH")
         if local_model_path:
             from model_runtime import load_inference_backend, verify_model_artifact
 
             try:
-                max_model_len = int(os.getenv("RUSA_MODEL_MAX_LENGTH", "4096"))
+                max_model_len = int(os.getenv("RUSA_MODEL_MAX_LENGTH") or os.getenv("RUSA_MAX_MODEL_LEN", "4096"))
                 manifest_digest = os.getenv("RUSA_MODEL_MANIFEST_SHA256")
                 verified = verify_model_artifact(
                     local_model_path,
@@ -169,12 +169,12 @@ async def lifespan(application: FastAPI):
                 local_backend = load_inference_backend(
                     str(verified.root),
                     backend_name=os.getenv("RUSA_INFERENCE_BACKEND", "transformers"),
-                    timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS", "120")),
+                    timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS") or os.getenv("RUSA_GENERATION_TIMEOUT_SECONDS", "120")),
                     max_model_len=max_model_len,
-                    max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS", "8")),
-                    max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS", "8192")),
-                    tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE", "1")),
-                    gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION", "0.9")),
+                    max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS") or os.getenv("RUSA_MAX_NUM_SEQS", "8")),
+                    max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS") or os.getenv("RUSA_MAX_NUM_BATCHED_TOKENS", "8192")),
+                    tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE") or os.getenv("RUSA_TENSOR_PARALLEL_SIZE", "1")),
+                    gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION") or os.getenv("RUSA_GPU_MEMORY_UTILIZATION", "0.9")),
                 )
             except (ImportError, ValueError, RuntimeError, OSError) as exc:
                 set_inference_provider(None)
