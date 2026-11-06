@@ -55,7 +55,7 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
 | RUSA_GPU_MEMORY_UTILIZATION | vLLM GPU memory target | 0.90 |
 
-Values above are initial configuration examples, not capacity guarantees. Measure the exact checkpoint on the target host.
+Values above are initial configuration examples, not capacity guarantees. Measure the exact checkpoint on the target host. The Compose startup grace period defaults to 30 minutes because loading large local weights occurs before the API starts serving; increase RUSA_START_PERIOD for larger artifacts.
 
 ## 4. Startup and health checks
 
