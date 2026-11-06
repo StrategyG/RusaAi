@@ -13,6 +13,7 @@ from rusa_agents.github import GitHubToolGateway
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.provider import OpenAICompatibleProvider
+from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.workers import AgentWorker
 
 
@@ -701,3 +702,14 @@ def test_agent_control_plane_modifications_require_human_review(path):
     )
     assert decision.allowed is False
     assert decision.requires_approval is True
+
+
+
+@pytest.mark.parametrize("token", ["", "short", "bad.token.with.dots", "x" * 129])
+def test_queue_rejects_invalid_lease_tokens(token):
+    with pytest.raises(ValueError, match="lease_token"):
+        PostgresTaskQueue._validate_lease_token(token)
+
+
+def test_queue_accepts_cryptographic_lease_token_shape():
+    PostgresTaskQueue._validate_lease_token("x" * 43)
