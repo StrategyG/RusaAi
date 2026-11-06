@@ -6,10 +6,12 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 from __future__ import annotations  # noqa: I001
 
 import os
+import selectors
 import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -58,6 +60,7 @@ class DockerSandbox:
         cpu_limit: str = "2",
         max_snapshot_bytes: int = 100_000_000,
         max_snapshot_files: int = 50_000,
+        max_output_bytes: int = 200_000,
     ) -> None:
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
@@ -65,6 +68,9 @@ class DockerSandbox:
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
         self.max_snapshot_files = max_snapshot_files
+        if not 1_024 <= max_output_bytes <= 5_000_000:
+            raise ValueError("max_output_bytes must be between 1024 and 5000000")
+        self.max_output_bytes = max_output_bytes
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
@@ -103,6 +109,77 @@ class DockerSandbox:
                 raise RuntimeError(
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
+
+    @staticmethod
+    def _run_bounded(
+        command: list[str],
+        timeout_seconds: int,
+        env: dict[str, str],
+        max_output_bytes: int,
+    ) -> tuple[int | None, str, str, int]:
+        """Stream Docker output with a hard memory/output budget."""
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            bufsize=0,
+        )
+        if process.stdout is None:
+            process.kill()
+            raise RuntimeError("Could not capture sandbox output")
+        output = bytearray()
+        total_bytes = 0
+        outcome = "completed"
+        deadline = time.monotonic() + timeout_seconds
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    outcome = "timeout"
+                    break
+                events = selector.select(min(remaining, 0.25))
+                for key, _ in events:
+                    chunk = os.read(key.fileobj.fileno(), 65_536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    total_bytes += len(chunk)
+                    output.extend(chunk)
+                    if len(output) > max_output_bytes:
+                        del output[:len(output) - max_output_bytes]
+                    if total_bytes > max_output_bytes:
+                        outcome = "output_limit"
+                        break
+                if outcome != "completed":
+                    break
+        if outcome != "completed":
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        else:
+            process.wait()
+        return process.returncode, output.decode("utf-8", "replace"), outcome, total_bytes
+
+    @staticmethod
+    def _remove_container(container_name: str, env: dict[str, str]) -> None:
+        if not DOCKER_BIN:
+            return
+        try:
+            subprocess.run(
+                [DOCKER_BIN, "rm", "-f", container_name],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
         if not DOCKER_BIN:
@@ -216,35 +293,56 @@ class DockerSandbox:
                 self.image,
                 *self.PROFILES[profile],
             ]
+            env = {
+                key: value for key, value in os.environ.items()
+                if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "HOME"}
+            }
             try:
-                completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
+                exit_code, output, outcome, output_bytes = self._run_bounded(
                     command,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
-                    env={key: value for key, value in os.environ.items()
-                         if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                    timeout_seconds=self.timeout_seconds,
+                    env=env,
+                    max_output_bytes=self.max_output_bytes,
                 )
             except FileNotFoundError as exc:
-                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-            except subprocess.TimeoutExpired:
-                try:
-                    subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
-                        [DOCKER_BIN, "rm", "-f", container_name],
-                        check=False, capture_output=True, text=True, timeout=30,
-                        env={key: value for key, value in os.environ.items()
-                             if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                return ToolResult(
+                    False,
+                    "Docker executable is unavailable; sandbox checks cannot run.",
+                    {"error": str(exc)},
+                )
+            except OSError as exc:
+                return ToolResult(False, f"Sandbox process could not start: {exc}")
+
+            if outcome != "completed":
+                self._remove_container(container_name, env)
+                if outcome == "timeout":
+                    message = f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout."
+                else:
+                    message = (
+                        f"Sandbox profile '{profile}' exceeded the "
+                        f"{self.max_output_bytes}-byte output limit."
                     )
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-                return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
-            output = (completed.stdout + "\n" + completed.stderr)[-20000:]
+                return ToolResult(
+                    False,
+                    message + "\\n" + output[-20_000:],
+                    {
+                        "profile": profile,
+                        "outcome": outcome,
+                        "output_bytes": output_bytes,
+                        "max_output_bytes": self.max_output_bytes,
+                        "image": self.image,
+                    },
+                )
             return ToolResult(
-                completed.returncode == 0,
-                output,
-                {"profile": profile, "exit_code": completed.returncode, "image": self.image,
-                 "snapshot_bytes": totals[0]},
+                exit_code == 0,
+                output[-20_000:],
+                {
+                    "profile": profile,
+                    "exit_code": exit_code,
+                    "image": self.image,
+                    "snapshot_bytes": totals[0],
+                    "output_bytes": output_bytes,
+                },
             )
 
 
