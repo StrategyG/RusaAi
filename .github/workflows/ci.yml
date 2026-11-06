@@ -66,5 +66,22 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
         run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
+      - name: Install sandbox launcher
+        run: python -m pip install -e .
+      - name: Run full test suite in isolated sandbox
+        env:
+          RUSA_SANDBOX_IMAGE: rusa-ai-agent-sandbox:${{ github.sha }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from rusa_agents.tool_gateway import DockerSandbox
+
+          sandbox = DockerSandbox(timeout_seconds=900)
+          sandbox.verify_ready(require_image=True)
+          result = sandbox.run(Path.cwd(), "pytest")
+          print(result.output)
+          if not result.ok:
+              raise SystemExit("isolated sandbox test suite failed")
+          PY
       - name: Build autonomous worker image
         run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
