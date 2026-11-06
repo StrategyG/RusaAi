@@ -47,6 +47,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Apply production database migrations to integration database
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_core.sql
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_tenant_rls.sql
       - name: Compile
         run: python -m compileall -q rusa_agents llm-project/serve tests
       - name: Lint
@@ -89,13 +96,25 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_API_KEYS: '{"long_random_ci_api_key_12345678901234567890":"tenant-ci"}'
+          RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
+          RUSA_MODEL_BASE_URL: https://model.internal/v1
+          RUSA_MODEL_NAME: rusa-ai
+          RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
+          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_DATABASE_URL: postgresql://runtime:secret@db.internal/rusa?sslmode=verify-full
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
           RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
           RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
-        run: |
-          cp .env.example .env
-          docker compose -f docker-compose.production.yml config --quiet
-          rm -f .env
+          RUSA_TASK_TIMEOUT_SECONDS: "3600"
+          RUSA_CI_TIMEOUT_SECONDS: "900"
+          RUSA_CI_POLL_SECONDS: "15"
+          RUSA_MAX_PARALLEL_WORKERS: "4"
+          RUSA_MAX_REPAIR_CYCLES: "2"
+          RUSA_METRICS_PORT: "9100"
+        run: docker compose -f docker-compose.production.yml config --quiet
