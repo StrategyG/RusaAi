@@ -135,3 +135,16 @@ def test_pgvector_hybrid_retrieval_and_tenant_rls(knowledge_store):
             "SELECT tenant_id FROM public.rusa_knowledge_documents ORDER BY tenant_id"
         ).fetchall()
     assert visible == [("tenant-a",)]
+
+
+
+def test_knowledge_store_readiness_rejects_bypassrls_database_identity():
+    from rusa_knowledge.store import PostgresKnowledgeStore
+
+    store = PostgresKnowledgeStore(DSN, min_pool_size=1, max_pool_size=1)
+    try:
+        # CI's database owner is a superuser. It must not be accepted as an
+        # application identity for tenant-isolated knowledge operations.
+        assert store.check_ready() is False
+    finally:
+        store.close()
