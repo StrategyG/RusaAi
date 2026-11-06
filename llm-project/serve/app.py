@@ -13,9 +13,12 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from rusa_agents.config import RuntimeConfig
+from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
@@ -74,6 +77,28 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def collect_request_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_name = getattr(route, "path", "unmatched")
+        API_REQUESTS.labels(request.method, route_name, str(status_code)).inc()
+        API_REQUEST_DURATION.labels(request.method, route_name).observe(
+            time.perf_counter() - started
+        )
+
+
+@app.get("/metrics", dependencies=[Depends(verify_api_key)])
+def metrics_endpoint():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 class ChatMessage(BaseModel):
