@@ -59,6 +59,35 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
+      - name: Validate PostgreSQL backup scripts
+        run: bash -n scripts/postgres/*.sh
+      - name: Run encrypted PostgreSQL backup and restore drill
+        env:
+          SOURCE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_test
+          RESTORE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_restore_test
+          RESTORE_CONFIRM_DATABASE: rusa_restore_test
+          BACKUP_DIR: ${{ runner.temp }}/rusa-agent-backups
+          BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/rusa-backup-identity.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age postgresql-client-16
+          mkdir -p "$BACKUP_DIR"
+          age-keygen -o "$BACKUP_AGE_IDENTITY_FILE"
+          export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
+          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
+              id INTEGER PRIMARY KEY,
+              value TEXT NOT NULL
+          );
+          TRUNCATE public.rusa_drill_probe;
+          INSERT INTO public.rusa_drill_probe (id, value)
+          VALUES (1, 'encrypted-restore-drill-ok');
+          SQL
+          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE rusa_restore_test'
+          scripts/postgres/restore_drill.sh
+          restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT value FROM public.rusa_drill_probe WHERE id=1')"
+          test "$restored_value" = "encrypted-restore-drill-ok"
+          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE rusa_restore_test'
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
@@ -86,6 +115,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
       - name: Build user and admin workspace image
         run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
+      - name: Build PostgreSQL backup utility image
+        run: docker build --pull -f Dockerfile.backup -t rusa-agent-db-backup:${{ github.sha }} .
       - name: Smoke-test RAG and MCP imports
         run: |
           docker run --rm rusa-knowledge-mcp:${{ github.sha }} python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
