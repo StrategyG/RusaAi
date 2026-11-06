@@ -209,7 +209,14 @@ class RAGService:
             raise ValueError("Embedding provider returned an invalid vector")
         results = await self.index.search(tenant_id=tenant_id, embedding=vector, top_k=top_k, allowed_source_ids=allowed_source_ids)
         return [
-            chunk for chunk in results
+            RetrievedChunk(
+                chunk_id=chunk.chunk_id,
+                source_id=chunk.source_id,
+                text=redact_sensitive_data(chunk.text),
+                score=chunk.score,
+                metadata=redact_sensitive_data(chunk.metadata),
+            )
+            for chunk in results
             if chunk.source_id and chunk.text.strip() and 0.0 <= chunk.score <= 1.0
             and (allowed_source_ids is None or chunk.source_id in allowed_source_ids)
         ]
