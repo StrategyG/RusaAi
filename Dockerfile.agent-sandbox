@@ -10,7 +10,10 @@ RUN python -m pip install --no-cache-dir -r requirements-agent-sandbox.txt \
     && python -m pip install --no-cache-dir "ruff>=0.6,<1" "bandit>=1.7,<2" \
     && python -m pip install --no-cache-dir --upgrade \
          "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && python -m pip check
+    && python -m pip check \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
+    && python -m pip uninstall -y pip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 # A fresh Debian stage avoids retaining setuptools 70.3.0 from the official
 # Python image's lower OCI layers. Only the final, patched /usr/local tree moves.
@@ -33,20 +36,22 @@ COPY --from=builder /usr/local /usr/local
 
 RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
-    && python -m pip check \
+    && pytest --version \
+    && ruff --version \
+    && bandit --version \
     && python - <<'PY'
-from importlib.metadata import distributions
+from importlib import import_module, metadata
 
-found = []
-for dist in distributions():
-    if (dist.metadata.get("Name") or "").lower() == "setuptools":
-        found.append((dist.version, str(dist._path)))
-        version = tuple(int(part) for part in dist.version.split(".")[:3] if part.isdigit())
-        if version < (84, 1, 0):
-            raise SystemExit(f"Vulnerable setuptools {dist.version} remains at {dist._path}")
-if not found:
-    raise SystemExit("Patched setuptools distribution is missing")
-print("Verified setuptools distributions:", found)
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        metadata.version(package)
+    except metadata.PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package} remains in the sandbox runtime")
+
+for module in ("pytest", "bandit"):
+    import_module(module)
+print("Sandbox test tools verified; build tooling is absent.")
 PY
 
 USER sandbox
