@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rusa
+      POSTGRES_USER: rusa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - rusa-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rusa -d rusa"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [rusa-internal]
+
+  rusa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: model-runtime
+    image: rusa-ai-model:local
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    ports:
+      - "127.0.0.1:${RUSA_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
+      RUSA_MODEL_PATH: /models
+      RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
+      TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
+      DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_AGENT_ENABLED: ${RUSA_AGENT_ENABLED:-false}
+      RUSA_TENANT_ID: ${RUSA_TENANT_ID:-default}
+    volumes:
+      - type: bind
+        source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
+        target: /models
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [rusa-internal, rusa-egress]
+
+  rusa-agent-worker:
+    profiles: ["agent"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: agent-runtime
+    image: rusa-ai-agent:local
+    command: ["python", "-m", "rusa_agents.worker"]
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_AGENT_DATA_DIR: /data
+      RUSA_PROVIDER_BASE_URL: ${RUSA_PROVIDER_BASE_URL:?Set RUSA_PROVIDER_BASE_URL in .env}
+      RUSA_PROVIDER_MODEL: ${RUSA_PROVIDER_MODEL:?Set RUSA_PROVIDER_MODEL in .env}
+      RUSA_PROVIDER_API_KEY: ${RUSA_PROVIDER_API_KEY:-}
+      RUSA_GITHUB_TOKEN: ${RUSA_GITHUB_TOKEN:?Set RUSA_GITHUB_TOKEN in .env}
+      RUSA_GITHUB_ALLOWED_REPOSITORIES: ${RUSA_GITHUB_ALLOWED_REPOSITORIES:?Set RUSA_GITHUB_ALLOWED_REPOSITORIES in .env}
+      RUSA_AGENT_MAX_TURNS: ${RUSA_AGENT_MAX_TURNS:-8}
+      RUSA_WORKER_LEASE_SECONDS: ${RUSA_WORKER_LEASE_SECONDS:-1800}
+    volumes:
+      - rusa-agent-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    networks: [rusa-internal, rusa-egress]
+
+volumes:
+  rusa-postgres:
+  rusa-agent-data:
+
+networks:
+  rusa-internal:
+    driver: bridge
+    internal: true
+  rusa-egress:
+    driver: bridge
