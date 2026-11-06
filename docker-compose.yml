@@ -35,6 +35,7 @@ services:
       TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
       DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_AGENT_ENABLED: ${RUSA_AGENT_ENABLED:-false}
+      RUSA_TENANT_ID: ${RUSA_TENANT_ID:-default}
     volumes:
       - type: bind
         source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}

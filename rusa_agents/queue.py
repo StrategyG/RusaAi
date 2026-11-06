@@ -78,6 +78,7 @@ class PostgresTaskQueue:
         task_id: str,
         payload: dict[str, Any],
         idempotency_key: str,
+        max_attempts: int = 3,
     ) -> dict[str, Any]:
         if not tenant_id or len(tenant_id) > 128:
             raise ValueError("tenant_id must contain 1 to 128 characters")
@@ -85,6 +86,8 @@ class PostgresTaskQueue:
             raise ValueError("idempotency_key must contain 8 to 128 characters")
         if not isinstance(payload, dict):
             raise ValueError("task payload must be a JSON object")
+        if not 1 <= max_attempts <= 10:
+            raise ValueError("max_attempts must be between 1 and 10")
         try:
             from uuid import UUID
             UUID(task_id)
@@ -94,14 +97,22 @@ class PostgresTaskQueue:
         with self._connect() as db:
             row = db.execute(
                 """
-                INSERT INTO rusa_agent_jobs(task_id, tenant_id, idempotency_key, payload)
-                VALUES (%s::uuid, %s, %s, %s::jsonb)
+                INSERT INTO rusa_agent_jobs(
+                    task_id, tenant_id, idempotency_key, payload, max_attempts
+                )
+                VALUES (%s::uuid, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (tenant_id, idempotency_key)
                 DO UPDATE SET updated_at=now()
                 WHERE rusa_agent_jobs.payload = EXCLUDED.payload
                 RETURNING task_id, state
                 """,
-                (task_id, tenant_id, idempotency_key, json.dumps(payload, ensure_ascii=False)),
+                (
+                    task_id,
+                    tenant_id,
+                    idempotency_key,
+                    json.dumps(payload, ensure_ascii=False),
+                    max_attempts,
+                ),
             ).fetchone()
         if row is None:
             raise ValueError("idempotency key was already used with a different task payload")

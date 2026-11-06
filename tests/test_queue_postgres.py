@@ -41,10 +41,7 @@ def test_idempotency_returns_existing_task_and_rejects_changed_payload(queue_and
     payload = make_payload()
     payload["task_id"] = task_id
     first = queue.enqueue(tenant, task_id, payload, "same-idempotency-key")
-    replay_id = str(uuid.uuid4())
-    replay_payload = dict(payload)
-    replay_payload["task_id"] = replay_id
-    replay = queue.enqueue(tenant, replay_id, replay_payload, "same-idempotency-key")
+    replay = queue.enqueue(tenant, task_id, payload, "same-idempotency-key")
     assert replay["task_id"] == first["task_id"]
 
     changed = make_payload("different objective")

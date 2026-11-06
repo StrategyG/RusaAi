@@ -59,9 +59,10 @@ The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only 
 ## API endpoints
 
 - POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
-- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.\n- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires DATABASE_URL.
+- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.\n- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
+- GET /v1/agent/tasks/{task_id}: requires X-API-Key; returns task status for the configured RUSA_TENANT_ID.
 
-## Agent worker\n\nSet DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), and RUSA_GITHUB_TOKEN in the secret-backed .env file. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.\n\nSee AI_CODE.md for the agent contract and docs/PRODUCTION_READINESS.md for release gates.\n\n## Quality gates
+## Agent worker\n\nSet RUSA_AGENT_ENABLED=true, RUSA_TENANT_ID, DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), RUSA_GITHUB_TOKEN, and RUSA_GITHUB_ALLOWED_REPOSITORIES in the secret-backed .env file. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.\n\nSee AI_CODE.md for the agent contract and docs/PRODUCTION_READINESS.md for release gates.\n\n## Quality gates
 
 Run ruff check llm-project/serve tests, python -m compileall -q llm-project tests, pytest -q, and pip-audit -r requirements.txt.
 
