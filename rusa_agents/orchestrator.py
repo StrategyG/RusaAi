@@ -91,6 +91,7 @@ class AICodeOrchestrator:
     def _valid_source(source: str, repository: str, kind: str) -> bool:
         try:
             parsed = urlsplit(source)
+            port = parsed.port
         except ValueError:
             return False
         if (
@@ -98,7 +99,7 @@ class AICodeOrchestrator:
             or parsed.hostname != "github.com"
             or parsed.username
             or parsed.password
-            or parsed.port not in {None, 443}
+            or port not in {None, 443}
             or parsed.query
             or parsed.fragment
         ):

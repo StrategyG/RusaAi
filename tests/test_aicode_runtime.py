@@ -566,3 +566,29 @@ def test_worker_requires_explicit_agent_enablement(monkeypatch):
     monkeypatch.setenv("RUSA_AGENT_ENABLED", "false")
     with pytest.raises(RuntimeError, match="RUSA_AGENT_ENABLED=true"):
         asyncio.run(run_worker())
+
+
+
+def test_github_gateway_rejects_truncated_repository_tree(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+
+    async def fake_get_branch(repository, branch):
+        return {"commit": {"sha": VALID_COMMIT_SHA}}
+
+    async def fake_request(method, path, **kwargs):
+        return {"truncated": True, "tree": []}
+
+    monkeypatch.setattr(gateway, "get_branch", fake_get_branch)
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    with pytest.raises(RuntimeError, match="truncated"):
+        asyncio.run(gateway.list_tree("StrategyG/RusaAi", "main"))
+
+
+def test_orchestrator_rejects_malformed_github_evidence_port(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        make_workers(quality_source="https://github.com:not-a-port/StrategyG/RusaAi/actions/runs/123"),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(make_task()))
+    assert record.state == TaskState.BLOCKED

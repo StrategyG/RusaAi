@@ -128,6 +128,10 @@ class GitHubRepositoryGateway:
             f"/repos/{repository}/git/trees/{sha}",
             params={"recursive": "1"},
         )
+        if tree.get("truncated"):
+            raise RuntimeError(
+                "GitHub returned a truncated repository tree; refusing incomplete inventory"
+            )
         return {
             "sha": sha,
             "truncated": bool(tree.get("truncated")),
