@@ -6,6 +6,8 @@ import json
 import math
 import re
 from typing import Any
+
+from .safety import validate_document_metadata
 from uuid import UUID
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -149,7 +151,7 @@ class PostgresKnowledgeStore:
             raise ValueError("content_hash must be a SHA-256 hex digest")
         if not chunks or len(chunks) != len(embeddings) or len(chunks) > 10_000:
             raise ValueError("document chunks and embeddings are invalid")
-        metadata_json = json.dumps(metadata, ensure_ascii=False, allow_nan=False)
+        metadata_json = validate_document_metadata(source_uri, title, metadata)
         if len(metadata_json) > 16_384:
             raise ValueError("document metadata exceeds 16 KiB")
 
