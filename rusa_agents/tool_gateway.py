@@ -208,13 +208,17 @@ class WorkspaceToolGateway:
     PROTECTED_WRITE_NAMES = {
         ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
         "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
-        "dockerfile.agent-sandbox", "docker-compose.yml", "makefile",
+        "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
+        "containerfile", "makefile", "procfile", "serverless.yml",
+        "vercel.json", "netlify.toml",
         "setup.py", "setup.cfg", "package.json", "package-lock.json",
         "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
         "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
     }
     PROTECTED_WRITE_PREFIXES = (
         ".github/", "migrations/", "schemas/", "llm-project/configs/",
+        "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
+        "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
     )
 
     def __init__(
@@ -282,7 +286,9 @@ class WorkspaceToolGateway:
         relative = target.relative_to(self.workspace).as_posix()
         if (
             target.name.lower() in self.PROTECTED_WRITE_NAMES
-            or target.name.lower().startswith(("requirements", "dockerfile."))
+            or target.name.lower().startswith(
+                ("requirements", "dockerfile.", "docker-compose.", "compose.")
+            )
             or PurePosixPath(relative).suffix.lower() in self.PROTECTED_SUFFIXES
             or any(relative.lower().startswith(prefix.lower()) for prefix in self.PROTECTED_WRITE_PREFIXES)
         ):
