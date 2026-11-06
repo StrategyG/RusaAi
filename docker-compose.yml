@@ -15,8 +15,6 @@ services:
       retries: 10
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   rusa-api:
     build:
@@ -63,6 +61,19 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  rusa-agent-migrate:
+    image: rusa-agent:local
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      RUSA_DATABASE_URL: postgresql+asyncpg://rusa:${RUSA_DB_PASSWORD}@postgres:5432/rusa
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   rusa-agent-api:
     build:
       context: .
@@ -75,6 +86,7 @@ services:
       - "127.0.0.1:${RUSA_AGENT_PORT:-8010}:8010"
     environment:
       RUSA_DATABASE_URL: postgresql+asyncpg://rusa:${RUSA_DB_PASSWORD}@postgres:5432/rusa
+      RUSA_DB_AUTO_CREATE: "false"
       RUSA_TENANT_API_KEYS: ${RUSA_TENANT_API_KEYS:?Set RUSA_TENANT_API_KEYS in .env}
       RUSA_TENANT_APPROVER_KEYS: ${RUSA_TENANT_APPROVER_KEYS:?Set RUSA_TENANT_APPROVER_KEYS in .env}
       RUSA_AGENT_MODEL_BASE_URL: http://rusa-api:8000/v1
@@ -82,8 +94,8 @@ services:
       RUSA_AGENT_MODEL_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set a least-privilege GITHUB_TOKEN in .env}
     depends_on:
-      postgres:
-        condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
       rusa-api:
         condition: service_healthy
     read_only: true
@@ -120,14 +132,15 @@ services:
     command: ["python", "-m", "rusa_agents.worker_cli"]
     environment:
       RUSA_DATABASE_URL: postgresql+asyncpg://rusa:${RUSA_DB_PASSWORD}@postgres:5432/rusa
+      RUSA_DB_AUTO_CREATE: "false"
       RUSA_AGENT_MODEL_BASE_URL: http://rusa-api:8000/v1
       RUSA_AGENT_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
       RUSA_AGENT_MODEL_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set a least-privilege GITHUB_TOKEN in .env}
       LOG_LEVEL: INFO
     depends_on:
-      postgres:
-        condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
       rusa-api:
         condition: service_healthy
     read_only: true
