@@ -12,6 +12,8 @@ from .runtime import AICodeRuntime
 
 
 async def serve() -> None:
+    # Preserve group access on setgid workspace roots for the rootless sandbox daemon.
+    os.umask(0o027)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
