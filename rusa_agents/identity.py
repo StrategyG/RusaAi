@@ -11,7 +11,7 @@ from typing import Any
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError
 from psycopg.rows import dict_row
 
 
@@ -68,6 +68,8 @@ class PostgresIdentityStore:
         self.access_token_seconds = access_token_seconds
         self.refresh_token_seconds = refresh_token_seconds
         self.password_hasher = PasswordHasher()
+        # Equalize the expensive password-verification path for unknown emails.
+        self._dummy_password_hash = self.password_hasher.hash(secrets.token_urlsafe(32))
 
     def _connect(self):
         import psycopg
@@ -230,6 +232,10 @@ class PostgresIdentityStore:
                 (tenant_id, email),
             ).fetchone()
             if row is None:
+                try:
+                    self.password_hasher.verify(self._dummy_password_hash, password)
+                except (VerificationError, InvalidHashError, TypeError):
+                    pass
                 return None
             try:
                 verified = self.password_hasher.verify(row["password_hash"], password)

@@ -344,3 +344,32 @@ def test_admin_can_list_tenant_tasks(client):
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
     assert response.json()["items"][0]["objective"] == "user task"
+
+
+
+def test_admin_can_create_user_without_exposing_password(client):
+    response = client.post(
+        "/v1/admin/users",
+        headers={"Authorization": "Bearer admin-token"},
+        json={
+            "email": "new-user@example.test",
+            "display_name": "New Workspace User",
+            "password": "a-strong-temporary-password",
+            "role": "user",
+        },
+    )
+    assert response.status_code == 201
+    user = response.json()["user"]
+    assert user["email"] == "new-user@example.test"
+    assert user["role"] == "user"
+    assert "password" not in user
+    assert "password_hash" not in user
+
+
+def test_refresh_rejects_cross_origin_requests(client):
+    response = client.post(
+        "/v1/auth/refresh",
+        headers={"Origin": "https://attacker.example"},
+        cookies={"rusa_refresh": "refresh-token-for-" + USER_ID},
+    )
+    assert response.status_code == 403
