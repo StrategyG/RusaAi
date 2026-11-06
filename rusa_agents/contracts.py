@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,7 +45,7 @@ class RiskLevel(str, Enum):
 class RepositoryTarget:
     full_name: str
     base_branch: str = "main"
-    work_branch: str = "feature/rusa-agent-task"
+    work_branch: str = "rusa-agent/unassigned/unassigned"
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.full_name):
@@ -79,6 +80,22 @@ class CodingTask:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: Mapping[str, str] = field(default_factory=dict)
 
+    @staticmethod
+    def expected_work_branch_for(
+        tenant_id: str, idempotency_key: str, task_id: str,
+    ) -> str:
+        identity = idempotency_key or task_id
+        tenant_part = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:10]
+        identity_part = hashlib.sha256(
+            f"{tenant_id}:{identity}".encode("utf-8")
+        ).hexdigest()[:24]
+        return f"rusa-agent/{tenant_part}/{identity_part}"
+
+    def expected_work_branch(self) -> str:
+        return self.expected_work_branch_for(
+            self.tenant_id, self.idempotency_key, self.task_id,
+        )
+
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", self.tenant_id):
             raise ValueError("tenant_id is invalid")
@@ -100,11 +117,16 @@ class CodingTask:
             raise ValueError("acceptance criteria must be unique")
         if len(self.metadata) > 32:
             raise ValueError("metadata contains too many entries")
-        if any(not isinstance(key, str) or not isinstance(value, str) for key, value in self.metadata.items()):
+        if any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in self.metadata.items()
+        ):
             raise ValueError("task metadata keys and values must be strings")
         sensitive = ("secret", "password", "token", "credential", "api_key", "private_key")
         if any(any(word in key.lower() for word in sensitive) for key in self.metadata):
             raise ValueError("sensitive values must not be placed in task metadata")
+        if self.repository.work_branch != self.expected_work_branch():
+            raise ValueError("work_branch must be the task's tenant-scoped RUSA-AI branch")
 
     def to_dict(self) -> dict[str, Any]:
         return {
