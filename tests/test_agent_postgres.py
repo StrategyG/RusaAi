@@ -31,23 +31,38 @@ def test_postgres_queue_idempotency_claim_and_checkpoint():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
     key = f"queue-{uuid4().hex}"
-    task = make_task("tenant-integration-a", key)
-    duplicate = make_task("tenant-integration-a", key)
-    other_tenant = make_task("tenant-integration-b", key)
+    tenant_id = f"tenant-integration-{uuid4().hex}"
+    task = make_task(tenant_id, key)
+    duplicate = CodingTask.from_dict(task.to_dict())
+    other_tenant = make_task(f"{tenant_id}-other", key)
     first_id = queue.enqueue(task)
     assert queue.enqueue(duplicate) == first_id
     assert queue.enqueue(other_tenant) != first_id
 
-    claimed = queue.claim()
+    claimed = queue.claim("integration-worker", lease_seconds=60)
     assert claimed is not None
     assert claimed["task_id"] == first_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
-    queue.acknowledge(task.tenant_id, first_id, record)
+    queue.acknowledge(
+        task.tenant_id,
+        first_id,
+        record,
+        worker_id=claimed["lease_owner"],
+    )
     fetched = queue.get(task.tenant_id, first_id)
     assert fetched is not None
     assert fetched["status"] == "observing"
     assert fetched["result"]["state"] == "observing"
+    with pytest.raises(ValueError, match="different task payload"):
+        changed = task.to_dict()
+        changed["objective"] = "Different objective"
+        queue.enqueue(CodingTask.from_dict(changed))
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id IN (%s, %s)",
+            (tenant_id, f"{tenant_id}-other"),
+        )
 
 
 def test_postgres_memory_is_tenant_scoped_and_deletable():
@@ -124,3 +139,41 @@ def test_postgres_row_level_security_filters_and_rejects_other_tenants():
                 """,
                 ("tenant-rls-b", f"forbidden-{marker}", f"forbidden-{marker}"),
             )
+
+
+def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = f"tenant-lease-{uuid4().hex}"
+    task = make_task(tenant_id, f"lease-{uuid4().hex}")
+    task_id = queue.enqueue(task)
+    first = queue.claim("worker-one", lease_seconds=60)
+    assert first is not None and first["task_id"] == task_id
+    assert queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            """
+            UPDATE rusa_agent_tasks
+            SET lease_until=now() - interval '1 second'
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, task_id),
+        )
+
+    second = queue.claim("worker-two", lease_seconds=60)
+    assert second is not None and second["task_id"] == task_id
+    assert not queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+    stale_record = TaskRecord(task=task)
+    stale_record.transition(TaskState.OBSERVING)
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        queue.acknowledge(tenant_id, task_id, stale_record, worker_id="worker-one")
+    queue.acknowledge(tenant_id, task_id, stale_record, worker_id="worker-two")
+    with psycopg.connect(DSN) as connection:
+        connection.execute("DELETE FROM rusa_agent_tasks WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_postgres_queue_readiness_requires_forced_tenant_rls():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    assert queue.check_ready() is True
