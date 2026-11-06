@@ -198,6 +198,24 @@ class GitHubPublisher:
             paths.append(raw_path)
         return sorted(set(paths))
 
+    @staticmethod
+    def validate_origin_url(remote_url: str, repository: str) -> None:
+        parsed = urlparse(remote_url.strip())
+        remote_repository = parsed.path.strip("/").removesuffix(".git")
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "github.com"
+            or parsed.port not in {None, 443}
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or remote_repository.lower() != repository.lower()
+        ):
+            raise RuntimeError(
+                "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
+            )
+
     def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
@@ -208,16 +226,7 @@ class GitHubPublisher:
         remote = self._run(["git", "remote", "get-url", "origin"], str(root))
         if remote.returncode:
             raise RuntimeError("Origin remote is unavailable")
-        parsed_remote = urlparse(remote.stdout.strip())
-        remote_repository = parsed_remote.path.strip("/").removesuffix(".git")
-        if (
-            parsed_remote.scheme != "https"
-            or parsed_remote.hostname != "github.com"
-            or parsed_remote.username
-            or parsed_remote.password
-            or remote_repository.lower() != repository.lower()
-        ):
-            raise RuntimeError("Origin must be credential-free HTTPS to the exact authorized GitHub repository")
+        self.validate_origin_url(remote.stdout, repository)
 
         changed = self._safe_changed_paths(root)
         if changed:
