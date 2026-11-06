@@ -81,3 +81,96 @@ class AuditLog:
             row["record_hash"] = self._digest(row)
             with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(row, ensure_ascii=False, default=str, sort_keys=True) + "\n")
+
+
+class PostgresAuditLog:
+    """Central HMAC-chained audit store for multi-worker deployments."""
+
+    def __init__(self, dsn: str, hmac_key: str):
+        if not dsn or not hmac_key:
+            raise ValueError("PostgreSQL DSN and audit HMAC key are required")
+        self.dsn = dsn
+        self._key = hmac_key.encode("utf-8")
+
+    def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Install psycopg to use PostgresAuditLog") from exc
+        return psycopg.connect(self.dsn)
+
+    def initialize(self) -> None:
+        with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS aicode_audit_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    event TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    details JSONB NOT NULL,
+                    previous_hash TEXT NOT NULL,
+                    record_hash TEXT NOT NULL UNIQUE
+                )
+            """)
+            conn.execute("""
+                CREATE OR REPLACE FUNCTION rusa_audit_immutable() RETURNS trigger
+                LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'aicode_audit_events is append-only';
+                END;
+                $$
+            """)
+            conn.execute("DROP TRIGGER IF EXISTS trg_aicode_audit_immutable ON aicode_audit_events")
+            conn.execute("""
+                CREATE TRIGGER trg_aicode_audit_immutable
+                BEFORE UPDATE OR DELETE ON aicode_audit_events
+                FOR EACH ROW EXECUTE FUNCTION rusa_audit_immutable()
+            """)
+
+    def _digest(self, payload: dict[str, Any]) -> str:
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return hmac.new(self._key, canonical, hashlib.sha256).hexdigest()
+
+    def record(self, event: str, task_id: str, actor: str,
+               details: dict[str, Any] | None = None, tenant_id: str = "default") -> None:
+        with self._connect() as conn:
+            conn.execute("LOCK TABLE aicode_audit_events IN EXCLUSIVE MODE")
+            previous_row = conn.execute(
+                "SELECT record_hash FROM aicode_audit_events ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            previous = previous_row[0] if previous_row else "GENESIS"
+            row = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event": event, "task_id": task_id, "tenant_id": tenant_id,
+                "actor": actor, "details": details or {}, "previous_hash": previous,
+            }
+            digest = self._digest(row)
+            conn.execute("""
+                INSERT INTO aicode_audit_events
+                    (timestamp, event, task_id, tenant_id, actor, details, previous_hash, record_hash)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+            """, (
+                row["timestamp"], event, task_id, tenant_id, actor,
+                json.dumps(row["details"], ensure_ascii=False, default=str), previous, digest,
+            ))
+
+    def verify(self) -> bool:
+        previous = "GENESIS"
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT timestamp, event, task_id, tenant_id, actor, details, previous_hash, record_hash
+                FROM aicode_audit_events ORDER BY id ASC
+            """).fetchall()
+        for row in rows:
+            details = row[5] if isinstance(row[5], dict) else json.loads(row[5])
+            payload = {
+                "timestamp": row[0].isoformat(), "event": row[1], "task_id": row[2],
+                "tenant_id": row[3], "actor": row[4], "details": details,
+                "previous_hash": row[6],
+            }
+            if row[6] != previous or not hmac.compare_digest(row[7], self._digest(payload)):
+                return False
+            previous = row[7]
+        return True
