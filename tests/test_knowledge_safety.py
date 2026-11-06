@@ -41,3 +41,8 @@ def test_rejects_credentials_in_document_title():
 def test_rejects_non_json_metadata():
     with pytest.raises(ValueError, match="JSON-serializable"):
         validate_document_metadata("file:///guide.txt", "Guide", {"bad": object()})
+
+
+def test_rejects_metadata_over_utf8_byte_limit():
+    with pytest.raises(ValueError, match="16 KiB"):
+        validate_document_metadata("file:///guide.txt", "Guide", {"text": "é" * 9000})
