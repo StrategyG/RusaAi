@@ -77,8 +77,21 @@ class PostgresTaskPolicyAudit:
                        pg_get_userbyid(table_info.relowner),
                        row_security_active('public.aicode_task_policy_events'),
                        has_table_privilege(current_user, 'public.aicode_task_policy_events', 'INSERT'),
+                       has_table_privilege(current_user, 'public.aicode_task_policy_events', 'SELECT'),
                        has_table_privilege(current_user, 'public.aicode_task_policy_events', 'UPDATE'),
                        has_table_privilege(current_user, 'public.aicode_task_policy_events', 'DELETE'),
+                       EXISTS (
+                           SELECT 1 FROM pg_policies
+                           WHERE schemaname='public'
+                             AND tablename='aicode_task_policy_events'
+                             AND policyname = CASE
+                                 WHEN %s = 'rusa_api_runtime'
+                                 THEN 'aicode_task_policy_events_api_insert'
+                                 ELSE 'aicode_task_policy_events_worker_insert'
+                             END
+                             AND cmd='INSERT'
+                             AND permissive='PERMISSIVE'
+                       ),
                        EXISTS (
                            SELECT 1 FROM pg_trigger
                            WHERE tgrelid='public.aicode_task_policy_events'::regclass
@@ -91,15 +104,15 @@ class PostgresTaskPolicyAudit:
                              AND NOT tgisinternal
                              AND tgname='trg_aicode_task_policy_events_no_truncate'
                        )
-                FROM pg_roles AS role
+                FROM pg_roles AS db_role
                 CROSS JOIN pg_class AS table_info
                 JOIN pg_namespace AS namespace ON namespace.oid=table_info.relnamespace
-                WHERE role.rolname=current_user
+                WHERE db_role.rolname=current_user
                   AND namespace.nspname='public'
                   AND table_info.relname='aicode_task_policy_events'
                   AND table_info.relkind='r'
                 """,
-                (runtime_role,),
+                (runtime_role, runtime_role),
             ).fetchone()
         if (
             not row
@@ -113,8 +126,10 @@ class PostgresTaskPolicyAudit:
             or not row[8]
             or row[9]
             or row[10]
-            or not row[11]
+            or row[11]
             or not row[12]
+            or not row[13]
+            or not row[14]
         ):
             raise RuntimeError(
                 "Task policy audit table, RLS, append-only triggers, or runtime privileges are not ready"
