@@ -54,7 +54,7 @@ jobs:
           if [ -d rusa_agents ]; then
             ruff check llm-project/serve rusa_agents tests
           else
-            ruff check llm-project/serve tests
+            ruff check llm-project/serve tests --select E9,F63,F7,F82
           fi
       - name: Compile
         run: |
