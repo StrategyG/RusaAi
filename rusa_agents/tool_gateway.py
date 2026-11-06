@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
