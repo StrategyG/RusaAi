@@ -44,5 +44,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
+      - name: Build API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Build isolated agent sandbox image
+        run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
