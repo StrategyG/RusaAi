@@ -232,7 +232,7 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
 
     client = TestClient(app)
     api_a = {"X-API-Key": key_a, "X-Tenant-ID": "audit-b"}
-    api_b = {"X-API-Key": key_b}
+    api_b = {"X-API-Key": key_b, "Idempotency-Key": "rls-task-create-001"}
     response = client.post("/v1/aicode/tasks", headers=api_b, json={
         "objective": "sensitive objective sentinel",
         "repository": {"full_name": "StrategyG/RusaAi"},
