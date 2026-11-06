@@ -885,6 +885,10 @@ def test_security_review_only_mode_sees_prior_diff_and_rejects_tools():
         "blockers": ["Unsafe eval() requires remediation"],
         "risk": "high",
         "criteria_results": {"Tests pass": True, "Security review passes": False},
+        "criteria_evidence": {
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_branch_diff:unsafe eval detected",
+        },
     }))
     worker = AgentWorker(WorkerRole.SECURITY, provider)
     result = asyncio.run(worker.run(task, prior, review_only=True))
@@ -1061,6 +1065,10 @@ def test_task_checkpoint_preserves_complete_ci_check_set():
             evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
         ),),
         criteria_results={"Tests pass": True, "Security review passes": True},
+        criteria_evidence={
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     ))
     restored = TaskRecord.from_dict(record.to_dict())
     ci = restored.worker_results[0].tool_results[0]
