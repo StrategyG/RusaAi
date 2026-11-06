@@ -51,7 +51,7 @@ class ScriptedWorker:
         self.role = role
         self.results = deque(results)
 
-    async def run(self, task, prior_results):
+    async def run(self, task, prior_results, *, review_only=False):
         if not self.results:
             return worker_result(self.role)
         return self.results.popleft()
@@ -814,3 +814,67 @@ def test_github_gateway_never_returns_patch_for_protected_file(monkeypatch):
     result = asyncio.run(gateway.execute(make_task(), ToolCall("get_branch_diff")))
     assert result.data["diff_complete"] is False
     assert result.data["files"][0]["patch"] == ""
+
+
+def test_security_review_only_mode_sees_prior_diff_and_rejects_tools():
+    task = make_task()
+    diff_result = ToolResult(
+        name="get_branch_diff",
+        success=True,
+        data={
+            "head_sha": "a" * 40,
+            "diff_complete": True,
+            "changed_files": 1,
+            "files": [{
+                "path": "src/example.py",
+                "patch": "+dangerous_eval = eval(user_input)",
+            }],
+        },
+        evidence={"source": "github_compare_api", "head_sha": "a" * 40},
+    )
+    ci_result = ToolResult(
+        name="get_ci_status",
+        success=True,
+        data={
+            "head_sha": "a" * 40,
+            "checks_complete": True,
+            "total_count": 2,
+            "checks": [
+                {"name": "Lint, test, and audit dependencies", "status": "completed", "conclusion": "success"},
+                {"name": "Build and smoke-test containers", "status": "completed", "conclusion": "success"},
+            ],
+        },
+        evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
+    )
+    prior = [WorkerResult(
+        role=WorkerRole.SECURITY,
+        summary="Fetched security evidence",
+        tool_results=(ci_result, diff_result),
+        criteria_results={"Tests pass": True, "Security review passes": True},
+    )]
+    provider = FakeProvider(json.dumps({
+        "summary": "The diff contains unsafe dynamic evaluation.",
+        "tool_calls": [],
+        "blockers": ["Unsafe eval() requires remediation"],
+        "risk": "high",
+        "criteria_results": {"Tests pass": True, "Security review passes": False},
+    }))
+    worker = AgentWorker(WorkerRole.SECURITY, provider)
+    result = asyncio.run(worker.run(task, prior, review_only=True))
+    assert not result.tool_calls
+    assert "dangerous_eval = eval(user_input)" in provider.last_user
+    assert "REVIEW-ONLY MODE" in provider.last_system
+    assert result.blockers
+
+
+def test_security_review_only_mode_rejects_any_tool_call():
+    provider = FakeProvider(json.dumps({
+        "summary": "Review complete",
+        "tool_calls": [{"name": "get_ci_status", "arguments": {}}],
+        "blockers": [],
+        "risk": "low",
+        "criteria_results": {"Tests pass": True, "Security review passes": True},
+    }))
+    worker = AgentWorker(WorkerRole.SECURITY, provider)
+    with pytest.raises(ValueError, match="unauthorized tool"):
+        asyncio.run(worker.run(make_task(), [], review_only=True))
