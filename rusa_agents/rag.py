@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -43,6 +44,20 @@ class OpenAICompatibleEmbeddingProvider:
         self.dimensions = dimensions
         if not self.base_url or not self.model:
             raise ValueError("Embedding base URL and model are required")
+        parsed = urlparse(self.base_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or (
+                parsed.scheme != "https"
+                and parsed.hostname not in {"localhost", "127.0.0.1"}
+            )
+        ):
+            raise ValueError("Embedding endpoint must use HTTPS, except localhost development")
         if dimensions != 384:
             raise ValueError("The current pgvector migration uses exactly 384 dimensions")
 
