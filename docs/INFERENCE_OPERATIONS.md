@@ -31,7 +31,7 @@ Use RUSA_INFERENCE_BACKEND=vllm when the model and target GPU are supported by t
 - RUSA_TENSOR_PARALLEL_SIZE
 - RUSA_GPU_MEMORY_UTILIZATION
 
-Start with conservative limits. Increase one capacity dimension at a time and retain the benchmark report for each change. Avoid multiple vLLM engine processes competing for the same GPU memory.
+Start with conservative limits. Increase one capacity dimension at a time and retain the benchmark report for each change. Avoid multiple vLLM engine processes competing for the same GPU memory. The Compose service reserves shared memory for PyTorch/NCCL and a writable temporary cache area for CUDA/Triton compilation; size RUSA_SHM_SIZE and RUSA_TMPFS_SIZE for the actual host. The temporary mount is not marked noexec because some GPU kernel toolchains load compiled artifacts from that location.
 
 auto is a convenience selection mode, not a substitute for an explicit production deployment decision. Pin the backend in production.
 
