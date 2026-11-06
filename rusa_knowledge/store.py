@@ -84,7 +84,25 @@ class PostgresKnowledgeStore:
                         FROM pg_attribute a
                         WHERE a.attrelid = to_regclass('public.rusa_knowledge_chunks')
                           AND a.attname = 'embedding' AND NOT a.attisdropped
-                    ), false)
+                    ), false),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_documents'
+                          AND policyname='rusa_knowledge_documents_tenant_isolation'
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_chunks'
+                          AND policyname='rusa_knowledge_chunks_tenant_isolation'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'SELECT'
+                    )
                 """
             ).fetchone()
         return bool(row and all(row))
