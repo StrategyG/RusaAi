@@ -75,9 +75,9 @@ services:
         condition: service_healthy
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m
-      - /var/cache/nginx:rw,noexec,nosuid,size=32m
-      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=32m,uid=101,gid=101
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=101,gid=101
+      - /var/run:rw,noexec,nosuid,size=8m,uid=101,gid=101
     security_opt:
       - no-new-privileges:true
     cap_drop:
