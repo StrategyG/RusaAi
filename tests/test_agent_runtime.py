@@ -231,6 +231,14 @@ async def test_submit_is_idempotent_and_tenant_scoped(database, registry):
     other_tenant = await runtime.submit("tenant-b", "request-0001", task)
     assert first == repeated
     assert first != other_tenant
+    from rusa_agents.worker import IdempotencyConflict
+
+    with pytest.raises(IdempotencyConflict):
+        await runtime.submit(
+            "tenant-a",
+            "request-0001",
+            make_task(objective="Different objective with same key").model_dump(),
+        )
     assert await runtime.get_task("tenant-b", first) is None
     assert await runtime.get_task("tenant-a", first) is not None
 
