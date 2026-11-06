@@ -38,7 +38,9 @@ class AICodeRuntime:
             raise RuntimeError("RUSA_AUDIT_HMAC_KEY is required by the worker runtime")
         self.audit = PostgresAuditLog(self.config.database_url, self.config.audit_hmac_key)
         self.workspace_manager = GitWorkspaceManager(
-            self.config.git_mirror_root, self.config.workspace_root
+            self.config.git_mirror_root,
+            self.config.workspace_root,
+            github_token=self.config.github_token,
         )
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
