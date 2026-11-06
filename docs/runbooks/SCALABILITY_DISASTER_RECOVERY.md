@@ -146,7 +146,7 @@ For production, configure a dedicated off-host bucket with versioning and immuta
 
 The dump covers the application database only. It does not include PostgreSQL cluster roles/global objects, the audit volume, model weights, or source documents stored outside PostgreSQL. Recreate database roles using the reviewed initialization procedure and restore the audit/model/document stores from their own protected backups. The bootstrap database credential is privileged; keep the backup profile disabled except during scheduled backup/restore operations.
 
-The snapshot RPO is no better than the time between successful backup snapshots, including backup duration and any missed/failed cycles. The current scripts do not configure WAL archiving or point-in-time recovery. If the approved RPO is shorter than the tested snapshot interval, implement WAL archiving/PITR (for example, pgBackRest or WAL-G) before release.
+The default scheduler starts a snapshot cycle every hour after the previous cycle finishes; failures retry after five minutes and must trigger an operational alert. The snapshot RPO is no better than the time between successful backup snapshots, including backup duration and any missed/failed cycles. The current scripts do not configure WAL archiving or point-in-time recovery. If the approved RPO is shorter than the tested snapshot interval, implement WAL archiving/PITR (for example, pgBackRest or WAL-G) before release.
 
 ## 7. Restore procedure
 
@@ -171,6 +171,8 @@ Run a repeatable backup-and-restore drill with distinct source and target databa
 ```bash
 bash scripts/postgres/restore_drill.sh
 ```
+
+When `RUSA_BACKUP_S3_URI` is configured, the drill restores from the uploaded S3 object (not the local copy), so it also validates the off-host path and checksum. If remote storage is mandatory, the drill fails when the remote upload is unavailable.
 
 Required environment: `SOURCE_DATABASE_URL`, `RESTORE_DATABASE_URL`, `RESTORE_CONFIRM_DATABASE`, `BACKUP_DIR`, `BACKUP_AGE_RECIPIENT`, and `BACKUP_AGE_IDENTITY_FILE`. The script reports backup duration, restore duration, and total recovery duration.
 
