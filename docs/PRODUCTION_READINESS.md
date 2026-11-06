@@ -59,7 +59,7 @@ PostgreSQL same-worker-ID stale-token test before release. The API role has no
 direct UPDATE or DELETE access to queue tables. Tenant cancellation and failed-task
 requeue are exposed only through SECURITY DEFINER functions that verify the
 transaction-local tenant context and restrict eligible task states. Function
-execution is revoked from PUBLIC and granted only to the tenant API role.
+execution is revoked from PUBLIC by default and explicitly granted only to the tenant API and worker service roles for the two required lifecycle functions.
 
 For rollout from a worker version that does not send lease tokens, drain and stop
 all old worker replicas before enabling the new queue migration and starting the
