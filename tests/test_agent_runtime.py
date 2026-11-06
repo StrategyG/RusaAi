@@ -345,7 +345,7 @@ def test_orchestrator_completes_only_with_ci_and_same_sha_security_evidence():
         },
     )
     record = asyncio.run(orchestrator.run(make_task()))
-    assert record.state == TaskState.SUCCEEDED
+    assert record.state == TaskState.SUCCEEDED, {"errors": record.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in record.worker_results]}
     assert record.stage_index == 7
 
 
@@ -362,7 +362,7 @@ def test_orchestrator_checkpoints_while_ci_is_pending_then_resumes():
     assert first.stage_index == 3
     restored = TaskRecord.from_dict(first.to_dict())
     second = asyncio.run(orchestrator.run(task, restored))
-    assert second.state == TaskState.SUCCEEDED
+    assert second.state == TaskState.SUCCEEDED, {"errors": second.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in second.worker_results]}
 
 
 def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
@@ -389,7 +389,7 @@ def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
         WorkerRole.DEBUGGER: debugger,
     })
     record = asyncio.run(orchestrator.run(make_task()))
-    assert record.state == TaskState.SUCCEEDED
+    assert record.state == TaskState.SUCCEEDED, {"errors": record.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in record.worker_results]}
     assert record.repair_cycles == 1
 
 
@@ -580,7 +580,7 @@ def test_changed_head_after_tester_requires_fresh_ci_and_diff():
         tools,
         {WorkerRole.TESTER: tester, WorkerRole.SECURITY: security},
     ).run(make_task()))
-    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.state == TaskState.WAITING_EXTERNAL, {"errors": record.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in record.worker_results]}
     assert record.stage_index == 3
 
 
@@ -609,7 +609,7 @@ def test_changed_head_after_security_requires_master_final_ci_recheck():
         FinalHeadChangeTools(),
         {WorkerRole.TESTER: tester},
     ).run(make_task()))
-    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.state == TaskState.WAITING_EXTERNAL, {"errors": record.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in record.worker_results]}
     assert record.stage_index == 3
 
 
@@ -627,7 +627,7 @@ def test_orchestrator_persists_each_checkpoint_and_propagates_checkpoint_failure
         FakeTools(["passed", "passed"]),
         {WorkerRole.TESTER: tester},
     ).run(task, checkpoint_callback=persist))
-    assert record.state == TaskState.SUCCEEDED
+    assert record.state == TaskState.SUCCEEDED, {"errors": record.errors, "workers": [(item.role.value, [tool.name for tool in item.tool_results]) for item in record.worker_results]}
     assert any(stage == 3 for _, stage in checkpoints)
     assert checkpoints[-1] == ("succeeded", 7)
 
