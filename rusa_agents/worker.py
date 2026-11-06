@@ -722,6 +722,7 @@ class AgentRuntime:
                     "final_answer": final_answer,
                     "acceptance_criteria": row.acceptance_criteria,
                     "acceptance_criteria_evaluated": False,
+                    "acceptance_criteria_model_assessed": True,
                     "verification_scope": [
                         "feature_branch_created",
                         *(
