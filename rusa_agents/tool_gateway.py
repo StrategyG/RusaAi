@@ -154,15 +154,29 @@ class DockerSandbox:
                         break
                 if outcome != "completed":
                     break
+        if outcome == "completed":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                outcome = "timeout"
+            else:
+                try:
+                    process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    outcome = "timeout"
         if outcome != "completed":
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
         else:
             process.wait()
+        process.stdout.close()
         return process.returncode, output.decode("utf-8", "replace"), outcome, total_bytes
 
     @staticmethod
