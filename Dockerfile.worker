@@ -5,14 +5,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
-COPY requirements-agent.txt .
-RUN python -m pip install --no-cache-dir -r requirements-agent.txt \
+COPY requirements-agent.txt requirements-rag-mcp.txt .
+RUN python -m pip install --no-cache-dir -r requirements-agent.txt -r requirements-rag-mcp.txt \
     && groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa \
     && mkdir -p /var/lib/rusa-agent \
     && chown -R 10001:10001 /var/lib/rusa-agent
 
 COPY rusa_agents /app/rusa_agents
+COPY rusa_knowledge /app/rusa_knowledge
+COPY rusa_mcp /app/rusa_mcp
+COPY migrations /app/migrations
 
 USER 10001:10001
 CMD ["python", "-m", "rusa_agents.worker"]
