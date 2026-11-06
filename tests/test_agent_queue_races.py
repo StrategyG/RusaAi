@@ -75,6 +75,41 @@ def test_worker_crash_reclaims_task_and_fences_old_acknowledgement():
         remove_tenant(tenant)
 
 
+def test_concurrent_duplicate_delivery_returns_one_task_id():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"rusa-test-duplicate-delivery-{uuid4().hex}"
+    key = f"duplicate-{uuid4().hex}"
+    task = make_task(tenant, key)
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            task_ids = list(pool.map(lambda _: queue.enqueue(task), range(16)))
+        assert len(set(task_ids)) == 1
+        assert queue.get(tenant, task_ids[0])["status"] == "queued"
+    finally:
+        remove_tenant(tenant)
+
+
+def test_two_workers_cannot_claim_the_same_task_concurrently():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"rusa-test-single-claim-{uuid4().hex}"
+    task = make_task(tenant, f"single-claim-{uuid4().hex}")
+    task_id = queue.enqueue(task)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claims = list(pool.map(
+                lambda worker: queue.claim(worker, lease_seconds=60),
+                ("exclusive-worker-a", "exclusive-worker-b"),
+            ))
+        owned = [claim for claim in claims if claim is not None]
+        assert len(owned) == 1
+        assert owned[0]["task_id"] == task_id
+        assert queue.get(tenant, task_id)["attempts"] == 1
+    finally:
+        remove_tenant(tenant)
+
+
 def test_competing_workers_claim_distinct_tasks():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
