@@ -24,7 +24,7 @@ Use RUSA_INFERENCE_BACKEND=transformers for CPU validation or a small single-GPU
 
 ### vLLM production candidate
 
-Use RUSA_INFERENCE_BACKEND=vllm 0.32.x when the model and target GPU are supported by the selected vLLM/PyTorch/CUDA versions. The base Docker image uses CPU-only PyTorch; the GPU override installs the vLLM 0.32.x runtime and its compatible CUDA-enabled PyTorch build. The supplied GPU Compose override requests NVIDIA devices and builds the optional vLLM dependency; it still requires NVIDIA Container Toolkit and a supported host driver. vLLM provides continuous batching and paged KV-cache management. Configure:
+Use RUSA_INFERENCE_BACKEND=vllm 0.32.x when the model and target GPU are supported by the selected vLLM/PyTorch/CUDA versions. The default API image intentionally omits heavyweight model dependencies. Build a local Transformers image with `docker build --build-arg RUSA_INSTALL_LOCAL_MODEL=1 -t rusa-ai-local-model .`; this installs the optional `[model]` extra. The vLLM dependency is isolated in `requirements-vllm.txt` and must be installed in a deployment-specific image/environment with a mutually compatible CUDA, PyTorch, vLLM, NVIDIA Container Toolkit, and host-driver combination. This repository does not currently provide a GPU Compose override for the current mainline service topology. vLLM provides continuous batching and paged KV-cache management. Configure:
 - RUSA_MAX_MODEL_LEN
 - RUSA_MAX_NUM_SEQS
 - RUSA_MAX_NUM_BATCHED_TOKENS
@@ -41,7 +41,7 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 |---|---|---|
 | ENVIRONMENT | Controls production fail-closed behavior | production |
 | RUSA_API_KEY | Service API credential | Secret manager; 48+ random bytes |
-| RUSA_MODEL_PATH | Mounted model directory | /models |
+| RUSA_MODEL_PATH or RUSA_LOCAL_MODEL_PATH | Mounted model directory | /models |
 | RUSA_MODEL_MANIFEST_SHA256 | Pinned artifact manifest digest | Exact SHA-256 from manifest generator |
 | RUSA_MODEL_NAME | OpenAI API model identifier | rusa-ai-v1 |
 | RUSA_INFERENCE_BACKEND | Backend selection | vllm after validation |
