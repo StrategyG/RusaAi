@@ -21,6 +21,8 @@ from .orchestrator import AICodeOrchestrator, CheckpointPersistenceError
 from .provider import OpenAICompatibleProvider
 from .queue import PostgresTaskQueue
 from .workers import AgentWorker
+from rusa_observability.metrics import record_agent_queue_snapshot, start_metrics_server
+from rusa_observability.telemetry import configure_telemetry
 
 logger = logging.getLogger("rusa-agent-worker")
 
@@ -99,9 +101,15 @@ class QueueWorker:
         maintenance_interval_seconds: float = 3600.0,
         worker_id: str | None = None,
         lease_seconds: int = 300,
+        tenant_ids: tuple[str, ...] = (),
+        metrics_interval_seconds: float = 30.0,
     ) -> None:
-        if poll_interval_seconds <= 0 or maintenance_interval_seconds <= 0:
-            raise ValueError("worker intervals must be positive")
+        if (
+            poll_interval_seconds <= 0
+            or maintenance_interval_seconds <= 0
+            or metrics_interval_seconds < 5
+        ):
+            raise ValueError("worker intervals must be positive and metrics interval at least 5s")
         PostgresTaskQueue._validate_lease(lease_seconds)
         self.queue = queue
         self.orchestrator = orchestrator
@@ -111,6 +119,8 @@ class QueueWorker:
         self.maintenance_interval_seconds = maintenance_interval_seconds
         self.worker_id = worker_id or f"{socket.gethostname()[:80]}-{uuid.uuid4().hex[:12]}"
         self.lease_seconds = lease_seconds
+        self.tenant_ids = tuple(sorted(set(tenant_ids)))
+        self.metrics_interval_seconds = metrics_interval_seconds
 
     def close(self) -> None:
         close = getattr(self.memory_reader, "close", None)
@@ -282,10 +292,41 @@ class QueueWorker:
                 logger.exception("could not persist worker failure task_id=%s", task_id)
         return True
 
+    async def _refresh_queue_metrics(self) -> None:
+        if not self.tenant_ids:
+            return
+        totals = {
+            "queued": 0,
+            "running": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "blocked": 0,
+            "cancelled": 0,
+            "waiting_external": 0,
+        }
+        oldest_queued_age = 0
+        for tenant_id in self.tenant_ids:
+            snapshot = await asyncio.to_thread(self.queue.stats, tenant_id)
+            counts = snapshot.get("counts", {})
+            for state in totals:
+                totals[state] += max(0, int(counts.get(state, 0)))
+            oldest_queued_age = max(
+                oldest_queued_age,
+                max(0, int(snapshot.get("oldest_queued_age_seconds", 0))),
+            )
+        record_agent_queue_snapshot(totals, oldest_queued_age)
+
     async def run_forever(self, stop_event: asyncio.Event) -> None:
         loop = asyncio.get_running_loop()
         next_maintenance = loop.time() + self.maintenance_interval_seconds
+        next_metrics = loop.time()
         while not stop_event.is_set():
+            if self.tenant_ids and loop.time() >= next_metrics:
+                try:
+                    await self._refresh_queue_metrics()
+                except Exception:
+                    logger.exception("agent queue metrics refresh failed")
+                next_metrics = loop.time() + self.metrics_interval_seconds
             if loop.time() >= next_maintenance:
                 try:
                     removed_tasks = await asyncio.to_thread(
@@ -422,6 +463,8 @@ def build_worker() -> QueueWorker:
         memory_reader=memory_reader,
         poll_interval_seconds=float(os.getenv("RUSA_AGENT_POLL_INTERVAL", "1")),
         lease_seconds=int(os.getenv("RUSA_AGENT_LEASE_SECONDS", "300")),
+        tenant_ids=tuple(tenant_repositories),
+        metrics_interval_seconds=float(os.getenv("RUSA_AGENT_METRICS_INTERVAL_SECONDS", "30")),
     )
 
 
@@ -430,6 +473,12 @@ async def _serve() -> None:
         level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    configure_telemetry("rusa-agent-worker")
+    if os.getenv("RUSA_METRICS_ENABLED", "false").lower() == "true":
+        start_metrics_server(
+            port=int(os.getenv("RUSA_WORKER_METRICS_PORT", "9100")),
+            addr="0.0.0.0",
+        )
     worker = build_worker()
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

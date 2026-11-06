@@ -15,6 +15,8 @@ from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from rusa_knowledge.service import KnowledgeService
+from rusa_observability.middleware import PrometheusASGIMiddleware
+from rusa_observability.telemetry import instrument_asgi
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -222,13 +224,16 @@ class TenantAuthMiddleware:
 
 
 _transport_security = TransportSecuritySettings(allowed_hosts=_allowed_hosts())
-app = TenantAuthMiddleware(
-    mcp.streamable_http_app(
-        transport_security=_transport_security,
-        stateless_http=True,
-        json_response=True,
-        max_request_body_size=128 * 1024,
-    )
+_mcp_app = mcp.streamable_http_app(
+    transport_security=_transport_security,
+    stateless_http=True,
+    json_response=True,
+    max_request_body_size=128 * 1024,
+)
+_mcp_app = instrument_asgi(_mcp_app, "rusa-mcp")
+app = PrometheusASGIMiddleware(
+    TenantAuthMiddleware(_mcp_app),
+    service_name="rusa-mcp",
 )
 
 

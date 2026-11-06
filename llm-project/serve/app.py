@@ -37,6 +37,9 @@ from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.identity import IdentityError, PostgresIdentityStore
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_knowledge.service import KnowledgeService
+from rusa_observability.middleware import install_metrics
+from rusa_observability.metrics import record_database_capacity_limit, record_inference
+from rusa_observability.telemetry import instrument_fastapi, trace_span
 
 logger = logging.getLogger("rusa-ai-serve")
 logging.basicConfig(
@@ -531,6 +534,11 @@ app = FastAPI(
     openapi_url="/openapi.json" if environment != "production" else None,
     lifespan=lifespan,
 )
+install_metrics(app, "rusa-inference")
+instrument_fastapi(app, "rusa-inference")
+record_database_capacity_limit(
+    int(os.getenv("RUSA_DATABASE_SIZE_LIMIT_BYTES", str(10 * 1024**3)))
+)
 
 
 class _RequestTooLarge(Exception):
@@ -786,13 +794,24 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
                         ChatMessage(role="system", content="Retrieved knowledge:\n\n" + "\n\n".join(evidence)),
                     )
 
+    generation_started = time.perf_counter()
+    generation_outcome = "error"
+    result: GenerationResult | None = None
     try:
-        result = backend.generate(
-            messages,
-            max_new_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-        )
+        with trace_span(
+            "rusa.inference.generate",
+            {
+                "gen_ai.request.model": configured_model,
+                "gen_ai.request.max_tokens": request.max_tokens,
+            },
+        ):
+            result = backend.generate(
+                messages,
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+            )
+        generation_outcome = "success"
     except Exception as exc:
         request_id = getattr(http_request.state, "request_id", "unknown")
         logger.exception("Inference failed request_id=%s", request_id)
@@ -800,6 +819,14 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Inference backend failed to generate a response",
         ) from exc
+    finally:
+        record_inference(
+            configured_model,
+            generation_outcome,
+            time.perf_counter() - generation_started,
+            prompt_tokens=result.prompt_tokens if result is not None else 0,
+            completion_tokens=result.completion_tokens if result is not None else 0,
+        )
 
     return ChatCompletionResponse(
         id=f"chatcmpl-{uuid.uuid4().hex}",

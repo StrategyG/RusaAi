@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .contracts import CodingTask, RepositoryTarget
 from .http_limits import BodyLimitMiddleware
 from .queue import IdempotencyConflictError, PostgresTaskQueue
+from rusa_observability.middleware import install_metrics
+from rusa_observability.telemetry import instrument_fastapi
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 if MAX_AGENT_REQUEST_BYTES <= 0:
@@ -191,6 +193,8 @@ app = FastAPI(
 )
 
 app.add_middleware(BodyLimitMiddleware, max_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
+install_metrics(app, "rusa-agent-api")
+instrument_fastapi(app, "rusa-agent-api")
 
 
 @app.middleware("http")
