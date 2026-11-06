@@ -1,17 +1,30 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-WORKDIR /app
+WORKDIR /build
 COPY requirements-agent.txt .
-RUN python -m pip install --no-cache-dir -r requirements-agent.txt \
+RUN python -m pip install --no-cache-dir --prefix=/install -r requirements-agent.txt
+
+FROM python:3.11-slim-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
     && groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa \
     && mkdir -p /var/lib/rusa-agent \
     && chown -R 10001:10001 /var/lib/rusa-agent
 
+COPY --from=builder /install /usr/local
 COPY rusa_agents /app/rusa_agents
 
 USER 10001:10001
