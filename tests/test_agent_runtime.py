@@ -421,3 +421,26 @@ def test_mcp_gateway_rejects_non_https_remote_endpoint():
             token="",
             allowed_tools=["search"],
         )
+
+
+def test_tenant_and_approver_credentials_are_separate(monkeypatch):
+    import json
+    from fastapi import HTTPException
+    from rusa_agents.api import resolve_approver_tenant, resolve_tenant
+
+    tenant_secret = "tenant-secret-that-is-at-least-thirty-two-characters"
+    approver_secret = "approver-secret-that-is-at-least-thirty-two-characters"
+    monkeypatch.setenv(
+        "RUSA_TENANT_API_KEYS",
+        json.dumps({"tenant-a": tenant_secret}),
+    )
+    monkeypatch.setenv(
+        "RUSA_TENANT_APPROVER_KEYS",
+        json.dumps({"tenant-a": approver_secret}),
+    )
+    assert resolve_tenant(tenant_secret) == "tenant-a"
+    assert resolve_approver_tenant(approver_secret) == "tenant-a"
+    with pytest.raises(HTTPException):
+        resolve_approver_tenant(tenant_secret)
+    with pytest.raises(HTTPException):
+        resolve_tenant(approver_secret)
