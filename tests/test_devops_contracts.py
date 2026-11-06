@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uuid import uuid4
+import uuid
 
 import pytest
 
@@ -18,8 +18,8 @@ TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 def _task() -> dict:
     return {
         "schema_version": 1,
-        "task_id": str(uuid4()),
-        "workflow_id": str(uuid4()),
+        "task_id": str(uuid.uuid4()),
+        "workflow_id": str(uuid.uuid4()),
         "tenant_id": "tenant-demo",
         "agent_id": "rusa_plan_agent",
         "stage": "plan",
@@ -51,8 +51,8 @@ def _task() -> dict:
 def _result() -> dict:
     return {
         "schema_version": 1,
-        "task_id": str(uuid4()),
-        "workflow_id": str(uuid4()),
+        "task_id": str(uuid.uuid4()),
+        "workflow_id": str(uuid.uuid4()),
         "tenant_id": "tenant-demo",
         "agent_id": "rusa_test_agent",
         "stage": "test",
