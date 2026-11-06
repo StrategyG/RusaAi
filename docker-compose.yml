@@ -43,8 +43,9 @@ services:
         target: /models
         read_only: true
     read_only: true
+    shm_size: ${RUSA_SHM_SIZE:-8gb}
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=256m
+      - /tmp:rw,nosuid,size=${RUSA_TMPFS_SIZE:-4g}
     security_opt:
       - no-new-privileges:true
     cap_drop:
