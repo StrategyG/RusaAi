@@ -85,6 +85,20 @@ CREATE POLICY rusa_knowledge_chunks_tenant_isolation
 
 DO $rusa$
 BEGIN
+    -- Existing database volumes do not replay docker-entrypoint-initdb.d.
+    -- Ensure the dedicated knowledge role exists before granting table access.
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_worker') THEN
+        CREATE ROLE rusa_knowledge_worker
+            NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    ELSE
+        ALTER ROLE rusa_knowledge_worker
+            NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker') THEN
+        GRANT rusa_knowledge_worker TO rusa_agent_worker;
+    END IF;
+
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api') THEN
         GRANT USAGE ON SCHEMA public TO rusa_agent_api;
         GRANT SELECT ON public.rusa_knowledge_documents TO rusa_agent_api;
