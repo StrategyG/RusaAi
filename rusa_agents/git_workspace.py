@@ -129,7 +129,10 @@ class GitWorkspaceManager:
             raise ValueError("Repository mirror must be a valid bare Git repository")
 
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]
-        workspace = (self.workspace_root / tenant_key / task.task_id).resolve()
+        attempt_key = hashlib.sha256(
+            str(task.metadata.get("lease_token", "legacy")).encode("utf-8")
+        ).hexdigest()[:12]
+        workspace = (self.workspace_root / tenant_key / task.task_id / attempt_key).resolve()
         if self.workspace_root not in workspace.parents:
             raise ValueError("Workspace path escaped configured root")
         workspace.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +163,10 @@ class GitWorkspaceManager:
         owner, repo = task.repository.full_name.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]
-        workspace = (self.workspace_root / tenant_key / task.task_id).resolve()
+        attempt_key = hashlib.sha256(
+            str(task.metadata.get("lease_token", "legacy")).encode("utf-8")
+        ).hexdigest()[:12]
+        workspace = (self.workspace_root / tenant_key / task.task_id / attempt_key).resolve()
         if self.mirror_root not in mirror.parents or self.workspace_root not in workspace.parents:
             raise ValueError("Cleanup path escaped configured roots")
         if not workspace.exists():
