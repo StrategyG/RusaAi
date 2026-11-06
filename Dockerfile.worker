@@ -5,13 +5,16 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git docker.io \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser
 
 COPY --chown=appuser:appuser . /app
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir . \
+    && python -m pip install --no-cache-dir --upgrade \
+         pip "setuptools>=78.1.1" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip check
 
 USER appuser
 EXPOSE 9100
