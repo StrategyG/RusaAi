@@ -1,3 +1,6 @@
+import pytest
+pytest.importorskip("mcp", reason="optional MCP runtime is not installed")
+
 import asyncio
 import hashlib
 import json
