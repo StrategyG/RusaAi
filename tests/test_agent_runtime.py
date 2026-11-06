@@ -606,7 +606,7 @@ def test_github_gateway_branch_diff_is_complete_and_redacts_secrets(monkeypatch)
     async def fake_request(method, path, *, json_body=None, params=None, allow_not_found=False):
         if path.endswith("/branches/main"):
             return {"commit": {"sha": "a" * 40}}
-        if path.endswith("/branches/" + task.repository.work_branch):
+        if path.endswith("/branches/" + task.repository.work_branch.replace("/", "%2F")):
             return {"commit": {"sha": "b" * 40}}
         if "/compare/" in path:
             return {
@@ -641,7 +641,7 @@ def test_github_gateway_branch_diff_fails_closed_for_missing_patch(monkeypatch):
     async def fake_request(method, path, *, json_body=None, params=None, allow_not_found=False):
         if path.endswith("/branches/main"):
             return {"commit": {"sha": "a" * 40}}
-        if path.endswith("/branches/" + task.repository.work_branch):
+        if path.endswith("/branches/" + task.repository.work_branch.replace("/", "%2F")):
             return {"commit": {"sha": "b" * 40}}
         if "/compare/" in path:
             return {

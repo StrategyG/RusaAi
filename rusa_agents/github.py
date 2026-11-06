@@ -271,7 +271,7 @@ class GitHubToolGateway:
     async def _get_ci_status(self, task: CodingTask) -> ToolResult:
         root = self._root(task)
         branch = await self._request(
-            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
+            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='')}",
         )
         if not isinstance(branch, dict):
             raise RuntimeError("work branch was not found")
@@ -318,7 +318,7 @@ class GitHubToolGateway:
 
         checks_complete = total_count is not None and len(raw_items) == total_count
         latest = await self._request(
-            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
+            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='')}",
         )
         latest_sha = str(latest.get("commit", {}).get("sha", "")) if isinstance(latest, dict) else ""
         items = [
@@ -350,10 +350,10 @@ class GitHubToolGateway:
     async def _get_branch_diff(self, task: CodingTask) -> ToolResult:
         root = self._root(task)
         base = await self._request(
-            "GET", f"{root}/branches/{quote(task.repository.base_branch, safe='/')}",
+            "GET", f"{root}/branches/{quote(task.repository.base_branch, safe='')}",
         )
         head = await self._request(
-            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='/')}",
+            "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='')}",
         )
         if not isinstance(base, dict) or not isinstance(head, dict):
             raise RuntimeError("base or work branch was not found")
