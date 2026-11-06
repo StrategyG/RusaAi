@@ -26,7 +26,7 @@ Review objective: close the highest-risk gaps without weakening autonomy boundar
 | External responses | GitHub and provider bodies are streamed with byte limits | Adapter limits and configuration |
 | CI completeness | Bounded check-run pagination, stable total count, unique run IDs, complete-set validation | Incomplete and paginated check-run tests |
 | Security review | Security worker fetches evidence, then runs a second read-only model pass that actually receives the complete diff and CI result | Review-only worker and orchestrator tests |
-| Secret handling | Common secret formats are redacted; diffs containing redaction markers are blocked | Redaction and hard-gate tests |
+| Secret handling | Common secret formats are redacted; secret-bearing writes are blocked before GitHub access; checkpoints, memory, and audit details omit/redact sensitive content | Redaction, checkpoint, and hard-gate tests |
 | Commit freshness | Tester CI, Security CI, and Security diff must identify the same head SHA | Changed-head regression |
 | Diff completeness | Security context is capped at 20 files and bounded patch size; incomplete diffs are blocked | Oversized and protected-path diff tests |
 | CI triggers | Pull-request checks now run for stacked PRs regardless of target branch | Workflow contract test |
