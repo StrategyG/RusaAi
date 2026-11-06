@@ -88,6 +88,7 @@ jobs:
               INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
           GRANT pg_read_all_data TO rusa_backup_ci;
           GRANT CONNECT ON DATABASE rusa_test TO rusa_backup_ci;
+          ALTER ROLE rusa_backup_ci SET default_transaction_read_only = on;
           CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
               id INTEGER PRIMARY KEY,
               value TEXT NOT NULL
@@ -98,6 +99,8 @@ jobs:
           SQL
           role_flags="$(psql "$ADMIN_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN NOT rolsuper AND rolbypassrls THEN 'ok' ELSE 'bad' END FROM pg_roles WHERE rolname='rusa_backup_ci'")"
           test "$role_flags" = "ok"
+          can_insert="$(psql "$ADMIN_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT has_table_privilege('rusa_backup_ci', 'public.rusa_drill_probe', 'INSERT')")"
+          test "$can_insert" = "f"
           if psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO public.rusa_drill_probe (id, value) VALUES (2, 'must-not-write')" >/dev/null 2>&1; then
               echo "Backup role unexpectedly has write access" >&2
               exit 1
