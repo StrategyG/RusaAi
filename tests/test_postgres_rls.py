@@ -288,6 +288,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert not worker.complete(job.id, "audit-a", "policy-test-worker", job.lease_token, {})
     assert client.delete(path, headers=api_a).status_code == 404
     assert client.get(path, headers=api_b).json()["status"] == "running"
+    assert not worker.authorize_execution(
+        job.id, task_id, "audit-b", "policy-test-worker", str(uuid4())
+    )
+    assert worker.authorize_execution(
+        job.id, task_id, "audit-b", "policy-test-worker", job.lease_token
+    )
     assert client.delete(path, headers=api_b).status_code == 202
 
     events = [json.loads(record.getMessage()) for record in caplog.records
@@ -307,12 +313,6 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert "sensitive objective sentinel" not in caplog.text
     assert key_a not in caplog.text and key_b not in caplog.text
 
-    assert not worker.authorize_execution(
-        job.id, task_id, "audit-b", "policy-test-worker", str(uuid4())
-    )
-    assert worker.authorize_execution(
-        job.id, task_id, "audit-b", "policy-test-worker", job.lease_token
-    )
     with psycopg.connect(worker_dsn) as conn:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("audit-b",))
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
