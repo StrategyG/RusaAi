@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rusa.ai/schemas/devops/agent-task.schema.json",
+  "$id": "https://rusa.ai/schemas/devops/v1/agent-task.schema.json",
   "title": "RUSA AI Agentic DevOps Task",
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "schema_version",
     "task_id",
     "workflow_id",
     "tenant_id",
@@ -16,8 +17,9 @@
     "audit"
   ],
   "properties": {
-    "task_id": { "type": "string", "format": "uuid" },
-    "workflow_id": { "type": "string", "format": "uuid" },
+    "schema_version": { "const": 1 },
+    "task_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "workflow_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
     "tenant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
     "agent_id": {
       "type": "string",
