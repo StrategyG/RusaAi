@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 
 from app import app, set_inference_provider
@@ -123,12 +124,24 @@ def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
-    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    production_key = "tenant-key-production-test-credential-000000"
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"' + hashlib.sha256(production_key.encode()).hexdigest()
+        + '":{"subject":"tenant-admin","tenant_id":"tenant-alpha","roles":["tenant_admin"]}}',
+    )
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/Allowed"]}')
+
+    class AuditSink:
+        def record(self, tenant_id, task_id, actor, action, decision):
+            return None
+
+    monkeypatch.setattr(app.state, "task_policy_audit", AuditSink(), raising=False)
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": "tenant-key"},
+        headers={"X-API-Key": production_key},
         json={
             "objective": "Try another repository",
             "repository": {"full_name": "someone/private-repo"},
