@@ -62,11 +62,11 @@ async def lifespan(application: FastAPI):
         )
     else:
         set_inference_provider(None)
-    if config.database_url:
-        queue = PostgresTaskQueue(config.database_url)
+    if config.api_database_url:
+        queue = PostgresTaskQueue(config.api_database_url)
         queue.initialize()
         application.state.queue = queue
-        limiter = PostgresRateLimiter(config.database_url)
+        limiter = PostgresRateLimiter(config.api_database_url)
         limiter.initialize()
         application.state.rate_limiter = limiter
     yield
