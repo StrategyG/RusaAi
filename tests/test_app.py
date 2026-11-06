@@ -17,6 +17,7 @@ from app import create_app
 KEY_A = "tenant-a-test-key-000000000000000000000000"
 KEY_B = "tenant-b-test-key-000000000000000000000000"
 READ_KEY = "readonly-test-key-000000000000000000000000"
+DEV_KEY = "developer-test-key-000000000000000000000000"
 
 
 def _key_hash(value):
@@ -28,6 +29,7 @@ def _registry():
         _key_hash(KEY_A): {"subject": "service-a", "tenant_id": "tenant-a", "roles": ["tenant_admin"]},
         _key_hash(KEY_B): {"subject": "service-b", "tenant_id": "tenant-b", "roles": ["tenant_admin"]},
         _key_hash(READ_KEY): {"subject": "readonly-a", "tenant_id": "tenant-a", "roles": ["read_only"]},
+        _key_hash(DEV_KEY): {"subject": "developer-a", "tenant_id": "tenant-a", "roles": ["developer"]},
     }
 
 
@@ -76,6 +78,30 @@ def test_rbac_denies_read_only_role_from_generation(client):
     response = client.post("/v1/chat/completions", headers={"X-API-Key": READ_KEY},
                            json={"messages": [{"role": "user", "content": "hello"}]})
     assert response.status_code == 403
+
+
+def test_rbac_denies_developer_from_writing_records(client):
+    response = client.post("/v1/records", headers={"X-API-Key": DEV_KEY},
+                           json={"data": {"label": "developer-write-attempt"}})
+    assert response.status_code == 403
+
+
+def test_unauthenticated_requests_are_rate_limited(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps(_registry()))
+    monkeypatch.setenv("RUSA_RATE_LIMIT_MAX_REQUESTS", "2")
+    monkeypatch.setenv("RUSA_RATE_LIMIT_WINDOW_SECONDS", "60")
+    monkeypatch.delenv("RUSA_REDIS_URL", raising=False)
+    with TestClient(create_app()) as test_client:
+        headers = {"X-API-Key": "invalid-key-value-that-is-long-enough-000"}
+        path = "/v1/chat/completions"
+        assert test_client.post(path, headers=headers,
+                                json={"messages": [{"role": "user", "content": "x"}]}).status_code == 401
+        assert test_client.post(path, headers=headers,
+                                json={"messages": [{"role": "user", "content": "x"}]}).status_code == 401
+        response = test_client.post(path, headers=headers,
+                                    json={"messages": [{"role": "user", "content": "x"}]})
+    assert response.status_code == 429
 
 
 def valid_envelope():

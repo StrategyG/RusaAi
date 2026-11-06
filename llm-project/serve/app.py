@@ -31,10 +31,9 @@ class MemoryRateLimiter:
         self.events: dict[str, deque[float]] = defaultdict(deque)
         self.lock = asyncio.Lock()
 
-    async def check(self, request: Request, principal: Principal) -> None:
+    async def check_key(self, request: Request, key: str) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production":
             raise HTTPException(status_code=503, detail="Rate limiting service is unavailable")
-        key = f"{principal.tenant_id}:{principal.subject}"
         now = time.monotonic()
         async with self.lock:
             events = self.events[key]
@@ -45,6 +44,7 @@ class MemoryRateLimiter:
                                     headers={"Retry-After": str(self.window)})
             events.append(now)
 
+
 class RateLimiter:
     def __init__(self, limit: int, window: int):
         if limit < 1 or window < 1:
@@ -52,21 +52,33 @@ class RateLimiter:
         self.limit, self.window = limit, window
         self.local = MemoryRateLimiter(limit, window)
 
-    async def check(self, request: Request, principal: Principal) -> None:
+    async def _check_key(self, request: Request, identity: str) -> None:
         redis_client = request.app.state.redis
         if redis_client is None:
-            await self.local.check(request, principal)
+            await self.local.check_key(request, identity)
             return
         import hashlib
-        identity = hashlib.sha256(f"{principal.tenant_id}:{principal.subject}".encode()).hexdigest()
+        digest = hashlib.sha256(identity.encode()).hexdigest()
         try:
-            count = await redis_client.eval(RATE_LIMIT_SCRIPT, 1, f"rusa:ratelimit:{identity}", self.window)
+            count = await redis_client.eval(
+                RATE_LIMIT_SCRIPT, 1, f"rusa:ratelimit:{digest}", self.window
+            )
         except Exception as exc:
             logger.error("rate_limit_backend_error", extra={"error_type": type(exc).__name__})
             raise HTTPException(status_code=503, detail="Rate limiting service is unavailable") from None
         if int(count) > self.limit:
             raise HTTPException(status_code=429, detail="Rate limit exceeded",
                                 headers={"Retry-After": str(self.window)})
+
+    async def check_ip(self, request: Request) -> None:
+        # Do not trust X-Forwarded-For; use the ASGI peer address unless a trusted
+        # proxy middleware is explicitly configured by the deployment.
+        host = request.client.host if request.client else "unknown"
+        await self._check_key(request, f"ip:{host}")
+
+    async def check(self, request: Request, principal: Principal) -> None:
+        await self._check_key(request, f"principal:{principal.tenant_id}:{principal.subject}")
+
 
 class RequestSizeLimitMiddleware:
     """Bound request bodies, including chunked requests without Content-Length."""

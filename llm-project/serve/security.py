@@ -12,7 +12,7 @@ KNOWN_ROLES = {"platform_admin", "tenant_admin", "developer", "read_only"}
 ROLE_PERMISSIONS = {
     "platform_admin": {"chat:invoke", "task:validate", "records:read", "records:write"},
     "tenant_admin": {"chat:invoke", "task:validate", "records:read", "records:write"},
-    "developer": {"chat:invoke", "task:validate", "records:read", "records:write"},
+    "developer": {"chat:invoke", "task:validate", "records:read"},
     "read_only": {"task:validate", "records:read"},
 }
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -55,7 +55,9 @@ def load_api_key_registry() -> dict[str, dict[str, Any]]:
                                 "roles": tuple(sorted(set(roles)))}
     return registry
 
-def authenticate(api_key: str | None = Depends(api_key_header)) -> Principal:
+async def authenticate(request: Request, api_key: str | None = Depends(api_key_header)) -> Principal:
+    # Apply an IP bucket before credential validation to limit authentication abuse too.
+    await request.app.state.rate_limiter.check_ip(request)
     try:
         registry = load_api_key_registry()
     except ValueError:

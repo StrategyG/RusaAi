@@ -8,7 +8,7 @@
 - Roles are platform_admin, tenant_admin, developer and read_only. Every principal remains scoped to the tenant asserted by its key; a role never grants cross-tenant access.
 - The database application role must be NOSUPERUSER, NOBYPASSRLS and must not own public.tenant_records. Startup verifies role flags, ENABLE/FORCE RLS and the exact tenant policy.
 - Tenant-record operations set app.tenant_id transaction-locally and use parameterized SQL. PostgreSQL RLS is a second authorization boundary.
-- Production requires PostgreSQL and Redis. Redis is the shared rate-limit backend; if it is unavailable, requests fail closed. In-memory limiting is development/test only.
+- Production requires PostgreSQL and Redis. Redis is the shared rate-limit backend; if it is unavailable, requests fail closed. Both peer-IP authentication attempts and authenticated tenant/subject requests are rate-limited. In-memory limiting is development/test only.
 - Request bodies are bounded by RUSA_MAX_REQUEST_BYTES (default 1 MiB). Validation and application errors do not echo request values, credentials, SQL or exception messages.
 - A2A schema is mandatory. Missing or invalid schema returns HTTP 503, never valid=true.
 - /health is a minimal public liveness endpoint. API docs and OpenAPI routes are disabled in production.
@@ -35,7 +35,7 @@ Configure only the 64-character digest:
       }
     }
 
-Supported permissions: platform_admin, tenant_admin and developer can invoke chat, validate tasks and read/write tenant records. read_only can validate tasks and read tenant records. Every credential is tenant-bound.
+Supported permissions: platform_admin and tenant_admin can invoke chat, validate tasks and read/write tenant records. developer can invoke chat, validate tasks and read tenant records. read_only can validate tasks and read tenant records. Every credential is tenant-bound.
 
 ## Runtime settings
 
