@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
     RUSA_MAX_REQUEST_BYTES=1048576 \
+    PYTHONPATH=/app:/app/llm-project/serve \
     PYTHONPATH=/app:/app/llm-project/serve
 
 WORKDIR /app
