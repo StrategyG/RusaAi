@@ -5,8 +5,9 @@
 Every push and pull request runs the reusable CI workflow:
 
 1. **Quality:** Ruff lint, Python 3.13 compilation, deployment/rollback shell tests, the full pytest suite against the digest-pinned PostgreSQL 16.15 image (Alpine 3.24), and pip-audit for the complete development dependency set.
-2. **Container security:** Compose interpolation validation, production API and worker image builds, Trivy image scans, and CycloneDX SBOM generation for both images.
-3. **Release Gate:** a single aggregate check that fails unless both mandatory jobs succeed. Configure this exact check as required on protected branches.
+2. **Container security:** Compose interpolation validation, digest-pinned Python base images, production API and worker image builds, patched Python dependency floors, runtime dependency verification, Trivy image scans, and CycloneDX SBOM generation for both images.
+3. **Production verification:** the production Compose stack must become healthy with a running PostgreSQL service; CI verifies the agent readiness endpoint, task/memory tables, and forced tenant RLS. A separate local-registry drill deploys immutable image digests, reinitializes the worker schema against persisted data, performs manual rollback, forces an unhealthy release, and verifies automatic rollback preserves the PostgreSQL sentinel row.
+4. **Release Gate:** a single aggregate check that fails unless quality, all six CRITICAL/HIGH image scans, production Compose smoke, and the PostgreSQL-backed rollback drill succeed. Configure this exact check as required on protected branches.
 
 Trivy blocks every CRITICAL finding and every HIGH finding except the exact CVEs listed in the root .trivyignore file. Each exception has a mitigation, owner, and expiry in docs/SECURITY_EXCEPTIONS.md; scripts/security/validate_trivy_exceptions.py fails CI when an exception expires or the ignore list and register diverge. Unfiltered JSON reports for both application images and PostgreSQL are retained as 30-day workflow artifacts. New CVEs are not automatically ignored.
 
@@ -30,7 +31,7 @@ Only `vMAJOR.MINOR.PATCH` tags are accepted. The release workflow:
 - signs image digests with Cosign using GitHub OIDC keyless signing;
 - publishes SLSA build-provenance attestations.
 
-Deployments use image digests, not mutable tags such as `latest`.
+Deployments use image digests, not mutable tags such as `latest`. The deployment scripts default to `ghcr.io`; `RUSA_IMAGE_REGISTRY` may be set explicitly for an isolated staging registry, and both the new images and rollback baseline must belong to that same registry.
 
 ## Production deployment prerequisites
 
@@ -95,4 +96,4 @@ Also protect the `v*` tag namespace so only authorized release maintainers can c
 
 ## Verification boundary
 
-The repository changes provide the pipeline and deployment mechanism. They do not prove that production infrastructure is configured. A 5/5 sign-off still requires: active branch rulesets, configured production environment approval, working SSH/registry credentials, a known-good rollback baseline, a successful tagged release, a successful staging/production smoke test, and an observed rollback drill. Do not mark deployment complete until those external controls have evidence.
+The repository changes provide the pipeline and deployment mechanism. CI now performs a real Compose deployment/rollback exercise against an ephemeral registry and a persistent PostgreSQL volume, including schema re-initialization and a sentinel-data check. This is not a substitute for the operator's external staging host. A production sign-off still requires: active branch rulesets, configured production environment approval, working SSH/registry credentials, a known-good rollback baseline, a successful tagged release, a successful deployment to the provisioned staging host, and an observed rollback drill on that host. Do not mark production deployment complete until those external controls have evidence.
