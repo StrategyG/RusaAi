@@ -186,7 +186,7 @@ class AICodeRuntime:
                 return True
             if record.state != TaskState.SUCCEEDED:
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id,
+                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
                 )
                 outcome = "failed"
