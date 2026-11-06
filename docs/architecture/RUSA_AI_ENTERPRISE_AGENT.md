@@ -275,3 +275,18 @@ This revision integrates upstream commit f6df656 (including the pytest import
 fix observed in the failed PR #8 CI run). Local verification after refinement:
 71 passed, 3 PostgreSQL tests skipped; Ruff and compileall passed. Remote CI,
 container builds and model/provider evaluation are separate evidence gates.
+
+
+## 12. Runtime hardening implemented in review revision
+
+The current implementation tightens the original target design in the following ways:
+
+- The API and GitHub adapter both enforce an exact repository allowlist. A task branch is derived from a hash of tenant identity and idempotency identity; callers cannot select an arbitrary shared work branch.
+- PostgreSQL leases carry a unique worker owner. Heartbeat, checkpoint, retry, and acknowledgement are accepted only from the current owner while its lease remains valid. A stale worker cannot overwrite a newer worker's checkpoint.
+- A retry clears the prior failed checkpoint so a transient failure does not repeatedly resume a terminal FAILED record. Side-effecting GitHub operations remain idempotent by deterministic branch, no-op file-write detection, and draft-PR reuse.
+- GitHub check-runs and compare-diff responses are read with bounded pagination and bounded streaming response sizes. CI is accepted only when the complete check set includes all named required checks and every returned check has completed successfully.
+- Security must inspect a complete branch diff and re-read CI. The tester CI SHA, security CI SHA, and diff head SHA must match before the master can record success.
+- Provider and GitHub response bodies are streamed and capped. Task context passed back to specialist workers is bounded to reduce prompt size and accidental retention of large repository payloads.
+- The API limits actual streamed request bytes before JSON parsing and rejects stalled body uploads.
+
+These are code-level controls. They do not replace live GitHub permission validation, external TLS/rate limiting, immutable audit export, load/chaos testing, model quality evaluation, or protected-branch review.
