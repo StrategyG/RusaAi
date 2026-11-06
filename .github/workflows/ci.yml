@@ -88,12 +88,24 @@ jobs:
         uses: actions/checkout@v4
       - name: Build API image
         run: docker build --pull -t rusa-ai:ci .
-      - name: Scan image for critical and high vulnerabilities
+      # Keep unfixable HIGH findings visible in the log, but do not block a
+      # release on vulnerabilities for which the upstream distro has no patch.
+      - name: Report all critical and high image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, immutable commit
+        with:
+          image-ref: rusa-ai:ci
+          format: table
+          exit-code: "0"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+      # This is the blocking gate: any fixable CRITICAL or HIGH issue fails CI.
+      - name: Block on fixable critical and high image vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, immutable commit
         with:
           image-ref: rusa-ai:ci
           format: table
           exit-code: "1"
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
