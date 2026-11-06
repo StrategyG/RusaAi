@@ -23,7 +23,7 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 
 ## Current verification boundary
 
-Latest CI on commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both required jobs: lint, compile, 123 tests (including PostgreSQL integration), dependency audit, Docker Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. This is code/build evidence only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+Latest CI on PR #15 commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both required jobs. PR #19 head 8a3dc95 also passed both CI jobs: lint, compile, unit/PostgreSQL integration tests, dependency audit, Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. These are code/build checks only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
 
 ## Release gates still open
 
@@ -35,13 +35,13 @@ Latest CI on commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both require
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
 | Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented; PostgreSQL integration CI passed; staging soak and live multi-worker verification pending |
-| Task lifecycle API | Tenant-scoped submit/status/cancel/retry, lease revocation, DB privilege boundary | Implemented in branch; PostgreSQL function/privilege regression CI pending |
+| Task lifecycle API | Tenant-scoped submit/status/cancel/retry, lease revocation, DB privilege boundary | CI passed on PR #19 head 8a3dc95; staging cancellation and lease-revocation verification pending |
 | Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; CI tenant-isolation/redaction tests passed; staging retention verification pending |
 | Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
 | MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Repository governance | Protected main branch, required CI checks, mandatory review | Blocked: GitHub currently reports main as unprotected; repository administrator action required |
-| PR integration | Conflict-free integration into main and merged dependency chain | Blocked: PR #8 is dirty and PR #15 remains stacked; no production merge performed |
+| PR integration | Conflict-free integration into main and merged dependency chain | Blocked: PR #8 is dirty; PR #15 and PR #19 remain stacked; no production merge performed |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
 
