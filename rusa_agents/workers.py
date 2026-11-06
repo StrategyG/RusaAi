@@ -31,6 +31,10 @@ class AgentWorker:
         max_turns: int = 8,
         max_tool_calls: int = 5,
     ) -> None:
+        if not 1 <= max_turns <= 20:
+            raise ValueError("max_turns must be between 1 and 20")
+        if not 1 <= max_tool_calls <= 10:
+            raise ValueError("max_tool_calls must be between 1 and 10")
         self.role = role
         self.provider = provider
         self.tools = tools
@@ -88,6 +92,14 @@ class AgentWorker:
                 system_prompt=system_prompt,
                 user_prompt=prompt,
             )
+            if not isinstance(raw, str) or len(raw.encode("utf-8")) > 262144:
+                return WorkerResult(
+                    role=self.role,
+                    summary="Worker response is invalid or too large.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["worker response exceeded the configured size limit"],
+                )
             try:
                 payload = json.loads(raw)
             except json.JSONDecodeError:
@@ -106,7 +118,42 @@ class AgentWorker:
                     evidence=evidence,
                     blockers=["invalid worker response type"],
                 )
-            summary = str(payload.get("summary", "")).strip()
+            required = {"summary", "final", "success", "tool_calls", "blockers"}
+            if set(payload) != required:
+                return WorkerResult(
+                    role=self.role,
+                    summary="Worker response fields are invalid.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["worker response must contain exactly the documented fields"],
+                )
+            if type(payload["final"]) is not bool or type(payload["success"]) is not bool:
+                return WorkerResult(
+                    role=self.role,
+                    summary="Worker response booleans are invalid.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["final and success must be JSON booleans"],
+                )
+            if not isinstance(payload["summary"], str) or len(payload["summary"]) > 4000:
+                return WorkerResult(
+                    role=self.role,
+                    summary="Worker summary is invalid.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["summary must be a string of at most 4000 characters"],
+                )
+            if not isinstance(payload["blockers"], list) or any(
+                not isinstance(item, str) or len(item) > 1000 for item in payload["blockers"]
+            ):
+                return WorkerResult(
+                    role=self.role,
+                    summary="Worker blockers are invalid.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["blockers must be a list of strings"],
+                )
+            summary = payload["summary"].strip()
             calls = payload.get("tool_calls", [])
             if not isinstance(calls, list) or len(calls) > self.max_tool_calls:
                 return WorkerResult(
@@ -124,10 +171,18 @@ class AgentWorker:
                 return WorkerResult(
                     role=self.role,
                     summary=summary or "Worker completed without a summary.",
-                    success=bool(payload.get("success")) and not blockers,
+                    success=payload["success"] and not blockers,
                     artifacts=artifacts,
                     evidence=evidence,
                     blockers=blockers,
+                )
+            if payload["success"]:
+                return WorkerResult(
+                    role=self.role,
+                    summary=summary or "Worker attempted to claim success before finishing.",
+                    success=False,
+                    evidence=evidence,
+                    blockers=["worker cannot claim success before its final response"],
                 )
             if not calls:
                 return WorkerResult(
@@ -140,12 +195,17 @@ class AgentWorker:
 
             tool_results = []
             for call in calls:
-                if not isinstance(call, dict) or not isinstance(call.get("arguments", {}), dict):
+                if (
+                    not isinstance(call, dict)
+                    or set(call) != {"action", "arguments"}
+                    or not isinstance(call.get("arguments"), dict)
+                ):
                     blockers.append("worker supplied a malformed tool call")
                     break
                 action = call.get("action")
-                if not isinstance(action, str):
-                    blockers.append("tool action must be a string")
+                allowed_actions = getattr(self.tools, "ROLE_ACTIONS", {}).get(self.role, set())
+                if not isinstance(action, str) or action not in allowed_actions:
+                    blockers.append("tool action is outside the worker role allowlist")
                     break
                 result = await self.tools.execute(
                     action,
@@ -153,12 +213,29 @@ class AgentWorker:
                     task,
                     self.role,
                 )
+                if not isinstance(result, dict) or result.get("ok") is not True:
+                    blockers.append(
+                        str(result.get("error", "tool execution failed"))
+                        if isinstance(result, dict)
+                        else "tool gateway returned an invalid response"
+                    )
+                    break
                 tool_results.append({"action": action, "result": result})
-                for item in result.get("evidence", []):
+                raw_evidence = result.get("evidence", [])
+                raw_artifacts = result.get("artifacts", [])
+                if (
+                    not isinstance(raw_evidence, list)
+                    or any(not isinstance(item, dict) for item in raw_evidence)
+                    or not isinstance(raw_artifacts, list)
+                    or any(not isinstance(item, str) for item in raw_artifacts)
+                ):
+                    blockers.append("tool gateway returned malformed evidence or artifacts")
+                    break
+                for item in raw_evidence:
                     evidence.append(ToolEvidence(**item))
                 artifacts.extend(item for item in result.get("artifacts", []) if item)
-                if not result.get("ok"):
-                    blockers.append(str(result.get("error", "tool execution failed")))
+                if len(json.dumps(tool_results, ensure_ascii=False).encode("utf-8")) > 262144:
+                    blockers.append("tool results exceed the configured size limit")
                     break
             if blockers:
                 return WorkerResult(

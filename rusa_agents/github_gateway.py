@@ -69,6 +69,7 @@ class GitHubRepositoryGateway:
             headers=headers,
             timeout=self.timeout,
             follow_redirects=False,
+            trust_env=False,
         ) as client:
             response = await client.request(
                 method,
@@ -81,6 +82,8 @@ class GitHubRepositoryGateway:
                 response.status_code,
                 f"GitHub API request failed with HTTP {response.status_code}",
             )
+        if len(response.content) > 2_000_000:
+            raise GitHubAPIError(502, "GitHub API response exceeded the configured size limit")
         if not response.content:
             return {}
         return response.json()
@@ -326,7 +329,7 @@ class GitHubToolGateway:
         patterns = (
             (
                 re.compile(
-                    r"(?i)\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret)\b"
+                    r"(?i)([A-Za-z0-9_-]*(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret|token)[A-Za-z0-9_-]*)"
                     r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
                 ),
                 r"\1\2[REDACTED]",
@@ -341,10 +344,7 @@ class GitHubToolGateway:
                 ),
                 "[REDACTED_PRIVATE_KEY]",
             ),
-            (
-                re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"),
-                "Bearer [REDACTED]",
-            ),
+            (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"), "Bearer [REDACTED]"),
         )
         for pattern, replacement in patterns:
             content = pattern.sub(replacement, content)
@@ -357,6 +357,8 @@ class GitHubToolGateway:
         max_file_bytes: int = 262144,
         allowed_repositories: set[str] | frozenset[str] | None = None,
     ) -> None:
+        if max_file_bytes <= 0:
+            raise ValueError("max_file_bytes must be positive")
         self.github = github
         self.policy = policy or AutonomyPolicy()
         self.max_file_bytes = max_file_bytes
@@ -408,6 +410,8 @@ class GitHubToolGateway:
                 if self.is_sensitive_path(path):
                     raise PermissionError("sensitive repository files cannot be sent to model workers")
                 data = await self.github.read_file(repository, path, ref)
+                if len(data.encode("utf-8")) > self.max_file_bytes:
+                    raise ValueError("file content exceeds the configured size limit")
                 return {"ok": True, "data": self.redact_secrets(data)}
             if action == "repo.create_branch":
                 data = await self.github.create_branch(repository, base, work)
@@ -484,8 +488,16 @@ class GitHubToolGateway:
                 completed = bool(checks) and all(
                     item.get("status") == "completed" for item in checks
                 )
+                all_checks_succeeded = completed and all(
+                    item.get("conclusion") == "success" for item in checks
+                )
+                failed_checks = [
+                    str(item.get("name", "unnamed-check"))
+                    for item in checks
+                    if item.get("status") != "completed" or item.get("conclusion") != "success"
+                ]
                 return {
-                    "ok": completed,
+                    "ok": all_checks_succeeded,
                     "data": {
                         "sha": sha,
                         "checks": [
@@ -498,7 +510,12 @@ class GitHubToolGateway:
                         ],
                     },
                     "evidence": evidence,
-                    "error": None if completed else "CI checks are missing or still pending",
+                    "error": (
+                        None
+                        if all_checks_succeeded
+                        else "CI checks are missing, pending, or unsuccessful: "
+                        + ", ".join(failed_checks or ["no check runs"])
+                    ),
                 }
         except (KeyError, TypeError, ValueError, PermissionError, GitHubAPIError, RuntimeError) as exc:
             return {"ok": False, "error": str(exc)}

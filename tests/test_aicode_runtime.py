@@ -295,6 +295,46 @@ def test_github_gateway_rejects_control_characters_in_paths():
         GitHubRepositoryGateway.validate_path("src\x00secret.py")
 
 
+def test_github_gateway_fails_when_any_completed_check_failed():
+    class FakeGitHub:
+        async def get_check_runs(self, repository, branch):
+            return VALID_COMMIT_SHA, [
+                {"name": "Lint, test, and audit dependencies", "status": "completed",
+                 "conclusion": "success", "html_url": CI_SOURCE},
+                {"name": "Build and smoke-test container", "status": "completed",
+                 "conclusion": "failure", "html_url": CI_SOURCE},
+            ]
+
+    gateway = GitHubToolGateway(FakeGitHub(), allowed_repositories={"strategyg/rusaai"})
+    result = asyncio.run(
+        gateway.execute("ci.wait_for_checks", {"wait_seconds": 0}, make_task(), WorkerRole.TESTER)
+    )
+    assert result["ok"] is False
+    assert "unsuccessful" in result["error"]
+
+
+def test_github_gateway_redacts_environment_style_secret_names():
+    content = "RUSA_API_KEY=super-secret GITHUB_TOKEN: another-secret"
+    redacted = GitHubToolGateway.redact_secrets(content)
+    assert "super-secret" not in redacted
+    assert "another-secret" not in redacted
+
+
+def test_worker_rejects_truthy_string_success():
+    provider = FakeProvider([{
+        "summary": "false-positive response",
+        "final": True,
+        "success": "false",
+        "tool_calls": [],
+        "blockers": [],
+    }])
+    result = asyncio.run(
+        AgentWorker(WorkerRole.DEVELOPER, provider, FakeTools()).run(make_task(), [])
+    )
+    assert result.success is False
+    assert any("JSON booleans" in blocker for blocker in result.blockers)
+
+
 
 def test_orchestrator_rejects_ci_evidence_from_different_commits(tmp_path):
     orchestrator = AICodeOrchestrator(
