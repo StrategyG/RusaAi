@@ -167,7 +167,10 @@ def test_postgres_audit_chain_is_verifiable_and_append_only(postgres_runtime):
                 (tenant_id, task_id),
             )
     assert audit.verify()
-
+    with pytest.raises(psycopg.errors.RaiseException):
+        with audit._connect() as db:
+            db.execute("TRUNCATE TABLE rusa_agent_audit_events")
+    assert audit.verify()
 
 
 def test_postgres_schema_initialization_is_idempotent(postgres_runtime):
