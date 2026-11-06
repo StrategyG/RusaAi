@@ -100,6 +100,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config -q
       - name: Build lightweight agent image
         run: docker build --pull -f Dockerfile.agent -t rusa-agent:ci .
       - name: Run agent API container
