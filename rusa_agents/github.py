@@ -270,7 +270,36 @@ class GitHubToolGateway:
         }
         if isinstance(current, dict):
             body["sha"] = current["sha"]
-        result = await self._request("PUT", endpoint, json_body=body)
+        try:
+            result = await self._request("PUT", endpoint, json_body=body)
+        except RuntimeError:
+            # The request may have committed even if the client lost the response.
+            recovered = await self._request(
+                "GET",
+                endpoint,
+                params={"ref": task.repository.work_branch},
+                allow_not_found=True,
+            )
+            if not isinstance(recovered, dict) or recovered.get("type") != "file":
+                raise
+            recovered_content = recovered.get("content")
+            if not isinstance(recovered_content, str):
+                raise
+            try:
+                recovered_bytes = base64.b64decode(
+                    recovered_content.replace("\n", ""),
+                    validate=True,
+                )
+            except ValueError:
+                raise
+            if recovered_bytes != content.encode("utf-8"):
+                raise
+            return ToolResult(
+                name="write_file",
+                success=True,
+                data={"path": path, "commit_sha": None, "recovered_after_ambiguous_commit": True},
+                evidence={"source": "github_contents_api", "branch": task.repository.work_branch},
+            )
         if not isinstance(result, dict) or not isinstance(result.get("commit"), dict):
             raise RuntimeError("GitHub did not confirm the file commit")
         return ToolResult(
