@@ -29,7 +29,7 @@ The optional knowledge plane adds document ingestion, 1,536-dimensional embeddin
 - RAG ingestion supports local TXT, Markdown, HTML, PDF, and DOCX files. Remote URLs are not fetched.
 - Retrieval combines vector and lexical ranks and returns source URI, document ID, title, and chunk metadata.
 - MCP exposes only three read-only tools: search_knowledge, get_document, and list_collections.
-- The MCP client and agent gateway enforce HTTPS/loopback transport, per-tenant bearer tokens, and a fixed tool allowlist.
+- The MCP client and agent gateway enforce HTTPS by default, with loopback or explicitly allowlisted private service HTTP for local/container networking, per-tenant bearer tokens, and a fixed tool allowlist.
 - The existing specialist workers can consume RAG results alongside episodic memory when RUSA_RAG_ENABLED=true; MCP tools can be enabled with RUSA_MCP_SERVER_URL.
 - The service is optional and does not make the full product production-certified. Apply migration 005, configure a real embedding provider, set tenant credentials, and complete retrieval/security evaluation before production.
 
@@ -76,12 +76,14 @@ The inference API reports not-ready and returns HTTP 503 until a real local mode
 ## Quality gates
 
 Run:
-- ruff check llm-project/serve rusa_agents tests
-- python -m compileall -q llm-project rusa_agents tests
-- pytest -q
-- pip-audit -r requirements.txt -r requirements-agent.txt
+- ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
+- python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+- pytest -q (including pgvector/RLS integration tests when RUSA_TEST_DATABASE_URL is configured)
+- pip-audit -r requirements.txt
+- pip-audit -r requirements-agent.txt
+- pip-audit -r requirements-rag-mcp.txt
 
-CI also builds both the inference API image and the agent runtime image, then smoke-tests the inference API container.
+CI also builds the inference API, agent runtime, and knowledge MCP images; smoke-tests MCP and inference liveness; and runs the optional pgvector/RLS integration suite against a disposable PostgreSQL service.
 
 ## Production acceptance
 
