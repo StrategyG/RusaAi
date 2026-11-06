@@ -46,6 +46,7 @@ class TaskCreate(BaseModel):
             "github.write_file",
             "github.get_ci_status",
             "github.create_pull_request",
+            "rag.search",
         ],
         max_length=20,
     )
