@@ -94,4 +94,4 @@ A green CI run validates the serving foundation. It does not prove model quality
 - [ ] Evaluation, safety, prompt-injection, tool authorization, and adversarial tests meet documented thresholds.
 - [ ] Staging soak test, canary rollout, monitoring, alerting, and operational runbook are approved.
 
-See docs/PRODUCTION_READINESS.md for the evidence ledger and remaining release gates.
+See docs/PRODUCTION_READINESS.md for the evidence ledger, docs/OPERATIONS_RUNBOOK.md for deployment and task operations, and AI_CODE.md for the agent contract.
