@@ -8,7 +8,7 @@ from typing import Any
 
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
-from .store import PostgresKnowledgeStore
+from .store import PostgresKnowledgeStore, validate_scope
 from .safety import reject_credential_material, validate_document_metadata
 
 
@@ -64,6 +64,7 @@ class KnowledgeService:
         chunk_size: int = 1200,
         overlap: int = 180,
     ) -> dict[str, Any]:
+        validate_scope(tenant_id, collection)
         if not isinstance(metadata, (dict, type(None))):
             raise ValueError("document metadata must be an object")
         if (
@@ -120,6 +121,7 @@ class KnowledgeService:
         query: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
+        validate_scope(tenant_id, collection)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         reject_credential_material(query)
