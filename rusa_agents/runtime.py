@@ -9,7 +9,7 @@ import time
 from collections.abc import Coroutine
 from typing import Any
 
-from .audit import PostgresAuditLog
+from .audit import PostgresAuditLog, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
@@ -193,6 +193,7 @@ class AICodeRuntime:
         outcome = "failed"
         lost_lease = asyncio.Event()
         heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
+        authorized = False
         try:
             task = self._task(job)
             allowed_repositories = self.config.tenant_repositories.get(job.tenant_id)
@@ -201,6 +202,9 @@ class AICodeRuntime:
             if self.config.environment == "production" and not allowed_repositories:
                 raise PermissionError("Tenant has no configured repository permissions")
 
+            await self._assert_lease(job, lost_lease)
+            authorized = True
+            record_task_policy(job.tenant_id, job.task_id, self.worker_id, "task.execute", True)
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
@@ -320,6 +324,8 @@ class AICodeRuntime:
             logger.info("AICode task %s completed: %s", task.task_id, pr_url)
             outcome = "success"
         except Exception as exc:
+            if not authorized:
+                record_task_policy(job.tenant_id, job.task_id, self.worker_id, "task.execute", False)
             logger.exception("AICode task %s failed", job.task_id)
             outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():

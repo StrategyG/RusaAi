@@ -4,11 +4,26 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any
+
+
+def record_task_policy(
+    tenant_id: str | None, task_id: str | None, actor: str, action: str, allowed: bool,
+) -> None:
+    """Emit task authorization decisions to the service's structured audit stream."""
+    logging.getLogger("rusa-ai.task-policy").info("%s", json.dumps({
+        "event": "task.policy",
+        "tenant_id": tenant_id,
+        "task_id": task_id,
+        "actor": actor,
+        "action": action,
+        "decision": "allow" if allowed else "deny",
+    }))
 
 
 class AuditLog:

@@ -141,3 +141,79 @@ def test_runtime_role_groups_are_non_login_non_bypass():
 
     assert {row[0] for row in rows} == {"rusa_api_runtime", "rusa_worker_runtime"}
     assert all(row[1] is False and row[2] is False and row[3] is False for row in rows)
+
+
+def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog):
+    import json
+
+    import psycopg
+    from app import app
+    from fastapi.testclient import TestClient
+
+    from rusa_agents.queue import PostgresTaskQueue
+
+    api_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_api_runtime")
+    worker_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_worker_runtime")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"test-key-a":"audit-a","test-key-b":"audit-b"}')
+    monkeypatch.setattr(app.state, "queue", PostgresTaskQueue(api_dsn), raising=False)
+    caplog.set_level("INFO", logger="rusa-ai.task-policy")
+
+    client = TestClient(app)
+    api_a = {"X-API-Key": "test-key-a", "X-Tenant-ID": "audit-b"}
+    api_b = {"X-API-Key": "test-key-b"}
+    response = client.post("/v1/aicode/tasks", headers=api_b, json={
+        "objective": "sensitive objective sentinel",
+        "repository": {"full_name": "StrategyG/RusaAi"},
+        "acceptance_criteria": ["The test passes"],
+    })
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+    path = f"/v1/aicode/tasks/{task_id}"
+
+    with psycopg.connect(api_dsn) as conn:
+        assert conn.execute(
+            """SELECT current_user, rolsuper, rolbypassrls, row_security_active('aicode_jobs')
+               FROM pg_roles WHERE rolname=current_user"""
+        ).fetchone() == ("rusa_api_runtime", False, False, True)
+        conn.execute("SELECT set_config('rusa.tenant_id', 'audit-a', true)")
+        assert conn.execute("SELECT 1 FROM aicode_jobs WHERE task_id=%s", (task_id,)).fetchone() is None
+        assert conn.execute(
+            "UPDATE aicode_jobs SET status='cancelled' WHERE task_id=%s", (task_id,),
+        ).rowcount == 0
+
+    # Ensure a cross-tenant retry would mutate an eligible row without isolation.
+    with connect() as conn:
+        conn.execute(
+            "UPDATE aicode_jobs SET status='failed', priority=2147483647 WHERE task_id=%s", (task_id,),
+        )
+    assert client.get(path, headers=api_a).status_code == 404
+    assert client.post(f"{path}/retry", headers=api_a).status_code == 409
+    assert client.get(path, headers=api_b).json()["status"] == "failed"
+    assert client.post(f"{path}/retry", headers=api_b).status_code == 202
+
+    worker = PostgresTaskQueue(worker_dsn)
+    job = worker.claim("policy-test-worker")
+    assert job is not None and job.task_id == task_id and job.tenant_id == "audit-b"
+    assert not worker.owns_lease(job.id, "audit-a", "policy-test-worker", job.lease_token)
+    assert not worker.complete(job.id, "audit-a", "policy-test-worker", job.lease_token, {})
+    assert client.delete(path, headers=api_a).status_code == 404
+    assert client.get(path, headers=api_b).json()["status"] == "running"
+    assert client.delete(path, headers=api_b).status_code == 202
+
+    events = [json.loads(record.getMessage()) for record in caplog.records
+              if record.name == "rusa-ai.task-policy"]
+    assert {(event["tenant_id"], event["actor"], event["action"], event["decision"])
+            for event in events} == {
+        ("audit-a", "tenant:audit-a", "task.read", "deny"),
+        ("audit-a", "tenant:audit-a", "task.retry", "deny"),
+        ("audit-a", "tenant:audit-a", "task.cancel", "deny"),
+        ("audit-b", "tenant:audit-b", "task.create", "allow"),
+        ("audit-b", "tenant:audit-b", "task.read", "allow"),
+        ("audit-b", "tenant:audit-b", "task.retry", "allow"),
+        ("audit-b", "tenant:audit-b", "task.cancel", "allow"),
+    }
+    assert all(event["task_id"] == task_id and event["event"] == "task.policy" for event in events)
+    assert "sensitive objective sentinel" not in caplog.text
+    assert "test-key-a" not in caplog.text and "test-key-b" not in caplog.text

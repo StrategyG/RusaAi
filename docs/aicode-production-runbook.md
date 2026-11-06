@@ -306,3 +306,21 @@ The current code still requires independent verification before it can be certif
 - Semantic/vector memory (pgvector) and model-generated dynamic DAG planning remain unimplemented. The current runtime now has repository, engineering, and quality managers, a deterministic dependency DAG, parallel QA dispatch, and a bounded repair loop. It does not yet autoscale worker replicas.
 - Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
 - Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
+
+
+### Task authorization audit
+
+Task endpoints require a configured API key even in development. The server-side
+key mapping supplies the tenant for every task operation. The API role applies
+RLS with transaction-local tenant context. Workers claim across tenants and
+authorize execution using the claimed row's tenant, its repository policy, and
+the current lease. RLS using a custom PostgreSQL setting assumes trusted service
+code controls SQL execution under the shared database login.
+
+Collect INFO events from the `rusa-ai.task-policy` logger in the API and worker
+processes and retain them in the deployment's restricted audit log sink. These
+JSON events contain `tenant_id`, `task_id`, `actor`, `action`, and `decision`.
+API actors identify the tenant principal, and worker actors identify the worker
+instance. Failed authentication uses a null tenant and an unauthenticated actor.
+These events omit credentials, lease tokens, and task payloads. A denied task
+lookup uses the caller's tenant to avoid disclosing the resource owner.

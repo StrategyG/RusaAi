@@ -18,6 +18,7 @@ from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from rusa_agents.audit import record_task_policy
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
@@ -224,16 +225,20 @@ class AICodeTaskResponse(BaseModel):
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
+    return authenticate_api_key(request, api_key)
+
+
+def authenticate_api_key(request: Request, api_key: str | None, *, require_key: bool = False) -> str:
     config = RuntimeConfig.from_env()
     if not config.api_keys:
-        if config.environment == "production":
+        if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
         return os.getenv("RUSA_DEFAULT_TENANT", "development")
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key")
     tenant_id = None
     for candidate, mapped_tenant in config.api_keys.items():
-        if hmac.compare_digest(api_key, candidate):
+        if hmac.compare_digest(api_key.encode("utf-8"), candidate.encode("utf-8")):
             tenant_id = mapped_tenant
     if tenant_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
@@ -262,6 +267,23 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
                 headers={"Retry-After": str(retry_after)},
             )
     return tenant_id
+
+
+def verify_task_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
+    try:
+        return authenticate_api_key(request, api_key, require_key=True)
+    except HTTPException as exc:
+        if exc.status_code == 401 or exc.detail == "API authentication is not configured":
+            try:
+                task_id = str(UUID(request.path_params.get("task_id", "")))
+            except ValueError:
+                task_id = None
+            record_task_policy(None, task_id, "unauthenticated", "task.authenticate", False)
+        raise
+
+
+def audit_api_task(tenant_id: str, task_id: str, action: str, allowed: bool) -> None:
+    record_task_policy(tenant_id, task_id, f"tenant:{tenant_id}", action, allowed)
 
 
 def verify_metrics_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -381,21 +403,23 @@ def validate_task_envelope(request: TaskValidationRequest):
 @app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
 def create_aicode_task(
     request: AICodeTaskRequest,
-    tenant_id: str = Depends(verify_api_key),
+    tenant_id: str = Depends(verify_task_api_key),
 ):
     config = RuntimeConfig.from_env()
+    task_id = str(uuid4())
     allowed_repositories = config.tenant_repositories.get(tenant_id)
     if config.environment == "production" and not allowed_repositories:
+        audit_api_task(tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
     if allowed_repositories is not None and request.repository.full_name not in allowed_repositories:
+        audit_api_task(tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
     if not config.aicode_enabled:
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
-    task_id = str(uuid4())
-    work_branch_prefix = f"feature/aicode/{task_id[:12]}" 
+    work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     payload = {
         "objective": request.objective,
         "context": request.context,
@@ -410,6 +434,7 @@ def create_aicode_task(
     except Exception:
         logger.exception("Could not enqueue AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(tenant_id, task_id, "task.create", created)
     if not created:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
     return AICodeTaskResponse(
@@ -421,7 +446,7 @@ def create_aicode_task(
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
-def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
+def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
@@ -430,6 +455,7 @@ def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
     except Exception:
         logger.exception("Could not read AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(tenant_id, str(task_id), "task.read", result is not None)
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
@@ -437,7 +463,7 @@ def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
 
 
 @app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
-def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
+def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
     """Require an explicit tenant-authenticated retry after failure or human review."""
     if not RuntimeConfig.from_env().aicode_enabled:
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
@@ -449,13 +475,14 @@ def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
     except Exception:
         logger.exception("Could not retry AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(tenant_id, str(task_id), "task.retry", retried)
     if not retried:
         raise HTTPException(status_code=409, detail="Task is unavailable or not in a retryable state")
     return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
 
 
 @app.delete("/v1/aicode/tasks/{task_id}", status_code=202)
-def cancel_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
+def cancel_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_task_api_key)):
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
@@ -464,6 +491,7 @@ def cancel_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
     except Exception:
         logger.exception("Could not cancel AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(tenant_id, str(task_id), "task.cancel", cancelled)
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
     return {"task_id": str(task_id), "status": "cancelled"}
