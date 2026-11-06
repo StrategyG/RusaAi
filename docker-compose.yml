@@ -115,8 +115,6 @@ services:
     depends_on:
       rusa-agent-migrate:
         condition: service_completed_successfully
-      rusa-agent-worker:
-        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
