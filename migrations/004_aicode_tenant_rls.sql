@@ -14,8 +14,9 @@ END
 $$;
 
 -- Keep privilege groups non-login and explicitly unable to bypass row security.
-ALTER ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
-ALTER ROLE rusa_worker_runtime NOLOGIN NOBYPASSRLS;
+ALTER ROLE rusa_api_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE rusa_worker_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
 
 -- Retire broad legacy shared-role grants from migration 001.
 REVOKE ALL ON public.aicode_jobs FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
