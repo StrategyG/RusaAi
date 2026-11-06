@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any
 
+from .github import redact_sensitive_text
+
 
 class PostgresMemoryStore:
     def __init__(self, dsn: str) -> None:
