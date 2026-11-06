@@ -297,6 +297,24 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             with conn.transaction():
                 conn.execute("SELECT * FROM aicode_task_policy_events")
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("audit-a",))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    """INSERT INTO aicode_task_policy_events
+                       (tenant_id, task_id, actor, action, decision)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    ("audit-b", task_id, "api:service-a", "task.read", "deny"),
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE aicode_task_policy_events SET decision='allow' WHERE task_id=%s",
+                    (task_id,),
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("TRUNCATE aicode_task_policy_events")
 
     with connect() as conn:
         persisted = conn.execute(
