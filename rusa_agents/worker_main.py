@@ -20,7 +20,7 @@ async def serve() -> None:
     if metrics_port > 0:
         start_http_server(
             metrics_port,
-            addr=os.getenv("RUSA_METRICS_BIND", "0.0.0.0"),
+            addr=os.getenv("RUSA_METRICS_BIND", "0.0.0.0"),  # nosec B104 - private container network; no host-published metrics port
         )
     runtime = AICodeRuntime()
     await asyncio.to_thread(runtime.initialize)
