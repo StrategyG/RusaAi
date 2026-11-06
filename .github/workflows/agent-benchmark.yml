@@ -17,8 +17,13 @@ jobs:
   deterministic-benchmark:
     name: Deterministic agent regression benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSA_BENCHMARK_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -28,7 +33,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-agent.txt pytest pytest-asyncio ruff
-      - name: Lint benchmark tests
-        run: ruff check tests/test_benchmark_contract.py
+      - name: Lint benchmark and runtime
+        run: ruff check rusa_agents tests/test_benchmark_contract.py tests/test_agent_runtime.py benchmarks/run_deterministic.py
+      - name: Compile benchmark and runtime
+        run: python -m compileall -q rusa_agents benchmarks/run_deterministic.py tests/test_benchmark_contract.py tests/test_agent_runtime.py
       - name: Run deterministic benchmark gate
         run: PYTHONPATH=. python -m pytest -q tests/test_benchmark_contract.py tests/test_agent_runtime.py
+      - name: Generate deterministic benchmark report
+        run: PYTHONPATH=. python benchmarks/run_deterministic.py --output benchmark-report.json
+      - name: Upload deterministic benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-benchmark-${{ github.event.pull_request.head.sha || github.sha }}
+          path: benchmark-report.json
+          if-no-files-found: ignore
+          retention-days: 30
