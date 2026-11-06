@@ -91,12 +91,12 @@ BEGIN
         GRANT SELECT ON public.rusa_knowledge_chunks TO rusa_agent_api;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker') THEN
-        GRANT USAGE ON SCHEMA public TO rusa_agent_worker;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_worker') THEN
+        GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker;
         GRANT SELECT, INSERT, UPDATE, DELETE
-            ON public.rusa_knowledge_documents TO rusa_agent_worker;
+            ON public.rusa_knowledge_documents TO rusa_knowledge_worker;
         GRANT SELECT, INSERT, UPDATE, DELETE
-            ON public.rusa_knowledge_chunks TO rusa_agent_worker;
+            ON public.rusa_knowledge_chunks TO rusa_knowledge_worker;
     END IF;
 END;
 $rusa$;
