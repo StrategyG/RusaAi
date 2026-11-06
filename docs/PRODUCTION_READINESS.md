@@ -115,6 +115,27 @@ This API currently uses one service API key, not per-user OIDC identities or ten
 
 The built-in rate limiter is per process and is a secondary safeguard. Configure distributed rate limiting, TLS, access logging, request timeouts and network policies at the ingress. Never log request bodies, prompts, API keys or model outputs by default.
 
+## Reproducible performance tests
+
+After mounting the actual checkpoint and starting the API on the target hardware, run the direct-runtime benchmark:
+
+```bash
+python scripts/benchmark_inference.py --requests 50 --warmup 5 --batch-size 1
+python scripts/benchmark_inference.py --requests 50 --warmup 5 --batch-size 4
+python scripts/benchmark_inference.py --requests 50 --warmup 5 --stream
+```
+
+Run the HTTP load test against the deployed service (the API key is read from the environment and is never printed):
+
+```bash
+export RUSA_API_KEY='...'
+python scripts/load_test.py --base-url https://your-internal-rusa-host --requests 100 --concurrency 1
+python scripts/load_test.py --base-url https://your-internal-rusa-host --requests 100 --concurrency 4
+python scripts/load_test.py --base-url https://your-internal-rusa-host --requests 100 --concurrency 4 --stream
+```
+
+Keep the JSON output with the checkpoint SHA-256, hardware/driver details, container image digest and environment settings. Compare p50/p95/p99 latency, streaming TTFT, requests/sec, generated tokens/sec, error counts and peak GPU memory. Repeat each scenario at least three times after warm-up. The benchmark scripts are implemented but have not been executed against a real RUSA-AI checkpoint in this repository.
+
 ## Verification
 
 Fast, dependency-light API regression tests:
