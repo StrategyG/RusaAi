@@ -36,6 +36,14 @@ A green CI run validates only the exact commit and checks it executed. It does n
   independently. The core API does not automatically expose MCP tools.
 - A browser workspace, user administration UI, and integrated JWT identity
   subsystem are not included in the current mainline.
+- The proposed eight-stage Agentic DevOps lifecycle is not yet implemented as
+  eight deployable agents. Current autonomous execution is the AICode worker
+  path; Plan, Build, Test, Release, Deploy, Operate, Monitor agents and their
+  dedicated DevOps Orchestrator/Security Guard remain implementation work.
+- The uploaded communication ADR is still a proposed target: the current
+  runtime uses the PostgreSQL task queue, not RabbitMQ + Kafka, a transactional
+  workflow outbox/event log, gRPC/Protobuf agent RPC, or signed durable messages.
+  These must not be represented as delivered capabilities.
 - The current CI builds and scans images but does not publish immutable images
   to GHCR automatically.
 
@@ -45,6 +53,8 @@ A green CI run validates only the exact commit and checks it executed. It does n
 |---|---|---|
 | Exact-main CI | All jobs green on commit `3c012e0` | Passed (all three jobs) |
 | VPS infrastructure | Provisioned Linux host, rootless Docker worker daemon, storage, DNS | Not supplied / not deployed |
+| Agentic DevOps lifecycle | Eight specialist agents, durable orchestrator workflow, validated task/result/event contracts, security guard | Not implemented; roadmap required |
+| Egress enforcement | Worker/sandbox outbound allowlist or egress proxy with deny-by-default policy | Not implemented in Compose; mandatory before untrusted execution |
 | Database | PostgreSQL 16 + pgvector, encrypted backup/PITR, TLS, separate runtime logins | Not provisioned |
 | Migrations | Apply 001–006, then 007 and 008 in order; verify RLS and role grants | Not applied |
 | Images | Build/push API, worker, sandbox, MCP; record immutable SHA-256 digests | Manual registry publication required |
