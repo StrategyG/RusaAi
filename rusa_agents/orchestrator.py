@@ -185,7 +185,7 @@ class AICodeOrchestrator:
 
     async def run(self, task: CodingTask) -> TaskRecord:
         record = TaskRecord(task=task)
-        self._record("task.received", record, {"repository": task.repository.full_name})
+        await self._record_async("task.received", record, {"repository": task.repository.full_name})
         try:
             record.transition(TaskState.OBSERVING)
             await self._persist_async(record)
