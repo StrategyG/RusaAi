@@ -66,3 +66,5 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
         run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
+      - name: Build autonomous worker image
+        run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
