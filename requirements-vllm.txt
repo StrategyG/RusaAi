@@ -1,2 +1,2 @@
 -r requirements.txt
-vllm>=0.10,<1
+vllm>=0.10.0,<0.11.0
