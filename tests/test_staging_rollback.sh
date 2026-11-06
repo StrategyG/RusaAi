@@ -56,7 +56,9 @@ PREVIOUS_API_IMAGE="$(build_and_push_api previous 200 previous)"
 CANDIDATE_API_IMAGE="$(build_and_push_api candidate 200 candidate)"
 UNHEALTHY_API_IMAGE="$(build_and_push_api unhealthy 503 unhealthy)"
 
-docker image inspect "$AGENT_IMAGE_TAG" >/dev/null
+if ! docker image inspect "$AGENT_IMAGE_TAG" >/dev/null 2>&1; then
+  docker pull "$AGENT_IMAGE_TAG"
+fi
 build_and_push_agent() {
   local tag="$1"
   local release_id="$2"
