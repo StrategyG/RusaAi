@@ -319,22 +319,44 @@ class GitHubToolGateway:
             if len(raw_items) >= total_count:
                 break
 
+        raw_total_count = total_count
+        run_ids = [item.get("id") for item in raw_items if isinstance(item, dict)]
         checks_complete = (
-            pagination_valid and total_count is not None and len(raw_items) == total_count
+            pagination_valid
+            and raw_total_count is not None
+            and len(raw_items) == raw_total_count
+            and all(type(run_id) is int for run_id in run_ids)
+            and len(run_ids) == len(set(run_ids))
         )
         latest = await self._request(
             "GET", f"{root}/branches/{quote(task.repository.work_branch, safe='')}",
         )
         latest_sha = str(latest.get("commit", {}).get("sha", "")) if isinstance(latest, dict) else ""
+        latest_by_identity = {}
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            app = item.get("app") if isinstance(item.get("app"), dict) else {}
+            identity = (app.get("id"), item.get("name"))
+            timestamp = str(item.get("started_at") or item.get("created_at") or "")
+            current = latest_by_identity.get(identity)
+            if current is None or timestamp >= current[0]:
+                latest_by_identity[identity] = (timestamp, item)
+        latest_items = [entry[1] for entry in latest_by_identity.values()]
         items = [
             {
+                "id": item.get("id"),
+                "app_id": (item.get("app") or {}).get("id")
+                    if isinstance(item.get("app"), dict) else None,
                 "name": item.get("name"),
                 "status": item.get("status"),
                 "conclusion": item.get("conclusion"),
                 "details_url": item.get("details_url"),
+                "started_at": item.get("started_at"),
             }
-            for item in raw_items if isinstance(item, dict)
+            for item in latest_items
         ]
+        items.sort(key=lambda item: (str(item.get("name") or ""), str(item.get("app_id") or "")))
         complete = checks_complete and bool(items) and all(
             item["status"] == "completed" for item in items
         )
@@ -346,7 +368,8 @@ class GitHubToolGateway:
                 "head_sha": latest_sha if latest_sha != sha else sha,
                 "checks": items,
                 "checks_complete": checks_complete and latest_sha == sha,
-                "total_count": total_count,
+                "total_count": len(items),
+                "raw_total_count": raw_total_count,
                 "all_checks_success": passed and latest_sha == sha,
             },
             evidence={"source": "github_check_runs_api", "head_sha": sha},
@@ -375,6 +398,7 @@ class GitHubToolGateway:
                 data={
                     "base_sha": base_sha, "head_sha": head_sha, "changed_files": 0,
                     "files": [], "diff_complete": True,
+                    "sensitive_content_detected": False,
                 },
                 evidence={"source": "github_compare_api", "head_sha": head_sha},
             )
@@ -399,6 +423,7 @@ class GitHubToolGateway:
         page_limit = min(page_count, self.max_diff_pages)
         collected = []
         diff_chars = 0
+        sensitive_content_detected = False
         for page in range(1, page_limit + 1):
             payload = first if page == 1 else await self._request(
                 "GET", f"{root}/compare/{compare_ref}",
@@ -432,12 +457,15 @@ class GitHubToolGateway:
                     )]
                     diff_complete = False
                 diff_chars += len(patch)
+                redacted_patch = redact_sensitive_text(patch)
+                if redacted_patch != patch:
+                    sensitive_content_detected = True
                 collected.append({
                     "path": filename,
                     "status": item.get("status"),
                     "additions": item.get("additions"),
                     "deletions": item.get("deletions"),
-                    "patch": redact_sensitive_text(patch),
+                    "patch": redacted_patch,
                 })
         if len(collected) != changed_count:
             diff_complete = False
@@ -450,6 +478,7 @@ class GitHubToolGateway:
                 "changed_files": changed_count,
                 "files": collected,
                 "diff_complete": diff_complete,
+                "sensitive_content_detected": sensitive_content_detected,
             },
             evidence={"source": "github_compare_api", "head_sha": head_sha},
         )
