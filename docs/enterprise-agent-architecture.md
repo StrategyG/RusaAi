@@ -69,7 +69,7 @@ The MCP gateway supports Streamable HTTP servers. Administrators configure serve
 
 ## Tools and safety
 
-Only registered tools execute. Tool arguments are validated against JSON Schema. GitHub operations are constrained to the task repository and exact work branch. Code changes require a bounded branch comparison, reviewer result, draft PR, and final CI check on the latest write commit. MCP endpoints and tool names are administrator-configured. RAG retrieval receives tenant identity from trusted worker context, never from model-controlled arguments. No arbitrary shell or filesystem tool is registered.
+Only registered tools execute. Tool arguments are validated against JSON Schema. Registered tool outputs, task context, durable memory, and RAG documents are passed through recursive credential redaction. GitHub reads/writes also block common credential paths. GitHub operations are constrained to the task repository and exact work branch. Code changes require a bounded branch comparison, reviewer result, draft PR, and final CI check on the latest write commit. MCP endpoints and tool names are administrator-configured. RAG retrieval receives tenant identity from trusted worker context, never from model-controlled arguments. No arbitrary shell or filesystem tool is registered.
 
 Approver credentials are separate from tenant API credentials. Merge, deploy, release, secrets, permissions, migrations, and destructive actions remain prohibited or require a future separately reviewed protected-tool implementation.
 
