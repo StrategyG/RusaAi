@@ -28,4 +28,4 @@ def test_knowledge_migration_grants_write_only_to_restricted_worker_role():
 def test_fresh_database_bootstrap_requires_explicit_rag_role_switch():
     bootstrap = Path("scripts/postgres/init-agent-db.sh").read_text(encoding="utf-8")
     assert "GRANT rusa_knowledge_worker TO rusa_agent_worker WITH ADMIN FALSE, INHERIT FALSE, SET TRUE" in bootstrap
-\n
+
