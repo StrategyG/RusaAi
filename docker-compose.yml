@@ -85,13 +85,13 @@ services:
             connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
             connection.execute("GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker")
             connection.execute("""
-                DO $rusa$
+                DO $$rusa$$
                 BEGIN
                     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_worker') THEN
                         EXECUTE 'CREATE ROLE rusa_knowledge_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS';
                     END IF;
                 END;
-                $rusa$;
+                $$rusa$$;
             """)
             connection.execute("GRANT rusa_knowledge_worker TO rusa_agent_worker")
             connection.execute("GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker")
