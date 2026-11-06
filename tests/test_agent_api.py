@@ -213,3 +213,38 @@ def test_agent_api_assigns_unique_work_branches_per_task(monkeypatch):
         )
     assert first.status_code == 202 and second.status_code == 202
     assert first.json()["work_branch"] != second.json()["work_branch"]
+
+
+def test_agent_api_times_out_slow_body_intake():
+    import asyncio
+
+    async def downstream(_scope, _receive, _send):
+        raise AssertionError("downstream must not receive a timed-out body")
+
+    async def receive():
+        await asyncio.sleep(0.05)
+        return {"type": "http.request", "body": b"x", "more_body": False}
+
+    async def run():
+        sent = []
+        async def send(message):
+            sent.append(message)
+
+        middleware = api.RequestGuardMiddleware(
+            downstream,
+            max_request_bytes=1024,
+            body_timeout_seconds=0.001,
+        )
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/agent/tasks",
+            "headers": [],
+            "state": {},
+        }
+        await middleware(scope, receive, send)
+        return sent
+
+    messages = asyncio.run(run())
+    response_start = next(message for message in messages if message["type"] == "http.response.start")
+    assert response_start["status"] == 408
