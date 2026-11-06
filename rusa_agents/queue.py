@@ -29,6 +29,12 @@ class PostgresTaskQueue:
         self.dsn = dsn
 
     def _connect(self):
+
+    @staticmethod
+    def _set_tenant(conn, tenant_id: str) -> None:
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id is required for tenant-scoped database access")
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
         try:
             import psycopg
         except ImportError as exc:
@@ -96,6 +102,7 @@ class PostgresTaskQueue:
         if not tenant_id or not task_id or max_attempts < 1:
             raise ValueError("tenant_id, task_id, and positive max_attempts are required")
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 INSERT INTO aicode_jobs(task_id, tenant_id, payload, max_attempts, priority)
                 VALUES (%s, %s, %s::jsonb, %s, %s)
@@ -146,6 +153,7 @@ class PostgresTaskQueue:
         if not lease_token or not 15 <= lease_seconds <= 3600:
             raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
                     updated_at=NOW()
@@ -158,6 +166,7 @@ class PostgresTaskQueue:
         self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
     ) -> bool:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='succeeded', lease_owner=NULL,
                     lease_until=NULL, lease_token=NULL, updated_at=NOW()
@@ -171,6 +180,7 @@ class PostgresTaskQueue:
         lease_token: str, reason: str,
     ) -> bool:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='awaiting_approval', lease_owner=NULL,
                     lease_until=NULL, lease_token=NULL, last_error=%s, updated_at=NOW()
@@ -184,6 +194,7 @@ class PostgresTaskQueue:
         lease_token: str, error: str, retry_delay_seconds: int = 30,
     ) -> bool:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs
                 SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
@@ -203,6 +214,7 @@ class PostgresTaskQueue:
         self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
     ) -> bool:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 SELECT EXISTS (
                     SELECT 1 FROM aicode_jobs
@@ -218,6 +230,7 @@ class PostgresTaskQueue:
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, available_at=NOW(),
@@ -230,6 +243,7 @@ class PostgresTaskQueue:
 
     def cancel(self, task_id: str, tenant_id: str) -> bool:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
                     lease_until=NULL, lease_token=NULL, updated_at=NOW()
@@ -239,6 +253,7 @@ class PostgresTaskQueue:
 
     def get(self, task_id: str, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 SELECT task_id::text, tenant_id, payload, status, attempts,
                        max_attempts, last_error, created_at, updated_at
