@@ -50,7 +50,7 @@ class FakeQueue:
     def cancel(self, tenant_id, task_id):
         item = self.get(tenant_id, task_id)
         if item is None or item["status"] not in {
-            "queued", "retry", "waiting_external", "running"
+            "queued", "retry", "waiting_external", "running", "awaiting_approval"
         }:
             return False
         item["status"] = "cancelled"
@@ -295,3 +295,23 @@ def test_agent_api_does_not_cancel_terminal_task(monkeypatch):
         client.app.state.queue.tasks[task_id]["status"] = "succeeded"
         response = client.delete(f"/v1/agent/tasks/{task_id}", headers=headers)
     assert response.status_code == 409
+
+
+
+def test_agent_api_cancels_task_awaiting_human_approval(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Cancel a task awaiting approval",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["Approval-pending tasks can be cancelled"],
+    }
+    with TestClient(api.app) as client:
+        created = client.post("/v1/agent/tasks", headers=headers, json=body)
+        task_id = created.json()["task_id"]
+        client.app.state.queue.tasks[task_id]["status"] = "awaiting_approval"
+        response = client.delete(f"/v1/agent/tasks/{task_id}", headers=headers)
+        fetched = client.get(f"/v1/agent/tasks/{task_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert fetched.json()["status"] == "cancelled"
