@@ -52,6 +52,7 @@ class QueueWorker:
         checkpoint: TaskRecord | None,
         tenant_id: str,
         task_id: str,
+        lease_token: str,
     ) -> TaskRecord:
         async def persist(record: TaskRecord) -> None:
             saved = await asyncio.to_thread(
@@ -59,6 +60,7 @@ class QueueWorker:
                 tenant_id,
                 task_id,
                 self.worker_id,
+                lease_token,
                 record,
             )
             if not saved:
@@ -84,6 +86,7 @@ class QueueWorker:
                     tenant_id,
                     task_id,
                     self.worker_id,
+                    lease_token,
                     self.lease_seconds,
                 )
             except Exception as exc:
@@ -105,12 +108,23 @@ class QueueWorker:
             return False
         tenant_id = item["tenant_id"]
         task_id = item["task_id"]
+        lease_token = item.get("lease_token")
+        try:
+            PostgresTaskQueue._validate_lease_token(lease_token)
+        except ValueError:
+            logger.error(
+                "queue claim omitted a valid lease token; refusing task execution task_id=%s",
+                task_id,
+            )
+            return True
         try:
             task = CodingTask.from_dict(item["payload"])
             if task.tenant_id != tenant_id or task.task_id != task_id:
                 raise ValueError("queued task identity does not match its database envelope")
             checkpoint = TaskRecord.from_dict(item["result"]) if item.get("result") else None
-            record = await self._run_with_heartbeat(task, checkpoint, tenant_id, task_id)
+            record = await self._run_with_heartbeat(
+                task, checkpoint, tenant_id, task_id, lease_token
+            )
             if record.state == TaskState.FAILED:
                 saved = await asyncio.to_thread(
                     self.queue.retry,
@@ -118,6 +132,7 @@ class QueueWorker:
                     task_id,
                     "; ".join(record.errors) or "agent execution failed",
                     self.worker_id,
+                    lease_token,
                 )
                 if not saved:
                     logger.warning("retry rejected after lease loss task_id=%s", task_id)
@@ -128,6 +143,7 @@ class QueueWorker:
                     task_id,
                     record,
                     self.worker_id,
+                    lease_token,
                 )
             if record.state == TaskState.SUCCEEDED:
                 summary = "\n".join(
@@ -152,6 +168,7 @@ class QueueWorker:
                     task_id,
                     "worker processing failed",
                     self.worker_id,
+                    lease_token,
                 )
                 if not saved:
                     logger.warning("failure retry rejected after lease loss task_id=%s", task_id)

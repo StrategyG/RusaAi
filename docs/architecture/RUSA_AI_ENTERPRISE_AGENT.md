@@ -237,7 +237,7 @@ not evidence that the control is implemented or operationally verified.
 | CI evidence | Successful gateway result, source identifier, matching 40-character commit SHA, complete check result set and named required checks | Source field is adapter provenance, not a cryptographic attestation or trusted GitHub App identity check |
 | Finalization | Master re-fetches CI after Security; changed head or nonpassing evidence returns to Tester, then Security | A remote commit can still change after the last read; deployment must bind to the immutable verified commit and independently re-check release gates |
 | Acceptance criteria | Exact criterion keys and true values from Tester and Security | These booleans are model assessments, not independent functional proof; benchmark/test artifact mapping remains a release blocker |
-| Persistence | Queue lease/checkpoint and tenant-scoped PostgreSQL memory | Tool writes and queue checkpoints are not one transaction; exactly-once execution is not claimed |
+| Persistence | PostgreSQL queue with cryptographically random per-claim lease tokens; heartbeat, checkpoint, acknowledgement and retry are fenced by worker ID plus token; tenant-scoped PostgreSQL memory | Same-worker-ID stale-lease regression is required; tool writes and queue checkpoints are not one transaction, so exactly-once execution is not claimed |
 | Autonomy | Routine allowlisted repository edits and draft PRs | SUCCEEDED means task verification completed; it never authorizes merge or deployment |
 
 ### Completion decision
@@ -267,9 +267,9 @@ flowchart TD
 
 Before promotion, independently validate trusted CI producer identity, immutable
 artifact-to-commit mapping, real acceptance-test artifacts, tenant isolation on
-production-equivalent PostgreSQL roles, stale lease recovery, concurrent writes,
-audit behavior across worker replicas, load/soak limits, backup/restore, and model
-quality. Do not derive a production readiness percentage from unit-test counts.
+production-equivalent PostgreSQL roles, same-worker-ID stale lease recovery,
+concurrent writes, audit behavior across worker replicas, load/soak limits,
+backup/restore, and model quality. Do not derive a production readiness percentage from unit-test counts.
 
 This revision integrates upstream commit f6df656 (including the pytest import
 fix observed in the failed PR #8 CI run). Local verification after refinement:

@@ -76,12 +76,16 @@ def test_postgres_queue_claim_checkpoint_and_acknowledgement():
     assert claimed["task_id"] == task_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
-    assert queue.checkpoint(tenant_id, task_id, "integration-worker", record)
+    lease_token = claimed["lease_token"]
+    assert queue.checkpoint(
+        tenant_id, task_id, "integration-worker", lease_token, record
+    )
     queue.acknowledge(
         tenant_id,
         task_id,
         record,
         worker_id="integration-worker",
+        lease_token=lease_token,
     )
     fetched = queue.get(tenant_id, task_id)
     assert fetched is not None
@@ -194,7 +198,10 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
 
     first = queue.claim("worker-one", lease_seconds=60)
     assert first is not None and first["task_id"] == task_id
-    assert queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+    first_token = first["lease_token"]
+    assert queue.heartbeat(
+        tenant_id, task_id, "worker-one", first_token, lease_seconds=60
+    )
 
     with psycopg.connect(DSN) as connection:
         connection.execute("""
@@ -203,31 +210,41 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
             WHERE tenant_id=%s AND task_id=%s
         """, (tenant_id, task_id))
 
-    second = queue.claim("worker-two", lease_seconds=60)
+    # Reclaim with the same worker ID: only the fresh token may mutate the task.
+    second = queue.claim("worker-one", lease_seconds=60)
     assert second is not None and second["task_id"] == task_id
-    assert second["lease_owner"] == "worker-two"
-    assert not queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+    assert second["lease_owner"] == "worker-one"
+    second_token = second["lease_token"]
+    assert first_token != second_token
+    assert not queue.heartbeat(
+        tenant_id, task_id, "worker-one", first_token, lease_seconds=60
+    )
     stale_record = TaskRecord(task=task)
     stale_record.transition(TaskState.OBSERVING)
-    assert not queue.checkpoint(tenant_id, task_id, "worker-one", stale_record)
+    assert not queue.checkpoint(
+        tenant_id, task_id, "worker-one", first_token, stale_record
+    )
     with pytest.raises(RuntimeError, match="lease was lost"):
         queue.acknowledge(
             tenant_id,
             task_id,
             stale_record,
             worker_id="worker-one",
+            lease_token=first_token,
         )
     assert queue.retry(
         tenant_id,
         task_id,
         "stale worker",
         worker_id="worker-one",
+        lease_token=first_token,
     ) is False
     queue.acknowledge(
         tenant_id,
         task_id,
         stale_record,
-        worker_id="worker-two",
+        worker_id="worker-one",
+        lease_token=second_token,
     )
     with psycopg.connect(DSN) as connection:
         connection.execute(
