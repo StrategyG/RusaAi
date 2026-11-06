@@ -170,7 +170,13 @@ class DockerSandbox:
                 os.chmod(temp_root, 0o750)
                 docker_gid = os.getenv("RUSA_DOCKER_GID")
                 if docker_gid:
-                    os.chown(temp_root, -1, int(docker_gid))
+                    try:
+                        numeric_gid = int(docker_gid)
+                    except ValueError as exc:
+                        raise ToolDenied("RUSA_DOCKER_GID must be numeric") from exc
+                    if not 1 <= numeric_gid <= 65535:
+                        raise ToolDenied("RUSA_DOCKER_GID is outside the supported group-ID range")
+                    os.chown(temp_root, -1, numeric_gid)
                 shutil.copytree(
                     workspace, snapshot, symlinks=True, ignore=ignore_sensitive,
                     copy_function=bounded_copy,
