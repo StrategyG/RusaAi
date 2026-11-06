@@ -27,9 +27,11 @@ class RuntimeConfig:
 
     @staticmethod
     def _looks_placeholder(value: str | None) -> bool:
-        if not value:
-            return True
+        if value is None:
+            return False
         lowered = value.strip().lower()
+        if not lowered:
+            return False
         markers = (
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
