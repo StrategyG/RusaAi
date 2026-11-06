@@ -17,6 +17,7 @@ TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
 def _task() -> dict:
     return {
+        "schema_version": 1,
         "task_id": str(uuid4()),
         "workflow_id": str(uuid4()),
         "tenant_id": "tenant-demo",
@@ -49,6 +50,7 @@ def _task() -> dict:
 
 def _result() -> dict:
     return {
+        "schema_version": 1,
         "task_id": str(uuid4()),
         "workflow_id": str(uuid4()),
         "tenant_id": "tenant-demo",
@@ -95,6 +97,12 @@ def _event() -> dict:
 
 def test_agent_task_contract_accepts_stage_specific_plan_task():
     validate_agent_task(_task())
+
+def test_agent_task_contract_rejects_missing_schema_version():
+    payload = _task()
+    payload.pop("schema_version")
+    with pytest.raises(ContractValidationError, match="schema_version"):
+        validate_agent_task(payload)
 
 
 def test_agent_task_contract_rejects_agent_stage_mismatch():
