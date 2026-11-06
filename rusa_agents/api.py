@@ -117,7 +117,15 @@ async def lifespan(app: FastAPI):
     await database.close()
 
 
-app = FastAPI(title="RUSA-AI Agent Control Plane", version="1.1.0", lifespan=lifespan)
+environment = os.getenv("ENVIRONMENT", "production").lower()
+app = FastAPI(
+    title="RUSA-AI Agent Control Plane",
+    version="1.1.0",
+    docs_url="/docs" if environment != "production" else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if environment != "production" else None,
+    lifespan=lifespan,
+)
 
 
 async def tenant_dependency(api_key: str | None = Depends(key_header)) -> str:
