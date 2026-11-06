@@ -80,7 +80,7 @@ mcp = MCPServer(
 @mcp.tool()
 def search_knowledge(
     query: str,
-    collection: str = "default",
+    collection: str = "agent",
     limit: int = 5,
 ) -> dict[str, Any]:
     """Search tenant-authorized knowledge using vector and lexical hybrid retrieval."""
@@ -95,7 +95,7 @@ def search_knowledge(
 
 
 @mcp.tool()
-def get_document(document_id: str, collection: str = "default") -> dict[str, Any]:
+def get_document(document_id: str, collection: str = "agent") -> dict[str, Any]:
     """Read one document and its bounded text content within the authenticated tenant."""
     tenant_id = _require_tenant()
     document = get_knowledge_service().get_document(
