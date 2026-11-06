@@ -48,7 +48,12 @@ def knowledge_store():
 
     from rusa_knowledge.store import PostgresKnowledgeStore
 
-    store = PostgresKnowledgeStore(restricted_dsn, min_pool_size=1, max_pool_size=2)
+    store = PostgresKnowledgeStore(
+        restricted_dsn,
+        min_pool_size=1,
+        max_pool_size=2,
+        db_role=role_name,
+    )
     try:
         assert store.check_ready() is True
         yield store, restricted_dsn
