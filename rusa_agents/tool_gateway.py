@@ -10,9 +10,9 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from uuid import uuid4
 from pathlib import Path, PurePosixPath
 from typing import Any
+from uuid import uuid4
 
 from .contracts import WorkerRole
 
