@@ -33,12 +33,13 @@ flowchart TB
 ## RAG pipeline
 
 1. An operator ingests a local file. Remote URLs are not fetched, preventing ingestion-time SSRF.
-2. TXT, Markdown, HTML, PDF, and DOCX parsers extract bounded text. The default source size is 10 MiB and extracted text is capped at 2 million characters. PDF page count and DOCX archive expansion are also bounded. High-confidence private-key, GitHub-token, and AWS-key patterns are rejected before embedding.
+2. TXT, Markdown, HTML, PDF, and DOCX parsers extract bounded text. The default source size is 10 MiB and extracted text is capped at 2 million characters. PDF page count and DOCX archive expansion are also bounded. High-confidence private-key, GitHub-token, AWS access-key, and common `sk-` provider-key patterns are rejected before embedding. Titles, metadata, source URIs, and search queries receive the same credential screening; embedded URL userinfo is rejected and metadata is capped at 16 KiB UTF-8.
 3. Text is normalized and divided into 1,200-character chunks with 180-character overlap. Chunking prefers paragraph and sentence boundaries.
-4. An OpenAI-compatible embeddings endpoint returns 1,536-dimensional vectors in batches of at most 64 chunks. The client validates response shape, vector indexes, dimensions, finite values, and non-zero vectors.
-5. The store writes document metadata and chunks in one PostgreSQL transaction.
-6. Retrieval runs vector cosine search and PostgreSQL full-text search in parallel. Results are combined using weighted reciprocal-rank fusion (70% vector rank, 30% lexical rank).
-7. Every result carries document ID, source URI, title, chunk index, and retrieval scores for source-grounded generation.
+4. Document chunks and search query text are sent to the configured embedding endpoint. Before enabling RAG, confirm the corpus and queries are approved for that provider and region; use a private/self-hosted endpoint for restricted data. The service requires HTTPS except for loopback development endpoints.
+5. An OpenAI-compatible embeddings endpoint returns 1,536-dimensional vectors in batches of at most 64 chunks. The client validates response shape, vector indexes, dimensions, finite values, and non-zero vectors.
+6. The store writes document metadata and chunks in one PostgreSQL transaction.
+7. Retrieval runs vector cosine search and PostgreSQL full-text search in parallel. Results are combined using weighted reciprocal-rank fusion (70% vector rank, 30% lexical rank).
+8. Every result carries document ID, source URI, title, chunk index, and retrieval scores for source-grounded generation.
 
 The current migration fixes dimensions at 1,536 to match text-embedding-3-small. A different embedding model or dimension requires a reviewed schema migration and re-indexing; do not change only the environment variable.
 
