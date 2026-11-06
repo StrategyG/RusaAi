@@ -25,6 +25,18 @@ class RuntimeConfig:
     tenant_repositories: dict[str, list[str]]
     aicode_enabled: bool = False
 
+    @staticmethod
+    def _looks_placeholder(value: str | None) -> bool:
+        if not value:
+            return True
+        lowered = value.strip().lower()
+        markers = (
+            "replace-with", "placeholder", "redacted", "long_random",
+            "at_least_32", "fine_grained_repository_token", "registry_digest",
+            "api_image_digest", "worker_image_digest", "model_host", "db_host",
+        )
+        return any(marker in lowered for marker in markers)
+
     @classmethod
     def from_env(cls) -> RuntimeConfig:
         environment = os.getenv("ENVIRONMENT", "development").lower()
@@ -85,8 +97,12 @@ class RuntimeConfig:
         missing = [name for name, value in required.items() if not value]
         if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
             missing.append("API keys of at least 32 UTF-8 bytes")
+        if any(self._looks_placeholder(key) for key in self.api_keys):
+            missing.append("API keys must not contain example placeholders")
         if self.metrics_api_key and len(self.metrics_api_key.encode("utf-8")) < 32:
             missing.append("RUSA_METRICS_API_KEY of at least 32 UTF-8 bytes")
+        if self._looks_placeholder(self.metrics_api_key):
+            missing.append("RUSA_METRICS_API_KEY must be a real operator secret, not a placeholder")
         if any(not tenant.strip() for tenant in self.api_keys.values()):
             missing.append("non-empty API-key tenant mappings")
         if any(not tenant.strip() for tenant in self.tenant_repositories):
@@ -96,12 +112,16 @@ class RuntimeConfig:
             ssl_modes = parse_qs(database_url.query).get("sslmode", [])
             if database_url.scheme not in {"postgres", "postgresql"}:
                 missing.append("RUSA_DATABASE_URL using PostgreSQL")
+            if self._looks_placeholder(database_url.hostname) or self._looks_placeholder(database_url.password):
+                missing.append("RUSA_DATABASE_URL must not contain example host/password placeholders")
             if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
                 missing.append("RUSA_DATABASE_URL with sslmode=require, verify-ca, or verify-full")
         if self.model_base_url:
             model_url = urlparse(self.model_base_url)
             if model_url.scheme != "https" or not model_url.hostname or model_url.username or model_url.password:
                 missing.append("RUSA_MODEL_BASE_URL using credential-free HTTPS")
+            if self._looks_placeholder(model_url.hostname):
+                missing.append("RUSA_MODEL_BASE_URL must point to a real model host")
         for tenant, repositories in self.tenant_repositories.items():
             if any(not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) for repository in repositories):
                 missing.append(f"valid owner/repository allowlist entries for tenant {tenant}")
@@ -121,6 +141,12 @@ class RuntimeConfig:
         missing = [name for name, value in required.items() if not value]
         if self.audit_hmac_key and len(self.audit_hmac_key.encode("utf-8")) < 32:
             missing.append("RUSA_AUDIT_HMAC_KEY of at least 32 UTF-8 bytes")
+        if self._looks_placeholder(self.audit_hmac_key):
+            missing.append("RUSA_AUDIT_HMAC_KEY must be a real secret, not a placeholder")
+        if self.github_token and (
+            len(self.github_token.encode("utf-8")) < 20 or self._looks_placeholder(self.github_token)
+        ):
+            missing.append("RUSA_GITHUB_TOKEN must be a real fine-grained token, not a placeholder")
         if self.workspace_root and not Path(self.workspace_root).is_absolute():
             missing.append("RUSA_WORKSPACE_ROOT must be an absolute path")
         if self.git_mirror_root and not Path(self.git_mirror_root).is_absolute():
