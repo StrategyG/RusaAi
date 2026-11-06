@@ -1,127 +1,147 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI is an AI model and agent platform under active development. The repository provides an authenticated local-model inference API, A2A task validation, and an enterprise hierarchical coding-agent runtime.
 
----
+## Verified scope and status
 
-## Key Features & Architecture
+The complete RUSA-AI product is not production-certified until a real model artifact, provider, GitHub credential, PostgreSQL deployment, target hardware benchmarks, security review, and operational release gates are supplied and verified. The repository does not claim trained model weights or measured production SLOs.
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+## Enterprise AICode Agent
 
----
+The agent control plane is a separate service from model inference. It uses a hierarchical master orchestrator and six specialist workers: Analyst, Architect, Developer, Debugger, Tester, and Security.
 
-## Repository Structure
+Capabilities within the configured access policy:
+- Read and list regular text files in an explicitly allowlisted repository assigned to the authenticated tenant.
+- Create or reuse a deterministic tenant/task-scoped work branch.
+- Write approved repository files on that isolated branch.
+- Open or reuse a draft pull request.
+- Read complete, bounded GitHub Actions check-runs and perform at most two repair cycles by default.
+- Review a complete, bounded GitHub compare diff and re-check CI against the same commit SHA.
+- Run a second, read-only Security review after the diff and CI evidence have been retrieved.
+- Persist tenant-scoped task state, fenced worker leases, episodic memory, and audit evidence.
 
-```
-RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
-├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
-```
+The agent does not expose arbitrary shell execution, unrestricted network access, secret retrieval, force push, merge, deployment, release, permission changes, or workflow changes. GitHub Actions provides the isolated test/build execution environment. Human review and protected-branch controls govern merge and release.
 
----
+See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md) and [Security and Operations](docs/architecture/SECURITY_AND_OPERATIONS.md).
 
-## Quick Start & Local Setup
+## Repository layout
 
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
+- llm-project/model/: model architecture blueprint; not trained weights.
+- llm-project/serve/: inference API and local Transformers adapter.
+- rusa_agents/: contracts, policy, provider, GitHub tools, queue, memory, audit, orchestrator, task API, and worker process.
+- schemas/a2a/: A2A task-envelope JSON Schema.
+- docs/architecture/: agent architecture, worker contract, and security/operations model.
+- tests/: API, contract, policy, orchestration, HTTP-boundary, PostgreSQL, and security regression tests.
 
-### 2. Environment Setup
+## Requirements
+
+- Python 3.11 for the supported container and CI baseline.
+- A compatible local causal language model directory for the inference API.
+- A structured-output-capable OpenAI-compatible model provider for the agent workers.
+- PostgreSQL 16 or compatible for task queue and memory.
+- A repository-scoped GitHub App or fine-grained token with minimum contents, pull-request, checks, and metadata permissions.
+- Docker Compose is optional for local orchestration.
+
+## Local setup
+
+1. Create and activate a Python virtual environment.
+2. Install dependencies: python -m pip install -r requirements-dev.txt.
+3. Copy .env.example to .env and generate unique secrets. Do not commit .env.
+4. Configure RUSA_MODEL_PATH and RUSA_MODEL_DIR for the inference API.
+5. Configure separate PostgreSQL owner/worker/API passwords, per-tenant API keys, provider credentials, GitHub credentials, audit HMAC key, and the global repository allowlist.
+6. Configure RUSA_AGENT_TENANT_REPOSITORIES as a JSON map assigning each tenant only its permitted repositories. Every tenant in this map must have a unique API key and every assigned repository must also appear in the global allowlist.
+7. Restrict the GitHub App or fine-grained token to the same global repository set. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
+8. Start the services with docker compose up --build -d. Compose runs the one-shot `rusa-agent-migrate` service before starting the agent API and worker; it creates the queue/memory schema and grants only the required task-table and lifecycle-function privileges.
+
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The inference API binds to 127.0.0.1 by default; put it behind a TLS reverse proxy and change RUSA_BIND_ADDRESS only when binding to a deliberate private interface. All agent task endpoints require X-API-Key and X-Tenant-ID; the API validates the key against RUSA_AGENT_TENANT_KEYS and enforces each tenant's repository assignment.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | /v1/agent/tasks | Submit an idempotent coding task |
+| GET | /v1/agent/tasks/{task_id} | Read task status and checkpoint summary within the tenant |
+| POST | /v1/agent/tasks/{task_id}/retry | Explicitly requeue a failed task |
+| DELETE | /v1/agent/tasks/{task_id} | Cancel a queued, waiting, running, or approval-pending task and revoke its worker lease |
+
+Cancellation and retry use tenant-checked database functions; the API role has no direct UPDATE or DELETE privilege on task tables. Cancellation clears the active lease token. The worker rechecks lease ownership immediately before each repository tool action and fails closed if the check is false or unavailable. Cancellation is cooperative: an external API request already in flight may finish, but no subsequent tool action or successful acknowledgement is permitted. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
+
+Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
+
+Potential secrets are redacted from repository reads, memory, audit details, and durable checkpoints; secret-bearing file writes are blocked before GitHub access. The Security worker can review at most 20 changed files per task, with a bounded patch size per file. Larger or incomplete diffs are blocked for human review rather than silently truncated and treated as complete.
+
+## Quality gates
+
+Run:
+- ruff check llm-project/serve rusa_agents tests
+- python -m compileall -q llm-project rusa_agents tests
+- pytest -q
+- pip-audit -r requirements.txt -r requirements-agent.txt
+
+When RUSA_TEST_DATABASE_URL is configured, PostgreSQL integration tests exercise idempotency, lease fencing, checkpoint ownership, and row-level security. CI provisions a dedicated PostgreSQL 16 service and runs those tests. CI builds both the inference API image and the agent runtime image, then smoke-tests the inference API container. Pull-request checks run regardless of the target branch so stacked PRs receive checks.
+
+## Production acceptance
+
+A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, outbound egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
+
+The runtime foundation is not a production certification. A real provider, GitHub App, PostgreSQL deployment, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested.
+
+
+## Semantic RAG and MCP knowledge plane
+
+The staging integration branch includes an optional tenant-scoped semantic knowledge plane:
+
+- Document parsing, chunking, embeddings, and hybrid retrieval.
+- PostgreSQL with the pgvector extension, forced row-level security, and a restricted `rusa_knowledge_worker` role.
+- Read-only MCP tools: `search_knowledge`, `get_document`, and `list_collections`.
+- Agent-side routing between GitHub tools and knowledge tools.
+- Composite episodic and semantic memory for specialist workers.
+
+RAG is disabled by default. To enable local RAG retrieval for the agent worker, configure `RUSA_RAG_ENABLED=true` and the embedding provider settings in `.env`, then start the agent profile:
+
 ```bash
-# Clone the repository
-git clone StrategyG/RusaAi
-cd RusaAi
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+docker compose --profile agent up -d --build
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
+When `RUSA_MCP_SERVER_URL` is empty, the worker uses the local knowledge gateway. To use the separate MCP server, configure `RUSA_MCP_SERVER_URL=http://rusa-mcp:8002/mcp`, provision unique tenant bearer tokens in `RUSA_MCP_TENANT_TOKENS`, and configure `RUSA_MCP_TENANT_KEYS` as a JSON map of SHA-256 token hashes to tenant IDs. Then start both profiles:
+
 ```bash
-cp .env.example .env
+docker compose --profile agent --profile knowledge up -d --build
 ```
 
----
+Never put plaintext tenant bearer tokens in `RUSA_MCP_TENANT_KEYS`. The MCP server is loopback-published for local administration; internal service traffic uses the Docker network. Knowledge ingestion is available through the operator CLI:
 
-## Running the Application
-
-### Running Locally with Uvicorn
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+python -m rusa_knowledge.cli ingest --file ./documents/guide.pdf --tenant-id tenant-a --collection agent
+python -m rusa_knowledge.cli check
 ```
 
-### Running with Docker & Docker Compose
+The RAG/MCP feature remains subject to PostgreSQL/pgvector integration tests, MCP protocol tests, tenant-isolation verification, and staging deployment checks. It is not a production certification.
+
+
+## User and admin workspace
+
+The staging branch also includes the React/TypeScript workspace served by the unprivileged Nginx container:
+
+- User workspace: login, dashboard, AI chat, and personal task list.
+- Admin workspace: tenant user management, task monitoring, retry, and cancellation.
+- Browser authentication: short-lived bearer access tokens and rotating HttpOnly refresh cookies.
+- Backend identity storage: PostgreSQL tables managed by migration `006_user_identity.sql`.
+- Separate database credentials: `rusa_web_api` for identity records and `rusa_agent_api` for tenant-scoped task operations.
+- The API writes HMAC-chained audit events to the shared audit volume.
+
+Set the web/authentication variables in `.env` (copy from `.env.example`), including a unique `RUSA_WEB_DB_PASSWORD`, `RUSA_AUTH_SECRET`, and bootstrap administrator credentials. The bootstrap administrator is created idempotently and an existing password is not reset.
+
+Start the API and web workspace with:
+
 ```bash
-# Build and start container
-docker-compose up --build -d
-
-# Verify server status
-curl localhost:8000/health
+docker compose up -d --build
 ```
 
----
+The web workspace is published on the loopback interface at `http://127.0.0.1:3000` by default. Put a TLS reverse proxy in front of it before exposing it beyond a trusted local network. Keep `RUSA_COOKIE_SECURE=true` when serving over HTTPS. Agent task submission remains disabled until `RUSA_AGENT_ENABLED=true`, the provider/GitHub credentials are configured, and the agent profile is started:
 
-## Running Tests
-
-Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+docker compose --profile agent up -d --build
 ```
 
----
+For remote MCP, also start the `knowledge` profile and configure the tenant token/hash mappings.
 
-## API Endpoints
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
-
----
-
-## Security & Governance
-
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
-
----
-
-## License
-This project is licensed under the MIT License.
+The chat page currently uses non-streaming completions. Conversation history persistence and live task updates are follow-on UI capabilities; do not treat the workspace as production-certified until browser E2E, authorization, CSRF, and staging tests pass.

@@ -1,46 +1,151 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - "**"
   pull_request:
-    branches: [ main ]
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Run Python Tests and Linting
+    name: Lint, test, and audit dependencies
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: rusa_test
+          POSTGRES_USER: rusa_test
+          POSTGRES_PASSWORD: rusa_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusa_test -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSA_TEST_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
+      DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-agent.txt
+            requirements-rag-mcp.txt
+            requirements-dev.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
-
-      - name: Lint and syntax check
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
+      - name: Lint
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
+      - name: Compile
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+      - name: Deterministic agent runtime benchmark
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          RUSA_BENCH_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
-
-      - name: Run tests with pytest
+          set -o pipefail
+          python tests/benchmark_runtime.py --require-postgres --repeats 5 | tee "$RUNNER_TEMP/agent-benchmark.json"
+      - name: Upload agent runtime evaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-runtime-evaluation
+          path: ${{ runner.temp }}/agent-benchmark.json
+      - name: Test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
+      - name: Audit production dependencies
         run: |
-          pytest
+          pip-audit -r requirements.txt
+          pip-audit -r requirements-agent.txt
+          pip-audit -r requirements-rag-mcp.txt
 
-  docker-build:
-    name: Verify Docker Image Build
+  container:
+    name: Build and smoke-test containers
     runs-on: ubuntu-latest
+    needs: test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
         run: |
-          docker build -t rusa-ai:latest .
+          if [ -f .env.example ]; then
+            cp .env.example .env
+            docker compose config --quiet
+            rm -f .env
+          fi
+      - name: Build inference API image
+        run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Build agent runtime image
+        run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Build RAG and MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Build user and admin workspace image
+        run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
+      - name: Smoke-test RAG and MCP imports
+        run: |
+          docker run --rm rusa-knowledge-mcp:${{ github.sha }} python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
+      - name: Smoke-test agent runtime imports
+        run: |
+          docker run --rm rusa-agent-runtime:${{ github.sha }} \
+            python -c "import rusa_agents.api, rusa_agents.worker; print('agent runtime imports ok')"
+      - name: Run MCP server container
+        run: docker run -d --name rusa-mcp-ci -p 127.0.0.1:8002:8002 rusa-knowledge-mcp:${{ github.sha }}
+      - name: Verify MCP server liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8002/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-mcp-ci
+          exit 1
+      - name: Run inference API container
+        run: |
+          docker run -d --name rusa-ai-ci \
+            -p 127.0.0.1:8000:8000 \
+            -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
+            rusa-ai:${{ github.sha }}
+      - name: Verify liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-ai-ci
+          exit 1
+      - name: Run web workspace container
+        run: docker run -d --name rusa-web-ci -p 127.0.0.1:3000:8080 rusa-ai-web:${{ github.sha }}
+      - name: Verify web workspace liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:3000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-web-ci
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rusa-ai-ci rusa-web-ci rusa-mcp-ci || true
