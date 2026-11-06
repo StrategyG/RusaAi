@@ -36,3 +36,10 @@ def test_ci_applies_all_database_migrations_once_in_version_order():
         "003_aicode_task_results.sql",
         "004_aicode_tenant_rls.sql",
     ]
+
+def test_ci_runs_required_checks_for_any_pull_request_base_branch():
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    pull_request_trigger = workflow.split("  pull_request:\\n", 1)[1].split(
+        "\\n  workflow_dispatch:", 1
+    )[0]
+    assert "branches:" not in pull_request_trigger
