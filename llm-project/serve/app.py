@@ -11,7 +11,7 @@ import time
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,6 +25,8 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 class InferenceProvider(Protocol):
+    async def check_ready(self) -> bool: ...
+
     async def complete(self, messages: list[dict[str, str]], **parameters: Any) -> str: ...
 
 
@@ -75,7 +77,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(default="rusa-ai-v1", min_length=1, max_length=128)
+    model: str = Field(default="rusa-ai", min_length=1, max_length=128)
     messages: list[ChatMessage] = Field(min_length=1, max_length=128)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
