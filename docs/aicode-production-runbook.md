@@ -43,7 +43,7 @@ Runtime permissions:
 - Neither role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
-The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
+The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py` and `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
