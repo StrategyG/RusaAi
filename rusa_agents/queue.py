@@ -146,7 +146,7 @@ class PostgresTaskQueue:
                 RETURNS BOOLEAN
                 LANGUAGE plpgsql
                 SECURITY DEFINER
-                SET search_path = pg_catalog, public
+                SET search_path = pg_catalog
                 AS $rusa$
                 DECLARE affected_rows INTEGER;
                 BEGIN
@@ -180,7 +180,7 @@ class PostgresTaskQueue:
                 RETURNS BOOLEAN
                 LANGUAGE plpgsql
                 SECURITY DEFINER
-                SET search_path = pg_catalog, public
+                SET search_path = pg_catalog
                 AS $rusa$
                 DECLARE affected_rows INTEGER;
                 BEGIN
