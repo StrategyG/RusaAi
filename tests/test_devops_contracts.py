@@ -182,3 +182,18 @@ def test_workflow_event_completed_requires_content_digest():
 def test_contract_payload_must_be_an_object():
     with pytest.raises(ContractValidationError, match="JSON object"):
         validate_agent_task(["not", "an", "object"])
+
+
+def test_packaged_contract_schemas_match_repository_sources():
+    from pathlib import Path
+
+    repository_dir = Path("schemas/devops")
+    packaged_dir = Path("rusa_agents/devops/schemas")
+    for filename in (
+        "agent-task.schema.json",
+        "agent-result.schema.json",
+        "workflow-event.schema.json",
+    ):
+        assert (packaged_dir / filename).read_bytes() == (
+            repository_dir / filename
+        ).read_bytes()
