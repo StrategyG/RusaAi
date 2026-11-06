@@ -40,6 +40,8 @@ jobs:
         run: pytest -q
       - name: Audit production dependencies
         run: pip-audit -r requirements.txt
+      - name: Audit optional vLLM dependencies
+        run: pip-audit -r requirements-vllm.txt
 
   container:
     name: Build and smoke-test container
