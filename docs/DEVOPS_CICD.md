@@ -38,7 +38,7 @@ Create a GitHub Environment named `production` and require approval from at leas
 
 | Name | Purpose |
 |---|---|
-| `PRODUCTION_SSH_HOST` | DNS name or IP of the production host |
+| `PRODUCTION_SSH_HOST` | DNS name or IPv4 address of the production host |
 | `PRODUCTION_SSH_USER` | Least-privilege deployment account |
 | `PRODUCTION_DEPLOY_PATH` | Absolute Compose project path, e.g. `/srv/rusa-ai` |
 | `GHCR_PULL_USERNAME` | Registry username, required only when using a pull token |
