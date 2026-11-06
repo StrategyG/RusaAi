@@ -7,6 +7,8 @@ def test_knowledge_migration_enforces_vector_and_tenant_rls():
     assert "vector(1536)" in migration
     assert "USING (tenant_id = current_setting('rusa.tenant_id', true))" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "CREATE ROLE rusa_knowledge_worker" in migration
+    assert "GRANT rusa_knowledge_worker TO rusa_agent_worker" in migration
     assert "vector_cosine_ops" in migration
     assert "USING GIN (search_vector)" in migration
 
