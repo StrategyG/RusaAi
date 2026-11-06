@@ -68,7 +68,7 @@ services:
     command:
       - -c
       - |
-        import os
+        from rusa_agents.healthcheck import main as worker_healthcheck
         from rusa_agents.memory import PostgresMemoryStore
         from rusa_agents.queue import PostgresTaskQueue
 
@@ -78,8 +78,8 @@ services:
         memory = PostgresMemoryStore(database_url)
         memory.initialize()
 
-        if not queue.check_ready() or not memory.check_ready():
-            raise SystemExit("PostgreSQL agent schema or tenant RLS policy is not ready")
+        if worker_healthcheck() != 0:
+            raise SystemExit("Worker healthcheck failed after PostgreSQL schema initialization")
     restart: "no"
     environment:
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
