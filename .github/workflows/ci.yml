@@ -1,46 +1,97 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Run Python Tests and Linting
+  quality:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: Install dependencies
+      - name: Install development dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
+          python -m pip install -r requirements-dev.txt
 
-      - name: Lint and syntax check
+      - name: Lint
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
+          python -m flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
 
-      - name: Run tests with pytest
-        run: |
-          pytest
+      - name: Compile
+        run: python -m compileall -q llm-project/serve tests
 
-  docker-build:
-    name: Verify Docker Image Build
+      - name: Run test suite
+        run: python -m pytest tests/ -v
+
+  docker-smoke:
+    name: Build and smoke-test production container
     runs-on: ubuntu-latest
+    needs: quality
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Build Docker image
+      - name: Build container
+        run: docker build --pull -t rusa-ai:ci .
+
+      - name: Smoke-test container startup, health, and authentication
+        shell: bash
         run: |
-          docker build -t rusa-ai:latest .
+          set -euo pipefail
+          api_key="ci-only-test-secret-with-at-least-32-characters"
+          docker run --detach --name rusa-ai-ci \
+            --publish 127.0.0.1:8000:8000 \
+            --env ENVIRONMENT=production \
+            --env RUSA_API_KEY="$api_key" \
+            rusa-ai:ci
+
+          cleanup() {
+            docker logs rusa-ai-ci || true
+            docker rm --force rusa-ai-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/health > /tmp/rusa-health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep --quiet '"status":"ok"' /tmp/rusa-health.json
+
+          unauthenticated_status="$(curl --silent --output /tmp/rusa-unauth.json --write-out '%{http_code}' \
+            --request POST http://127.0.0.1:8000/v1/chat/completions \
+            --header 'Content-Type: application/json' \
+            --data '{"messages":[{"role":"user","content":"smoke test"}]}')"
+          test "$unauthenticated_status" = "401"
+
+          authenticated_status="$(curl --silent --output /tmp/rusa-auth.json --write-out '%{http_code}' \
+            --request POST http://127.0.0.1:8000/v1/chat/completions \
+            --header 'Content-Type: application/json' \
+            --header "X-API-Key: $api_key" \
+            --data '{"messages":[{"role":"user","content":"smoke test"}]}')"
+          test "$authenticated_status" = "503"
+          grep --quiet 'Inference backend is not configured' /tmp/rusa-auth.json
