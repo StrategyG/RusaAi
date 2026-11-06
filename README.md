@@ -35,7 +35,7 @@ See `docs/INFERENCE_OPERATIONS.md`.
 
 The tenant-scoped knowledge service and read-only MCP endpoint are independently
 deployable. Install `requirements-rag-mcp.txt`, apply
-`migrations/005_rag_knowledge_pgvector.sql` to a PostgreSQL database with
+`migrations/007_rag_knowledge_pgvector.sql` to a PostgreSQL database with
 pgvector, and configure restricted database credentials and per-tenant MCP
 bearer-token hashes. The `rusa-knowledge` CLI supports ingestion, readiness,
 and retrieval evaluation. See `docs/RAG_MCP_OPERATIONS.md`.
