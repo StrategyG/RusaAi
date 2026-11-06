@@ -49,6 +49,7 @@ class AICodeOrchestrator:
         "get_ci_status": "ci_read",
         "get_branch_diff": "repo_read",
     }
+    EXTERNAL_WRITES = {"create_branch", "write_file", "create_pull_request"}
     SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
     def __init__(
@@ -229,6 +230,9 @@ class AICodeOrchestrator:
                 if decision.requires_approval:
                     raise _ApprovalRequired(decision.reason)
                 raise _TaskBlocked(decision.reason)
+            if checkpoint_callback is not None and call.name in self.EXTERNAL_WRITES:
+                record.pending_external_write = call.name
+                await self._persist(record, checkpoint_callback)
             if tool_guard is not None:
                 try:
                     lease_valid = await tool_guard()
@@ -261,6 +265,7 @@ class AICodeOrchestrator:
             role.value,
             {"tool_count": len(tool_results), "summary": result.summary[:400]},
         )
+        record.pending_external_write = None
         await self._persist(record, checkpoint_callback)
         return completed
 
@@ -343,6 +348,10 @@ class AICodeOrchestrator:
         resume_external = record.state == TaskState.WAITING_EXTERNAL
         lease_lost = False
         try:
+            if record.pending_external_write:
+                raise _TaskBlocked(
+                    "external write was not checkpointed; reconcile provider state before retrying"
+                )
             self._event(
                 "task.started",
                 record,
@@ -582,11 +591,15 @@ class AICodeOrchestrator:
         except asyncio.TimeoutError:
             record.errors.append("worker or tool execution timed out")
             if record.state not in {TaskState.FAILED, TaskState.BLOCKED}:
-                record.transition(TaskState.FAILED)
+                record.transition(
+                    TaskState.BLOCKED if record.pending_external_write else TaskState.FAILED
+                )
         except Exception as exc:
             record.errors.append(f"{type(exc).__name__}: {str(exc)[:500]}")
             if record.state not in {TaskState.FAILED, TaskState.BLOCKED}:
-                record.transition(TaskState.FAILED)
+                record.transition(
+                    TaskState.BLOCKED if record.pending_external_write else TaskState.FAILED
+                )
         finally:
             self._event(
                 "task.checkpoint",
@@ -594,7 +607,7 @@ class AICodeOrchestrator:
                 "rusa-master",
                 {"state": record.state.value, "stage_index": record.stage_index},
             )
-            if not lease_lost:
+            if not lease_lost and record.state != TaskState.FAILED:
                 await self._persist(record, checkpoint_callback)
         return record
 

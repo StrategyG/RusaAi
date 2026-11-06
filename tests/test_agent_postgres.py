@@ -1,5 +1,7 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from threading import Barrier
 from uuid import uuid4
 
 import psycopg
@@ -541,3 +543,130 @@ def test_postgres_queue_can_cancel_task_waiting_for_human_approval():
             "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
             (tenant_id,),
         )
+
+
+def test_postgres_duplicate_delivery_competing_claims_and_crash_recovery():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    task = make_task(f"rusa-test-race-{uuid4().hex}", "duplicate")
+    gate = Barrier(2, timeout=10)
+
+    def submit(message):
+        gate.wait()
+        return queue.enqueue(message)
+
+    with ThreadPoolExecutor(2) as pool:
+        first_id, second_id = pool.map(submit, (task, replace(task, task_id=uuid4().hex)))
+    assert first_id == second_id
+
+    def claim(worker_id):
+        gate.wait()
+        return queue.claim(worker_id)
+
+    with ThreadPoolExecutor(2) as pool:
+        claims = list(pool.map(claim, ("worker-one", "worker-two")))
+    owner, = [item for item in claims if item is not None]
+    assert owner["task_id"] == first_id
+    task = CodingTask.from_dict(owner["payload"])
+    checkpoint = TaskRecord(task=task, state=TaskState.OBSERVING)
+    lease = (task.tenant_id, first_id, owner["lease_owner"], owner["lease_token"])
+    assert queue.checkpoint(*lease, checkpoint)
+
+    # Simulate a worker crash by expiring the lease without releasing it.
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            UPDATE rusa_agent_tasks SET lease_until=now() - interval '1 second'
+            WHERE tenant_id=%s AND task_id=%s
+        """, (task.tenant_id, first_id))
+
+    assert not queue.checkpoint(*lease, checkpoint)
+    assert not queue.heartbeat(*lease)
+    winner = queue.claim("replacement")
+    assert winner["attempts"] == 2
+    assert winner["lease_token"] != owner["lease_token"]
+    assert winner["result"]["state"] == "observing"
+    result = TaskRecord(task=task, state=TaskState.SUCCEEDED)
+    queue.acknowledge(task.tenant_id, first_id, result, "replacement", winner["lease_token"])
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        queue.acknowledge(
+            task.tenant_id, first_id, checkpoint, owner["lease_owner"], owner["lease_token"],
+        )
+    assert queue.enqueue(task) == first_id
+    saved = queue.get(task.tenant_id, first_id)
+    assert saved["status"] == "succeeded"
+    assert saved["result"] == result.to_dict()
+    assert queue.claim("worker-three") is None
+
+
+def test_postgres_cancel_races_with_completion():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    queue.configure_api_permissions()
+    task = make_task(f"rusa-test-cancel-race-{uuid4().hex}", "cancel")
+    task_id = queue.enqueue(task)
+    lease = queue.claim("worker-one")
+    result = TaskRecord(task=task, state=TaskState.SUCCEEDED)
+    gate = Barrier(2, timeout=10)
+
+    def finish():
+        gate.wait()
+        try:
+            queue.acknowledge(
+                task.tenant_id, task_id, result, "worker-one", lease["lease_token"],
+            )
+        except RuntimeError as exc:
+            assert "lease was lost" in str(exc)
+            return False
+        return True
+
+    def cancel():
+        gate.wait()
+        return queue.cancel(task.tenant_id, task_id)
+
+    with ThreadPoolExecutor(2) as pool:
+        completion = pool.submit(finish)
+        cancellation = pool.submit(cancel)
+        completed, cancelled = completion.result(), cancellation.result()
+    assert completed != cancelled
+    saved = queue.get(task.tenant_id, task_id)
+    assert saved["status"] == ("cancelled" if cancelled else "succeeded")
+    assert saved["result"] == (None if cancelled else result.to_dict())
+    assert not queue.retry(task.tenant_id, task_id, "stale", "worker-one", lease["lease_token"])
+    assert queue.enqueue(task) == task_id
+    assert queue.claim("replacement") is None
+
+
+@pytest.mark.parametrize("state", [TaskState.WAITING_EXTERNAL, TaskState.EXECUTING])
+def test_postgres_attempt_limit_applies_to_polling_and_crashed_writes(state):
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    queue.configure_api_permissions()
+    task = make_task(f"rusa-test-limit-{uuid4().hex}", "limit")
+    task_id = queue.enqueue(task, max_attempts=1)
+    lease = queue.claim("worker-one")
+    record = TaskRecord(task=task, state=state)
+    if state == TaskState.WAITING_EXTERNAL:
+        queue.acknowledge(task.tenant_id, task_id, record, "worker-one", lease["lease_token"])
+    else:
+        record.pending_external_write = "write_file"
+        assert queue.checkpoint(
+            task.tenant_id, task_id, "worker-one", lease["lease_token"], record,
+        )
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            UPDATE rusa_agent_tasks SET available_at=now(), lease_until=now()
+            WHERE tenant_id=%s AND task_id=%s
+        """, (task.tenant_id, task_id))
+
+    assert queue.claim("replacement") is None
+    saved = queue.get(task.tenant_id, task_id)
+    assert saved["attempts"] == 1
+    if state == TaskState.WAITING_EXTERNAL:
+        assert saved["status"] == "failed"
+    else:
+        assert saved["status"] == "blocked"
+        assert saved["result"]["pending_external_write"] == "write_file"
+        assert not queue.requeue_failed(task.tenant_id, task_id)
