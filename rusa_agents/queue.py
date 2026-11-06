@@ -107,15 +107,32 @@ class PostgresTaskQueue:
                 SELECT
                     EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'),
                     EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'),
+                    COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname='rusa_agent_api'), false),
+                    COALESCE((SELECT rolbypassrls FROM pg_roles WHERE rolname='rusa_agent_api'), false),
+                    COALESCE((SELECT rolcreatedb FROM pg_roles WHERE rolname='rusa_agent_api'), false),
+                    COALESCE((SELECT rolcreaterole FROM pg_roles WHERE rolname='rusa_agent_api'), false),
+                    COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname='rusa_agent_worker'), false),
+                    COALESCE((SELECT rolbypassrls FROM pg_roles WHERE rolname='rusa_agent_worker'), false),
+                    COALESCE((SELECT rolcreatedb FROM pg_roles WHERE rolname='rusa_agent_worker'), false),
+                    COALESCE((SELECT rolcreaterole FROM pg_roles WHERE rolname='rusa_agent_worker'), false),
                     current_user,
                     COALESCE(
                         (SELECT rolsuper FROM pg_roles WHERE rolname=current_user),
                         false
                     )
             """).fetchone()
-            api_exists, worker_exists, current_user, is_superuser = role_state
+            (
+                api_exists, worker_exists,
+                api_superuser, api_bypassrls, api_createdb, api_createrole,
+                worker_superuser, worker_bypassrls, worker_createdb, worker_createrole,
+                current_user, is_superuser,
+            ) = role_state
             if not api_exists or not worker_exists:
                 raise RuntimeError("rusa_agent_api and rusa_agent_worker roles must exist")
+            if any((api_superuser, api_bypassrls, api_createdb, api_createrole)):
+                raise RuntimeError("rusa_agent_api must remain a non-privileged NOBYPASSRLS role")
+            if worker_superuser or not worker_bypassrls or worker_createdb or worker_createrole:
+                raise RuntimeError("rusa_agent_worker must be a non-superuser BYPASSRLS service role")
             if current_user != "rusa_agent_worker" and not is_superuser:
                 raise RuntimeError(
                     "API permission migration must run as rusa_agent_worker or a database superuser"
@@ -229,6 +246,23 @@ class PostgresTaskQueue:
                 "GRANT EXECUTE ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) TO rusa_agent_api, rusa_agent_worker"
             )
 
+            api_privileges = connection.execute("""
+                SELECT
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'SELECT'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'INSERT'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'UPDATE'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'DELETE'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_memory', 'SELECT'),
+                    has_function_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_cancel_task(text,text)', 'EXECUTE'
+                    ),
+                    has_function_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_requeue_failed_task(text,text)', 'EXECUTE'
+                    )
+            """).fetchone()
+            if api_privileges != (True, True, False, False, False, True, True):
+                raise RuntimeError("tenant API database privileges do not match the least-privilege policy")
+
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute("""
@@ -260,7 +294,20 @@ class PostgresTaskQueue:
                            current_user,
                            'public.rusa_agent_requeue_failed_task(text,text)',
                            'EXECUTE'
-                       )
+                       ),
+                       CASE
+                           WHEN current_user = 'rusa_agent_api' THEN
+                               NOT has_table_privilege(
+                                   current_user, 'public.rusa_agent_tasks', 'UPDATE'
+                               )
+                               AND NOT has_table_privilege(
+                                   current_user, 'public.rusa_agent_tasks', 'DELETE'
+                               )
+                               AND NOT has_table_privilege(
+                                   current_user, 'public.rusa_agent_memory', 'SELECT'
+                               )
+                           ELSE TRUE
+                       END
                 FROM pg_class AS c
                 JOIN pg_namespace AS n ON n.oid=c.relnamespace
                 WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
