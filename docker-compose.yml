@@ -49,7 +49,7 @@ services:
     profiles: ["worker"]
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     command: ["python", "-m", "rusa_agents.worker_main"]
     restart: unless-stopped
     init: true
