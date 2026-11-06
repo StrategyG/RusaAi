@@ -6,7 +6,7 @@ on:
       - "**"
   pull_request:
     branches:
-      - main
+      - "**"
 
 permissions:
   contents: read
@@ -54,7 +54,9 @@ jobs:
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents tests
       - name: Test
-        run: pytest -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
