@@ -47,11 +47,36 @@ class DockerSandbox:
         cpu_limit: str = "2",
         max_snapshot_bytes: int = 100_000_000,
     ) -> None:
-        self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py310")
+        self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
+
+    def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
+        """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
+        try:
+            info = subprocess.run(
+                ["docker", "info", "--format", "{{json .SecurityOptions}}"],
+                check=False, capture_output=True, text=True, timeout=20,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("Docker CLI is not installed in the worker image") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Docker daemon readiness check timed out") from exc
+        if info.returncode != 0:
+            raise RuntimeError(f"Docker daemon is unavailable: {info.stderr[-1000:]}")
+        if require_rootless and "rootless" not in info.stdout.lower():
+            raise RuntimeError("Production Docker daemon must run in rootless mode")
+        if require_image:
+            inspected = subprocess.run(
+                ["docker", "image", "inspect", self.image],
+                check=False, capture_output=True, text=True, timeout=30,
+            )
+            if inspected.returncode != 0:
+                raise RuntimeError(
+                    "Pinned sandbox image is not present in the worker's rootless Docker daemon"
+                )
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
         if profile not in self.PROFILES:
