@@ -86,6 +86,15 @@ class ToolStep(BaseModel):
     purpose: str = Field(min_length=1, max_length=1000)
 
 
+class ReviewResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    summary: str = Field(min_length=1, max_length=4000)
+    findings: list[str] = Field(default_factory=list, max_length=30)
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
+
+
 class AgentPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
