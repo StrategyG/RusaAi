@@ -35,6 +35,10 @@ def configure_api(monkeypatch):
         json.dumps({"tenant-a": "a" * 48, "tenant-b": "b" * 48}),
     )
     monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv(
+        "RUSA_AGENT_TENANT_REPOSITORIES",
+        json.dumps({"tenant-a": ["StrategyG/RusaAi"], "tenant-b": ["StrategyG/RusaAi"]}),
+    )
     monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
 
 
@@ -122,3 +126,46 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
+
+
+
+def test_agent_api_rejects_repository_outside_tenant_allowlist(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = task_body()
+    body["repository"] = "another-owner/private-repo"
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert response.status_code == 403
+
+
+def test_agent_api_enforces_streamed_body_limit_without_content_length():
+    import asyncio
+
+    from rusa_agents.api import RequestGuardMiddleware
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            if message["type"] == "http.request" and not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = RequestGuardMiddleware(downstream, max_request_bytes=4)
+    messages = [
+        {"type": "http.request", "body": b"abc", "more_body": True},
+        {"type": "http.request", "body": b"def", "more_body": False},
+    ]
+    sent = []
+
+    async def receive():
+        return messages.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/test", "headers": [], "state": {}}
+    asyncio.run(middleware(scope, receive, send))
+    response_start = next(item for item in sent if item["type"] == "http.response.start")
+    assert response_start["status"] == 413

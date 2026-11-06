@@ -19,6 +19,124 @@ from .queue import PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 
+class RequestGuardMiddleware:
+    """Bound and buffer every HTTP request body, including chunked bodies."""
+
+    def __init__(self, app, max_request_bytes):
+        self.app = app
+        self.max_request_bytes = max_request_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = uuid.uuid4().hex
+        scope.setdefault("state", {})["request_id"] = request_id
+        limit = self.max_request_bytes() if callable(self.max_request_bytes) else self.max_request_bytes
+        if not isinstance(limit, int) or limit <= 0:
+            raise RuntimeError("request body size limit must be a positive integer")
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() not in {
+                        b"x-request-id", b"x-content-type-options", b"cache-control",
+                    }
+                ]
+                headers.extend([
+                    (b"x-request-id", request_id.encode("ascii")),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"cache-control", b"no-store"),
+                ])
+                message["headers"] = headers
+            await send(message)
+
+        async def send_error(code, detail):
+            response = JSONResponse(status_code=code, content={"detail": detail})
+            await response(scope, receive, send_with_headers)
+
+        raw_length = dict(scope.get("headers", [])).get(b"content-length")
+        if raw_length is not None:
+            try:
+                declared_length = int(raw_length.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                await send_error(400, "Invalid Content-Length header")
+                return
+            if declared_length < 0:
+                await send_error(400, "Invalid Content-Length header")
+                return
+            if declared_length > limit:
+                await send_error(413, "Request body exceeds the configured size limit")
+                return
+
+        buffered_messages = []
+        received_bytes = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            received_bytes += len(message.get("body", b""))
+            if received_bytes > limit:
+                await send_error(413, "Request body exceeds the configured size limit")
+                return
+            buffered_messages.append(message)
+            if not message.get("more_body", False):
+                break
+
+        async def replay_receive():
+            if buffered_messages:
+                return buffered_messages.pop(0)
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(scope, replay_receive, send_with_headers)
+
+
+def tenant_repository_allowlist(tenant_id: str) -> frozenset[str]:
+    raw = os.getenv("RUSA_AGENT_TENANT_REPOSITORIES", "")
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Per-tenant repository allowlists are not configured",
+        )
+    try:
+        mapping = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Tenant repository allowlist configuration is invalid",
+        ) from exc
+    if not isinstance(mapping, dict) or not mapping:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Tenant repository allowlist configuration is invalid",
+        )
+    for key, repositories in mapping.items():
+        if (
+            not isinstance(key, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", key)
+            or not isinstance(repositories, list)
+            or not repositories
+            or any(
+                not isinstance(repository, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                for repository in repositories
+            )
+            or len(set(repositories)) != len(repositories)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Tenant repository allowlist configuration is invalid",
+            )
+    if tenant_id not in mapping:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant has no repository access")
+    return frozenset(mapping[tenant_id])
+
+
 
 class CreateAgentTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -104,38 +222,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestGuardMiddleware, max_request_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
 
-@app.middleware("http")
-async def request_guard(request: Request, call_next):
-    request_id = uuid.uuid4().hex
-    request.state.request_id = request_id
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            size = int(content_length)
-        except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={"detail": "Invalid Content-Length header"},
-                headers={"X-Request-ID": request_id},
-            )
-        if size < 0:
-            return JSONResponse(
-                status_code=400,
-                content={"detail": "Invalid Content-Length header"},
-                headers={"X-Request-ID": request_id},
-            )
-        if size > MAX_AGENT_REQUEST_BYTES:
-            return JSONResponse(
-                status_code=413,
-                content={"detail": "Request body exceeds the configured size limit"},
-                headers={"X-Request-ID": request_id},
-            )
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store"
-    return response
+
+
 
 
 @app.get("/health/live")
@@ -167,6 +257,8 @@ def create_task(
         r"[A-Za-z0-9_.:-]{1,128}", idempotency_key
     ):
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
+    if body.repository not in tenant_repository_allowlist(tenant_id):
+        raise HTTPException(status_code=403, detail="Repository is not allowlisted for this tenant")
     try:
         task = CodingTask(
             tenant_id=tenant_id,
