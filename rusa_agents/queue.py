@@ -142,20 +142,6 @@ class PostgresTaskQueue:
                         "Production tenant idempotency index is missing; "
                         "apply migrations/006_aicode_idempotency.sql"
                     )
-                idempotency_constraints = conn.execute("""
-                    SELECT COUNT(*) FROM pg_constraint
-                    WHERE conrelid='public.aicode_jobs'::regclass
-                      AND conname = ANY(%s)
-                """, ([
-                    "aicode_jobs_idempotency_key_hash_check",
-                    "aicode_jobs_request_hash_check",
-                    "aicode_jobs_idempotency_pair_check",
-                ],)).fetchone()
-                if not idempotency_constraints or idempotency_constraints[0] != 3:
-                    raise RuntimeError(
-                        "Production task idempotency constraints are missing; "
-                        "apply migrations/006_aicode_idempotency.sql"
-                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
