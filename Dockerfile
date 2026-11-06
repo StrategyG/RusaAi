@@ -15,8 +15,8 @@ FROM python:3.10-slim AS runner
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \\
-    && rm -rf /var/lib/apt/lists/* \\
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser
 
 COPY --from=builder /install /usr/local
