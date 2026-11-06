@@ -9,3 +9,9 @@ def test_knowledge_migration_enforces_vector_and_tenant_rls():
     assert "FORCE ROW LEVEL SECURITY" in migration
     assert "vector_cosine_ops" in migration
     assert "USING GIN (search_vector)" in migration
+
+
+def test_knowledge_migration_grants_write_only_to_restricted_worker_role():
+    migration = Path("migrations/005_rag_knowledge_pgvector.sql").read_text(encoding="utf-8")
+    assert "rusa_knowledge_worker" in migration
+    assert "rusa_agent_worker" not in migration
