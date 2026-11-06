@@ -4,7 +4,7 @@ RUSA-AI is an AI model and agent platform under active development. This reposit
 
 ## Verified scope and release status
 
-The serving implementation rejects simulated output and will not report readiness until a real local model artifact has passed manifest and file checksum verification and has loaded successfully. The repository does not include trained RUSA-AI model weights. The actual RUSA-AI checkpoint, license, tokenizer, target GPU/CPU hardware, and deployment secrets must be supplied by the model owner.
+The serving implementation rejects simulated output and will not report readiness until a real local model artifact has passed manifest and file checksum verification and has loaded successfully. The repository does not include trained RUSA-AI safetensors model weights. Pickle-based checkpoint files are rejected by the production artifact verifier. The actual RUSA-AI checkpoint, license, tokenizer, target GPU/CPU hardware, and deployment secrets must be supplied by the model owner.
 
 **This branch is an inference implementation candidate, not production certification.** No real checkpoint or target hardware was supplied in this work session, so model quality, actual inference, GPU performance, sustained capacity, and production SLOs remain unverified.
 
