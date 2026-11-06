@@ -1,0 +1,3 @@
+# Minimal optional dependencies needed by the autonomous worker's read-only RAG tools.
+# The separate MCP service and ingestion CLI use requirements-rag-mcp.txt.
+psycopg[binary,pool]>=3.2,<4

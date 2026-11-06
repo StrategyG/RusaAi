@@ -49,11 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Compile
-        run: python -m compileall -q rusa_agents llm-project/serve tests
+        run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Lint
-        run: ruff check rusa_agents tests llm-project/serve
+        run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis
-        run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
+        run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
       - name: Tests
         run: python -m pytest -q
 
@@ -98,8 +98,10 @@ jobs:
           if not result.ok:
               raise SystemExit("isolated sandbox test suite failed")
           PY
+      - name: Build isolated knowledge MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
-        run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+        run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
         with:
@@ -112,7 +114,8 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
-            "rusa-ai-worker:${{ github.sha }}"; do
+            "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
             echo "::endgroup::"
@@ -142,6 +145,29 @@ jobs:
           if not found:
               print("No setuptools package entry found in the sandbox image JSON report.")
           PY
+      - name: Diagnose setuptools package origin in RAG/MCP image
+        run: |
+          trivy image --scanners vuln --pkg-types library --format json \
+            --output /tmp/rusa-rag-mcp-trivy.json \
+            "rusa-ai-rag-mcp:${{ github.sha }}"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/rusa-rag-mcp-trivy.json").read_text())
+          found = False
+          for result in report.get("Results", []):
+              for vulnerability in result.get("Vulnerabilities", []):
+                  if vulnerability.get("PkgName", "").lower() == "setuptools":
+                      print(json.dumps({
+                          "target": result.get("Target"),
+                          "type": result.get("Type"),
+                          "vulnerability": vulnerability,
+                      }, indent=2))
+                      found = True
+          if not found:
+              print("No setuptools vulnerability entry found in RAG/MCP image.")
+          PY
       - name: Block on fixable CRITICAL and HIGH image vulnerabilities
         shell: bash
         run: |
@@ -149,7 +175,8 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
-            "rusa-ai-worker:${{ github.sha }}"; do
+            "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
               --severity CRITICAL,HIGH --pkg-types os,library "${image}"
           done
@@ -181,3 +208,52 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
+
+  rag-mcp:
+    name: RAG and MCP integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: rusa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSA_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install RAG and MCP test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" -r requirements-rag-mcp.txt
+      - name: Compile RAG and MCP packages
+        run: python -m compileall -q rusa_knowledge rusa_mcp
+      - name: Lint RAG and MCP packages
+        run: ruff check rusa_knowledge rusa_mcp tests/test_knowledge_*.py tests/test_mcp_*.py
+      - name: Test RAG and MCP
+        run: |
+          python -m pytest -q \
+            tests/test_knowledge_chunking.py \
+            tests/test_knowledge_embeddings.py \
+            tests/test_knowledge_evaluation.py \
+            tests/test_knowledge_migration.py \
+            tests/test_knowledge_parsers.py \
+            tests/test_knowledge_postgres.py \
+            tests/test_knowledge_safety.py \
+            tests/test_knowledge_service.py \
+            tests/test_mcp_client.py \
+            tests/test_mcp_server.py \
+            tests/test_mcp_server_security.py

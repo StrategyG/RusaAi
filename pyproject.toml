@@ -19,6 +19,9 @@ dependencies = [
   "prometheus-client>=0.20,<1",
 ]
 
+[project.scripts]
+rusa-knowledge = "rusa_knowledge.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=7.3,<10",
@@ -26,10 +29,16 @@ dev = [
   "ruff>=0.6,<1",
   "bandit>=1.7,<2",
 ]
-model = ["torch>=2.0,<3"]
+model = [
+  "torch>=2.2,<3",
+  "transformers>=5.10.0,<6",
+  "accelerate>=1.0,<2",
+  "safetensors>=0.4.5,<1",
+]
+vllm = ["vllm>=0.32,<0.33"]
 
 [tool.setuptools.packages.find]
-include = ["rusa_agents*"]
+include = ["rusa_agents*", "rusa_knowledge*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

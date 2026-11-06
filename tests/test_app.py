@@ -124,6 +124,53 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert queue.get(data["task_id"], "tenant-beta") is None
 
 
+
+def test_aicode_task_idempotency_header_replays_original_task(monkeypatch):
+    class IdempotentQueue:
+        def __init__(self):
+            self.by_key = {}
+
+        def enqueue_idempotent(
+            self, task_id, tenant_id, payload, key, *, audit_actor=None
+        ):
+            existing = self.by_key.get((tenant_id, key))
+            normalized = json.loads(json.dumps(payload))
+            normalized["repository"].pop("work_branch_prefix", None)
+            if existing:
+                old_id, old_payload = existing
+                if old_payload != normalized:
+                    raise ValueError("Idempotency-Key was already used with a different task payload")
+                return old_id, False, "queued"
+            self.by_key[(tenant_id, key)] = (task_id, normalized)
+            return task_id, True, "queued"
+
+        def get(self, task_id, tenant_id, *, audit_actor=None):
+            return {"task_id": task_id, "tenant_id": tenant_id, "status": "queued"}
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}')
+    queue = IdempotentQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    payload = {
+        "objective": "Add a health endpoint test",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The test passes"],
+    }
+    headers = {"X-API-Key": "tenant-key", "Idempotency-Key": "request-123"}
+    first = client.post("/v1/aicode/tasks", headers=headers, json=payload)
+    replay = client.post("/v1/aicode/tasks", headers=headers, json=payload)
+    assert first.status_code == replay.status_code == 202
+    assert first.json()["task_id"] == replay.json()["task_id"]
+    assert replay.json()["work_branch_prefix"] == first.json()["work_branch_prefix"]
+
+    changed = {**payload, "objective": "Do a different task"}
+    conflict = client.post("/v1/aicode/tasks", headers=headers, json=changed)
+    assert conflict.status_code == 409
+
+
+
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")

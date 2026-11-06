@@ -1,0 +1,8 @@
+# Optional local model runtime dependencies.
+# Install this set only for hosts that load local Transformers models.
+# The core API remains installable without model weights or GPU libraries.
+-r requirements.txt
+torch>=2.2,<3
+transformers>=5.10.0,<6
+accelerate>=1.0,<2
+safetensors>=0.4.5,<1
