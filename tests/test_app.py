@@ -3,9 +3,10 @@ import json
 import uuid
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
+
 from app import app, set_inference_provider
 from rusa_agents.providers import InferenceStreamEvent
-from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
