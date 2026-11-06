@@ -49,7 +49,7 @@ BACKUP_FILE="$backup_file" \
 BACKUP_AGE_IDENTITY_FILE="$BACKUP_AGE_IDENTITY_FILE" \
 RESTORE_CONFIRM_DATABASE="$RESTORE_CONFIRM_DATABASE" \
 RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
-"$script_dir/restore.sh"
+bash "$script_dir/restore.sh"
 restore_finished_at="$(date +%s)"
 
 printf 'BACKUP_FILE=%s\n' "$backup_file"
