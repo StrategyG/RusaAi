@@ -44,3 +44,14 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
     ]
+
+
+def test_sql_migration_dollar_quote_delimiters_are_balanced():
+    for migration in sorted(Path("migrations").glob("*.sql")):
+        sql = migration.read_text(encoding="utf-8")
+        assert sql.count("$$") % 2 == 0, (
+            f"{migration.name} contains an unmatched dollar-quote delimiter"
+        )
+        assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
+            f"{migration.name} contains a malformed single-dollar terminator"
+        )
