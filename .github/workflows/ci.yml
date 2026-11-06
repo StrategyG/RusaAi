@@ -100,9 +100,41 @@ jobs:
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
-            trivy image --scanners vuln --severity CRITICAL,HIGH --vuln-type os,library "${image}"
+            trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
             echo "::endgroup::"
           done
+      # Emit the exact package location for any remaining setuptools finding.
+      - name: Diagnose setuptools package location in sandbox image
+        shell: bash
+        run: |
+          set -euo pipefail
+          trivy image --scanners vuln --pkg-types library --format json \
+            --output /tmp/rusa-sandbox-trivy.json \
+            "rusa-ai-agent-sandbox:${{ github.sha }}"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/rusa-sandbox-trivy.json").read_text())
+          found = False
+          for result in report.get("Results", []):
+              for package in result.get("Packages", []):
+                  if package.get("Name", "").lower() == "setuptools":
+                      print(json.dumps({
+                          "target": result.get("Target"),
+                          "package": package,
+                      }, indent=2))
+                      found = True
+              for vulnerability in result.get("Vulnerabilities", []):
+                  if vulnerability.get("PkgName", "").lower() == "setuptools":
+                      print(json.dumps({
+                          "target": result.get("Target"),
+                          "vulnerability": vulnerability,
+                      }, indent=2))
+                      found = True
+          if not found:
+              print("No setuptools package entry found in the sandbox image JSON report.")
+          PY
       # Fail only when a CRITICAL/HIGH finding has a vendor fix available.
       - name: Block on fixable CRITICAL and HIGH image vulnerabilities
         shell: bash
@@ -113,7 +145,7 @@ jobs:
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
-              --severity CRITICAL,HIGH --vuln-type os,library "${image}"
+              --severity CRITICAL,HIGH --pkg-types os,library "${image}"
           done
       - name: Validate production Compose configuration
         env:
