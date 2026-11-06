@@ -356,6 +356,7 @@ class GitHubToolGateway:
         policy: AutonomyPolicy | None = None,
         max_file_bytes: int = 262144,
         allowed_repositories: set[str] | frozenset[str] | None = None,
+        tenant_repositories: dict[str, set[str] | frozenset[str]] | None = None,
     ) -> None:
         if max_file_bytes <= 0:
             raise ValueError("max_file_bytes must be positive")
@@ -367,7 +368,28 @@ class GitHubToolGateway:
             for item in (allowed_repositories or set())
             if item.strip()
         )
-        if not self.allowed_repositories:
+        self.tenant_repositories = None
+        if tenant_repositories is not None:
+            normalized: dict[str, frozenset[str]] = {}
+            for tenant_id, repositories in tenant_repositories.items():
+                if not isinstance(tenant_id, str) or not re.fullmatch(
+                    r"[A-Za-z0-9_.:-]{1,128}", tenant_id
+                ):
+                    raise ValueError("tenant repository allowlist contains an invalid tenant ID")
+                repo_set = frozenset(
+                    item.strip().lower()
+                    for item in repositories
+                    if isinstance(item, str) and item.strip()
+                )
+                if not repo_set:
+                    raise ValueError(
+                        f"tenant {tenant_id!r} must have at least one allowed repository"
+                    )
+                normalized[tenant_id] = repo_set
+            if not normalized:
+                raise ValueError("tenant repository allowlist must not be empty")
+            self.tenant_repositories = normalized
+        elif not self.allowed_repositories:
             raise ValueError("an explicit GitHub repository allowlist is required")
 
     async def execute(
@@ -377,7 +399,15 @@ class GitHubToolGateway:
         task: CodingTask,
         role: WorkerRole,
     ) -> dict[str, Any]:
-        if task.repository.full_name.lower() not in self.allowed_repositories:
+        repository_name = task.repository.full_name.lower()
+        if self.tenant_repositories is not None:
+            tenant_allowed = self.tenant_repositories.get(task.tenant_id, frozenset())
+            if repository_name not in tenant_allowed:
+                return {
+                    "ok": False,
+                    "error": "repository is not allowlisted for the authenticated tenant",
+                }
+        elif repository_name not in self.allowed_repositories:
             return {"ok": False, "error": "repository is not in the configured GitHub allowlist"}
         if action not in self.ROLE_ACTIONS.get(role, set()):
             return {"ok": False, "error": f"{role.value} is not allowed to use {action}"}

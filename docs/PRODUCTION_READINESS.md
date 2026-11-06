@@ -12,13 +12,14 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - Hierarchical AICode workers: analyst, architect, developer, debugger, tester, and security.
 - Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, and draft PR creation.
 - PostgreSQL durable queue with idempotency keys, leases, bounded retries, and worker process.
-- Tenant-scoped SQLite task memory for single-node development and hash-chained audit log.
+- Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
+- API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.
 - Authenticated A2A task submission endpoint using Idempotency-Key.
 - CI for lint, compile, tests, Bandit, dependency audit, container build, and API smoke test.
 
 ## Current verification
 
-The AICode branch CI must pass after the latest changes. The runtime has not yet been validated against a live GitHub App installation, a real approved model provider, or a multi-worker PostgreSQL deployment. The API model adapter has not been benchmarked with real model weights and target hardware.
+The AICode branch CI must pass after the latest changes. The runtime has not yet been validated against a live GitHub App installation, a real approved model provider, or a multi-worker PostgreSQL deployment. Multi-tenant API keys require a matching RUSA_GITHUB_TENANT_REPOSITORIES_JSON entry for every tenant; this is enforced at worker startup. The API model adapter has not been benchmarked with real model weights and target hardware.
 
 ## Release gates
 
@@ -28,7 +29,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 | Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
 | Queue reliability | Lease heartbeat and current-owner completion/failure guards; cancellation, dead-letter inspection, replay controls, queue-age alerts | Partially implemented; operational gates open |
-| Tenant security | Authenticated tenant identity mapping; cross-tenant authorization tests for API, queue, memory, audit | Open; current API task intake is single-tenant default |
+| Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
 | Provider security | Approved endpoint allowlist, HTTPS, secret manager, egress restrictions | Deployment configuration required |

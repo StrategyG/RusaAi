@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 
 from .audit import PostgresAuditLog
 from .github_gateway import GitHubRepositoryGateway, GitHubToolGateway
@@ -30,17 +32,83 @@ def build_orchestrator() -> AICodeOrchestrator:
         os.getenv("RUSA_PROVIDER_API_KEY"),
         timeout_seconds=float(os.getenv("RUSA_PROVIDER_TIMEOUT_SECONDS", "120")),
     )
+    raw_tenant_repositories = os.getenv("RUSA_GITHUB_TENANT_REPOSITORIES_JSON")
+    raw_api_tenants = os.getenv("RUSA_API_KEY_TENANTS_JSON")
+    tenant_repositories = None
+    if raw_tenant_repositories is not None:
+        try:
+            parsed_repositories = json.loads(raw_tenant_repositories)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "RUSA_GITHUB_TENANT_REPOSITORIES_JSON must contain valid JSON"
+            ) from exc
+        if not isinstance(parsed_repositories, dict) or not parsed_repositories:
+            raise RuntimeError(
+                "RUSA_GITHUB_TENANT_REPOSITORIES_JSON must be a non-empty object"
+            )
+        tenant_repositories = {}
+        for tenant_id, repositories in parsed_repositories.items():
+            if not isinstance(tenant_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9_.:-]{1,128}", tenant_id
+            ):
+                raise RuntimeError("tenant repository map contains an invalid tenant ID")
+            if (
+                not isinstance(repositories, list)
+                or not repositories
+                or any(
+                    not isinstance(repository, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                    for repository in repositories
+                )
+            ):
+                raise RuntimeError(
+                    f"tenant {tenant_id!r} must map to a non-empty list of owner/repo entries"
+                )
+            tenant_repositories[tenant_id] = set(repositories)
+
+    if raw_api_tenants is not None:
+        try:
+            api_tenants = json.loads(raw_api_tenants)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RUSA_API_KEY_TENANTS_JSON must contain valid JSON") from exc
+        if not isinstance(api_tenants, dict) or not api_tenants:
+            raise RuntimeError("RUSA_API_KEY_TENANTS_JSON must be a non-empty object")
+        tenant_ids = set()
+        for key_hash, tenant_id in api_tenants.items():
+            if not isinstance(key_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", key_hash):
+                raise RuntimeError("tenant API-key map keys must be SHA-256 hex digests")
+            if not isinstance(tenant_id, str) or not re.fullmatch(
+                r"[A-Za-z0-9_.:-]{1,128}", tenant_id
+            ):
+                raise RuntimeError("tenant API-key map contains an invalid tenant ID")
+            tenant_ids.add(tenant_id)
+        if tenant_repositories is None:
+            raise RuntimeError(
+                "multi-tenant API keys require RUSA_GITHUB_TENANT_REPOSITORIES_JSON"
+            )
+        missing_tenants = tenant_ids - tenant_repositories.keys()
+        if missing_tenants:
+            raise RuntimeError(
+                "tenant repository allowlist is missing authenticated tenants: "
+                + ", ".join(sorted(missing_tenants))
+            )
+
     allowed_repositories = {
         item.strip()
         for item in os.getenv("RUSA_GITHUB_ALLOWED_REPOSITORIES", "").split(",")
         if item.strip()
     }
-    if not allowed_repositories:
+    if tenant_repositories is None and not allowed_repositories:
         raise RuntimeError(
-            "RUSA_GITHUB_ALLOWED_REPOSITORIES must contain explicit owner/repo entries"
+            "configure RUSA_GITHUB_ALLOWED_REPOSITORIES or "
+            "RUSA_GITHUB_TENANT_REPOSITORIES_JSON"
         )
     github = GitHubRepositoryGateway(github_token)
-    gateway = GitHubToolGateway(github, allowed_repositories=allowed_repositories)
+    gateway = GitHubToolGateway(
+        github,
+        allowed_repositories=allowed_repositories or None,
+        tenant_repositories=tenant_repositories,
+    )
     memory = PostgresMemory(database_url)
     audit = PostgresAuditLog(database_url)
     workers = [

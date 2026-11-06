@@ -383,3 +383,44 @@ def test_github_gateway_refuses_to_reuse_a_diverged_work_branch(monkeypatch):
                 "feature/aicode-test",
             )
         )
+
+
+
+def test_github_gateway_enforces_repository_allowlist_per_tenant():
+    gateway = GitHubToolGateway(
+        object(),
+        tenant_repositories={
+            "tenant-a": {"trusted/repo-a"},
+            "tenant-b": {"trusted/repo-b"},
+        },
+    )
+    task = make_task()
+    task.tenant_id = "tenant-a"
+    denied = asyncio.run(
+        gateway.execute("repo.list_tree", {}, task, WorkerRole.ANALYST)
+    )
+    assert denied["ok"] is False
+    assert "authenticated tenant" in denied["error"]
+
+    task.repository = RepositoryTarget(
+        "trusted/repo-a",
+        "main",
+        "feature/aicode-test",
+    )
+    class FakeGitHub:
+        async def list_tree(self, repository, ref):
+            return {"sha": VALID_COMMIT_SHA, "paths": ["README.md"], "truncated": False}
+
+    gateway.github = FakeGitHub()
+    allowed = asyncio.run(
+        gateway.execute("repo.list_tree", {}, task, WorkerRole.ANALYST)
+    )
+    assert allowed["ok"] is True
+
+
+def test_github_gateway_rejects_empty_tenant_repository_allowlist():
+    with pytest.raises(ValueError, match="at least one allowed repository"):
+        GitHubToolGateway(
+            object(),
+            tenant_repositories={"tenant-a": set()},
+        )
