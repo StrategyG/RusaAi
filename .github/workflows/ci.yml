@@ -63,8 +63,10 @@ jobs:
         run: ruff check rusa_agents tests llm-project/serve
       - name: Security static analysis
         run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
-      - name: Tests
-        run: python -m pytest -q
+      - name: Dependency vulnerability audit
+        run: pip-audit
+      - name: Tests with coverage report
+        run: python -m pytest -q --cov=rusa_agents --cov=app --cov-report=term-missing
 
   docker-build:
     name: Build production image
