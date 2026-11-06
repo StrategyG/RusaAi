@@ -68,6 +68,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+# Install this additional file only for model development/training dependencies:
+# pip install -r requirements-model.txt
 ```
 
 ### 3. Environment Variables

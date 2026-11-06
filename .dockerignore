@@ -21,3 +21,10 @@ tests
 docs
 notebooks
 *.log
+
+models
+weights
+*.safetensors
+*.pt
+*.pth
+*.bin

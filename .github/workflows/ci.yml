@@ -65,6 +65,8 @@ jobs:
           flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
           bandit -q -r llm-project/serve
       - name: Audit Python dependencies
-        run: pip-audit -r requirements.txt --strict
+        run: |
+          pip-audit -r requirements.txt --strict
+          pip-audit -r requirements-model.txt --strict
       - name: Run regression and security tests
         run: pytest -q --strict-config --strict-markers
