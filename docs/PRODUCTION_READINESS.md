@@ -1,90 +1,109 @@
 # RUSA-AI Production Readiness Evidence Ledger
 
-## Current baseline
+**Assessment date:** 2026-11-07  
+**Release decision:** **NO-GO — production certification is not yet evidenced.**
 
-- Repository: `StrategyG/RusaAi`
-- Current main commit at this ledger revision: `3c012e0a4342b8e10b974643884539618d222aee`
-- PR #50 (post-lease Git publication fencing): merged into main.
-- PR #50 exact-head CI: passed (test/lint/security, production image build/test/scan, and RAG/MCP integration).
-- Main push CI for commit `3c012e0`: passed all three jobs (test/lint/security, production image build/test/scan, and RAG/MCP integration).
+This ledger distinguishes repository controls from evidence that must be collected in the target environment. Passing CI, publishing images, or merging a pull request does not certify a live production deployment.
 
-A green CI run validates only the exact commit and checks it executed. It does not certify a VPS deployment.
+## 1. Current application and platform baseline
 
-## Implemented capabilities
+- OpenAI-compatible inference API with bounded request/response handling, streaming, admission control, and an optional local Transformers/vLLM backend.
+- Local model artifact manifest and SHA-256 verification. No trained RUSA-AI model weights are included in the repository.
+- Tenant-scoped PostgreSQL AICode queue with lease tokens, expiry recovery, retry limits, cancellation/completion fencing, and durable task results.
+- Tenant-scoped client idempotency: identical retries return the original task; reuse of a key with a different canonical request returns HTTP 409.
+- Worker publication fencing: Git publication is performed while the exact task lease row is locked and validated, preventing another worker from reclaiming the task during the bounded publication.
+- Optional RAG ingestion and retrieval through PostgreSQL/pgvector, plus a separate read-only bearer-authenticated MCP knowledge service.
+- Separate API, worker, MCP, and knowledge-reader database identities; the API cannot read knowledge content, and worker/MCP retrieval is restricted to the read-only knowledge role.
+- Non-root API, worker, sandbox, and MCP container build definitions. Production Compose uses an external PostgreSQL service; the RAG/MCP overlay is included only when `RUSA_RAG_ENABLED=true`.
+- CI coverage for Python tests, PostgreSQL-backed queue/tenant/idempotency tests, image builds, sandbox execution, Trivy vulnerability scanning, production Compose validation, and RAG/MCP integration tests.
 
-- FastAPI OpenAI-compatible inference gateway with bounded requests, authentication,
-  RBAC, admission control, and streaming.
-- Optional local Transformers/vLLM runtime with verified model manifests and
-  externally pinned SHA-256 digest support.
-- Tenant-scoped PostgreSQL AICode queue, lease tokens, lease expiry recovery,
-  stale-lease fencing, cancellation/completion race protection, retry limits,
-  and tenant-scoped idempotency-key replay protection.
-- Sandboxed autonomous worker with a dedicated rootless Docker daemon contract.
-- Optional PostgreSQL/pgvector knowledge ingestion and hybrid retrieval.
-- Read-only bearer-authenticated MCP server with tenant identity derived from
-  token hashes.
-- CI compile, lint, Bandit, PostgreSQL-backed tests, Docker image builds, Trivy
-  vulnerability reporting/blocking for fixable CRITICAL/HIGH findings, and
-  separate pgvector/MCP integration tests.
+## 2. CI evidence snapshot
 
-## Explicit product boundaries
+- PR #49 integrated the local inference runtime, queue reliability, and RAG/MCP foundations into `main`.
+- The mainline CI run `42281975019` passed all three jobs on commit `9e0fd2f1abe38026b7d82d74136c38391daea1f1`.
+- PR #50 added the post-lease Git publication fence. Its exact head `6a0db58ad474475629acd66b7d9002b8df1e3afe` passed all three CI jobs and was squash-merged as `3c012e0a4342b8e10b974643884539618d222aee`.
+- The VPS/RAG-MCP integration branch passed the existing three CI jobs on commit `1232fa5b47ae3089b76ae0a18a7cb23211c8b742` in run `42292637684`. This evidence predates the release/deployment workflow and actionlint additions in this combined branch.
+- The combined release-readiness branch still requires its own exact-head CI run, including the new actionlint and deployment-script tests.
 
-- No trained RUSA-AI model weights or tokenizer are bundled. The local inference
-  runtime is a loader, not a trained model. Chat requires an approved external
-  OpenAI-compatible endpoint until an approved local checkpoint is supplied.
-- The MCP/RAG service is separate from the core API and must be deployed
-  independently. The core API does not automatically expose MCP tools.
-- A browser workspace, user administration UI, and integrated JWT identity
-  subsystem are not included in the current mainline.
-- The proposed eight-stage Agentic DevOps lifecycle is not yet implemented as
-  eight deployable agents. Current autonomous execution is the AICode worker
-  path; Plan, Build, Test, Release, Deploy, Operate, Monitor agents and their
-  dedicated DevOps Orchestrator/Security Guard remain implementation work.
-- The uploaded communication ADR is still a proposed target: the current
-  runtime uses the PostgreSQL task queue, not RabbitMQ + Kafka, a transactional
-  workflow outbox/event log, gRPC/Protobuf agent RPC, or signed durable messages.
-  These must not be represented as delivered capabilities.
-- The current CI builds and scans images but does not publish immutable images
-  to GHCR automatically.
+CI evidence is valid only for the exact commit and checks that ran. Re-run the complete workflow on every release tag.
 
-## Release gates
+## 3. Database migration contract
 
-| Gate | Evidence required | Status |
+Apply core migrations in this exact order using a schema owner or migration identity:
+
+1. `migrations/001_aicode_core.sql`
+2. `migrations/002_aicode_lease_fencing.sql`
+3. `migrations/003_aicode_task_results.sql`
+4. `migrations/004_aicode_tenant_rls.sql`
+5. `migrations/005_aicode_task_policy_audit.sql`
+6. `migrations/006_aicode_idempotency.sql`
+
+The optional knowledge plane requires pgvector and these additional migrations, in order:
+
+7. `migrations/007_rag_knowledge_pgvector.sql`
+8. `migrations/008_rag_read_only_reader.sql`
+
+Migration 008 removes the worker's knowledge-ingestion membership from the runtime role, grants a non-login read-only role with RLS enforcement, and removes knowledge-table read access from the API runtime. The worker and MCP service must explicitly assume the read-only role for retrieval. Apply 007–008 only when RAG/MCP is enabled and the restricted roles are configured.
+
+The API and worker must use separate non-superuser login roles, TLS-enabled DSNs, and the least privileges documented in the production runbooks. Runtime identities must never be the schema owner.
+
+## 4. Release and deployment controls added by this change
+
+These controls are implemented in the combined branch and remain unverified until its CI passes and a real tagged release/deployment exercise completes:
+
+- A stable aggregate CI check named **Release Gate**, which succeeds only when test/lint/security, production image, and RAG/MCP jobs all succeed on the same commit.
+- All GitHub Actions workflow files are linted with actionlint. Deployment and rollback shell scripts are syntax-checked and exercised with fake Docker/health states.
+- A semantic-version release workflow. A tag must match `vMAJOR.MINOR.PATCH` and point to a commit already reachable from `main`.
+- The release workflow reruns the complete reusable CI workflow on the exact tag, then builds and publishes four immutable GHCR images: API, worker, sandbox, and RAG/MCP.
+- The exact published image digests are scanned for fixable CRITICAL/HIGH vulnerabilities, keylessly signed with GitHub OIDC/Cosign, and given build-provenance and SBOM attestations.
+- A release manifest records all four image digests.
+- Image publication is gated by the GitHub `release` environment. Production deployment is a separate manual workflow gated by the GitHub `production` environment.
+- Deployment verifies all four signatures against the exact release workflow identity and uses SSH with pinned host keys.
+- The host deployment script requires existing digest-pinned rollback targets and `RUSA_AICODE_ENABLED=false`; operators must drain active tasks before deployment/rollback.
+- The script updates the API/worker/sandbox/MCP digest set, pulls the sandbox through the dedicated rootless Docker socket, includes the RAG/MCP Compose overlay only when `RUSA_RAG_ENABLED=true`, checks required service health, and restores the previous image set if the candidate fails.
+- Manual rollback is serialized with deployment and uses the previous environment snapshot.
+
+These workflows do not provision a production host, configure GitHub environment reviewers, create registry credentials, apply database migrations, or deploy anything automatically when this document is updated.
+
+## 5. Release blockers
+
+| Gate | Evidence required | Current status |
 |---|---|---|
-| Exact-main CI | All jobs green on commit `3c012e0` | Passed (all three jobs) |
-| VPS infrastructure | Provisioned Linux host, rootless Docker worker daemon, storage, DNS | Not supplied / not deployed |
-| Agentic DevOps lifecycle | Eight specialist agents, durable orchestrator workflow, validated task/result/event contracts, security guard | Not implemented; roadmap required |
-| Egress enforcement | Worker/sandbox outbound allowlist or egress proxy with deny-by-default policy | Not implemented in Compose; mandatory before untrusted execution |
-| Database | PostgreSQL 16 + pgvector, encrypted backup/PITR, TLS, separate runtime logins | Not provisioned |
-| Migrations | Apply 001–006, then 007 and 008 in order; verify RLS and role grants | Not applied |
-| Images | Build/push API, worker, sandbox, MCP; record immutable SHA-256 digests | Manual registry publication required |
-| Chat model | Approved endpoint or verified local model artifact and task-quality tests | Not configured; no local weights |
-| Embeddings | Approved 1536-dimensional OpenAI-compatible embeddings endpoint | Not configured |
-| MCP | Dedicated read-only login, tenant token hashes, TLS ingress, ready check | Deployment pending |
-| AICode worker | Rootless sandbox execution, GitHub least-privilege token, repo allowlist | Deployment pending |
-| Branch protection | Required PR review and CI checks on main | Must be verified by repository administrator |
-| Operations | Monitoring, alerting, encrypted backup, restore drill, rollback rehearsal | Not completed |
-| Security | Independent tenant-isolation and sandbox review, secret rotation, TLS checks | Not completed |
-| Production approval | Staging soak, SLO approval, human operator sign-off | Not approved |
+| Aggregate CI | Release Gate green on the exact combined PR head and release tag | Pending combined-branch CI |
+| Branch protection | Active ruleset for `main`; PR-only merges, at least one approval, stale approval dismissal, required Release Gate, no routine bypass | **Not configured**; branch metadata reports `protected: false` |
+| Release environment | Required reviewers and tag restrictions on GitHub `release` environment | Not configured/verified |
+| Production environment | Required reviewers and deployment restrictions on GitHub `production` environment | Not configured/verified |
+| Release pipeline | Successful semantic tag, four GHCR digests, Trivy results, Cosign signatures, provenance, SBOM, release manifest | Not run |
+| Deployment host | Provisioned Linux host, rootless Docker socket, SSH access, TLS ingress, firewall, persistent workspace/mirror storage | Not supplied or verified |
+| Registry access | Four GHCR packages published and host pull credentials restricted to read-only package access | Not configured/verified |
+| Database rollout | Core migrations 001–006 applied on staging; optional 007–008 applied only for RAG/MCP; roles and grants verified | CI tests exist; target staging migration not performed |
+| Tenant isolation | Adversarial cross-tenant tests using actual non-superuser API/worker/MCP login identities | Automated tests exist; target-environment review pending |
+| Model artifact | Approved model ID/revision, license, tokenizer, manifest, SHA-256 pin, and hardware compatibility | Blocked: no approved artifact supplied |
+| Model quality and safety | Versioned evaluation set, quality/safety thresholds, human review, provider/data-processing approval | Not measured/approved |
+| Capacity and performance | p50/p95 latency, TTFT/tokens/sec where applicable, throughput, concurrency, RAM/VRAM, and multi-hour soak | Not measured |
+| RAG/MCP operations | pgvector database, restricted reader/ingestion roles, tenant key provisioning, TLS/network isolation, ingestion/retrieval acceptance tests | Code and CI coverage exist; production deployment not performed |
+| Backup and DR | Encrypted off-host backups, PITR policy, restore drill, approved RPO/RTO, infrastructure-loss exercise | Not completed |
+| Observability | Centralized logs, metrics scraping, alert rules, paging test, incident ownership, SLO/error budget | Not completed in target environment |
+| Security review | Independent threat model/penetration test, secret rotation, TLS verification, least-privilege GitHub token review | Pending |
+| Release sign-off | Product owner, SRE/operations, security, and data/model owner approval | Not obtained |
 
-## Deployment rules
+## 6. Model and product scope limitations
 
-- Keep `RUSA_AICODE_ENABLED=false` until all deployment and operational gates
-  pass. Do not expose the worker to untrusted tenants before sandbox, GitHub,
-  database, and tenant-isolation checks pass.
-- Keep `RUSA_RAG_ENABLED=false` until migrations 007 and 008, embedding access,
-  and reader-role grants have been verified.
-- Use `rusa_knowledge_reader` for MCP and autonomous retrieval. Reserve the
-  write-capable `rusa_knowledge_worker` role for a separately controlled
-  ingestion identity.
-- Apply migrations 001–006 in numeric order, followed by 007 and 008. Never run
-  migrations using an application login.
-- Deploy only immutable image digests. The API, worker, sandbox, and MCP images
-  must be built from the same reviewed source revision.
-- Do not deploy the local model backend without a verified artifact manifest
-  and externally pinned `RUSA_MODEL_MANIFEST_SHA256`.
-- Do not commit model weights, credentials, tenant bearer tokens, or private
-  evaluation datasets.
-- Do not describe RUSA-AI as a standalone trained model or production-certified
-  platform until the applicable gates have objective evidence and operator
-  approval.
+- The local inference adapter is a runtime integration, not a trained RUSA-AI model. The repository does not include model weights.
+- The default API image does not install heavyweight local-model dependencies. A local-model image requires a separately approved model artifact and target-hardware validation.
+- The production Compose stack deploys API and worker services. RAG/MCP is an optional overlay requiring its own DSNs, reader role, tenant tokens, embedding endpoint, and network configuration.
+- Identity/JWT and browser workspace capabilities are not included in the current integrated production baseline. If required for the initial product release, they need a separately designed and security-reviewed workstream.
+- A Compose configuration check is not proof of high availability, disaster recovery, performance, or operational readiness.
+
+## 7. Production decision rule
+
+Keep `RUSA_AICODE_ENABLED=false` until all applicable P0 gates have objective evidence. Do not enable production tenants merely because CI is green or release images exist.
+
+Production may be declared ready only after:
+1. Branch rules and required reviews are active.
+2. The exact release tag passes Release Gate and all four published images verify by digest/signature.
+3. Staging migrations, runtime-role isolation, tenant isolation, model/provider behavior, and RAG/MCP (if enabled) pass.
+4. Staging load/soak, monitoring/alerting, backup/restore, rollback, and disaster-recovery exercises meet owner-approved SLO/RPO/RTO targets.
+5. Security, SRE/operations, and product owners sign the release record.
+
+Until then, the correct status is **NO-GO for production certification**.
