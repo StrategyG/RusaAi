@@ -150,10 +150,10 @@ def test_runtime_role_groups_are_non_login_non_bypass():
 
 def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog):
     import psycopg
-    from app import app
     from fastapi.testclient import TestClient
     from psycopg import sql
 
+    from app import app
     from rusa_agents.audit import PostgresTaskPolicyAudit
     from rusa_agents.queue import PostgresTaskQueue
 
