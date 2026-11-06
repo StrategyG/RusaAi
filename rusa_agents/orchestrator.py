@@ -182,7 +182,7 @@ class HierarchicalOrchestrator:
             result = ReviewResult.model_validate_json(raw)
         except Exception as exc:
             raise PlanRejected("Reviewer returned an invalid review result") from exc
-        if result.risk_level in {"high", "critical"}:
+        if result.risk_level in {"medium", "high", "critical"}:
             result.approved = False
         return result.model_dump(mode="json")
 
