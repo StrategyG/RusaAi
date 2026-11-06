@@ -40,7 +40,7 @@ backup_file="$(
     BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-30}" \
     RUSA_BACKUP_S3_URI="${RUSA_BACKUP_S3_URI:-}" \
     RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
-    "$script_dir/backup.sh"
+    bash "$script_dir/backup.sh"
 )"
 backup_finished_at="$(date +%s)"
 
