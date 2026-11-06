@@ -1,3 +1,4 @@
+import hashlib
 import os
 from uuid import uuid4
 
@@ -5,7 +6,7 @@ import pytest
 
 from rusa_agents.audit import PostgresAuditLog
 from rusa_agents.memory import PostgresMemory
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import IdempotencyConflictError, PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
 
 DSN = os.getenv("RUSA_DATABASE_URL")
@@ -37,6 +38,58 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     stored = queue.get(task_id, "tenant-alpha")
     assert stored["status"] == "succeeded"
     assert stored["result"] == result
+
+
+def test_postgres_queue_idempotency_key_replays_per_tenant_and_rejects_payload_change():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = f"tenant-idempotency-{uuid4().hex}"
+    other_tenant = f"tenant-idempotency-other-{uuid4().hex}"
+    idempotency_key = f"request-{uuid4().hex}"
+    payload = {"objective": "stable task payload"}
+    request_hash = hashlib.sha256(b"stable task payload").hexdigest()
+    first_task_id = str(uuid4())
+
+    first_id, created = queue.enqueue_idempotent(
+        first_task_id, tenant_id, payload, idempotency_key, request_hash
+    )
+    assert first_id == first_task_id
+    assert created is True
+
+    replay_id, replay_created = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+    )
+    assert replay_id == first_task_id
+    assert replay_created is False
+
+    changed_hash = hashlib.sha256(b"different task payload").hexdigest()
+    with pytest.raises(IdempotencyConflictError):
+        queue.enqueue_idempotent(
+            str(uuid4()),
+            tenant_id,
+            {"objective": "different task payload"},
+            idempotency_key,
+            changed_hash,
+        )
+
+    other_task_id = str(uuid4())
+    other_id, other_created = queue.enqueue_idempotent(
+        other_task_id, other_tenant, payload, idempotency_key, request_hash
+    )
+    assert other_id == other_task_id
+    assert other_created is True
+
+    expected_key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    with queue._connect() as conn:
+        stored = conn.execute(
+            "SELECT idempotency_key_hash, request_hash FROM aicode_jobs WHERE task_id=%s",
+            (first_task_id,),
+        ).fetchone()
+        assert stored == (expected_key_hash, request_hash)
+        conn.execute(
+            "DELETE FROM aicode_jobs WHERE tenant_id IN (%s, %s)",
+            (tenant_id, other_tenant),
+        )
 
 
 def test_postgres_queue_retries_then_dead_letters():
