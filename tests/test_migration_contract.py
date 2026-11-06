@@ -58,6 +58,8 @@ def test_knowledge_reader_migration_is_select_only_and_separates_ingestion_role(
     assert "GRANT SELECT" in migration
     assert "REVOKE rusa_knowledge_worker FROM rusa_worker_runtime" in migration
     assert "GRANT rusa_knowledge_reader TO rusa_worker_runtime WITH INHERIT FALSE" in migration
+    assert "REVOKE SELECT" in migration
+    assert "FROM rusa_api_runtime" in migration
     assert "FOR SELECT TO rusa_knowledge_reader" in migration
 
 def test_sql_migration_dollar_quote_delimiters_are_balanced():
