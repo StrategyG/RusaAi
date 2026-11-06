@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rusa.ai/schemas/devops/workflow-event.schema.json",
+  "$id": "https://rusa.ai/schemas/devops/v1/workflow-event.schema.json",
   "title": "RUSA AI Durable Workflow Event v1",
   "type": "object",
   "additionalProperties": false,
