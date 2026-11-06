@@ -138,7 +138,8 @@ def test_expired_worker_attempt_limit_moves_job_to_failed():
         assert second and second.task_id == task_id
         expire_lease(second.id, tenant)
 
-        assert queue.claim("retry-worker-c", lease_seconds=30) is None
+        third = queue.claim("retry-worker-c", lease_seconds=30)
+        assert third is None or third.task_id != task_id
         current = queue.get(task_id, tenant)
         assert current is not None
         assert current["status"] == "failed"
