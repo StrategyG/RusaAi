@@ -216,14 +216,16 @@ def test_postgres_queue_idempotency_key_replays_and_rejects_payload_changes():
         },
     }
     try:
-        created_id, created = queue.enqueue_idempotent(
+        created_id, created, created_status = queue.enqueue_idempotent(
             first_id, tenant, original, key
         )
-        replayed_id, replay_created = queue.enqueue_idempotent(
+        replayed_id, replay_created, replay_status = queue.enqueue_idempotent(
             second_id, tenant, replay, key
         )
         assert created is True
+        assert created_status == "queued"
         assert replay_created is False
+        assert replay_status == "queued"
         assert created_id == replayed_id == first_id
 
         changed = {**replay, "objective": "A different task"}
