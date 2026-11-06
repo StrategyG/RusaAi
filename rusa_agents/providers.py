@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -19,6 +20,23 @@ class OpenAICompatibleProvider:
         self.model = model or os.getenv("RUSA_AGENT_MODEL_NAME", "")
         if not self.base_url or not self.model:
             raise ModelProviderError("RUSA_AGENT_MODEL_BASE_URL and RUSA_AGENT_MODEL_NAME are required")
+        parsed = urlparse(self.base_url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or (
+                parsed.scheme != "https"
+                and parsed.hostname not in {"localhost", "127.0.0.1"}
+                and "." in (parsed.hostname or "")
+            )
+        ):
+            raise ModelProviderError(
+                "Model endpoint must use HTTPS for remote hosts and cannot embed URL credentials"
+            )
 
     async def complete(self, system_prompt: str, user_prompt: str) -> str:
         headers = {"Content-Type": "application/json"}
