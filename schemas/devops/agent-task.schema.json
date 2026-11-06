@@ -208,7 +208,7 @@
     },
     {
       "if": { "properties": { "stage": { "const": "deploy" } }, "required": ["stage"] },
-      "then": { "properties": { "agent_id": { "const": "rusa_deploy_agent" }, "input": { "required": ["release_manifest_ref", "environment"] }, "constraints": { "properties": { "approval_required": { "const": true }, "approval_scope": { "contains": { "const": "deploy" } } } } } }
+      "then": { "properties": { "agent_id": { "const": "rusa_deploy_agent" }, "input": { "required": ["release_manifest_ref", "environment"] }, "constraints": { "required": ["approval_scope"], "properties": { "approval_required": { "const": true }, "approval_scope": { "contains": { "const": "deploy" } } } } } }
     },
     {
       "if": { "properties": { "stage": { "const": "operate" } }, "required": ["stage"] },
