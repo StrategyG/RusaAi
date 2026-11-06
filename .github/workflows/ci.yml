@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: rusa_test
           POSTGRES_USER: rusa_test
@@ -81,6 +81,12 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Build RAG and MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Smoke-test RAG and MCP imports
+        run: |
+          docker run --rm rusa-knowledge-mcp:${{ github.sha }} \\
+            python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
       - name: Smoke-test agent runtime imports
         run: |
           docker run --rm rusa-agent-runtime:${{ github.sha }} \
