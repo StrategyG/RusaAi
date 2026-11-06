@@ -97,6 +97,9 @@ jobs:
           PY
       - name: Build autonomous worker image
         run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Smoke-test worker runtime on Python 3.10
+        run: |
+          docker run --rm --entrypoint python rusa-ai-worker:${{ github.sha }} -c "import rusa_agents.runtime, rusa_agents.worker_main; print('worker runtime imports passed')"
       - name: Validate production Compose configuration
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
