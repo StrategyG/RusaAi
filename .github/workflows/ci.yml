@@ -283,9 +283,9 @@ jobs:
           IMAGE_RESULT: ${{ needs.docker-build.result }}
           RAG_MCP_RESULT: ${{ needs.rag-mcp.result }}
         run: |
-          printf 'Test, lint, and security: %s\\n' "$TEST_RESULT"
-          printf 'Build, test, and scan production images: %s\\n' "$IMAGE_RESULT"
-          printf 'RAG and MCP integration tests: %s\\n' "$RAG_MCP_RESULT"
+          printf 'Test, lint, and security: %s\n' "$TEST_RESULT"
+          printf 'Build, test, and scan production images: %s\n' "$IMAGE_RESULT"
+          printf 'RAG and MCP integration tests: %s\n' "$RAG_MCP_RESULT"
           if [[ "$TEST_RESULT" != "success" || "$IMAGE_RESULT" != "success" || "$RAG_MCP_RESULT" != "success" ]]; then
             echo "Release Gate failed: every required job must succeed on this exact commit." >&2
             exit 1
