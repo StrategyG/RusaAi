@@ -28,6 +28,8 @@ class MemoryStore:
             raise ValueError("tenant, namespace, key, and non-empty content are required")
         if len(namespace) > 128 or len(memory_key) > 255 or len(content) > 100_000:
             raise ValueError("memory payload exceeds configured limits")
+        content = redact_sensitive_data(content)
+        metadata = redact_sensitive_data(metadata or {})
         async with self.database.session() as session:
             row = await session.scalar(
                 select(MemoryRow).where(
@@ -43,12 +45,12 @@ class MemoryStore:
                     namespace=namespace,
                     memory_key=memory_key,
                     content=content,
-                    metadata_json=metadata or {},
+                    metadata_json=metadata,
                 )
                 session.add(row)
             else:
                 row.content = content
-                row.metadata_json = metadata or {}
+                row.metadata_json = metadata
             await session.commit()
             return self._serialize(row)
 
@@ -105,8 +107,8 @@ class MemoryStore:
         return {
             "namespace": row.namespace,
             "key": row.memory_key,
-            "content": row.content,
-            "metadata": row.metadata_json,
+            "content": redact_sensitive_data(row.content),
+            "metadata": redact_sensitive_data(row.metadata_json),
             "created_at": row.created_at.isoformat(),
             "updated_at": row.updated_at.isoformat(),
         }
