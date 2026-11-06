@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa.ai/schemas/devops/agent-result.schema.json",
+  "title": "RUSA AI Agentic DevOps Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "workflow_id", "tenant_id", "agent_id", "stage", "status", "output", "audit"],
+  "properties": {
+    "task_id": { "type": "string", "format": "uuid" },
+    "workflow_id": { "type": "string", "format": "uuid" },
+    "tenant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "agent_id": {
+      "type": "string",
+      "enum": [
+        "rusa_plan_agent",
+        "rusa_code_agent",
+        "rusa_build_agent",
+        "rusa_test_agent",
+        "rusa_release_agent",
+        "rusa_deploy_agent",
+        "rusa_operate_agent",
+        "rusa_monitor_agent",
+        "rusa_security_guard_agent"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["plan", "code", "build", "test", "release", "deploy", "operate", "monitor", "security_guard"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed", "blocked", "needs_approval", "cancelled", "skipped"]
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "artifact_refs", "evidence_refs", "findings"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "artifact_refs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "format": "uri" }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "type": "string", "format": "uri" }
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "code", "message"],
+            "properties": {
+              "severity": { "type": "string", "enum": ["info", "low", "medium", "high", "critical"] },
+              "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "message": { "type": "string", "minLength": 1, "maxLength": 4000 },
+              "evidence_ref": { "type": "string", "format": "uri" }
+            }
+          }
+        },
+        "approval_ref": { "type": "string", "format": "uri" }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next_agent", "event"],
+      "properties": {
+        "next_agent": {
+          "type": "string",
+          "enum": [
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent",
+            "rusa_security_guard_agent"
+          ]
+        },
+        "event": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "completed_at", "policy_version"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "model_id": { "type": "string", "maxLength": 256 },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "source_commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "passed" } }, "required": ["status"] },
+      "then": { "properties": { "output": { "properties": { "evidence_refs": { "minItems": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "needs_approval" } }, "required": ["status"] },
+      "then": { "properties": { "output": { "required": ["approval_ref"] } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["failed", "blocked"] } }, "required": ["status"] },
+      "then": { "properties": { "output": { "properties": { "findings": { "minItems": 1 } } } }
+    }
+  ]
+}
