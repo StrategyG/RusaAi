@@ -24,6 +24,13 @@ from .workers import AgentWorker
 logger = logging.getLogger("rusa-agent-worker")
 
 
+def _enabled_tool_set(knowledge_tools: set[str]) -> set[str]:
+    selected = set(knowledge_tools)
+    if not selected.issubset(KNOWLEDGE_TOOLS):
+        raise ValueError("configured knowledge tools contain an unapproved tool")
+    return (set(AgentWorker.TOOL_NAMES) - set(KNOWLEDGE_TOOLS)) | selected
+
+
 class QueueWorker:
     def __init__(
         self,
@@ -308,7 +315,7 @@ def build_worker() -> QueueWorker:
             allow_http_hosts=internal_http_hosts,
         )
         tools = CompositeToolGateway(github, mcp_gateway)
-        enabled_tools = set(AgentWorker.TOOL_NAMES)
+        enabled_tools = _enabled_tool_set(allowed_tools)
     elif tenant_tokens_raw:
         raise RuntimeError("RUSA_MCP_TENANT_TOKENS requires RUSA_MCP_SERVER_URL")
     elif knowledge_service is not None:
@@ -319,7 +326,7 @@ def build_worker() -> QueueWorker:
                 default_collection=knowledge_collection,
             ),
         )
-        enabled_tools = set(AgentWorker.TOOL_NAMES)
+        enabled_tools = _enabled_tool_set(set(KNOWLEDGE_TOOLS))
 
     workers = [
         AgentWorker(role, provider, memory_reader, enabled_tools=enabled_tools)
