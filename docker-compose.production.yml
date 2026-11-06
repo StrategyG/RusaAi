@@ -1,13 +1,13 @@
 services:
   api:
-    image: \${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
+    image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
     pull_policy: always
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
       ENVIRONMENT: production
-      RUSA_API_DATABASE_URL: \${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
+      RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
       RUSA_WORKER_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
@@ -19,7 +19,7 @@ services:
       RUSA_DOCKER_SOCKET: ""
       RUSA_DOCKER_GID: ""
       POSTGRES_PASSWORD: ""
-      RUSA_AICODE_ENABLED: \${RUSA_AICODE_ENABLED:-false}
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -38,7 +38,7 @@ services:
     networks: [rusa-internal, rusa-egress]
 
   worker:
-    image: \${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
+    image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
     pull_policy: always
     restart: unless-stopped
     init: true
@@ -46,14 +46,14 @@ services:
     env_file: .env
     environment:
       ENVIRONMENT: production
-      RUSA_WORKER_DATABASE_URL: \${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
+      RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_METRICS_API_KEY: ""
       POSTGRES_PASSWORD: ""
-      RUSA_AICODE_ENABLED: \${RUSA_AICODE_ENABLED:-false}
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
       DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
     read_only: true
@@ -65,11 +65,11 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,size=128m
     volumes:
-      - \${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
-      - \${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:\${RUSA_WORKSPACE_ROOT}
-      - \${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:\${RUSA_GIT_MIRROR_ROOT}
+      - ${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
+      - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
+      - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
     group_add:
-      - "\${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
+      - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
     expose:
       - "9100"
     healthcheck:
