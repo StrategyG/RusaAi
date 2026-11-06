@@ -259,3 +259,30 @@ def test_postgres_dedicated_login_roles_enforce_tenant_boundaries(monkeypatch):
 
     audit.record("rls.login.test", task_id, "ci-worker", {"ok": True}, tenant_id=tenant_id)
     assert audit.verify()
+
+
+
+def test_postgres_audit_redacts_credentials_before_persisting():
+    import psycopg
+
+    task_id = str(uuid4())
+    audit = PostgresAuditLog(DSN, os.getenv("RUSA_AUDIT_HMAC_KEY", "ci-test-audit-key"))
+    audit.initialize()
+    audit.record(
+        "test.redaction",
+        task_id,
+        "pytest",
+        {
+            "api_key": "must-not-be-stored",
+            "nested": {"authorization": "Bearer should-also-be-redacted"},
+        },
+        tenant_id="tenant-audit-redaction",
+    )
+    with psycopg.connect(DSN) as conn:
+        row = conn.execute(
+            "SELECT details FROM aicode_audit_events WHERE task_id=%s AND event='test.redaction'",
+            (task_id,),
+        ).fetchone()
+    assert row is not None
+    assert row[0]["api_key"] == "[REDACTED]"
+    assert row[0]["nested"]["authorization"] == "[REDACTED]"
