@@ -84,6 +84,12 @@ class PostgresMemory:
         self.dsn = dsn
 
     def _connect(self):
+
+    @staticmethod
+    def _set_tenant(conn, tenant_id: str) -> None:
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id is required for tenant-scoped database access")
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
         try:
             import psycopg
         except ImportError as exc:
@@ -118,6 +124,7 @@ class PostgresMemory:
         if not tenant_id:
             raise ValueError("tenant_id is required")
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             conn.execute("""
                 INSERT INTO aicode_memory(tenant_id, task_id, repository, state, payload)
                 VALUES (%s, %s, %s, %s, %s::jsonb)
@@ -128,6 +135,7 @@ class PostgresMemory:
 
     def get(self, task_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 SELECT tenant_id, task_id::text, repository, state, payload, updated_at
                 FROM aicode_memory WHERE task_id=%s AND tenant_id=%s
