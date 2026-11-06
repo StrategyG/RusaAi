@@ -338,7 +338,7 @@ class DockerSandbox:
                     )
                 return ToolResult(
                     False,
-                    message + "\\n" + output[-20_000:],
+                    message + "\n" + output[-20_000:],
                     {
                         "profile": profile,
                         "outcome": outcome,
