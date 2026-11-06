@@ -20,7 +20,23 @@ BEGIN
                 OR (
                     idempotency_key IS NOT NULL
                     AND length(idempotency_key) BETWEEN 1 AND 128
-                    AND request_hash ~ '^[0-9a-f]{64}$'
+                    AND request_hash IS NOT NULL
+                    AND request_hash ~ '^[0-9a-f]{64}
+                )
+            ) NOT VALID;
+    END IF;
+END;
+$$;
+
+ALTER TABLE public.aicode_jobs
+    VALIDATE CONSTRAINT aicode_jobs_idempotency_pair_check;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_aicode_jobs_tenant_idempotency
+    ON public.aicode_jobs (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+COMMIT;
+
                 )
             ) NOT VALID;
     END IF;
