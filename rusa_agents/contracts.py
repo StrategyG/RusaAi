@@ -94,7 +94,7 @@ class ReviewResult(BaseModel):
     approved: bool
     summary: str = Field(min_length=1, max_length=4000)
     findings: list[str] = Field(default_factory=list, max_length=30)
-    risk_level: Literal["low", "medium", "high", "critical"] = "low"
+    risk_level: Literal["low", "medium", "high", "critical"]
 
 
 class AgentPlan(BaseModel):
