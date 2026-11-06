@@ -11,7 +11,7 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - Liveness/readiness separation, request IDs, security headers, and request-size guard.
 - Hierarchical AICode workers: analyst, architect, developer, debugger, tester, and security.
 - Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, and draft PR creation.
-- PostgreSQL durable queue with idempotency keys, leases, bounded retries, and worker process.
+- PostgreSQL durable queue with idempotency keys, per-claim UUID lease fencing, bounded retries, and worker process.
 - Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
 - API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.
 - Authenticated A2A task submission endpoint using Idempotency-Key.
@@ -28,7 +28,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 | Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Pending current branch CI |
 | Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
-| Queue reliability | Lease heartbeat, current-owner fencing, tenant-scoped cancellation, dead-letter inspection/replay, queue-age reporting and alerts | Lease, cancellation, dead-letter inspection/replay, and age reporting implemented; alerting and operator replay approval remain open |
+| Queue reliability | Per-claim UUID lease fencing, lease heartbeat, tenant-scoped cancellation, dead-letter inspection/replay, queue-age reporting and alerts | Lease, cancellation, dead-letter inspection/replay, and age reporting implemented; alerting and operator replay approval remain open |
 | Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
@@ -45,6 +45,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 - Do not merge or deploy while required CI checks are failing or stale.
 - AICode must only use least-privilege repository credentials and must not receive production secrets.
 - Do not expose the API directly to the public internet; use a TLS gateway with distributed rate limits, request limits, timeouts, and network controls.
+- Do not use a shared Compose env_file for API and worker; inject only the secrets each service requires.
 - Keep task worker egress restricted to the approved model provider and GitHub API.
 - Do not treat SQLite memory or local JSONL audit as multi-replica production storage.
 - Do not mark the complete RUSA-AI product production-ready until all applicable release gates have objective evidence and owner approval.
