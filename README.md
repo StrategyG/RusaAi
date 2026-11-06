@@ -33,7 +33,7 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 
 ## Requirements
 
-- Python 3.11 for the supported container and CI baseline.
+- Python 3.13 for the digest-pinned container and CI baseline.
 - A compatible local causal language model directory for the inference API.
 - A structured-output-capable OpenAI-compatible model provider for the agent workers.
 - PostgreSQL 16 or compatible for task queue and memory.
@@ -59,10 +59,10 @@ Run:
 - pytest -q
 - pip-audit -r requirements.txt -r requirements-agent.txt
 
-CI also builds both the inference API image and the agent runtime image, then smoke-tests the inference API container.
+CI also builds both production images from the same candidate commit, scans API/agent/PostgreSQL images with Trivy, publishes CycloneDX SBOM artifacts, starts the production Compose stack with a real PostgreSQL service, verifies tenant RLS readiness, and performs a manual plus automatic rollback drill against a persistent PostgreSQL volume.
 
 ## Production acceptance
 
-A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, tenant isolation tests, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
+A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before production release, configure active GitHub branch rulesets requiring the Release Gate, the protected production environment and reviewers, SSH/known-host and GHCR access, a provisioned host with a known-good digest baseline, TLS and distributed rate limiting at an API gateway, egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, tenant isolation and prompt-injection red-team tests, staging soak tests, monitoring, alerting, and a rollback drill on the provisioned staging host. The CI rollback drill uses real PostgreSQL and proves volume/data persistence, but it does not provision or certify the external production host.
 
 See docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md for the complete architecture and acceptance model.
