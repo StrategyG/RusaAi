@@ -180,3 +180,24 @@ def test_sandbox_snapshot_excludes_non_hidden_env_files(tmp_path, monkeypatch):
     monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
     monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
     assert DockerSandbox(image="sandbox:test").run(workspace, "pytest").ok
+
+
+
+def test_gateway_rejects_secret_manifest_names(tmp_path):
+    (tmp_path / "secrets.yaml").write_text("token: should-not-be-read")
+    (tmp_path / "credentials.toml").write_text("password = 'hidden'")
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.read_file("secrets.yaml")
+    with pytest.raises(ToolDenied):
+        gateway.read_file("credentials.toml")
+
+
+def test_sandbox_snapshot_enforces_file_count_limit(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "one.py").write_text("print('one')")
+    sandbox = DockerSandbox(max_snapshot_files=1)
+    result = sandbox.run(workspace, "pytest")
+    assert result.ok is False
+    assert "file-count limit" in result.output
