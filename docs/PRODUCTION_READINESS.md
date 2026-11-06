@@ -1,73 +1,80 @@
 # RUSA-AI Production Readiness Evidence Ledger
 
-## Scope
+## Current baseline
 
-This ledger describes the capabilities present on the integration branch and separates
-automated code validation from deployment certification. Passing CI is evidence only
-for the exact commit and checks that ran; it is not a production approval.
+- Repository: `StrategyG/RusaAi`
+- Current main commit at this ledger revision: `3c012e0a4342b8e10b974643884539618d222aee`
+- PR #50 (post-lease Git publication fencing): merged into main.
+- PR #50 exact-head CI: passed (test/lint/security, production image build/test/scan, and RAG/MCP integration).
+- Main push CI for commit `3c012e0`: was still running at the last status check; test/lint/security and RAG/MCP jobs had passed, while the production image job was still running.
 
-## Delivered in this integration branch
+A green CI run validates only the exact commit and checks it executed. It does not certify a VPS deployment.
 
-- OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
-- Local model artifact manifest and SHA-256 verification; production local loading
-  requires an externally pinned manifest digest.
-- Bounded generation/streaming adapters, API admission control, and backend shutdown.
-- Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
-  fencing of stale acknowledgements, cancellation/completion race protection,
-  and retry limits.
-- Optional tenant-scoped idempotency keys for task creation. Replays with identical
-  request payloads return the original task; payload changes under the same key
-  return HTTP 409.
-- Offline retrieval evaluation metrics: Recall@K, MRR@K, and NDCG@K.
-- Optional RAG ingestion and hybrid retrieval using PostgreSQL/pgvector, with a
-  separate read-only bearer-authenticated MCP server.
-- Separate Python 3.11 CI job for RAG/MCP dependencies and pgvector integration tests.
-- Isolated, non-root MCP container image with vulnerability scanning in CI.
+## Implemented capabilities
 
-## Verification boundary
+- FastAPI OpenAI-compatible inference gateway with bounded requests, authentication,
+  RBAC, admission control, and streaming.
+- Optional local Transformers/vLLM runtime with verified model manifests and
+  externally pinned SHA-256 digest support.
+- Tenant-scoped PostgreSQL AICode queue, lease tokens, lease expiry recovery,
+  stale-lease fencing, cancellation/completion race protection, retry limits,
+  and tenant-scoped idempotency-key replay protection.
+- Sandboxed autonomous worker with a dedicated rootless Docker daemon contract.
+- Optional PostgreSQL/pgvector knowledge ingestion and hybrid retrieval.
+- Read-only bearer-authenticated MCP server with tenant identity derived from
+  token hashes.
+- CI compile, lint, Bandit, PostgreSQL-backed tests, Docker image builds, Trivy
+  vulnerability reporting/blocking for fixable CRITICAL/HIGH findings, and
+  separate pgvector/MCP integration tests.
 
-The primary CI job has previously passed compile, lint, Bandit, and unit tests on
-commit `7ed80f0801651165cd634b95dcd993a6c85b9484`. Subsequent commits added
-RAG/MCP packaging, queue idempotency, race tests, and further CI changes; those
-changes must be judged only by the latest workflow run on the exact PR head.
+## Explicit product boundaries
 
-A local model backend is not a trained RUSA-AI model. No model weights are bundled.
-The optional runtime can load a compatible, externally supplied, locally mounted
-model artifact after manifest verification. Real-model throughput and quality
-remain unmeasured until a specific checkpoint and target hardware are supplied.
+- No trained RUSA-AI model weights or tokenizer are bundled. The local inference
+  runtime is a loader, not a trained model. Chat requires an approved external
+  OpenAI-compatible endpoint until an approved local checkpoint is supplied.
+- The MCP/RAG service is separate from the core API and must be deployed
+  independently. The core API does not automatically expose MCP tools.
+- A browser workspace, user administration UI, and integrated JWT identity
+  subsystem are not included in the current mainline.
+- The current CI builds and scans images but does not publish immutable images
+  to GHCR automatically.
 
-## Release gates still open
+## Release gates
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Pending latest run |
-| Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
-| Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
-| Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
-| vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
-| RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
-| Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
-| Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
-| Reliability operations | Backup/restore drill, rollback rehearsal, alerting and incident runbook | Not completed |
-| Production rollout | Staging soak, canary, SLO approval and owner sign-off | Not performed |
+| Exact-main CI | All jobs green on commit `3c012e0` | Pending at last check |
+| VPS infrastructure | Provisioned Linux host, rootless Docker worker daemon, storage, DNS | Not supplied / not deployed |
+| Database | PostgreSQL 16 + pgvector, encrypted backup/PITR, TLS, separate runtime logins | Not provisioned |
+| Migrations | Apply 001–006, then 007 and 008 in order; verify RLS and role grants | Not applied |
+| Images | Build/push API, worker, sandbox, MCP; record immutable SHA-256 digests | Manual registry publication required |
+| Chat model | Approved endpoint or verified local model artifact and task-quality tests | Not configured; no local weights |
+| Embeddings | Approved 1536-dimensional OpenAI-compatible embeddings endpoint | Not configured |
+| MCP | Dedicated read-only login, tenant token hashes, TLS ingress, ready check | Deployment pending |
+| AICode worker | Rootless sandbox execution, GitHub least-privilege token, repo allowlist | Deployment pending |
+| Branch protection | Required PR review and CI checks on main | Must be verified by repository administrator |
+| Operations | Monitoring, alerting, encrypted backup, restore drill, rollback rehearsal | Not completed |
+| Security | Independent tenant-isolation and sandbox review, secret rotation, TLS checks | Not completed |
+| Production approval | Staging soak, SLO approval, human operator sign-off | Not approved |
 
 ## Deployment rules
 
-- Do not merge while any required CI job is pending or failing.
-- Do not deploy the local backend without a verified model artifact and a pinned
-  `RUSA_MODEL_MANIFEST_SHA256` value in the secret/configuration manager.
-- Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
-  Transformers dependencies are required. The default image intentionally omits
-  heavyweight model packages.
-- Apply migrations `001` through `006` in order using the database owner before
-  enabling production task intake. The API runtime must not have schema-owner or
-  superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
-  knowledge database and configure the restricted `rusa_knowledge_worker` role.
-- Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
-  `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
+- Keep `RUSA_AICODE_ENABLED=false` until all deployment and operational gates
+  pass. Do not expose the worker to untrusted tenants before sandbox, GitHub,
+  database, and tenant-isolation checks pass.
+- Keep `RUSA_RAG_ENABLED=false` until migrations 007 and 008, embedding access,
+  and reader-role grants have been verified.
+- Use `rusa_knowledge_reader` for MCP and autonomous retrieval. Reserve the
+  write-capable `rusa_knowledge_worker` role for a separately controlled
+  ingestion identity.
+- Apply migrations 001–006 in numeric order, followed by 007 and 008. Never run
+  migrations using an application login.
+- Deploy only immutable image digests. The API, worker, sandbox, and MCP images
+  must be built from the same reviewed source revision.
+- Do not deploy the local model backend without a verified artifact manifest
+  and externally pinned `RUSA_MODEL_MANIFEST_SHA256`.
 - Do not commit model weights, credentials, tenant bearer tokens, or private
   evaluation datasets.
-- Do not describe the complete product as production-ready until every applicable
-  release gate has objective evidence and human approval.
+- Do not describe RUSA-AI as a standalone trained model or production-certified
+  platform until the applicable gates have objective evidence and operator
+  approval.
