@@ -40,7 +40,8 @@ def configure_api(monkeypatch):
         json.dumps({"tenant-a": "a" * 48, "tenant-b": "b" * 48}),
     )
     monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
-    monkeypatch.setenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "StrategyG/RusaAi")
+    monkeypatch.setenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "StrategyG/RusaAi,other-owner/other-repo")
+    monkeypatch.setenv("RUSA_AGENT_TENANT_REPOSITORIES", json.dumps({"tenant-a": ["StrategyG/RusaAi"]}))
     monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
 
 
@@ -148,3 +149,16 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
+
+
+def test_agent_api_rejects_repository_assigned_to_another_tenant(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "b" * 48, "X-Tenant-ID": "tenant-b"}
+    body = {
+        "objective": "Inspect a globally allowed but unassigned repository",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["No changes"],
+    }
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert response.status_code == 403
