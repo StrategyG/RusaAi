@@ -13,7 +13,7 @@ from rusa_agents.contracts import (
     WorkerResult,
     WorkerRole,
 )
-from rusa_agents.github_gateway import GitHubToolGateway
+from rusa_agents.github_gateway import GitHubRepositoryGateway, GitHubToolGateway
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
@@ -203,7 +203,7 @@ def test_provider_rejects_credentials_in_url():
 
 def test_github_gateway_blocks_sensitive_files_before_reading():
     gateway = GitHubToolGateway(
-        object(),
+        GitHubRepositoryGateway("test-token-value-long-enough-for-gateway"),
         allowed_repositories={"strategyg/rusaai"},
     )
     result = asyncio.run(
@@ -220,7 +220,7 @@ def test_github_gateway_blocks_sensitive_files_before_reading():
 
 def test_github_gateway_blocks_workflow_and_secret_file_writes():
     gateway = GitHubToolGateway(
-        object(),
+        GitHubRepositoryGateway("test-token-value-long-enough-for-gateway"),
         allowed_repositories={"StrategyG/RusaAi"},
     )
     for path in (".github/workflows/ci.yml", "config/service.pem"):
