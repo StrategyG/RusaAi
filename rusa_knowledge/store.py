@@ -152,7 +152,7 @@ class PostgresKnowledgeStore:
         if not chunks or len(chunks) != len(embeddings) or len(chunks) > 10_000:
             raise ValueError("document chunks and embeddings are invalid")
         metadata_json = validate_document_metadata(source_uri, title, metadata)
-        if len(metadata_json) > 16_384:
+        if len(metadata_json.encode("utf-8")) > 16_384:
             raise ValueError("document metadata exceeds 16 KiB")
 
         rows = []
