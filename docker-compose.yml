@@ -102,7 +102,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    image: rusa-agent-runtime:local
     command: ["python", "-m", "rusa_agents.worker"]
     restart: unless-stopped
     init: true
