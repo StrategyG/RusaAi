@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -50,7 +50,7 @@ class CodingTask:
     acceptance_criteria: list[str]
     context: str = ""
     task_id: str = field(default_factory=lambda: str(uuid4()))
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -76,7 +76,7 @@ class TaskRecord:
     state: TaskState = TaskState.RECEIVED
     results: list[WorkerResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     TRANSITIONS = {
         TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.FAILED, TaskState.BLOCKED, TaskState.CANCELLED},
@@ -100,4 +100,4 @@ class TaskRecord:
         if new_state not in self.TRANSITIONS[self.state]:
             raise ValueError(f"invalid task transition: {self.state.value} -> {new_state.value}")
         self.state = new_state
-        self.updated_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = datetime.now(UTC).isoformat()
