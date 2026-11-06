@@ -677,3 +677,27 @@ def test_security_stage_blocks_incomplete_repository_diff():
     record = asyncio.run(make_orchestrator(IncompleteDiffTools()).run(make_task()))
     assert record.state == TaskState.BLOCKED
     assert any("complete" in error.lower() for error in record.errors)
+
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "rusa_agents/policy.py",
+        "rusa_agents/github.py",
+        "rusa_agents/orchestrator.py",
+        "rusa_agents/queue.py",
+        "rusa_agents/audit.py",
+    ],
+)
+def test_agent_control_plane_modifications_require_human_review(path):
+    policy = AutonomyPolicy()
+    assert policy.safe_repository_path(path) is True
+    decision = policy.evaluate(
+        "repo_write",
+        risk=RiskLevel.LOW,
+        repository=make_task().repository,
+        path=path,
+    )
+    assert decision.allowed is False
+    assert decision.requires_approval is True

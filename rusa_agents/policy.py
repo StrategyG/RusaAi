@@ -29,6 +29,12 @@ class AutonomyPolicy:
         ".github/workflows", ".github/actions", ".github/codeowners",
         "scripts/postgres", ".env", "secrets", "credentials", ".aws", ".ssh",
     )
+    HUMAN_REVIEW_FILES = {
+        "rusa_agents/policy.py", "rusa_agents/github.py", "rusa_agents/api.py",
+        "rusa_agents/audit.py", "rusa_agents/queue.py", "rusa_agents/contracts.py",
+        "rusa_agents/orchestrator.py", "rusa_agents/worker.py", "rusa_agents/workers.py",
+        "rusa_agents/memory.py", "rusa_agents/provider.py", "rusa_agents/healthcheck.py",
+    }
     PROTECTED_FILES = {
         "codeowners", "dockerfile", "docker-compose.yml", "docker-compose.yaml",
         "compose.yml", "compose.yaml", "pyproject.toml", "poetry.lock", "uv.lock",
@@ -73,6 +79,11 @@ class AutonomyPolicy:
             for part in parts
         )
 
+    @staticmethod
+    def requires_human_review_path(path: str) -> bool:
+        normalized = path.strip("/").lower()
+        return normalized in AutonomyPolicy.HUMAN_REVIEW_FILES
+
     def evaluate(
         self,
         action: str,
@@ -91,6 +102,8 @@ class AutonomyPolicy:
             return PolicyDecision(False, False, f"Action '{action}' is not allowlisted")
         if path is not None and not self.safe_repository_path(path):
             return PolicyDecision(False, True, "Repository path is protected or unsafe")
+        if action == "repo_write" and path and self.requires_human_review_path(path):
+            return PolicyDecision(False, True, "Changes to agent control-plane files require human review")
         if action == "repo_write" and (
             repository is None or repository.work_branch == repository.base_branch
         ):

@@ -164,6 +164,8 @@ class GitHubToolGateway:
         path = str(arguments.get("path", ""))
         if not AutonomyPolicy.safe_repository_path(path):
             raise PermissionError("repository path is protected or unsafe")
+        if self.policy.requires_human_review_path(path):
+            raise PermissionError("agent control-plane files require human approval before modification")
         ref = str(arguments.get("ref", task.repository.base_branch))
         if ref not in {task.repository.base_branch, task.repository.work_branch}:
             raise PermissionError("read ref is outside the task repository scope")
