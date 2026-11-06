@@ -1,118 +1,270 @@
-import os
+"""RUSA-AI API. Inference fails closed until a real backend is injected."""
+from __future__ import annotations
+
+import hmac
 import json
 import logging
-from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+import os
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Literal, Protocol
+from uuid import uuid4
+
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-import jsonschema
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+from rusa_agents.config import RuntimeConfig
+from rusa_agents.queue import PostgresTaskQueue
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+class InferenceProvider(Protocol):
+    async def complete(self, messages: list[dict[str, str]], **parameters: Any) -> str: ...
+
+
+inference_provider: InferenceProvider | None = None
+
+
+def set_inference_provider(provider: InferenceProvider | None) -> None:
+    """Inject the real model-serving adapter during application composition."""
+    global inference_provider
+    inference_provider = provider
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    config = RuntimeConfig.from_env()
+    config.validate()
+    application.state.config = config
+    application.state.queue = None
+    if config.database_url:
+        queue = PostgresTaskQueue(config.database_url)
+        queue.initialize()
+        application.state.queue = queue
+    yield
+
 
 app = FastAPI(
-    title="RUSA-AI Serving Engine",
-    description="Production-ready API for RUSA-AI model inference and task validation.",
-    version="1.0.0"
+    title="RUSA-AI Serving and Agent API",
+    description="Authenticated inference, task intake, and A2A validation API.",
+    version="1.1.0",
+    lifespan=lifespan,
 )
 
-API_KEY_NAME = "X-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-
-def verify_api_key(api_key: Optional[str] = Depends(api_key_header)):
-    expected_key = os.getenv("RUSA_API_KEY")
-    if expected_key:
-        if not api_key or api_key != expected_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing API Key"
-            )
-    return api_key
 
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Message role: system, user, or assistant")
-    content: str = Field(..., description="Content of the message")
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(min_length=1, max_length=100_000)
+
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(default="rusa-ai-v1", description="Model identifier")
-    messages: List[ChatMessage] = Field(..., description="List of chat messages")
+    model: str = Field(default="rusa-ai-v1", min_length=1, max_length=128)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=128)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.9, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.9, gt=0.0, le=1.0)
     max_tokens: int = Field(default=1024, ge=1, le=4096)
-    stream: bool = Field(default=False)
+    stream: bool = False
+
 
 class ChatChoice(BaseModel):
     index: int
     message: ChatMessage
     finish_reason: str
 
+
 class ChatCompletionResponse(BaseModel):
     id: str
     object: str = "chat.completion"
     created: int
     model: str
-    choices: List[ChatChoice]
+    choices: list[ChatChoice]
+
 
 class TaskValidationRequest(BaseModel):
-    envelope: Dict[str, Any]
+    envelope: dict[str, Any]
+
 
 class TaskValidationResponse(BaseModel):
     valid: bool
-    errors: Optional[List[str]] = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class RepositoryInput(BaseModel):
+    full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    base_branch: str = Field(default="main", min_length=1, max_length=180)
+    work_branch: str = Field(
+        pattern=r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$"
+    )
+
+
+class AICodeTaskRequest(BaseModel):
+    objective: str = Field(min_length=1, max_length=8000)
+    context: str = Field(default="", max_length=20000)
+    repository: RepositoryInput
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=30)
+
+
+class AICodeTaskResponse(BaseModel):
+    task_id: str
+    status: str
+    tenant_id: str
+
+
+def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
+    config = RuntimeConfig.from_env()
+    if not config.api_keys:
+        if config.environment == "production":
+            raise HTTPException(status_code=503, detail="API authentication is not configured")
+        return os.getenv("RUSA_DEFAULT_TENANT", "development")
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key")
+    tenant_id = None
+    for candidate, mapped_tenant in config.api_keys.items():
+        if hmac.compare_digest(api_key, candidate):
+            tenant_id = mapped_tenant
+    if tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    return tenant_id
+
 
 @app.get("/health", status_code=status.HTTP_200_OK)
 def health_check():
     return {
         "status": "healthy",
         "service": "rusa-ai-serve",
-        "version": "1.0.0",
-        "environment": os.getenv("ENVIRONMENT", "production")
+        "version": "1.1.0",
+        "environment": os.getenv("ENVIRONMENT", "development"),
     }
 
-@app.post("/v1/chat/completions", response_model=ChatCompletionResponse, dependencies=[Depends(verify_api_key)])
-def chat_completions(request: ChatCompletionRequest):
+
+@app.get("/health/ready")
+def readiness_check():
+    if inference_provider is None:
+        raise HTTPException(status_code=503, detail="Inference backend is not configured")
+    return {"status": "ready", "inference": "configured"}
+
+
+@app.post(
+    "/v1/chat/completions",
+    response_model=ChatCompletionResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def chat_completions(request: ChatCompletionRequest):
+    if request.stream:
+        raise HTTPException(status_code=501, detail="Streaming is not enabled by this deployment")
+    if inference_provider is None:
+        raise HTTPException(status_code=503, detail="Inference backend is not configured")
     try:
-        if not request.messages:
-            raise HTTPException(status_code=400, detail="Messages list cannot be empty")
-        
-        last_msg = request.messages[-1].content
-        mock_response = f"[RUSA-AI Model Output]: Processed prompt: '{last_msg}' successfully."
-        
-        import time
+        output = await inference_provider.complete(
+            [message.model_dump() for message in request.messages],
+            model=request.model,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            max_tokens=request.max_tokens,
+        )
+        now = int(time.time())
         return ChatCompletionResponse(
-            id=f"rusa-chatcmpl-{int(time.time())}",
-            created=int(time.time()),
+            id=f"rusa-chatcmpl-{uuid4().hex}",
+            created=now,
             model=request.model,
             choices=[
                 ChatChoice(
                     index=0,
-                    message=ChatMessage(role="assistant", content=mock_response),
-                    finish_reason="stop"
+                    message=ChatMessage(role="assistant", content=output),
+                    finish_reason="stop",
                 )
-            ]
+            ],
         )
-    except Exception as e:
-        logger.error(f"Inference error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Inference engine failure: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Inference backend request failed")
+        raise HTTPException(status_code=502, detail="Inference backend request failed") from None
 
-@app.post("/v1/validate-task", response_model=TaskValidationResponse)
+
+@app.post(
+    "/v1/validate-task",
+    response_model=TaskValidationResponse,
+    dependencies=[Depends(verify_api_key)],
+)
 def validate_task_envelope(request: TaskValidationRequest):
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "a2a", "task-envelope.schema.json")
-    if not os.path.exists(schema_path):
-        schema_path = "schemas/a2a/task-envelope.schema.json"
-    
-    if not os.path.exists(schema_path):
-        return TaskValidationResponse(valid=True, errors=["Schema file not found on disk, skipped validation."])
+    import jsonschema
 
+    schema_path = Path(__file__).resolve().parents[2] / "schemas" / "a2a" / "task-envelope.schema.json"
+    if not schema_path.is_file():
+        raise HTTPException(status_code=503, detail="Task validation schema is unavailable")
     try:
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema = json.load(f)
-        
-        validator = jsonschema.Draft7Validator(schema)
-        errors = [err.message for err in validator.iter_errors(request.envelope)]
-        
-        if errors:
-            return TaskValidationResponse(valid=False, errors=errors)
-        return TaskValidationResponse(valid=True, errors=[])
-    except Exception as e:
-        return TaskValidationResponse(valid=False, errors=[str(e)])
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        validator = jsonschema.Draft202012Validator(
+            schema, format_checker=jsonschema.FormatChecker()
+        )
+        errors = [
+            f"{'/'.join(str(part) for part in error.absolute_path)}: {error.message}"
+            for error in validator.iter_errors(request.envelope)
+        ]
+        return TaskValidationResponse(valid=not errors, errors=errors)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Task schema validation failed")
+        raise HTTPException(status_code=500, detail="Task schema validation failed") from None
+
+
+@app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
+def create_aicode_task(
+    request: AICodeTaskRequest,
+    tenant_id: str = Depends(verify_api_key),
+):
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    task_id = str(uuid4())
+    payload = {
+        "objective": request.objective,
+        "context": request.context,
+        "repository": request.repository.model_dump(),
+        "acceptance_criteria": request.acceptance_criteria,
+    }
+    try:
+        created = queue.enqueue(task_id, tenant_id, payload)
+    except Exception:
+        logger.exception("Could not enqueue AICode task")
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    if not created:
+        raise HTTPException(status_code=409, detail="Task identifier conflict")
+    return AICodeTaskResponse(task_id=task_id, status="queued", tenant_id=tenant_id)
+
+
+@app.get("/v1/aicode/tasks/{task_id}")
+def get_aicode_task(task_id: str, tenant_id: str = Depends(verify_api_key)):
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        result = queue.get(task_id, tenant_id)
+    except Exception:
+        logger.exception("Could not read AICode task")
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@app.delete("/v1/aicode/tasks/{task_id}", status_code=202)
+def cancel_aicode_task(task_id: str, tenant_id: str = Depends(verify_api_key)):
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        cancelled = queue.cancel(task_id, tenant_id)
+    except Exception:
+        logger.exception("Could not cancel AICode task")
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
+    return {"task_id": task_id, "status": "cancelled"}
