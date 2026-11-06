@@ -16,6 +16,7 @@ from app import (  # noqa: E402
     GenerationEvent,
     GenerationResult,
     InferenceAdmissionController,
+    TransientInferenceError,
     app,
 )
 
@@ -294,3 +295,53 @@ def test_generation_timeout_returns_gateway_timeout(client, monkeypatch):
         json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
     )
     assert response.status_code == 504
+
+
+def test_transient_inference_failure_is_retried_once(client, monkeypatch):
+    class FlakyBackend(FakeBackend):
+        def __init__(self):
+            self.attempts = 0
+
+        async def generate(self, *args, **kwargs):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise TransientInferenceError("temporary backend transport failure")
+            return await super().generate(*args, **kwargs)
+
+    backend = FlakyBackend()
+    app.state.backend = backend
+    monkeypatch.setenv("RUSA_INFERENCE_RETRIES", "1")
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 200
+    assert backend.attempts == 2
+
+
+def test_admission_controller_never_exceeds_active_limit():
+    async def exercise():
+        controller = InferenceAdmissionController(
+            max_active=2,
+            max_waiting=4,
+            queue_timeout=1.0,
+        )
+        active = 0
+        peak_active = 0
+
+        async def worker():
+            nonlocal active, peak_active
+            await controller.acquire()
+            try:
+                active += 1
+                peak_active = max(peak_active, active)
+                await asyncio.sleep(0.01)
+            finally:
+                active -= 1
+                controller.release()
+
+        await asyncio.gather(*(worker() for _ in range(6)))
+        assert peak_active <= 2
+
+    asyncio.run(exercise())
