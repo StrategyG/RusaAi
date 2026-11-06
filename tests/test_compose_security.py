@@ -47,6 +47,7 @@ def test_schema_and_privilege_migration_gates_api_and_worker():
     assert "queue.configure_api_permissions()" in migration_command
     assert "RUSA_AGENT_BACKUP_DB_PASSWORD" in migration_command
     assert "GRANT pg_read_all_data TO rusa_agent_backup" in migration_command
+    assert "default_transaction_read_only = on" in migration_command
     worker_environment = services["rusa-agent-worker"]["environment"]
     assert worker_environment["RUSA_AGENT_PROVIDER_BASE_URL"] == "${RUSA_AGENT_PROVIDER_BASE_URL:-}"
     assert worker_environment["RUSA_AGENT_PROVIDER_API_KEY"] == "${RUSA_AGENT_PROVIDER_API_KEY:-}"
@@ -97,6 +98,7 @@ def test_user_admin_workspace_is_loopback_published_and_migration_gated():
     assert "CREATE ROLE rusa_agent_backup" in init_script
     assert "BYPASSRLS" in init_script
     assert "GRANT pg_read_all_data TO rusa_agent_backup" in init_script
+    assert "default_transaction_read_only = on" in init_script
 
 
 def test_worker_scaling_has_bounded_graceful_shutdown_and_queue_limit():
