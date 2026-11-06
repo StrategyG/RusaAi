@@ -98,7 +98,7 @@ BEGIN
         GRANT SELECT, INSERT, UPDATE, DELETE
             ON public.rusa_knowledge_chunks TO rusa_agent_worker;
     END IF;
-END
-$$;
+END;
+$;
 
 COMMIT;
