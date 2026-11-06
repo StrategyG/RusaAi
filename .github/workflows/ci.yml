@@ -1,11 +1,13 @@
 name: RUSA-AI CI
 
 on:
-  # PR branches are validated by pull_request only; avoid duplicate push runs.
+  # Validate working branches on every push; validate PR creation/review readiness once.
+  # Omitting pull_request.synchronize avoids duplicate runs for the same commit.
   push:
-    branches: [main]
+    branches: [main, "fix/**", "feat/**"]
   pull_request:
     branches: [main]
+    types: [opened, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
