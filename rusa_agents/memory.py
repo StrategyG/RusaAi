@@ -1,8 +1,4 @@
-"""Tenant-scoped SQLite memory for development and single-node deployments.
-
-For horizontally scaled production, use the durable PostgreSQL job store and
-a managed tenant-aware memory backend; this adapter is intentionally local.
-"""
+"""Tenant-scoped SQLite memory for development and single-node deployments."""
 import json
 import sqlite3
 from pathlib import Path
@@ -18,13 +14,27 @@ class SQLiteMemory:
         with self._connect() as db:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS task_memory ("
-                "task_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'default', "
+                "task_id TEXT NOT NULL, tenant_id TEXT NOT NULL DEFAULT 'default', "
                 "repository TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL, "
-                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "PRIMARY KEY(task_id, tenant_id))"
             )
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(task_memory)")}
+            columns = {row["name"]: row for row in db.execute("PRAGMA table_info(task_memory)")}
             if "tenant_id" not in columns:
                 db.execute("ALTER TABLE task_memory ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
+                columns = {row["name"]: row for row in db.execute("PRAGMA table_info(task_memory)")}
+            if columns["task_id"]["pk"] and not columns["tenant_id"]["pk"]:
+                db.execute("ALTER TABLE task_memory RENAME TO task_memory_legacy")
+                db.execute(
+                    "CREATE TABLE task_memory (task_id TEXT NOT NULL, tenant_id TEXT NOT NULL, "
+                    "repository TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL, "
+                    "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(task_id, tenant_id))"
+                )
+                db.execute(
+                    "INSERT INTO task_memory(task_id, tenant_id, repository, state, payload, updated_at) "
+                    "SELECT task_id, tenant_id, repository, state, payload, updated_at FROM task_memory_legacy"
+                )
+                db.execute("DROP TABLE task_memory_legacy")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_task_tenant_repo "
                 "ON task_memory(tenant_id, repository)"
@@ -44,9 +54,9 @@ class SQLiteMemory:
         with self._lock, self._connect() as db:
             db.execute(
                 "INSERT INTO task_memory(task_id, tenant_id, repository, state, payload) "
-                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET "
-                "tenant_id=excluded.tenant_id, repository=excluded.repository, "
-                "state=excluded.state, payload=excluded.payload, updated_at=CURRENT_TIMESTAMP",
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, tenant_id) DO UPDATE SET "
+                "repository=excluded.repository, state=excluded.state, "
+                "payload=excluded.payload, updated_at=CURRENT_TIMESTAMP",
                 (task_id, tenant_id, repository, state, json.dumps(payload, ensure_ascii=False)),
             )
 
