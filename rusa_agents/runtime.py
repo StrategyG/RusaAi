@@ -181,6 +181,10 @@ class AICodeRuntime:
             )
             if not completed:
                 raise RuntimeError("Queue rejected completion because the lease is no longer owned")
+            try:
+                await asyncio.to_thread(self.workspace_manager.cleanup, task, job.tenant_id)
+            except Exception:
+                logger.exception("Could not clean successful task workspace %s", task.task_id)
             logger.info("AICode task %s completed: %s", task.task_id, pr_url)
         except Exception as exc:
             logger.exception("AICode task %s failed", job.task_id)
