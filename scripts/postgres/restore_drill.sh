@@ -41,7 +41,7 @@ backup_file="$(
     RUSA_BACKUP_REQUIRE_REMOTE="${RUSA_BACKUP_REQUIRE_REMOTE:-false}" \
     RUSA_BACKUP_S3_URI="${RUSA_BACKUP_S3_URI:-}" \
     RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
-    "$script_dir/backup.sh"
+    bash "$script_dir/backup.sh"
 )"
 backup_finished_at="$(date +%s)"
 restore_backup_file="$backup_file"
@@ -54,7 +54,7 @@ BACKUP_FILE="$restore_backup_file" \
 BACKUP_AGE_IDENTITY_FILE="$BACKUP_AGE_IDENTITY_FILE" \
 RESTORE_CONFIRM_DATABASE="$RESTORE_CONFIRM_DATABASE" \
 RUSA_BACKUP_S3_ENDPOINT="${RUSA_BACKUP_S3_ENDPOINT:-}" \
-"$script_dir/restore.sh"
+bash "$script_dir/restore.sh"
 restore_finished_at="$(date +%s)"
 
 printf 'BACKUP_FILE=%s\n' "$restore_backup_file"
