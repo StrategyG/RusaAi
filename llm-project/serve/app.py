@@ -220,7 +220,7 @@ class AICodeTaskResponse(BaseModel):
     task_id: str
     status: str
     tenant_id: str
-    work_branch: str
+    work_branch_prefix: str
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
@@ -395,13 +395,13 @@ def create_aicode_task(
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     task_id = str(uuid4())
-    work_branch = f"feature/aicode/{task_id[:12]}"
+    work_branch_prefix = f"feature/aicode/{task_id[:12]}" 
     payload = {
         "objective": request.objective,
         "context": request.context,
         "repository": {
             **request.repository.model_dump(),
-            "work_branch": work_branch,
+            "work_branch_prefix": work_branch_prefix,
         },
         "acceptance_criteria": request.acceptance_criteria,
     }
@@ -412,7 +412,12 @@ def create_aicode_task(
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
     if not created:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
-    return AICodeTaskResponse(task_id=task_id, status="queued", tenant_id=tenant_id, work_branch=work_branch)
+    return AICodeTaskResponse(
+        task_id=task_id,
+        status="queued",
+        tenant_id=tenant_id,
+        work_branch_prefix=work_branch_prefix,
+    )
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
