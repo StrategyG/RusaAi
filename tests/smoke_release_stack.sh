@@ -53,10 +53,6 @@ deploy() {
   test "$(docker inspect --format '{{.Image}}' "$migration_id")" = \
     "$(docker image inspect --format '{{.Id}}' "$RUSA_AGENT_IMAGE")"
 
-  assert_image rusa-api "$RUSA_API_IMAGE"
-  assert_image rusa-agent-api "$RUSA_AGENT_IMAGE"
-  assert_image rusa-agent-worker "$RUSA_AGENT_IMAGE"
-
   # Wait for readiness rather than treating container creation as success.
   local api_ready=false agent_ready=false
   for attempt in {1..180}; do
@@ -76,6 +72,10 @@ deploy() {
     sleep 1
   done
   test "$agent_ready" = "true"
+
+  assert_image rusa-api "$RUSA_API_IMAGE"
+  assert_image rusa-agent-api "$RUSA_AGENT_IMAGE"
+  assert_image rusa-agent-worker "$RUSA_AGENT_IMAGE"
 }
 
 sql() {
