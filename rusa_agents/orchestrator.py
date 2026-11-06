@@ -48,6 +48,9 @@ class AICodeOrchestrator:
         "create_pull_request": "pull_request_create",
         "get_ci_status": "ci_read",
         "get_branch_diff": "repo_read",
+        "search_knowledge": "knowledge_read",
+        "get_document": "knowledge_read",
+        "list_collections": "knowledge_read",
     }
     SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 
