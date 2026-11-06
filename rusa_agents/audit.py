@@ -89,11 +89,13 @@ class AuditLog:
             with self.path.open("r", encoding="utf-8") as stream:
                 for line in stream:
                     row = json.loads(line)
+                    if not isinstance(row, dict):
+                        return False
                     recorded = row.pop("record_hash")
                     if row.get("previous_hash") != previous:
                         return False
                     expected = self._digest(row)
-                    if not hmac.compare_digest(recorded, expected):
+                    if not isinstance(recorded, str) or not hmac.compare_digest(recorded, expected):
                         return False
                     previous = recorded
             return True
@@ -128,6 +130,12 @@ class AuditLog:
             row["record_hash"] = self._digest(row)
             with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(row, ensure_ascii=False, default=str, sort_keys=True) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.chmod(self.path, 0o600)
+            except OSError:
+                pass
 
 
 class PostgresAuditLog:
