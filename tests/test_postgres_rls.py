@@ -240,7 +240,10 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         "acceptance_criteria": ["The test passes"],
     })
     assert response.status_code == 202
-    rejected_tenant_override = client.post("/v1/aicode/tasks", headers=api_a, json={
+    rejected_tenant_override = client.post(
+        "/v1/aicode/tasks",
+        headers={**api_a, "Idempotency-Key": "rls-tenant-override-001"},
+        json={
         "objective": "Tenant identity must come from credentials",
         "repository": {"full_name": "StrategyG/RusaAi"},
         "acceptance_criteria": ["The request tenant must be rejected"],
