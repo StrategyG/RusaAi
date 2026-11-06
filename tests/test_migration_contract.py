@@ -26,9 +26,9 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert all(f"CREATE POLICY {name}" in migration for name in required)
 
 
-def test_rls_integration_fixture_applies_migrations_once_in_version_order():
-    test_source = Path("tests/test_postgres_rls.py").read_text(encoding="utf-8")
-    migrations = re.findall(r'"(\\d{3}_[A-Za-z0-9_-]+\\.sql)"', test_source)
+def test_rls_migrations_are_bootstrapped_before_any_test_module():
+    source = Path("tests/conftest.py").read_text(encoding="utf-8")
+    migrations = re.findall(r'"(\\d{3}_[A-Za-z0-9_-]+\\.sql)"', source)
 
     assert migrations == [
         "001_aicode_core.sql",
@@ -36,3 +36,10 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "003_aicode_task_results.sql",
         "004_aicode_tenant_rls.sql",
     ]
+    assert '@pytest.fixture(scope="session", autouse=True)' in source
+
+
+def test_role_provisioning_do_blocks_have_valid_dollar_terminators():
+    for name in ("001_aicode_core.sql", "004_aicode_tenant_rls.sql"):
+        source = (Path("migrations") / name).read_text(encoding="utf-8")
+        assert re.search(r"DO \\$\\$\\s*BEGIN[\\s\\S]*?\\nEND;\\s*\\$\\$;", source)
