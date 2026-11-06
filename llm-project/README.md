@@ -1,6 +1,6 @@
 # RUSA-AI LLM Project Blueprint
 
-This directory contains a concrete implementation skeleton for the high-level architecture discussed earlier. It is intentionally a blueprint scaffold, not a claim that a trained or deployed model already exists.
+This directory contains a concrete implementation skeleton for the high-level architecture discussed earlier. It is intentionally a blueprint scaffold, not a claim that a trained or deployed model already exists. The local serving adapter requires a Transformers v5-compatible model directory with safetensors weights; remote code and implicit downloads are disabled.
 
 Status: PLANNED -> IMPLEMENTED (skeleton only)
 
