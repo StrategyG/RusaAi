@@ -24,7 +24,7 @@ def test_production_config_rejects_mutable_sandbox_tag(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://db/rusa")
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
-    monkeypatch.setenv("RUSA_API_KEYS", '{"api-secret":"tenant-a"}')
+    monkeypatch.setenv("RUSA_API_KEYS", '{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":"tenant-a"}')
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_WORKSPACE_ROOT", "/srv/rusa/workspaces")
     monkeypatch.setenv("RUSA_GIT_MIRROR_ROOT", "/srv/rusa/mirrors")
