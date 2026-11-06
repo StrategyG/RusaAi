@@ -9,6 +9,8 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -37,6 +39,36 @@ from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.identity import IdentityError, PostgresIdentityStore
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_knowledge.service import KnowledgeService
+
+def _is_rfc3339_datetime(value: object) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+        value,
+    ):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
+def _is_absolute_uri(value: object) -> bool:
+    if not isinstance(value, str) or not value or re.search(r"\s", value):
+        return False
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+        return False
+    try:
+        urlsplit(value)
+    except ValueError:
+        return False
+    return True
+
+
+TASK_FORMAT_CHECKER = FormatChecker()
+TASK_FORMAT_CHECKER.checks("date-time")(_is_rfc3339_datetime)
+TASK_FORMAT_CHECKER.checks("uri")(_is_absolute_uri)
+
 
 logger = logging.getLogger("rusa-ai-serve")
 logging.basicConfig(
@@ -263,10 +295,12 @@ def _load_task_validator(schema_path: str) -> jsonschema.protocols.Validator:
     path = Path(schema_path)
     with path.open("r", encoding="utf-8") as schema_file:
         schema = json.load(schema_file)
+    if not isinstance(schema, dict):
+        raise jsonschema.SchemaError("The schema root must be a JSON object")
 
     validator_class = jsonschema.validators.validator_for(schema)
     validator_class.check_schema(schema)
-    return validator_class(schema, format_checker=FormatChecker())
+    return validator_class(schema, format_checker=TASK_FORMAT_CHECKER)
 
 
 def get_task_validator() -> jsonschema.protocols.Validator:
@@ -279,12 +313,41 @@ def get_task_validator() -> jsonschema.protocols.Validator:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task validation is unavailable because its schema is not installed",
         ) from exc
-    except (json.JSONDecodeError, jsonschema.SchemaError, OSError) as exc:
-        logger.exception("A2A schema could not be loaded")
+    except (json.JSONDecodeError, jsonschema.SchemaError, OSError, ValueError) as exc:
+        logger.error("A2A schema could not be loaded: %s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task validation is unavailable because its schema is invalid",
         ) from exc
+
+
+def _client_validation_message(error: jsonschema.ValidationError) -> str:
+    """Return actionable schema feedback without echoing submitted values."""
+    if error.validator == "format":
+        return f"must be a valid {error.validator_value} value"
+    if error.validator == "required":
+        missing = error.message.split(" ")[0].strip("'")
+        return f"missing required field '{missing}'"
+    if error.validator == "additionalProperties":
+        return "contains unsupported field(s)"
+    if error.validator == "type":
+        expected = error.validator_value
+        return f"must be of type {expected}"
+    if error.validator == "enum":
+        return "must use one of the allowed values"
+    if error.validator == "const":
+        return "does not match the required value"
+    if error.validator == "pattern":
+        return "does not match the required pattern"
+    if error.validator == "minLength":
+        return f"must contain at least {error.validator_value} characters"
+    if error.validator == "maxLength":
+        return f"must contain no more than {error.validator_value} characters"
+    if error.validator == "minItems":
+        return f"must contain at least {error.validator_value} item(s)"
+    if error.validator == "maxItems":
+        return f"must contain no more than {error.validator_value} item(s)"
+    return "does not satisfy the schema constraints"
 
 
 def _load_api_key_tenants() -> dict[str, str] | None:
@@ -432,6 +495,15 @@ def verify_api_key(
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Validate the protocol contract before the process can become ready.
+    try:
+        application.state.task_validator = get_task_validator()
+    except HTTPException as exc:
+        logger.error("A2A task schema validation failed during startup")
+        raise RuntimeError(
+            "A2A task schema is missing or invalid; refusing to start"
+        ) from exc
+
     application.state.backend = None
     application.state.backend_error = "RUSA_MODEL_PATH is not configured"
     model_path = os.getenv("RUSA_MODEL_PATH")
@@ -1068,7 +1140,7 @@ def validate_task_envelope(request: TaskValidationRequest):
     errors = []
     for error in validation_errors:
         path = ".".join(str(part) for part in error.absolute_path) or "$"
-        errors.append(f"{path}: {error.message}")
+        errors.append(f"{path}: {_client_validation_message(error)}")
 
     return TaskValidationResponse(valid=not errors, errors=errors)
 
