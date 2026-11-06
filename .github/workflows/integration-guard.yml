@@ -1,0 +1,32 @@
+name: RUSA-AI Integration Guard
+
+on:
+  push:
+    branches:
+      - "integration/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-integration-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-workflows-and-deploy-scripts:
+    name: Validate workflows and deployment scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate every GitHub Actions workflow
+        run: "$(go env GOPATH)/bin/actionlint" -color
+      - name: Validate shell syntax and deployment behavior
+        run: |
+          set -euo pipefail
+          bash -n scripts/deploy/compose-deploy.sh
+          bash -n scripts/deploy/compose-rollback.sh
+          bash -n tests/test_deploy_scripts.sh
+          bash tests/test_deploy_scripts.sh
