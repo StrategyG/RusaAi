@@ -130,7 +130,11 @@ def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     assert response.status_code == 403
 
 
-def test_metrics_endpoint_requires_authenticated_dependency_and_returns_metrics():
-    response = client.get("/metrics")
+def test_metrics_endpoint_requires_authentication_and_returns_metrics(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"metrics-key":"tenant-metrics"}')
+    denied = client.get("/metrics")
+    assert denied.status_code == 401
+    response = client.get("/metrics", headers={"X-API-Key": "metrics-key"})
     assert response.status_code == 200
     assert "rusa_api_requests_total" in response.text
