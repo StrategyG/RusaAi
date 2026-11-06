@@ -1055,3 +1055,21 @@ def test_policy_requires_human_approval_for_dependency_and_infrastructure_change
     )
     assert decision.allowed is False
     assert decision.requires_approval is True
+
+
+def test_worker_required_ci_checks_are_configurable(monkeypatch):
+    from rusa_agents.worker import _load_required_ci_checks
+
+    monkeypatch.setenv(
+        "RUSA_AGENT_REQUIRED_CI_CHECKS",
+        '["Unit tests","Security scan"]',
+    )
+    assert _load_required_ci_checks() == ("Unit tests", "Security scan")
+
+
+def test_worker_rejects_invalid_required_ci_check_configuration(monkeypatch):
+    from rusa_agents.worker import _load_required_ci_checks
+
+    monkeypatch.setenv("RUSA_AGENT_REQUIRED_CI_CHECKS", "not-json")
+    with pytest.raises(RuntimeError, match="JSON array"):
+        _load_required_ci_checks()
