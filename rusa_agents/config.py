@@ -223,5 +223,6 @@ class RuntimeConfig:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
 
     def validate(self) -> None:
-        """Backward-compatible alias for validating the complete worker runtime."""
+        """Validate both service configurations for tests and deployment preflight."""
+        self.validate_api()
         self.validate_worker()
