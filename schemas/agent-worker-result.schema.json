@@ -4,7 +4,7 @@
   "title": "RUSA-AI Worker Result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "tool_calls", "blockers", "risk", "criteria_results"],
+  "required": ["summary", "tool_calls", "blockers", "risk", "criteria_results", "criteria_evidence"],
   "properties": {
     "summary": {"type": "string", "minLength": 1, "maxLength": 8000},
     "tool_calls": {
@@ -37,6 +37,12 @@
       "minProperties": 1,
       "maxProperties": 20,
       "additionalProperties": {"type": "boolean"}
+    },
+    "criteria_evidence": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 2000}
     }
   }
 }
