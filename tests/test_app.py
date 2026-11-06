@@ -1,7 +1,8 @@
 import uuid
 
-from app import app, set_inference_provider
 from fastapi.testclient import TestClient
+
+from app import app, set_inference_provider
 
 
 client = TestClient(app)
@@ -164,3 +165,53 @@ def test_aicode_task_retry_is_tenant_scoped(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert invalid.status_code == 422
+
+
+
+def test_readiness_checks_inference_and_database(monkeypatch):
+    class ReadyProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "ok"
+
+    class ReadyQueue:
+        def ping(self):
+            return True
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setattr(app.state, "queue", ReadyQueue(), raising=False)
+    set_inference_provider(ReadyProvider())
+    try:
+        response = client.get("/health/ready")
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert response.json()["inference"] == "reachable"
+    assert response.json()["database"] == "reachable"
+
+
+def test_readiness_fails_when_database_is_unavailable(monkeypatch):
+    class ReadyProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "ok"
+
+    class BrokenQueue:
+        def ping(self):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setattr(app.state, "queue", BrokenQueue(), raising=False)
+    set_inference_provider(ReadyProvider())
+    try:
+        response = client.get("/health/ready")
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Task database is unavailable"
