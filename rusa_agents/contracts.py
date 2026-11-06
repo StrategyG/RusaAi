@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 
 class TaskState(StrEnum):
@@ -59,7 +59,7 @@ class TaskRecord:
     results: list[WorkerResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    _TRANSITIONS = {
+    _TRANSITIONS: ClassVar[dict[TaskState, set[TaskState]]] = {
         TaskState.RECEIVED:{TaskState.OBSERVING,TaskState.CANCELLED},
         TaskState.OBSERVING:{TaskState.PLANNING,TaskState.BLOCKED,TaskState.FAILED},
         TaskState.PLANNING:{TaskState.EXECUTING,TaskState.BLOCKED,TaskState.FAILED},
