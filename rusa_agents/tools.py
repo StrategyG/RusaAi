@@ -5,6 +5,7 @@ import base64
 import os
 import re
 from typing import Any, Awaitable, Callable
+from urllib.parse import quote
 
 import httpx
 
@@ -20,9 +21,28 @@ def _safe_repo(value: str) -> str:
 
 
 def _safe_branch(value: str) -> str:
-    if not re.fullmatch(r"(feature|fix|chore|docs)/[A-Za-z0-9._/-]+", value) or ".." in value:
-        raise ToolError("Unsafe branch name")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9._/-]+", value)
+        or value.startswith("/")
+        or value.endswith("/")
+        or ".." in value.split("/")
+        or value in {".", ".."}
+    ):
+        raise ToolError("Unsafe Git reference")
     return value
+
+
+def _safe_path(value: str) -> str:
+    if (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or any(ord(character) < 32 for character in value)
+        or any(segment in {".", ".."} for segment in value.split("/"))
+        or any(character in value for character in ("?", "#"))
+    ):
+        raise ToolError("Unsafe repository path")
+    return quote(value, safe="/-_.@")
 
 
 class ToolRegistry:
@@ -66,65 +86,175 @@ class GitHubTools:
             "Authorization": f"Bearer {self.token}",
         }
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-            response = await client.request(method, f"{self.api}{path}", headers=headers, **kwargs)
+            response = await client.request(
+                method,
+                f"{self.api}{path}",
+                headers=headers,
+                **kwargs,
+            )
             if response.status_code >= 400:
                 raise ToolError(f"GitHub API returned HTTP {response.status_code}")
             return response.json() if response.content else {}
 
-    async def list_files(self, repository: str, path: str = "", ref: str = "main") -> dict[str, Any]:
+    async def list_files(
+        self,
+        repository: str,
+        path: str = "",
+        ref: str = "main",
+    ) -> dict[str, Any]:
         repo = _safe_repo(repository)
-        if path and (path.startswith("/") or ".." in path.split("/")):
-            raise ToolError("Unsafe repository path")
-        suffix = f"/{path}" if path else ""
-        data = await self._request("GET", f"/repos/{repo}/contents{suffix}", params={"ref": ref})
-        return {"entries": [{"name": x["name"], "path": x["path"], "type": x["type"]} for x in data]}
+        safe_ref = _safe_branch(ref)
+        suffix = f"/{_safe_path(path)}" if path else ""
+        data = await self._request(
+            "GET",
+            f"/repos/{repo}/contents{suffix}",
+            params={"ref": safe_ref},
+        )
+        if not isinstance(data, list):
+            raise ToolError("GitHub did not return a directory listing")
+        return {
+            "entries": [
+                {"name": item["name"], "path": item["path"], "type": item["type"]}
+                for item in data
+            ]
+        }
 
-    async def read_file(self, repository: str, path: str, ref: str = "main") -> dict[str, Any]:
+    async def read_file(
+        self,
+        repository: str,
+        path: str,
+        ref: str = "main",
+    ) -> dict[str, Any]:
         repo = _safe_repo(repository)
-        if path.startswith("/") or ".." in path.split("/"):
-            raise ToolError("Unsafe repository path")
-        data = await self._request("GET", f"/repos/{repo}/contents/{path}", params={"ref": ref})
+        safe_path = _safe_path(path)
+        safe_ref = _safe_branch(ref)
+        data = await self._request(
+            "GET",
+            f"/repos/{repo}/contents/{safe_path}",
+            params={"ref": safe_ref},
+        )
         if data.get("type") != "file":
             raise ToolError("Requested path is not a file")
         try:
-            content = base64.b64decode(data["content"]).decode("utf-8")
-        except Exception as exc:
-            raise ToolError("File is not a UTF-8 text file") from exc
+            content = base64.b64decode(data["content"], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError, KeyError) as exc:
+            raise ToolError("File is not a valid UTF-8 text file") from exc
         return {"path": path, "sha": data["sha"], "content": content[:40000]}
 
-    async def create_branch(self, repository: str, base_branch: str, work_branch: str) -> dict[str, Any]:
-        repo, branch = _safe_repo(repository), _safe_branch(work_branch)
-        if branch == "main" or branch == base_branch:
+    async def create_branch(
+        self,
+        repository: str,
+        base_branch: str,
+        work_branch: str,
+    ) -> dict[str, Any]:
+        repo = _safe_repo(repository)
+        base = _safe_branch(base_branch)
+        branch = _safe_branch(work_branch)
+        if branch == base:
             raise ToolError("Feature branch must differ from base branch")
-        source = await self._request("GET", f"/repos/{repo}/git/ref/heads/{base_branch}")
-        data = await self._request("POST", f"/repos/{repo}/git/refs", json={
-            "ref": f"refs/heads/{branch}", "sha": source["object"]["sha"]
-        })
+        source = await self._request(
+            "GET",
+            f"/repos/{repo}/git/ref/heads/{quote(base, safe='/')}",
+        )
+        data = await self._request(
+            "POST",
+            f"/repos/{repo}/git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": source["object"]["sha"]},
+        )
         return {"branch": branch, "sha": data["object"]["sha"]}
 
-    async def write_file(self, repository: str, path: str, content: str, message: str, branch: str, expected_sha: str | None = None) -> dict[str, Any]:
-        repo, branch = _safe_repo(repository), _safe_branch(branch)
-        if path.startswith("/") or ".." in path.split("/") or len(content) > 100000:
-            raise ToolError("Unsafe path or content exceeds limit")
+    async def write_file(
+        self,
+        repository: str,
+        path: str,
+        content: str,
+        message: str,
+        branch: str,
+        expected_sha: str | None = None,
+    ) -> dict[str, Any]:
+        repo = _safe_repo(repository)
+        safe_path = _safe_path(path)
+        safe_branch = _safe_branch(branch)
+        if len(content) > 100000:
+            raise ToolError("File content exceeds the configured limit")
         payload: dict[str, Any] = {
-            "message": message[:200], "content": base64.b64encode(content.encode()).decode(), "branch": branch
+            "message": message[:200],
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "branch": safe_branch,
         }
         if expected_sha:
+            if not re.fullmatch(r"[a-f0-9]{40}", expected_sha):
+                raise ToolError("Invalid expected file SHA")
             payload["sha"] = expected_sha
-        data = await self._request("PUT", f"/repos/{repo}/contents/{path}", json=payload)
-        return {"path": path, "commit_sha": data["commit"]["sha"], "content_sha": data["content"]["sha"]}
+        data = await self._request(
+            "PUT",
+            f"/repos/{repo}/contents/{safe_path}",
+            json=payload,
+        )
+        return {
+            "path": path,
+            "commit_sha": data["commit"]["sha"],
+            "content_sha": data["content"]["sha"],
+        }
 
-    async def get_ci_status(self, repository: str, commit_sha: str) -> dict[str, Any]:
+    async def get_ci_status(
+        self,
+        repository: str,
+        commit_sha: str,
+    ) -> dict[str, Any]:
         repo = _safe_repo(repository)
-        data = await self._request("GET", f"/repos/{repo}/commits/{commit_sha}/check-runs")
-        checks = [{"name": x["name"], "status": x["status"], "conclusion": x.get("conclusion")} for x in data.get("check_runs", [])]
-        return {"total": len(checks), "checks": checks, "all_passed": bool(checks) and all(x["status"] == "completed" and x["conclusion"] == "success" for x in checks)}
+        if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
+            raise ToolError("Invalid commit SHA for CI verification")
+        data = await self._request(
+            "GET",
+            f"/repos/{repo}/commits/{commit_sha}/check-runs",
+        )
+        checks = [
+            {
+                "name": item["name"],
+                "status": item["status"],
+                "conclusion": item.get("conclusion"),
+            }
+            for item in data.get("check_runs", [])
+        ]
+        all_passed = bool(checks) and all(
+            item["status"] == "completed" and item["conclusion"] == "success"
+            for item in checks
+        )
+        return {
+            "commit_sha": commit_sha,
+            "total": len(checks),
+            "checks": checks,
+            "all_passed": all_passed,
+        }
 
-    async def create_pull_request(self, repository: str, title: str, body: str, head: str, base: str) -> dict[str, Any]:
-        repo, head = _safe_repo(repository), _safe_branch(head)
-        if head == base or base == "main" and head == "main":
+    async def create_pull_request(
+        self,
+        repository: str,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+    ) -> dict[str, Any]:
+        repo = _safe_repo(repository)
+        safe_head = _safe_branch(head)
+        safe_base = _safe_branch(base)
+        if safe_head == safe_base:
             raise ToolError("Pull request head and base must differ")
-        data = await self._request("POST", f"/repos/{repo}/pulls", json={
-            "title": title[:200], "body": body[:60000], "head": head, "base": base, "draft": True
-        })
-        return {"number": data["number"], "url": data["html_url"], "state": data["state"], "draft": data["draft"]}
+        data = await self._request(
+            "POST",
+            f"/repos/{repo}/pulls",
+            json={
+                "title": title[:200],
+                "body": body[:60000],
+                "head": safe_head,
+                "base": safe_base,
+                "draft": True,
+            },
+        )
+        return {
+            "number": data["number"],
+            "url": data["html_url"],
+            "state": data["state"],
+            "draft": data["draft"],
+        }
