@@ -993,7 +993,8 @@ def test_task_checkpoint_omits_raw_file_write_content_and_bounds_file_reads():
     assert "content" not in call_args
     assert call_args["content_omitted"] is True
     assert call_args["content_sha256"]
-    assert read_data["content"]["truncated"] is True
-    assert len(read_data["content"]["preview"]) == 6000
+    assert "content" not in read_data
+    assert read_data["content_omitted"] is True
+    assert read_data["content_sha256"]
     restored = TaskRecord.from_dict(checkpoint)
     assert restored.worker_results[0].tool_calls[0].arguments["content_omitted"] is True
