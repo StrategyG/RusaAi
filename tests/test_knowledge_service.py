@@ -111,3 +111,45 @@ def test_ingest_text_batches_large_documents_with_provider_limit():
     assert len(embeddings.batches) >= 2
     assert max(embeddings.batches) <= 64
     assert len(store.ingested["embeddings"]) == result["chunk_count"]
+
+
+def test_ingestion_blocks_credentials_in_metadata_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    secret = "ghp_" + ("d" * 36)
+    try:
+        service.ingest_text(
+            tenant_id="tenant-a",
+            collection="agent",
+            source_uri="file:///guide.txt",
+            title="Guide",
+            content="Safe document content.",
+            metadata={"imported_by_token": secret},
+        )
+    except ValueError as exc:
+        assert "GitHub credential" in str(exc)
+    else:
+        raise AssertionError("credential-bearing metadata was ingested")
+    assert embeddings.inputs == []
+    assert store.ingested is None
+
+
+def test_ingestion_blocks_source_uri_userinfo_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.ingest_text(
+            tenant_id="tenant-a",
+            collection="agent",
+            source_uri="https://user:password@example.com/private",
+            title="Guide",
+            content="Safe document content.",
+        )
+    except ValueError as exc:
+        assert "embedded credentials" in str(exc)
+    else:
+        raise AssertionError("credential-bearing source URI was ingested")
+    assert embeddings.inputs == []
+    assert store.ingested is None
