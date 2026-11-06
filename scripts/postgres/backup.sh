@@ -34,6 +34,9 @@ if [[ -n "${RUSA_BACKUP_S3_URI:-}" && ! "${RUSA_BACKUP_S3_URI}" =~ ^s3://[A-Za-z
     exit 1
 fi
 
+# A SIGTERM from docker compose run waits for the current pg_dump/age pipeline.
+trap 'echo "Shutdown requested; waiting for the active backup stream to finish" >&2' TERM INT
+
 retention_days="${BACKUP_RETENTION_DAYS:-30}"
 if [[ ! "$retention_days" =~ ^[1-9][0-9]{0,3}$ ]] || (( retention_days > 3650 )); then
     echo "BACKUP_RETENTION_DAYS must be between 1 and 3650" >&2
