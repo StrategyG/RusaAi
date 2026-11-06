@@ -31,6 +31,7 @@ class AuditSink(Protocol):
 
 
 CheckpointCallback = Callable[[TaskRecord], Awaitable[None]]
+LeaseGuard = Callable[[], Awaitable[bool]]
 
 
 class CheckpointPersistenceError(RuntimeError):
@@ -165,6 +166,7 @@ class AICodeOrchestrator:
         record: TaskRecord,
         role: WorkerRole,
         checkpoint_callback: CheckpointCallback | None,
+        tool_guard: LeaseGuard | None,
     ) -> WorkerResult:
         result = await asyncio.wait_for(
             self.workers[role].run(record.task, list(record.worker_results)),
@@ -199,6 +201,13 @@ class AICodeOrchestrator:
                 if decision.requires_approval:
                     raise _ApprovalRequired(decision.reason)
                 raise _TaskBlocked(decision.reason)
+            if tool_guard is not None:
+                try:
+                    lease_valid = await tool_guard()
+                except Exception:
+                    lease_valid = False
+                if not lease_valid:
+                    raise _LeaseLost("task lease is no longer valid before tool execution")
             tool_result = await asyncio.wait_for(
                 self.tools.execute(record.task, call),
                 timeout=self.worker_timeout_seconds,
@@ -292,6 +301,7 @@ class AICodeOrchestrator:
         record: TaskRecord | None = None,
         *,
         checkpoint_callback: CheckpointCallback | None = None,
+        tool_guard: LeaseGuard | None = None,
     ) -> TaskRecord:
         record = record or TaskRecord(task=task)
         if record.task.task_id != task.task_id or record.task.tenant_id != task.tenant_id:
@@ -303,6 +313,7 @@ class AICodeOrchestrator:
             return record
 
         resume_external = record.state == TaskState.WAITING_EXTERNAL
+        lease_lost = False
         try:
             self._event(
                 "task.started",
@@ -359,6 +370,7 @@ class AICodeOrchestrator:
                         record,
                         role,
                         checkpoint_callback,
+                        tool_guard,
                     )
 
                 if stage in {0, 1}:
@@ -523,6 +535,14 @@ class AICodeOrchestrator:
 
         except CheckpointPersistenceError:
             raise
+        except _LeaseLost as exc:
+            lease_lost = True
+            record.errors.append(str(exc))
+            if record.state not in {
+                TaskState.FAILED, TaskState.BLOCKED, TaskState.CANCELLED,
+                TaskState.SUCCEEDED, TaskState.AWAITING_APPROVAL,
+            }:
+                record.transition(TaskState.FAILED)
         except _ApprovalRequired as exc:
             record.errors.append(str(exc))
             if record.state != TaskState.AWAITING_APPROVAL:
@@ -546,8 +566,13 @@ class AICodeOrchestrator:
                 "rusa-master",
                 {"state": record.state.value, "stage_index": record.stage_index},
             )
-            await self._persist(record, checkpoint_callback)
+            if not lease_lost:
+                await self._persist(record, checkpoint_callback)
         return record
+
+
+class _LeaseLost(RuntimeError):
+    pass
 
 
 class _TaskBlocked(RuntimeError):
