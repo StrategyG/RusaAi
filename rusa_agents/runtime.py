@@ -156,9 +156,21 @@ class AICodeRuntime:
             lost_lease.set()
             raise RuntimeError("Task lease is no longer owned by this worker")
 
-    async def _await_human_review(self, job: Job, task: CodingTask, reason: str) -> None:
+    async def _await_human_review(
+        self,
+        job: Job,
+        task: CodingTask,
+        reason: str,
+        result: dict[str, Any] | None = None,
+    ) -> None:
         updated = await asyncio.to_thread(
-            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, job.lease_token, reason
+            self.queue.await_approval,
+            job.id,
+            job.tenant_id,
+            self.worker_id,
+            job.lease_token,
+            reason,
+            result,
         )
         if not updated:
             raise RuntimeError("Queue rejected awaiting-approval transition because the lease was lost")
@@ -201,7 +213,10 @@ class AICodeRuntime:
             )
             if record.state == TaskState.AWAITING_APPROVAL:
                 await self._await_human_review(
-                    job, task, "; ".join(record.errors) or "Human intervention required"
+                    job,
+                    task,
+                    "; ".join(record.errors) or "Human intervention required",
+                    {"branch": task.repository.work_branch},
                 )
                 outcome = "awaiting_approval"
                 return True
@@ -263,7 +278,16 @@ class AICodeRuntime:
                 lost_lease,
             )
             if not ci_ok:
-                await self._await_human_review(job, task, ci_reason)
+                await self._await_human_review(
+                    job,
+                    task,
+                    ci_reason,
+                    {
+                        "pull_request_url": pr_url,
+                        "commit_sha": commit_sha,
+                        "branch": task.repository.work_branch,
+                    },
+                )
                 outcome = "awaiting_approval"
                 return True
 
@@ -276,7 +300,16 @@ class AICodeRuntime:
                 tenant_id=job.tenant_id,
             )
             completed = await asyncio.to_thread(
-                self.queue.complete, job.id, job.tenant_id, self.worker_id, job.lease_token
+                self.queue.complete,
+                job.id,
+                job.tenant_id,
+                self.worker_id,
+                job.lease_token,
+                {
+                    "pull_request_url": pr_url,
+                    "commit_sha": commit_sha,
+                    "branch": task.repository.work_branch,
+                },
             )
             if not completed:
                 raise RuntimeError("Queue rejected completion because the lease is no longer owned")
