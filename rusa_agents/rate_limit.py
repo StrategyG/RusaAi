@@ -12,6 +12,12 @@ class PostgresRateLimiter:
         self.dsn = dsn
 
     def _connect(self):
+
+    @staticmethod
+    def _set_tenant(conn, tenant_id: str) -> None:
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id is required for tenant-scoped database access")
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
         try:
             import psycopg
         except ImportError as exc:
@@ -47,6 +53,7 @@ class PostgresRateLimiter:
         now = int(time.time())
         window_start = (now // window_seconds) * window_seconds
         with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 INSERT INTO aicode_rate_limits(tenant_id, route_key, window_start, request_count)
                 VALUES (%s, %s, %s, 1)
