@@ -24,6 +24,14 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_
 
 The migration creates `aicode_jobs`, `aicode_memory`, `aicode_audit_events`, `aicode_rate_limits`, audit immutability triggers, and the restricted `rusa_runtime` role.
 
+The queue lease-fencing upgrade adds a second forward-only migration. Apply it after migration 001 and before deploying the upgraded API/worker image:
+
+```bash
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_queue_lease_fencing.sql
+```
+
+Each claim receives a unique `lease_token`. Heartbeat and terminal state transitions must present the current token while the lease is still valid; a worker whose lease expired cannot renew, complete, fail, or pause a job after another worker takes ownership. Drain or stop old worker instances before rolling out the new worker version.
+
 Keep `rusa_runtime` as a NOLOGIN privilege group. Create a separate login role and grant membership, for example:
 
 ```sql
