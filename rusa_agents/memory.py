@@ -91,6 +91,11 @@ class PostgresMemory:
 
     def initialize(self) -> None:
         with self._connect() as conn:
+            if __import__("os").getenv("ENVIRONMENT", "development").lower() == "production":
+                exists = conn.execute("SELECT to_regclass('public.aicode_memory')").fetchone()
+                if not exists or exists[0] is None:
+                    raise RuntimeError("Production memory schema is missing; apply migrations/001_aicode_core.sql")
+                return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_memory (
                     tenant_id TEXT NOT NULL,
