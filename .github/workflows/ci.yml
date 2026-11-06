@@ -114,6 +114,29 @@ jobs:
       - name: Build inference API image
         run: docker build --pull --file Dockerfile --tag rusa-ai:${{ github.sha }} .
 
+      - name: Verify patched inference API dependencies
+        run: |
+          docker run --rm --entrypoint python rusa-ai:${{ github.sha }} -c '
+          from importlib.metadata import distributions
+          from packaging.version import Version
+
+          minimums = {
+              "msgpack": Version("1.2.3"),
+              "urllib3": Version("2.8.0"),
+              "setuptools": Version("78.1.1"),
+          }
+          found = {name: [] for name in minimums}
+          for dist in distributions():
+              name = (dist.metadata.get("Name") or "").lower().replace("_", "-")
+              if name in found:
+                  found[name].append(Version(dist.version))
+          for name, minimum in minimums.items():
+              versions = found[name]
+              if not versions or any(version < minimum for version in versions):
+                  raise SystemExit(f"{name} versions {versions} do not meet security floor {minimum}")
+              print(f"{name}: {versions}")
+          '
+
       - name: Build agent runtime image
         run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
 
@@ -121,6 +144,8 @@ jobs:
         run: docker pull postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
 
       - name: Block all CRITICAL inference API vulnerabilities
+        id: api-critical-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-ai:${{ github.sha }}
@@ -131,6 +156,8 @@ jobs:
           severity: CRITICAL
 
       - name: Gate inference API HIGH vulnerabilities
+        id: api-high-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-ai:${{ github.sha }}
@@ -153,6 +180,8 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Block all CRITICAL agent runtime vulnerabilities
+        id: agent-critical-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-agent-runtime:${{ github.sha }}
@@ -163,6 +192,8 @@ jobs:
           severity: CRITICAL
 
       - name: Gate agent runtime HIGH vulnerabilities
+        id: agent-high-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-agent-runtime:${{ github.sha }}
@@ -185,6 +216,8 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Block all CRITICAL PostgreSQL vulnerabilities
+        id: postgres-critical-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
@@ -195,6 +228,8 @@ jobs:
           severity: CRITICAL
 
       - name: Gate PostgreSQL HIGH vulnerabilities
+        id: postgres-high-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
@@ -260,6 +295,7 @@ jobs:
           upload-release-assets: false
 
       - name: Smoke-test production Compose stack
+        id: production-compose-smoke
         env:
           RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
           RUSA_MODEL_DIR: .
@@ -287,6 +323,14 @@ jobs:
             http://127.0.0.1:${RUSA_PORT:-8000}/health/live >/dev/null
           curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
             http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/live >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/ready >/dev/null
+
+          docker compose exec -T rusa-agent-db pg_isready -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent
+          schema_count="$(docker compose exec -T -e PGPASSWORD="$RUSA_AGENT_DB_PASSWORD" rusa-agent-db \
+            psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -Atqc \
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('rusa_agent_tasks','rusa_agent_memory') AND c.relrowsecurity AND c.relforcerowsecurity")"
+          test "$schema_count" = "2"
 
           auth_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --request POST \
@@ -294,6 +338,28 @@ jobs:
             --data '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"health probe"}]}' \
             http://127.0.0.1:${RUSA_PORT:-8000}/v1/chat/completions)"
           test "$auth_status" = "401"
+
+      - name: Enforce all image scans and production smoke test
+        if: always()
+        env:
+          API_CRITICAL: ${{ steps.api-critical-scan.outcome }}
+          API_HIGH: ${{ steps.api-high-scan.outcome }}
+          AGENT_CRITICAL: ${{ steps.agent-critical-scan.outcome }}
+          AGENT_HIGH: ${{ steps.agent-high-scan.outcome }}
+          POSTGRES_CRITICAL: ${{ steps.postgres-critical-scan.outcome }}
+          POSTGRES_HIGH: ${{ steps.postgres-high-scan.outcome }}
+          PRODUCTION_SMOKE: ${{ steps.production-compose-smoke.outcome }}
+        run: |
+          printf 'API critical: %s\\nAPI high: %s\\nAgent critical: %s\\nAgent high: %s\\nPostgreSQL critical: %s\\nPostgreSQL high: %s\\nProduction smoke: %s\\n' \\
+            "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" \\
+            "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE"
+          test "$API_CRITICAL" = "success"
+          test "$API_HIGH" = "success"
+          test "$AGENT_CRITICAL" = "success"
+          test "$AGENT_HIGH" = "success"
+          test "$POSTGRES_CRITICAL" = "success"
+          test "$POSTGRES_HIGH" = "success"
+          test "$PRODUCTION_SMOKE" = "success"
 
   release-gate:
     name: Release Gate
