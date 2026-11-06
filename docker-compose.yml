@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "${RUSA_PORT:-8000}:8000"
+      - "127.0.0.1:${RUSA_PORT:-8000}:8000"
     environment:
       ENVIRONMENT: production
       RUSA_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
@@ -33,7 +33,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -90,6 +90,12 @@ services:
     cap_drop:
       - ALL
     pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     logging:
       driver: json-file
       options:
