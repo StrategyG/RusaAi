@@ -52,10 +52,16 @@ class PostgresTaskQueue:
     ) -> None:
         if actor is None:
             return
-        if not actor.startswith("api:") or len(actor) > 128:
-            raise ValueError("API audit actor is invalid")
-        if action not in {"task.create", "task.read", "task.retry", "task.cancel"}:
-            raise ValueError("Task policy audit action is invalid")
+        if not isinstance(actor, str) or len(actor) > 128:
+            raise ValueError("Task policy audit actor is invalid")
+        if actor.startswith("api:"):
+            if action not in {"task.create", "task.read", "task.retry", "task.cancel"}:
+                raise ValueError("API task policy audit action is invalid")
+        elif actor.startswith("worker:"):
+            if action != "task.execute":
+                raise ValueError("Worker task policy audit action is invalid")
+        else:
+            raise ValueError("Task policy audit actor is invalid")
         if decision not in {"allow", "deny"}:
             raise ValueError("Task policy audit decision is invalid")
         conn.execute(
@@ -344,6 +350,37 @@ class PostgresTaskQueue:
             ))
         return cur.rowcount == 1
 
+
+    def authorize_execution(
+        self,
+        job_id: int,
+        task_id: str,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+    ) -> bool:
+        """Atomically verify a live tenant-bound lease and append its policy decision."""
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                SELECT 1 FROM aicode_jobs
+                WHERE id=%s AND task_id=%s AND tenant_id=%s
+                  AND lease_owner=%s AND lease_token=%s::uuid
+                  AND status='running' AND lease_until > NOW()
+                FOR UPDATE
+                """,
+                (job_id, task_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            self._record_policy_event(
+                conn,
+                tenant_id,
+                task_id,
+                f"worker:{worker_id}",
+                "task.execute",
+                "allow" if row is not None else "deny",
+            )
+        return row is not None
 
     def owns_lease(
         self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
