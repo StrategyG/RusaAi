@@ -384,15 +384,21 @@ class GitHubTools:
             "GET",
             f"/repos/{repo}/compare/{quote(safe_base, safe='/')}...{quote(safe_head, safe='/')}",
         )
+        raw_files = data.get("files", [])
+        if not isinstance(raw_files, list) or len(raw_files) > 20:
+            raise ToolError("Diff exceeds the reviewer limit; split the change into smaller tasks")
         files = []
-        for item in data.get("files", [])[:50]:
+        for item in raw_files:
+            patch = item.get("patch") or ""
+            if len(patch) > 3000:
+                raise ToolError("A diff patch exceeds the reviewer context limit; split the change")
             files.append(
                 {
                     "filename": item.get("filename", "")[:500],
                     "status": item.get("status", ""),
                     "additions": item.get("additions", 0),
                     "deletions": item.get("deletions", 0),
-                    "patch": (item.get("patch") or "")[:12000],
+                    "patch": patch,
                 }
             )
         return {
