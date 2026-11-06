@@ -285,10 +285,18 @@ class GitHubTools:
         if data.get("type") != "file":
             raise ToolError("Requested path is not a file")
         try:
-            content = base64.b64decode(data["content"], validate=True).decode("utf-8")
+            content = base64.b64decode(
+                "".join(data["content"].split()),
+                validate=True,
+            ).decode("utf-8")
         except (ValueError, UnicodeDecodeError, KeyError) as exc:
             raise ToolError("File is not a valid UTF-8 text file") from exc
-        return {"path": path, "sha": data["sha"], "content": content[:40000]}
+        return {
+            "path": path,
+            "sha": data["sha"],
+            "content": content[:40000],
+            "truncated": len(content) > 40000,
+        }
 
     async def create_branch(
         self,
