@@ -1,0 +1,45 @@
+services:
+  rusa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rusa-ai:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "\${RUSA_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_KEY: \${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
+      RUSA_MODEL_NAME: \${RUSA_MODEL_NAME:-rusa-ai-v1}
+      RUSA_MODEL_PATH: /models
+      RUSA_MAX_REQUEST_BYTES: \${RUSA_MAX_REQUEST_BYTES:-1048576}
+      TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
+    volumes:
+      - type: bind
+        source: \${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
+        target: /models
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
