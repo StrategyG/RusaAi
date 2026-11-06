@@ -1,8 +1,10 @@
 import os
-from pathlib import Path
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+
+from rusa_agents.audit import PostgresAuditLog
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -11,21 +13,6 @@ pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is n
 def connect():
     import psycopg
     return psycopg.connect(DSN)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def apply_database_migrations():
-    if not DSN:
-        pytest.skip("PostgreSQL integration DSN is not configured")
-    migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    with connect() as conn:
-        for migration_name in (
-            "001_aicode_core.sql",
-            "002_aicode_lease_fencing.sql",
-            "003_aicode_task_results.sql",
-            "004_aicode_tenant_rls.sql",
-        ):
-            conn.execute((migration_root / migration_name).read_text(encoding="utf-8"))
 
 
 def set_role_and_tenant(conn, role, tenant):
@@ -87,11 +74,29 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
                     ("rls-worker-b", str(uuid4()), "StrategyG/RusaAi", "testing", '{"ok":true}'),
                 )
 
+        previous_row = conn.execute(
+            "SELECT record_hash FROM aicode_audit_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        previous_hash = previous_row[0] if previous_row else "GENESIS"
+        timestamp = datetime.now(timezone.utc).isoformat()
+        audit = PostgresAuditLog(DSN, os.environ["RUSA_AUDIT_HMAC_KEY"])
+        audit_row = {
+            "timestamp": timestamp,
+            "event": "test.rls",
+            "task_id": task_id,
+            "tenant_id": "rls-worker-a",
+            "actor": "pytest",
+            "details": {},
+            "previous_hash": previous_hash,
+        }
         conn.execute(
             """INSERT INTO aicode_audit_events
-               (event, task_id, tenant_id, actor, details, previous_hash, record_hash)
-               VALUES ('test.rls', %s, %s, 'pytest', '{}'::jsonb, 'GENESIS', %s)""",
-            (task_id, "rls-worker-a", "rls-test-" + task_id),
+               (timestamp, event, task_id, tenant_id, actor, details, previous_hash, record_hash)
+               VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)""",
+            (
+                timestamp, "test.rls", task_id, "rls-worker-a", "pytest", "{}",
+                previous_hash, audit._digest(audit_row),
+            ),
         )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             with conn.transaction():
@@ -99,6 +104,7 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
                     "UPDATE aicode_audit_events SET event='tampered' WHERE task_id=%s",
                     (task_id,),
                 )
+    assert audit.verify()
 
 
 def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
