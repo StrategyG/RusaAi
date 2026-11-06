@@ -21,19 +21,35 @@ RUSA-AI has three implementation layers: local-model inference API, hierarchical
 
 The repository has automated unit, contract, security, and PostgreSQL/pgvector integration tests. CI must be green on the exact candidate commit, including dependency audit, Docker builds, and container smoke tests, before code is considered eligible for review. Do not treat a prior green run as evidence for a later commit.
 
-The most recent CI run before the follow-up fixes reported 129 passed and 10 failed. The identified causes were psycopg bulk-insert API misuse and a scripted test worker missing the explicit tool-authorization contract. Follow-up commits address those defects; the latest CI run must confirm the result before this ledger is marked green.
+The latest completed pull-request CI run validated code commit `932a840b64abd84c395836f3be5c14e7e68cc9ec` (run [42196444175](https://github.com/StrategyG/RusaAi/actions/runs/42196444175)):
+
+- Ruff lint and Python compile: passed.
+- Pytest with PostgreSQL 16/pgvector: **182 passed**.
+- Dependency audits for inference, agent, and RAG/MCP requirements: no known vulnerabilities.
+- Docker Compose configuration validation: passed.
+- Inference API, agent runtime, and knowledge MCP images: built successfully.
+- MCP and inference API container liveness smoke tests: passed.
+
+This is evidence for the exact code commit above. It is not evidence of a deployed staging environment, a loaded model, production readiness, or measured service-level objectives. Any subsequent executable-code change requires a new exact-head CI run.
+
+## Integration state
+
+- PR #3 is the serving-hardening base on `main`; PR #7 is the hierarchical-agent branch stacked on PR #3; PR #17 is the RAG/MCP branch stacked on PR #7. PR #17 remains Draft and has not been merged.
+- PR #8 has a stale base commit and is currently reported as not mergeable. PR #15 and PR #19 are stacked on that branch chain; reconcile/rebase that chain before treating its additional lifecycle controls as integrated.
+- PR #20 is a separate alternative agent-runtime architecture with its own successful CI run. It is not an ancestor of PR #7 or PR #17; select and review one canonical runtime before merging overlapping implementations.
+- GitHub branch-protection and required-review settings could not be verified with the current integration permissions. Confirm them in repository settings before any merge.
 
 ## Release gates
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Inference API foundation | Green CI, schema/auth tests, container smoke test | Pending exact-commit CI |
+| Inference API foundation | Green exact-head CI, schema/auth tests, container build and liveness smoke | CI passed on code commit 932a840; model readiness not verified |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template, reproducible loading | Blocked: model weights not supplied |
 | Model quality and safety | Versioned benchmark dataset, task success, safety and regression evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency, target-hardware soak test | Blocked |
 | High-throughput serving | Runtime selection and measured load test for the selected model | Open |
-| Agent runtime | End-to-end staging tasks, GitHub permissions, queue recovery, lease fencing, CI evidence freshness | Implemented; staging verification pending |
-| Memory/RAG/MCP | Tenant-separated gold set, Recall@K/MRR/nDCG, citation accuracy, prompt-injection and cross-tenant tests | Implemented; domain evaluation and staging verification pending |
+| Agent runtime | End-to-end staging tasks, GitHub permissions, queue recovery, lease fencing, CI evidence freshness | Core runtime and lease fencing implemented; staging verification and lifecycle-control integration pending |
+| Memory/RAG/MCP | Tenant-separated gold set, Recall@K/MRR/nDCG, citation accuracy, prompt-injection and cross-tenant tests | Code, pgvector/RLS integration, and container smoke checks passed; domain evaluation and staging verification pending |
 | Security operations | TLS ingress, distributed rate limiting, egress allowlists, secret rotation, external penetration test | Partial; deployment controls required |
 | Reliability operations | PostgreSQL backup/PITR, restore drill, immutable remote audit, monitoring, alerting, incident runbook, rollback rehearsal | Partial; operational drills pending |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
