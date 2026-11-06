@@ -1060,9 +1060,8 @@ def login(
     _validate_same_origin(http_request)
     store = _identity_store(http_request)
     tenant_id = os.getenv("RUSA_TENANT_ID", "default")
-    client_host = http_request.client.host if http_request.client else "unknown"
+    # Account throttling remains distinct behind a shared reverse proxy/NAT.
     buckets = [
-        "ip:" + client_host,
         "account:" + tenant_id + ":" + request.email.strip().lower(),
     ]
     if not all(store.allow_login_attempt(bucket) for bucket in buckets):

@@ -83,7 +83,7 @@ docker compose --profile agent up -d --build rusa-agent-worker
 - The bootstrap admin is created only when its tenant/email pair is absent. Existing admin passwords are not overwritten by startup.
 - Passwords are hashed with Argon2id; raw passwords and refresh tokens are not stored in the database.
 - Refresh tokens rotate on use; sessions are revocable and expire.
-- Login attempts are rate-limited by client IP and tenant/email.
+- Login attempts are rate-limited by normalized email within the configured tenant. Deployments should also enforce network-level throttling at a trusted edge proxy.
 - A user sees only tasks attributed to their user ID. Administrators can inspect tasks within their tenant only.
 - The last active administrator cannot be disabled or demoted.
 - Chat and task activity are not fabricated in the UI. The dashboard reflects API state and reports unavailable model/worker dependencies.
