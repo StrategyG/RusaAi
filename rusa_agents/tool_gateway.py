@@ -137,7 +137,7 @@ class DockerSandbox:
                     copy_function=bounded_copy,
                 )
                 for directory, _, filenames in os.walk(snapshot):
-                    os.chmod(directory, 0o555)
+                    os.chmod(directory, 0o555)  # nosec B103 - read/traverse only; Docker bind mount is read-only
                     for filename in filenames:
                         path = Path(directory) / filename
                         if not path.is_symlink():
@@ -158,7 +158,7 @@ class DockerSandbox:
                 f"--memory={self.memory_limit}",
                 f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - private ephemeral container tmpfs
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,readonly",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--env", "PYTHONPYCACHEPREFIX=/tmp/pycache",
