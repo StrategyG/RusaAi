@@ -44,6 +44,12 @@ backup_file="$(
 )"
 backup_finished_at="$(date +%s)"
 
+# When remote storage is configured, restore from the object store rather than
+# the local copy so the drill verifies the off-host recovery path as well.
+if [[ -n "${RUSA_BACKUP_S3_URI:-}" ]]; then
+    backup_file="${RUSA_BACKUP_S3_URI%/}/$(basename "$backup_file")"
+fi
+
 RESTORE_DATABASE_URL="$RESTORE_DATABASE_URL" \
 BACKUP_FILE="$backup_file" \
 BACKUP_AGE_IDENTITY_FILE="$BACKUP_AGE_IDENTITY_FILE" \
