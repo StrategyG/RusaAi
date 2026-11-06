@@ -44,7 +44,7 @@ services:
         max-file: "3"
 
   rusa-agent-db:
-    image: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
+    image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     restart: unless-stopped
     environment:
       POSTGRES_DB: rusa_agent
@@ -63,13 +63,12 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Idempotent schema bootstrap; worker startup is gated on successful completion.
   rusa-agent-migrate:
     image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
     command:
       - -c
       - |
-        import os
+        from rusa_agents.healthcheck import main as worker_healthcheck
         from rusa_agents.memory import PostgresMemoryStore
         from rusa_agents.queue import PostgresTaskQueue
 
@@ -79,8 +78,8 @@ services:
         memory = PostgresMemoryStore(database_url)
         memory.initialize()
 
-        if not queue.check_ready() or not memory.check_ready():
-            raise SystemExit("PostgreSQL agent schema or tenant RLS policy is not ready")
+        if worker_healthcheck() != 0:
+            raise SystemExit("Worker healthcheck failed after PostgreSQL schema initialization")
     restart: "no"
     environment:
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
