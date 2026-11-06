@@ -15,6 +15,7 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - Request IDs, basic security headers, a content-length limit, and generic internal error responses are added.
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
+- Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
 
 ## Current verification boundary
 

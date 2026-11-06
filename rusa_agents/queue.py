@@ -10,6 +10,10 @@ from typing import Any
 from .contracts import CodingTask, TaskRecord, TaskState
 
 
+class IdempotencyConflictError(ValueError):
+    """Raised when a tenant reuses an idempotency key for a different task."""
+
+
 class PostgresTaskQueue:
     MIN_LEASE_SECONDS = 10
     MAX_LEASE_SECONDS = 3600
@@ -166,7 +170,9 @@ class PostgresTaskQueue:
             if isinstance(stored_payload, str):
                 stored_payload = json.loads(stored_payload)
             if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
-                raise ValueError("idempotency key was already used with a different task payload")
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
             return str(existing[0])
 
     def claim(

@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
 from .http_limits import BodyLimitMiddleware
-from .queue import PostgresTaskQueue
+from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 if MAX_AGENT_REQUEST_BYTES <= 0:
@@ -287,6 +287,8 @@ def create_task(
             task_id=task_id,
         )
         task_id = request.app.state.queue.enqueue(task)
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
