@@ -188,22 +188,76 @@ jobs:
           WHERE tenant_id = 'ci-role-check' AND source_uri = 'ci://role-check';
           COMMIT;
           SQL
-      - name: Run knowledge MCP container
+      - name: Seed isolated MCP tenant fixtures
         run: |
-          docker run -d --name rusa-mcp-ci \
-            -p 127.0.0.1:8002:8002 \
-            -e RUSA_MCP_ALLOWED_HOSTS=localhost,localhost:*,127.0.0.1,127.0.0.1:*,rusa-mcp,rusa-mcp:* \
-            rusa-knowledge-mcp:${{ github.sha }}
-      - name: Verify MCP liveness
+          docker compose exec -T rusa-agent-db psql --no-psqlrc --set ON_ERROR_STOP=1 -U rusa_agent_owner -d rusa_agent <<'SQL'
+          INSERT INTO public.rusa_knowledge_documents
+              (tenant_id, document_id, collection, source_uri, title, content_hash)
+          VALUES
+              ('ci-tenant', '00000000-0000-0000-0000-0000000000a1', 'agent', 'ci://tenant-a', 'Tenant A fixture', repeat('a', 64)),
+              ('other-tenant', '00000000-0000-0000-0000-0000000000b2', 'agent', 'ci://tenant-b', 'Tenant B fixture', repeat('b', 64));
+          SQL
+      - name: Run knowledge MCP service with a CI tenant credential
+        run: |
+          CI_MCP_TOKEN='ci-mcp-token-that-is-at-least-32-characters-long-0001'
+          CI_MCP_HASH="$(printf '%s' "$CI_MCP_TOKEN" | sha256sum | cut -d ' ' -f1)"
+          RUSA_MCP_TENANT_KEYS="{\"$CI_MCP_HASH\":\"ci-tenant\"}" docker compose --profile knowledge up -d rusa-mcp
+      - name: Verify MCP readiness, authentication, and tenant isolation
+        env:
+          CI_MCP_TOKEN: ci-mcp-token-that-is-at-least-32-characters-long-0001
         run: |
           for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8002/health/live; then
-              exit 0
+            if curl --fail --silent http://127.0.0.1:8002/health/ready; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              docker compose logs rusa-mcp
+              exit 1
             fi
             sleep 2
           done
-          docker logs rusa-mcp-ci
-          exit 1
+          PYTHONPATH="$GITHUB_WORKSPACE" python - <<'PY'
+          import asyncio
+          import os
+
+          from rusa_mcp.client import MCPToolClient
+
+          async def main():
+              allowed = {"search_knowledge", "get_document", "list_collections"}
+              client = MCPToolClient(
+                  server_url="http://127.0.0.1:8002/mcp",
+                  api_key=os.environ["CI_MCP_TOKEN"],
+                  allowed_tools=allowed,
+              )
+              tools = await client.list_tools()
+              assert {tool["name"] for tool in tools} == allowed
+              collections = await client.call_tool("list_collections", {})
+              assert collections == {
+                  "collections": [{"collection": "agent", "document_count": 1}]
+              }, collections
+              other_tenant = await client.call_tool(
+                  "get_document",
+                  {
+                      "document_id": "00000000-0000-0000-0000-0000000000b2",
+                      "collection": "agent",
+                  },
+              )
+              assert other_tenant.get("found") is False, other_tenant
+
+              invalid = MCPToolClient(
+                  server_url="http://127.0.0.1:8002/mcp",
+                  api_key="invalid-ci-token-that-is-at-least-32-characters",
+                  allowed_tools=allowed,
+              )
+              try:
+                  await invalid.list_tools()
+              except Exception:
+                  pass
+              else:
+                  raise AssertionError("MCP accepted an invalid tenant bearer token")
+
+          asyncio.run(main())
+          PY
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \
