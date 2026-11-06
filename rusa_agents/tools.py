@@ -186,6 +186,21 @@ class GitHubTools:
             },
         )
         registry.register(
+            "github.compare_branches",
+            self.compare_branches,
+            "Compare the task work branch against the base branch and return bounded diff patches for independent review.",
+            {
+                "type": "object",
+                "properties": {
+                    "repository": repository,
+                    "base": branch,
+                    "head": branch,
+                },
+                "required": ["repository", "base", "head"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
             "github.create_pull_request",
             self.create_pull_request,
             "Create a draft pull request from the task work branch to its base branch.",
@@ -352,6 +367,40 @@ class GitHubTools:
             "total": len(checks),
             "checks": checks,
             "all_passed": all_passed,
+        }
+
+    async def compare_branches(
+        self,
+        repository: str,
+        base: str,
+        head: str,
+    ) -> dict[str, Any]:
+        repo = _safe_repo(repository)
+        safe_base = _safe_branch(base)
+        safe_head = _safe_branch(head)
+        if safe_base == safe_head:
+            raise ToolError("Branch comparison requires distinct base and head refs")
+        data = await self._request(
+            "GET",
+            f"/repos/{repo}/compare/{quote(safe_base, safe='/')}...{quote(safe_head, safe='/')}",
+        )
+        files = []
+        for item in data.get("files", [])[:50]:
+            files.append(
+                {
+                    "filename": item.get("filename", "")[:500],
+                    "status": item.get("status", ""),
+                    "additions": item.get("additions", 0),
+                    "deletions": item.get("deletions", 0),
+                    "patch": (item.get("patch") or "")[:12000],
+                }
+            )
+        return {
+            "status": data.get("status"),
+            "ahead_by": data.get("ahead_by"),
+            "behind_by": data.get("behind_by"),
+            "total_files": len(data.get("files", [])),
+            "files": files,
         }
 
     async def create_pull_request(
