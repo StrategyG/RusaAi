@@ -188,12 +188,13 @@ def test_queue_does_not_cancel_completed_task(queue_and_tenant):
 
 def test_queue_rejects_payload_tenant_mismatch(queue_and_tenant):
     queue, tenant = queue_and_tenant
+    task_id = str(uuid.uuid4())
     with pytest.raises(ValueError, match="tenant_id must match"):
         queue.enqueue(
             tenant,
-            str(uuid.uuid4()),
+            task_id,
             {
-                "task_id": str(uuid.uuid4()),
+                "task_id": task_id,
                 "tenant_id": "another-tenant",
                 "objective": "cross-tenant payload",
             },

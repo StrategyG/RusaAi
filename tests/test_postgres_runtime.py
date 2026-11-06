@@ -43,11 +43,17 @@ def test_queue_idempotency_replays_only_identical_payload(postgres_runtime):
 
     assert first["task_id"] == first_id
     assert replay["task_id"] == first_id
+    changed_id = str(uuid.uuid4())
     with pytest.raises(ValueError, match="different task payload"):
         queue.enqueue(
             tenant_id,
-            str(uuid.uuid4()),
-            {"objective": "delete", "repository": "owner/repo"},
+            changed_id,
+            {
+                "task_id": changed_id,
+                "tenant_id": tenant_id,
+                "objective": "delete",
+                "repository": "owner/repo",
+            },
             "same-idempotency-key",
         )
 
