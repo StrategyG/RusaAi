@@ -1,11 +1,12 @@
 """Hierarchical master orchestrator with checkpointed CI verification and bounded repair."""
 
 import asyncio
+import re
 from dataclasses import replace
 from typing import Any, Protocol
 
 from .contracts import (
-    CodingTask, RiskLevel, TaskRecord, TaskState, ToolResult, WorkerResult, WorkerRole,
+    CodingTask, RiskLevel, TaskRecord, TaskState, ToolCall, ToolResult, WorkerResult, WorkerRole,
 )
 from .policy import AutonomyPolicy
 from .workers import AgentWorker
@@ -116,8 +117,19 @@ class AICodeOrchestrator:
         return completed
 
     def _ci_outcome(self, result: ToolResult) -> str:
+        sha = result.data.get("head_sha")
+        if (
+            result.name != "get_ci_status"
+            or result.success is not True
+            or result.evidence.get("source") != "github_check_runs_api"
+            or not isinstance(sha, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", sha)
+            or result.evidence.get("head_sha") != sha
+            or result.data.get("checks_complete") is not True
+        ):
+            return "pending"
         checks = result.data.get("checks", [])
-        if not checks or result.data.get("checks_complete") is not True:
+        if not isinstance(checks, list) or not checks:
             return "pending"
         if any(item.get("status") != "completed" for item in checks):
             return "pending"
@@ -206,6 +218,45 @@ class AICodeOrchestrator:
                         raise _TaskBlocked("security evaluation did not pass")
                     if not self._criteria_passed(task, result):
                         raise _TaskBlocked("security worker did not verify every acceptance criterion")
+
+                    tester_result = next(
+                        (item for item in reversed(record.worker_results)
+                         if item.role == WorkerRole.TESTER),
+                        None,
+                    )
+                    tester_ci = next(
+                        (item for item in reversed(tester_result.tool_results)
+                         if item.name == "get_ci_status"),
+                        None,
+                    ) if tester_result else None
+                    if tester_ci is None or self._ci_outcome(tester_ci) != "passed":
+                        raise _TaskBlocked("tester CI evidence is missing or unverifiable")
+
+                    decision = self.policy.evaluate(
+                        "ci_read", risk=RiskLevel.LOW, repository=task.repository,
+                    )
+                    if not decision.allowed:
+                        raise _TaskBlocked("final CI verification is denied by policy")
+                    final_ci = await asyncio.wait_for(
+                        self.tools.execute(task, ToolCall("get_ci_status")),
+                        timeout=self.worker_timeout_seconds,
+                    )
+                    final_sha = final_ci.data.get("head_sha")
+                    tester_sha = tester_ci.data.get("head_sha")
+                    final_outcome = self._ci_outcome(final_ci)
+                    if final_outcome != "passed" or final_sha != tester_sha:
+                        record.stage_index = 3
+                        record.transition(TaskState.WAITING_EXTERNAL)
+                        self._event(
+                            "task.waiting_external", record, "rusa-master",
+                            {
+                                "reason": "final CI evidence requires re-verification",
+                                "tested_sha": tester_sha,
+                                "current_sha": final_sha,
+                                "ci_outcome": final_outcome,
+                            },
+                        )
+                        return record
                     record.stage_index = 7
                     continue
 
