@@ -1,12 +1,12 @@
+import asyncio
 import hashlib
-import json
 import importlib
+import json
 
 import pytest
 
 pytest.importorskip("mcp", reason="optional MCP runtime is not installed")
 server = importlib.import_module("rusa_mcp.server")
-
 
 def test_tenant_tokens_are_stored_as_hashes_and_resolve_to_one_tenant():
     token = "a-secure-test-token-that-is-at-least-32-characters"
