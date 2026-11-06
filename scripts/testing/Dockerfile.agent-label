@@ -1,0 +1,5 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG RELEASE_ID=ci
+LABEL org.opencontainers.image.version="${RELEASE_ID}"
