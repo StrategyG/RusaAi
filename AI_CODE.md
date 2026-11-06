@@ -51,7 +51,7 @@ No production credential may be supplied to a worker. GitHub access must use a n
 4. Read files only from the base or task work branch.
 5. Validate relative paths; reject absolute paths, traversal, .git, and protected paths.
 6. Limit file size and tool-call count.
-7. Prefix every task commit with the immutable task UUID marker; reuse an existing branch only when every commit ahead of base is owned by the same task.
+7. Use the deterministic task branch `<requested-work-branch>-<task-id-prefix>`; prefix every task commit with the immutable task UUID marker and reuse an existing branch only when every commit ahead of base is owned by the same task.
 8. Create or safely reuse the task's draft pull request; do not merge.
 9. Wait for checks associated with the exact work-branch commit SHA.
 10. Report PR URL, commit SHA, CI evidence, and unresolved blockers.

@@ -744,3 +744,22 @@ def test_github_gateway_reuses_existing_task_draft_pull_request(monkeypatch):
     )
     assert result["number"] == 12
     assert result["draft"] is True
+
+
+
+def test_github_gateway_derives_unique_branch_per_task():
+    task = make_task()
+    work_branch = GitHubToolGateway.task_work_branch(task)
+    assert work_branch == f"{task.repository.work_branch}-{task.task_id[:8]}"
+    assert work_branch != task.repository.work_branch
+
+
+def test_github_gateway_rejects_overlong_task_branch():
+    task = make_task()
+    task.repository = RepositoryTarget(
+        task.repository.full_name,
+        task.repository.base_branch,
+        "feature/" + ("x" * 240),
+    )
+    with pytest.raises(ValueError, match="ref length"):
+        GitHubToolGateway.task_work_branch(task)

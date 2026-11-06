@@ -561,6 +561,13 @@ class GitHubToolGateway:
         elif not self.allowed_repositories:
             raise ValueError("an explicit GitHub repository allowlist is required")
 
+    @staticmethod
+    def task_work_branch(task: CodingTask) -> str:
+        branch = f"{task.repository.work_branch}-{task.task_id[:8]}"
+        if len(branch) > 240:
+            raise ValueError("task work branch exceeds the supported GitHub ref length")
+        return branch
+
     async def execute(
         self,
         action: str,
@@ -593,7 +600,7 @@ class GitHubToolGateway:
 
         repository = task.repository.full_name
         base = task.repository.base_branch
-        work = task.repository.work_branch
+        work = self.task_work_branch(task)
         try:
             if action == "repo.list_tree":
                 ref = arguments.get("ref", base)
