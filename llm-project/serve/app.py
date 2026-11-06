@@ -762,7 +762,7 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
                     content = str(document.get("content", ""))[:3000]
                     if content:
                         evidence.append(
-                            f"[Source {index}: source_uri={source_uri}; document_id={document_id}]\\n{content}"
+                            f"[Source {index}: source_uri={source_uri}; document_id={document_id}]\n{content}"
                         )
                 if evidence:
                     insert_at = next(
@@ -783,7 +783,7 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
                     )
                     messages.insert(
                         insert_at + 1,
-                        ChatMessage(role="system", content="Retrieved knowledge:\\n\\n" + "\\n\\n".join(evidence)),
+                        ChatMessage(role="system", content="Retrieved knowledge:\n\n" + "\n\n".join(evidence)),
                     )
 
     try:
