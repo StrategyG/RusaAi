@@ -43,3 +43,17 @@ def test_schema_and_privilege_migration_gates_api_and_worker():
     assert "queue.initialize()" in migration_command
     assert "PostgresMemoryStore(dsn).initialize()" in migration_command
     assert "queue.configure_api_permissions()" in migration_command
+
+
+def test_knowledge_service_is_optional_and_loopback_bound():
+    services = load_compose()["services"]
+
+    assert services["rusa-agent-db"]["image"] == "pgvector/pgvector:pg16"
+    assert services["rusa-mcp"]["profiles"] == ["knowledge"]
+    assert services["rusa-mcp"]["ports"] == ["127.0.0.1:${RUSA_MCP_PORT:-8002}:8002"]
+    assert services["rusa-mcp"]["depends_on"] == {
+        "rusa-agent-migrate": {"condition": "service_completed_successfully"}
+    }
+    assert "ports" not in services["rusa-agent-worker"]
+    migration_command = " ".join(services["rusa-agent-migrate"]["command"])
+    assert "005_rag_knowledge_pgvector.sql" in migration_command
