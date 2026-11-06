@@ -79,6 +79,10 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Smoke-test agent runtime imports
+        run: |
+          docker run --rm rusa-agent-runtime:${{ github.sha }} \
+            python -c "import rusa_agents.api, rusa_agents.worker; print('agent runtime imports ok')"
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \

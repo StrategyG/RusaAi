@@ -47,6 +47,11 @@ The worker credential is an internal service identity and must never be exposed
 to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
 PostgreSQL same-worker-ID stale-token test before release.
 
+For rollout from a worker version that does not send lease tokens, drain and stop
+all old worker replicas before enabling the new queue migration and starting the
+new worker pool. Do not run mixed worker versions against the same queue: older
+workers cannot honor token fencing.
+
 ## Deployment rules
 
 - Do not merge or deploy while required CI checks are failing.
