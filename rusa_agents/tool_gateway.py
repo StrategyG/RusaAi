@@ -6,7 +6,9 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -41,54 +43,85 @@ class DockerSandbox:
         timeout_seconds: int = 600,
         memory_limit: str = "2g",
         cpu_limit: str = "2",
+        max_snapshot_bytes: int = 100_000_000,
     ) -> None:
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py310")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
+        self.max_snapshot_bytes = max_snapshot_bytes
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
         if profile not in self.PROFILES:
             raise ToolDenied(f"Unknown validation profile: {profile}")
         workspace = workspace.resolve(strict=True)
-        command = [
-            "docker", "run", "--rm",
-            "--network=none",
-            "--read-only",
-            "--user", "10001:10001",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--pids-limit=128",
-            f"--memory={self.memory_limit}",
-            f"--cpus={self.cpu_limit}",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-            "--mount", f"type=bind,src={workspace},dst=/workspace,rw",
-            "--env", "PYTHONDONTWRITEBYTECODE=1",
-            "--env", "PYTEST_ADDOPTS=-p no:cacheprovider",
-            "--workdir", "/workspace",
-            self.image,
-            *self.PROFILES[profile],
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                env={key: value for key, value in os.environ.items()
-                     if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
-            )
-        except FileNotFoundError as exc:
-            return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-        except subprocess.TimeoutExpired:
-            return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
-        output = (completed.stdout + "\n" + completed.stderr)[-20000:]
-        return ToolResult(
-            completed.returncode == 0,
-            output,
-            {"profile": profile, "exit_code": completed.returncode, "image": self.image},
+        if not workspace.is_dir():
+            raise ToolDenied("Sandbox workspace must be a directory")
+
+        totals = [0]
+
+        def bounded_copy(source: str, destination: str) -> str:
+            size = Path(source).stat().st_size
+            totals[0] += size
+            if totals[0] > self.max_snapshot_bytes:
+                raise ToolDenied("Sandbox snapshot exceeds configured size limit")
+            return shutil.copy2(source, destination)
+
+        ignore = shutil.ignore_patterns(
+            ".git", ".env*", ".secrets", "secrets", "credentials",
+            ".ssh", ".aws", ".azure", ".rusa-ai", ".venv", "venv",
+            "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules",
         )
+        # The real checkout and Git metadata are never mounted into test containers.
+        with tempfile.TemporaryDirectory(prefix=".rusa-sandbox-", dir=workspace.parent) as temp_root:
+            snapshot = Path(temp_root) / "workspace"
+            try:
+                shutil.copytree(
+                    workspace, snapshot, symlinks=True, ignore=ignore,
+                    copy_function=bounded_copy,
+                )
+            except (OSError, ToolDenied) as exc:
+                return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
+
+            command = [
+                "docker", "run", "--rm",
+                "--network=none",
+                "--read-only",
+                "--user", "10001:10001",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges:true",
+                "--pids-limit=128",
+                f"--memory={self.memory_limit}",
+                f"--cpus={self.cpu_limit}",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+                "--mount", f"type=bind,src={snapshot},dst=/workspace,rw",
+                "--env", "PYTHONDONTWRITEBYTECODE=1",
+                "--env", "PYTEST_ADDOPTS=-p no:cacheprovider",
+                "--workdir", "/workspace",
+                self.image,
+                *self.PROFILES[profile],
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                    env={key: value for key, value in os.environ.items()
+                         if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                )
+            except FileNotFoundError as exc:
+                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
+            except subprocess.TimeoutExpired:
+                return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
+            output = (completed.stdout + "\\n" + completed.stderr)[-20000:]
+            return ToolResult(
+                completed.returncode == 0,
+                output,
+                {"profile": profile, "exit_code": completed.returncode, "image": self.image,
+                 "snapshot_bytes": totals[0]},
+            )
 
 
 class WorkspaceToolGateway:
