@@ -1,5 +1,6 @@
 -r requirements.txt
 -r requirements-agent.txt
+-r requirements-rag-mcp.txt
 pytest>=8,<10
 httpx>=0.27,<1
 ruff>=0.9,<1
