@@ -47,7 +47,7 @@ class PostgresTaskQueue:
                     tenant_id TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     status TEXT NOT NULL DEFAULT 'queued'
-                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+                        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')),
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
                     max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
                     priority INTEGER NOT NULL DEFAULT 0,
@@ -134,6 +134,15 @@ class PostgresTaskQueue:
             """, (job_id, tenant_id, worker_id))
         return cur.rowcount == 1
 
+    def await_approval(self, job_id: int, tenant_id: str, worker_id: str, reason: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("""
+                UPDATE aicode_jobs SET status='awaiting_approval', lease_owner=NULL,
+                    lease_until=NULL, last_error=%s, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND status='running'
+            """, (reason[:4000], job_id, tenant_id, worker_id))
+        return cur.rowcount == 1
+
     def fail(self, job_id: int, tenant_id: str, worker_id: str,
              error: str, retry_delay_seconds: int = 30) -> bool:
         with self._connect() as conn:
@@ -151,7 +160,7 @@ class PostgresTaskQueue:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
                     lease_until=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running')
+                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
             """, (task_id, tenant_id))
         return cur.rowcount == 1
 
