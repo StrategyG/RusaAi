@@ -24,6 +24,15 @@ from .workers import AgentWorker
 logger = logging.getLogger("rusa-agent-worker")
 
 
+def _enabled_tool_set(knowledge_tools: set[str]) -> set[str]:
+    from .mcp_gateway import KNOWLEDGE_TOOLS
+
+    selected = set(knowledge_tools)
+    if not selected.issubset(KNOWLEDGE_TOOLS):
+        raise ValueError("configured knowledge tools contain an unapproved tool")
+    return (set(AgentWorker.TOOL_NAMES) - set(KNOWLEDGE_TOOLS)) | selected
+
+
 class LeaseLostError(RuntimeError):
     """Raised when the worker no longer owns the current task lease."""
 
@@ -84,6 +93,7 @@ class QueueWorker:
         queue: PostgresTaskQueue,
         orchestrator: AICodeOrchestrator,
         memory: PostgresMemoryStore,
+        memory_reader: Any | None = None,
         poll_interval_seconds: float = 1.0,
         maintenance_interval_seconds: float = 3600.0,
         worker_id: str | None = None,
@@ -95,10 +105,16 @@ class QueueWorker:
         self.queue = queue
         self.orchestrator = orchestrator
         self.memory = memory
+        self.memory_reader = memory_reader or memory
         self.poll_interval_seconds = poll_interval_seconds
         self.maintenance_interval_seconds = maintenance_interval_seconds
         self.worker_id = worker_id or f"{socket.gethostname()[:80]}-{uuid.uuid4().hex[:12]}"
         self.lease_seconds = lease_seconds
+
+    def close(self) -> None:
+        close = getattr(self.memory_reader, "close", None)
+        if callable(close):
+            close()
 
     async def _run_with_heartbeat(
         self,
@@ -344,6 +360,7 @@ def build_worker() -> QueueWorker:
     memory_reader = memory
     tool_gateway = github
     knowledge_service = None
+    knowledge_tools: set[str] = set()
     if rag_enabled:
         knowledge_service = KnowledgeService.from_env(check_ready=True)
         memory_reader = CompositeMemoryReader(memory, knowledge_service)
@@ -361,6 +378,7 @@ def build_worker() -> QueueWorker:
                     "search_knowledge,get_document,list_collections",
                 ).split(",") if item.strip()
             }
+            knowledge_tools = allowed_tools
             allowed_hosts = {
                 item.strip() for item in os.getenv("RUSA_MCP_INTERNAL_HTTP_HOSTS", "rusa-mcp").split(",")
                 if item.strip()
@@ -372,12 +390,22 @@ def build_worker() -> QueueWorker:
                 allow_http_hosts=allowed_hosts,
             )
         else:
+            knowledge_tools = {
+                item.strip() for item in os.getenv(
+                    "RUSA_MCP_ALLOWED_TOOLS",
+                    "search_knowledge,get_document,list_collections",
+                ).split(",") if item.strip()
+            }
             knowledge_gateway = LocalKnowledgeGateway(
                 knowledge_service,
                 default_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
             )
         tool_gateway = CompositeToolGateway(github, knowledge_gateway)
-    workers = [AgentWorker(role, provider, memory_reader) for role in WorkerRole]
+    enabled_tools = _enabled_tool_set(knowledge_tools)
+    workers = [
+        AgentWorker(role, provider, memory_reader, enabled_tools=enabled_tools)
+        for role in WorkerRole
+    ]
     orchestrator = AICodeOrchestrator(
         workers=workers,
         tools=tool_gateway,
@@ -390,6 +418,7 @@ def build_worker() -> QueueWorker:
         queue=queue,
         orchestrator=orchestrator,
         memory=memory,
+        memory_reader=memory_reader,
         poll_interval_seconds=float(os.getenv("RUSA_AGENT_POLL_INTERVAL", "1")),
         lease_seconds=int(os.getenv("RUSA_AGENT_LEASE_SECONDS", "300")),
     )
@@ -405,7 +434,10 @@ async def _serve() -> None:
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop_event.set)
-    await worker.run_forever(stop_event)
+    try:
+        await worker.run_forever(stop_event)
+    finally:
+        worker.close()
 
 
 def main() -> None:
