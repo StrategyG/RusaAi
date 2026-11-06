@@ -133,6 +133,12 @@ class AICodeRuntime:
             record = await execution
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease; refusing to publish")
+            if record.state == TaskState.AWAITING_APPROVAL:
+                await asyncio.to_thread(
+                    self.queue.await_approval, job.id, job.tenant_id, self.worker_id,
+                    "; ".join(record.errors) or "Human intervention required",
+                )
+                return True
             if record.state != TaskState.SUCCEEDED:
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id,
