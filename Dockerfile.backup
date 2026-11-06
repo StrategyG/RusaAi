@@ -15,4 +15,4 @@ COPY scripts/postgres /app/scripts/postgres
 RUN chmod 0755 /app/scripts/postgres/*.sh
 
 USER 10001:10001
-CMD ["/app/scripts/postgres/backup.sh"]
+CMD ["bash", "/app/scripts/postgres/backup.sh"]
