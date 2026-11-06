@@ -562,3 +562,63 @@ def test_checkpoint_persistence_failure_is_not_reported_as_task_success():
                 checkpoint_callback=fail,
             )
         )
+
+
+
+def test_github_gateway_branch_diff_is_complete_and_redacts_secrets(monkeypatch):
+    task = make_task()
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+
+    async def fake_request(method, path, *, json_body=None, params=None, allow_not_found=False):
+        if path.endswith("/branches/main"):
+            return {"commit": {"sha": "a" * 40}}
+        if path.endswith("/branches/" + task.repository.work_branch):
+            return {"commit": {"sha": "b" * 40}}
+        if "/compare/" in path:
+            return {
+                "status": "ahead",
+                "behind_by": 0,
+                "changed_files": 1,
+                "files": [{
+                    "filename": "rusa_agents/example.py",
+                    "status": "modified",
+                    "additions": 1,
+                    "deletions": 0,
+                    "patch": "+TOKEN = 'ghp_" + "A" * 24 + "'",
+                }],
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    result = asyncio.run(gateway.execute(task, ToolCall("get_branch_diff")))
+    assert result.success is True
+    assert result.data["diff_complete"] is True
+    assert result.data["changed_files"] == 1
+    assert "[REDACTED TOKEN]" in result.data["files"][0]["patch"]
+
+
+def test_github_gateway_branch_diff_fails_closed_for_missing_patch(monkeypatch):
+    task = make_task()
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+
+    async def fake_request(method, path, *, json_body=None, params=None, allow_not_found=False):
+        if path.endswith("/branches/main"):
+            return {"commit": {"sha": "a" * 40}}
+        if path.endswith("/branches/" + task.repository.work_branch):
+            return {"commit": {"sha": "b" * 40}}
+        if "/compare/" in path:
+            return {
+                "status": "ahead", "behind_by": 0, "changed_files": 1,
+                "files": [{"filename": "rusa_agents/example.py", "status": "modified"}],
+            }
+        raise AssertionError(path)
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    result = asyncio.run(gateway.execute(task, ToolCall("get_branch_diff")))
+    assert result.data["diff_complete"] is False
