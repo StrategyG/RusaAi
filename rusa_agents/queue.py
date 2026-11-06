@@ -42,6 +42,11 @@ class PostgresTaskQueue:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     @staticmethod
+    def _require_policy_audit_actor(actor: str | None) -> None:
+        if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
+            raise RuntimeError("Production task queue operations require a policy audit actor")
+
+    @staticmethod
     def _record_policy_event(
         conn,
         tenant_id: str,
@@ -221,6 +226,7 @@ class PostgresTaskQueue:
     ) -> bool:
         if not tenant_id or not task_id or max_attempts < 1:
             raise ValueError("tenant_id, task_id, and positive max_attempts are required")
+        self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
@@ -403,6 +409,7 @@ class PostgresTaskQueue:
         """Explicitly requeue a failed or approval-paused task for a tenant."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
+        self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
@@ -422,6 +429,7 @@ class PostgresTaskQueue:
     def cancel(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
+        self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
@@ -438,6 +446,7 @@ class PostgresTaskQueue:
     def get(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> dict[str, Any] | None:
+        self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
