@@ -1,58 +1,588 @@
+import hashlib
+import json
 import os
 import sys
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")))
+sys.path.insert(
+    0,
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
+)
 
-from app import app
+from app import (  # noqa: E402
+    GenerationResult,
+    _load_api_key_tenants,
+    _load_task_validator,
+    app,
+)
 
-client = TestClient(app)
-
-
-def test_health_endpoint():
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "ok"
-
-
-def test_chat_completions_endpoint():
-    payload = {
-        "messages": [
-            {"role": "user", "content": "Hello"}
-        ]
-    }
-    response = client.post("/v1/chat/completions", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "choices" in data
+TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
 
-def test_validate_task_endpoint_valid():
-    valid_envelope = {
+class FakeAuditLog:
+    def __init__(self):
+        self.calls = []
+
+    def record(self, event, task_id, actor, details=None, tenant_id="default"):
+        self.calls.append(
+            {
+                "event": event,
+                "task_id": task_id,
+                "actor": actor,
+                "details": details or {},
+                "tenant_id": tenant_id,
+            }
+        )
+
+
+class FakeBackend:
+    def generate(
+        self,
+        messages,
+        *,
+        max_new_tokens,
+        temperature,
+        top_p,
+    ):
+        assert messages[-1].content == "Hello RUSA"
+        assert max_new_tokens == 64
+        return GenerationResult(
+            content="Hello from a test inference backend.",
+            prompt_tokens=12,
+            completion_tokens=8,
+            finish_reason="stop",
+        )
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.delenv("RUSA_API_KEY_TENANTS_JSON", raising=False)
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "false")
+    monkeypatch.setenv("RUSA_TENANT_ID", "default")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-ai-v1")
+    monkeypatch.delenv("TASK_ENVELOPE_SCHEMA_PATH", raising=False)
+    _load_task_validator.cache_clear()
+
+    with TestClient(app) as test_client:
+        app.state.backend = FakeBackend()
+        app.state.audit_log = FakeAuditLog()
+        yield test_client
+        app.state.backend = None
+        app.state.task_queue = None
+        app.state.audit_log = None
+
+    _load_task_validator.cache_clear()
+
+
+def auth_headers():
+    return {"X-API-Key": TEST_API_KEY}
+
+
+def valid_envelope():
+    return {
         "protocol_version": "1.0",
         "task_id": str(uuid.uuid4()),
         "message_id": str(uuid.uuid4()),
         "type": "task.create",
-        "from": "agent-a",
-        "to": "agent-b",
+        "from": {"agent_id": "human-1", "role": "human"},
+        "to": {"agent_id": "rusa-main", "role": "rusa_orchestrator"},
         "created_at": "2026-11-06T10:00:00Z",
-        "task": {"name": "Test Task"},
-        "policy": {}
+        "task": {
+            "objective": "Run a production readiness test",
+            "acceptance_criteria": ["All required tests pass"],
+            "repository": "StrategyG/RusaAi",
+            "base_branch": "main",
+            "work_branch": "feature/readiness-test",
+        },
+        "policy": {
+            "allowed_actions": ["read_repository"],
+            "prohibited_actions": ["deploy"],
+            "human_approval_required": ["merge", "deploy"],
+        },
     }
-    response = client.post("/v1/validate-task", json={"envelope": valid_envelope})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["valid"] is True
 
 
-def test_validate_task_endpoint_invalid():
-    invalid_envelope = {
-        "protocol_version": "1.0"
-    }
-    response = client.post("/v1/validate-task", json={"envelope": invalid_envelope})
+def test_liveness_endpoint_is_public(client):
+    response = client.get("/health/live")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.headers["X-Request-ID"]
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_legacy_health_endpoint_is_public(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["service"] == "rusa-ai-serve"
+
+
+def test_readiness_reports_missing_model(client):
+    app.state.backend = None
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["checks"]["model_loaded"] is False
+
+
+def test_chat_completion_uses_backend_and_returns_usage(client):
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={
+            "model": "rusa-ai-v1",
+            "messages": [{"role": "user", "content": "Hello RUSA"}],
+            "max_tokens": 64,
+        },
+    )
     assert response.status_code == 200
     data = response.json()
-    assert data["valid"] is False
+    assert data["object"] == "chat.completion"
+    assert data["choices"][0]["message"]["content"] == (
+        "Hello from a test inference backend."
+    )
+    assert data["usage"] == {
+        "prompt_tokens": 12,
+        "completion_tokens": 8,
+        "total_tokens": 20,
+    }
+
+
+def test_chat_completion_requires_api_key(client):
+    response = client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 401
+
+
+def test_missing_api_key_configuration_fails_closed(client, monkeypatch):
+    monkeypatch.delenv("RUSA_API_KEY")
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 503
+
+
+def test_chat_completion_returns_503_when_model_is_not_loaded(client):
+    app.state.backend = None
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 503
+
+
+def test_streaming_is_not_silently_ignored(client):
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={
+            "messages": [{"role": "user", "content": "Hello RUSA"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 501
+
+
+def test_unknown_model_is_rejected(client):
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={
+            "model": "unknown-model",
+            "messages": [{"role": "user", "content": "Hello RUSA"}],
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_invalid_chat_role_is_rejected(client):
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "tool", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 422
+
+
+def test_valid_a2a_envelope_passes_schema_validation(client):
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"valid": True, "errors": []}
+
+
+def test_invalid_a2a_envelope_fails_schema_validation(client):
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": {"protocol_version": "1.0"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert response.json()["errors"]
+
+
+def test_a2a_schema_missing_fails_closed(client, monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "TASK_ENVELOPE_SCHEMA_PATH",
+        str(tmp_path / "missing-schema.json"),
+    )
+    _load_task_validator.cache_clear()
+
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 503
+
+
+def test_a2a_validation_requires_api_key(client):
+    response = client.post(
+        "/v1/validate-task",
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 401
+
+
+def test_agent_task_submission_is_authenticated_and_idempotent(client, monkeypatch):
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, tenant_id, task_id, payload, idempotency_key):
+            self.calls.append((tenant_id, task_id, payload, idempotency_key))
+            return {"task_id": task_id, "state": "queued"}
+
+        def get(self, tenant_id, task_id):
+            return {
+                "task_id": task_id,
+                "state": "succeeded",
+                "attempts": 1,
+                "max_attempts": 3,
+                "result": {"state": "succeeded"},
+                "created_at": "2026-11-06T00:00:00Z",
+                "updated_at": "2026-11-06T00:01:00Z",
+            }
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0001"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 202
+    assert response.json()["state"] == "queued"
+    assert len(queue.calls) == 1
+    assert queue.calls[0][0] == "default"
+    assert queue.calls[0][3] == "task-key-0001"
+    assert app.state.audit_log.calls[0]["event"] == "task.enqueue_requested"
+    assert app.state.audit_log.calls[0]["tenant_id"] == "default"
+
+
+def test_agent_task_submission_requires_authentication(client):
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={"Idempotency-Key": "task-key-0002"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 401
+
+
+def test_agent_task_submission_fails_closed_without_queue(client, monkeypatch):
+    app.state.task_queue = None
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0003"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 503
+
+
+def test_agent_task_submission_rejects_non_create_envelope(client, monkeypatch):
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    class FakeQueue:
+        def enqueue(self, *args):
+            raise AssertionError("queue must not receive non-create events")
+
+    app.state.task_queue = FakeQueue()
+    envelope = valid_envelope()
+    envelope["type"] = "task.cancel"
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0004"},
+        json={"envelope": envelope},
+    )
+    assert response.status_code == 422
+
+
+
+def test_agent_task_status_is_authenticated_and_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def get(self, tenant_id, task_id):
+            assert tenant_id == "tenant-one"
+            return {
+                "task_id": task_id,
+                "state": "succeeded",
+                "attempts": 1,
+                "max_attempts": 3,
+                "result": {"state": "succeeded"},
+                "created_at": "2026-11-06T00:00:00Z",
+                "updated_at": "2026-11-06T00:01:00Z",
+            }
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-one")
+    response = client.get(
+        f"/v1/agent/tasks/{uuid.uuid4()}",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "succeeded"
+
+
+def test_agent_task_status_returns_404_for_unknown_task(client, monkeypatch):
+    class FakeQueue:
+        def get(self, tenant_id, task_id):
+            return None
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.get(
+        f"/v1/agent/tasks/{uuid.uuid4()}",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 404
+
+
+
+def test_api_key_hash_map_scopes_agent_tasks_to_authenticated_tenant(client, monkeypatch):
+    tenant_key = "tenant-specific-test-api-key-that-is-longer-than-32-chars"
+    tenant_hash = hashlib.sha256(tenant_key.encode("utf-8")).hexdigest()
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "RUSA_API_KEY_TENANTS_JSON",
+        json.dumps({tenant_hash: "tenant-acme"}),
+    )
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, tenant_id, task_id, payload, idempotency_key):
+            self.calls.append((tenant_id, payload["tenant_id"]))
+            return {"task_id": task_id, "state": "queued"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={
+            "X-API-Key": tenant_key,
+            "Idempotency-Key": "tenant-acme-key-01",
+        },
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 202
+    assert queue.calls == [("tenant-acme", "tenant-acme")]
+
+
+def test_invalid_api_key_tenant_map_fails_closed(client, monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY_TENANTS_JSON", "{not-json")
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 503
+
+
+def test_chunked_or_oversized_request_body_is_rejected(client):
+    response = client.post(
+        "/v1/validate-task",
+        content=b"x" * (1024 * 1024 + 1),
+    )
+    assert response.status_code == 413
+
+
+
+def test_agent_task_cancellation_is_tenant_scoped_and_idempotent(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def cancel(self, tenant_id, task_id):
+            self.calls.append((tenant_id, task_id))
+            return True
+
+        def get(self, tenant_id, task_id):
+            return {"state": "cancelled"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-cancel")
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent/tasks/{task_id}/cancel",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 202
+    assert response.json() == {"task_id": task_id, "state": "cancelled"}
+    assert queue.calls == [("tenant-cancel", task_id)]
+    assert app.state.audit_log.calls[0]["event"] == "task.cancel_requested"
+    assert app.state.audit_log.calls[0]["tenant_id"] == "tenant-cancel"
+
+
+def test_agent_task_cancellation_returns_409_for_terminal_task(client, monkeypatch):
+    class FakeQueue:
+        def cancel(self, tenant_id, task_id):
+            return False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "succeeded"}
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        f"/v1/agent/tasks/{uuid.uuid4()}/cancel",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 409
+
+
+
+def test_agent_queue_stats_are_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def stats(self, tenant_id):
+            return {
+                "tenant_id": tenant_id,
+                "counts": {"queued": 2},
+                "oldest_queued_age_seconds": 12.5,
+            }
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-metrics")
+    response = client.get("/v1/agent/queue/stats", headers=auth_headers())
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == "tenant-metrics"
+
+
+def test_agent_dead_letter_list_is_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def list_dead_letters(self, tenant_id, limit):
+            assert tenant_id == "tenant-dead"
+            assert limit == 50
+            return [{"task_id": str(uuid.uuid4()), "state": "dead_letter"}]
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-dead")
+    response = client.get("/v1/agent/dead-letters", headers=auth_headers())
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+
+
+def test_agent_dead_letter_replay_requires_dead_letter_state(client, monkeypatch):
+    class FakeQueue:
+        def retry_dead_letter(self, tenant_id, task_id):
+            return False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "succeeded"}
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        f"/v1/agent/tasks/{uuid.uuid4()}/retry",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 409
+
+
+
+def test_blank_api_key_tenant_map_uses_single_tenant_mode(monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY_TENANTS_JSON", "   ")
+    assert _load_api_key_tenants() is None
+
+
+
+def test_multi_tenant_api_key_must_meet_minimum_entropy_length(client, monkeypatch):
+    short_key = "short-key"
+    short_hash = hashlib.sha256(short_key.encode("utf-8")).hexdigest()
+    monkeypatch.setenv(
+        "RUSA_API_KEY_TENANTS_JSON",
+        json.dumps({short_hash: "tenant-short-key"}),
+    )
+    response = client.post(
+        "/v1/validate-task",
+        headers={"X-API-Key": short_key},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 401
+
+
+
+def test_agent_task_submission_fails_closed_when_audit_is_unavailable(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, *args):
+            self.calls.append(args)
+            return {"task_id": args[1], "state": "queued"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    app.state.audit_log = None
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "audit-required-01"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 503
+    assert queue.calls == []
+
+
+def test_agent_task_retry_is_audited_before_replay(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.replayed = False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "dead_letter"}
+
+        def retry_dead_letter(self, tenant_id, task_id):
+            self.replayed = True
+            return True
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent/tasks/{task_id}/retry",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 202
+    assert queue.replayed is True
+    assert app.state.audit_log.calls[0]["event"] == "task.retry_requested"

@@ -1,46 +1,112 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - "fix/**"
+      - "feat/**"
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Run Python Tests and Linting
+    name: Lint, test, and audit dependencies
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rusa
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: rusa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusa -d rusa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://rusa:ci-postgres-password@localhost:5432/rusa_test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install package and development dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
+          python -m pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check rusa_agents llm-project/serve tests
+      - name: Compile
+        run: python -m compileall -q rusa_agents llm-project tests
+      - name: Security static analysis
+        run: bandit -q -r rusa_agents
+      - name: Test
+        run: pytest -q
+      - name: Audit core production dependencies
+        run: pip-audit -r requirements.txt
+      - name: Audit local-model production dependencies
+        run: pip-audit -r requirements-model.txt
 
-      - name: Lint and syntax check
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
-
-      - name: Run tests with pytest
-        run: |
-          pytest
-
-  docker-build:
-    name: Verify Docker Image Build
+  container:
+    name: Build and smoke-test container
     runs-on: ubuntu-latest
+    needs: test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
         run: |
-          docker build -t rusa-ai:latest .
+          cp .env.example .env
+          docker compose config --quiet
+          rm .env
+      - name: Build API, model, and worker images
+        run: |
+          docker build --pull --target api -t rusa-ai-api:${{ github.sha }} .
+          docker build --pull --target model-runtime -t rusa-ai-model:${{ github.sha }} .
+          docker build --pull --target agent-runtime -t rusa-ai-agent:${{ github.sha }} .
+      - name: Verify worker package imports
+        run: |
+          docker run --rm rusa-ai-agent:${{ github.sha }} \
+            python -c "from rusa_agents.worker import run_worker; print('worker import ok')"
+      - name: Run model-serving container
+        run: |
+          docker run -d --name rusa-ai-ci \
+            -p 127.0.0.1:8000:8000 \
+            -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
+            rusa-ai-model:${{ github.sha }}
+      - name: Verify application imports
+        run: |
+          docker exec rusa-ai-ci python -c "import app; import rusa_agents; print('application imports ok')"
+      - name: Verify liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-ai-ci
+          exit 1
+      - name: Verify readiness fails closed without a model artifact
+        run: |
+          status=$(curl --silent --output /tmp/rusa-ready.json --write-out "%{http_code}" http://127.0.0.1:8000/health/ready)
+          test "$status" = "503"
+          python -c "import json; data=json.load(open('/tmp/rusa-ready.json')); assert data['status']=='not_ready' and data['checks']['model_loaded'] is False"
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rusa-ai-ci || true
