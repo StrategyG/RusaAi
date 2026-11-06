@@ -229,6 +229,7 @@ class WorkerResult:
     risk: RiskLevel = RiskLevel.LOW
     tool_results: tuple[ToolResult, ...] = ()
     criteria_results: Mapping[str, bool] = field(default_factory=dict)
+    criteria_evidence: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -304,6 +305,7 @@ class TaskRecord:
                         for result in item.tool_results
                     ],
                     "criteria_results": dict(item.criteria_results),
+                    "criteria_evidence": dict(item.criteria_evidence),
                 }
                 for item in self.worker_results
             ],
@@ -344,6 +346,7 @@ class TaskRecord:
                     risk=RiskLevel(item.get("risk", "low")),
                     tool_results=results,
                     criteria_results=item.get("criteria_results", {}),
+                    criteria_evidence=item.get("criteria_evidence", {}),
                 )
             )
         return record
