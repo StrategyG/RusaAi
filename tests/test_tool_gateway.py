@@ -61,6 +61,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
     assert result.evidence["profile"] == "pytest"
+    assert "PYTHONPYCACHEPREFIX=/tmp/pycache" in command
 
 
 def test_gateway_rejects_credential_like_files(tmp_path):
@@ -95,3 +96,22 @@ def test_gateway_atomic_write_creates_expected_content(tmp_path):
     result = gateway.write_file("src/generated.py", "VALUE = 42\n", WorkerRole.DEVELOPER)
     assert result.ok
     assert (tmp_path / "src" / "generated.py").read_text() == "VALUE = 42\n"
+
+
+
+def test_tester_worker_cannot_run_security_profile(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.run_check("bandit", WorkerRole.TESTER)
+
+
+def test_case_insensitive_workflow_path_is_protected(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.read_file(".GITHUB/workflows/ci.yml")
+
+
+def test_case_insensitive_migration_write_is_protected(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.write_file("MIGRATIONS/unsafe.sql", "DROP TABLE users;", WorkerRole.DEVELOPER)
