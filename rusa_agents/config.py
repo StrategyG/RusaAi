@@ -21,7 +21,7 @@ class RuntimeConfig:
     tenant_repositories: dict[str, list[str]]
 
     @classmethod
-    def from_env(cls) -> "RuntimeConfig":
+    def from_env(cls) -> RuntimeConfig:
         try:
             keys = json.loads(os.getenv("RUSA_API_KEYS", "{}"))
         except json.JSONDecodeError as exc:
