@@ -94,3 +94,16 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
     )
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.AWAITING_APPROVAL
+
+
+def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
+    failing = workers()
+    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    orchestrator = AICodeOrchestrator(
+        failing,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("check:pytest" in error for error in record.errors)
