@@ -18,14 +18,19 @@ def apply_database_migrations():
     if not DSN:
         pytest.skip("PostgreSQL integration DSN is not configured")
     migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    with connect() as conn:
+    import psycopg
+
+    with psycopg.connect(DSN, autocommit=True) as conn:
         for migration_name in (
             "001_aicode_core.sql",
             "002_aicode_lease_fencing.sql",
             "003_aicode_task_results.sql",
             "004_aicode_tenant_rls.sql",
         ):
-            conn.execute((migration_root / migration_name).read_text(encoding="utf-8"))
+            conn.execute(
+                (migration_root / migration_name).read_text(encoding="utf-8"),
+                prepare=False,
+            )
 
 
 def set_role_and_tenant(conn, role, tenant):
@@ -123,3 +128,16 @@ def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
                     "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
                     (str(uuid4()), "rls-worker-a", '{"objective":"worker cannot enqueue"}'),
                 )
+
+
+
+def test_runtime_role_groups_are_non_login_non_bypass():
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+            FROM pg_roles
+            WHERE rolname = ANY(%s)
+        """, (["rusa_api_runtime", "rusa_worker_runtime"],)).fetchall()
+
+    assert {row[0] for row in rows} == {"rusa_api_runtime", "rusa_worker_runtime"}
+    assert all(row[1] is False and row[2] is False and row[3] is False for row in rows)
