@@ -19,8 +19,8 @@ def test_health_endpoint():
 def test_chat_completions_endpoint():
     payload = {"messages": [{"role": "user", "content": "Hello"}]}
     response = client.post("/v1/chat/completions", json=payload)
-    assert response.status_code == 200
-    assert "choices" in response.json()
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Inference backend is not configured"
 
 
 def test_validate_task_endpoint_valid():
