@@ -111,3 +111,49 @@ def test_health_liveness_does_not_require_database_or_tenant_secrets():
     )
     assert sent[0]["status"] == 200
     assert json.loads(sent[1]["body"])["status"] == "ok"
+
+def test_concurrent_requests_keep_tenant_contexts_isolated():
+    tokens = {
+        "tenant-a": "tenant-a-token-that-is-at-least-32-characters",
+        "tenant-b": "tenant-b-token-that-is-at-least-32-characters",
+    }
+    key_hashes = {
+        hashlib.sha256(token.encode("utf-8")).hexdigest(): tenant
+        for tenant, token in tokens.items()
+    }
+    observed = []
+
+    async def inner_app(scope, receive, send):
+        tenant = server.CURRENT_TENANT.get()
+        await asyncio.sleep(0)
+        observed.append(tenant)
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = server.TenantAuthMiddleware(inner_app, key_hashes)
+
+    async def request(token):
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            pass
+
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/mcp",
+                "headers": [(b"authorization", f"Bearer {token}".encode("ascii"))],
+            },
+            receive,
+            send,
+        )
+
+    async def exercise():
+        await asyncio.gather(*(request(token) for token in tokens.values()))
+
+    asyncio.run(exercise())
+    assert sorted(observed) == ["tenant-a", "tenant-b"]
+    assert server.CURRENT_TENANT.get() is None
+
