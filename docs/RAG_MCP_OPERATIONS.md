@@ -8,7 +8,7 @@ not enabled by the core API merely because its package is installed.
 - Python 3.11 or newer.
 - PostgreSQL 16 with the pgvector extension available.
 - A dedicated database role with only the privileges granted by
-  `migrations/005_rag_knowledge_pgvector.sql`.
+  `migrations/007_rag_knowledge_pgvector.sql`.
 - An OpenAI-compatible embeddings endpoint. The default model is
   `text-embedding-3-small` with 1536 dimensions; the configured embedding model
   must return vectors of the configured dimension.
@@ -17,7 +17,7 @@ not enabled by the core API merely because its package is installed.
 
 ## Database setup
 
-Apply `migrations/005_rag_knowledge_pgvector.sql` as a database owner or
+Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or
 administrator on the dedicated knowledge database. The migration creates
 tenant-scoped document and chunk tables, pgvector indexes, forced row-level
 security, and a non-login knowledge-worker role. Follow the migration's grant
