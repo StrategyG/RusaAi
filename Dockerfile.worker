@@ -11,8 +11,8 @@ RUN apt-get update \
 
 COPY --chown=appuser:appuser . /app
 
-RUN python -m pip install --no-cache-dir . \
-    && python -m pip uninstall -y setuptools wheel jaraco.context || true
+RUN python -m pip install --no-cache-dir .
+RUN python -m pip uninstall -y setuptools wheel jaraco.context || true
 RUN SITE_PACKAGES="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
     && rm -rf "${SITE_PACKAGES}/setuptools" "${SITE_PACKAGES}"/setuptools-*.dist-info \
          "${SITE_PACKAGES}/wheel" "${SITE_PACKAGES}"/wheel-*.dist-info \
