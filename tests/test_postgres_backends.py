@@ -286,3 +286,70 @@ def test_postgres_audit_redacts_credentials_before_persisting():
     assert row is not None
     assert row[0]["api_key"] == "[REDACTED]"
     assert row[0]["nested"]["authorization"] == "[REDACTED]"
+
+
+
+def test_postgres_runtime_roles_enforce_adapter_boundaries(monkeypatch):
+    import psycopg
+
+    api_dsn = os.getenv("RUSA_API_DATABASE_URL")
+    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL")
+    if not api_dsn or not worker_dsn:
+        pytest.skip("Dedicated PostgreSQL runtime role DSNs are not configured")
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    api_queue = PostgresTaskQueue(api_dsn)
+    worker_queue = PostgresTaskQueue(worker_dsn)
+    api_queue.initialize()
+    worker_queue.initialize()
+
+    task_id = str(uuid4())
+    tenant_id = "restricted-adapter-" + task_id[:8]
+    assert api_queue.enqueue(
+        task_id, tenant_id, {"objective": "role isolation"}, priority=1_000_000
+    )
+    assert api_queue.get(task_id, "different-tenant") is None
+
+    job = worker_queue.claim("restricted-ci-worker", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    assert worker_queue.complete(job.id, tenant_id, "restricted-ci-worker", job.lease_token)
+    assert api_queue.get(task_id, tenant_id)["status"] == "succeeded"
+
+    memory = PostgresMemory(worker_dsn)
+    memory.initialize()
+    memory.save(task_id, "StrategyG/RusaAi", "completed", {"ok": True}, tenant_id=tenant_id)
+    assert memory.get(task_id, tenant_id)["payload"]["ok"] is True
+    assert memory.get(task_id, "different-tenant") is None
+
+    limiter = PostgresRateLimiter(api_dsn)
+    limiter.initialize()
+    route = "restricted-role:" + task_id
+    assert limiter.hit(tenant_id, route, 1)[0] is True
+    assert limiter.hit("different-tenant", route, 1)[0] is True
+
+    audit = PostgresAuditLog(worker_dsn, os.environ["RUSA_AUDIT_HMAC_KEY"])
+    audit.initialize()
+    audit.record("restricted.role.test", task_id, "worker", {"ok": True}, tenant_id=tenant_id)
+    assert audit.verify()
+
+    with psycopg.connect(api_dsn) as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("SELECT * FROM aicode_memory")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("SELECT * FROM aicode_audit_events")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE aicode_jobs SET payload='{}'::jsonb WHERE task_id=%s",
+                    (task_id,),
+                )
+
+    with psycopg.connect(worker_dsn) as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, '{}'::jsonb)",
+                    (str(uuid4()), tenant_id),
+                )
