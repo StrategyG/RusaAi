@@ -116,14 +116,27 @@ class QueueWorker:
                     "task checkpoint rejected because the lease is no longer valid"
                 )
 
+        async def tool_guard() -> bool:
+            try:
+                return await asyncio.to_thread(
+                    self.queue.owns_lease,
+                    tenant_id,
+                    task_id,
+                    self.worker_id,
+                )
+            except Exception:
+                logger.exception("lease ownership check failed task_id=%s", task_id)
+                return False
+
         execution = asyncio.create_task(
             self.orchestrator.run(
                 task,
                 checkpoint,
                 checkpoint_callback=persist,
+                tool_guard=tool_guard,
             )
         )
-        interval = max(5, self.lease_seconds // 3)
+        interval = max(5, self.lease_seconds // 6)
         while True:
             done, _ = await asyncio.wait({execution}, timeout=interval)
             if done:
