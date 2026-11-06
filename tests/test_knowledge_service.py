@@ -214,3 +214,22 @@ def test_ingest_invalid_scope_is_rejected_before_embedding_or_store_access():
     assert embeddings.inputs == []
     assert store.ingested is None
 
+def test_invalid_search_limit_is_rejected_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    for limit in (0, 21, "5", True):
+        try:
+            service.search(
+                tenant_id="tenant-a",
+                collection="agent",
+                query="valid search query",
+                limit=limit,
+            )
+        except ValueError as exc:
+            assert "limit" in str(exc)
+        else:
+            raise AssertionError("invalid retrieval limit was accepted")
+    assert embeddings.inputs == []
+    assert store.search_args is None
+
