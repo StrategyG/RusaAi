@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker, SchemaError
+import jsonschema
 
 
 _REPOSITORY_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "devops"
@@ -24,7 +24,7 @@ class ContractValidationError(ValueError):
 
 
 @lru_cache(maxsize=len(_SCHEMA_FILES))
-def _validator(contract_name: str) -> Draft202012Validator:
+def _validator(contract_name: str) -> jsonschema.Draft202012Validator:
     try:
         filename = _SCHEMA_FILES[contract_name]
     except KeyError as exc:
@@ -39,11 +39,11 @@ def _validator(contract_name: str) -> Draft202012Validator:
         raise RuntimeError(f"cannot load DevOps contract schema {filename}") from exc
 
     try:
-        Draft202012Validator.check_schema(schema)
-    except SchemaError as exc:
+        jsonschema.Draft202012Validator.check_schema(schema)
+    except jsonschema.exceptions.SchemaError as exc:
         raise RuntimeError(f"invalid DevOps contract schema {filename}: {exc.message}") from exc
 
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
 
 
 def validate_contract(contract_name: str, payload: dict[str, Any]) -> None:
