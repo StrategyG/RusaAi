@@ -679,6 +679,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                         },
                     }
                 )
+            yield _sse("[DONE]")
         except asyncio.TimeoutError:
             yield _sse(
                 {
@@ -688,6 +689,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     }
                 }
             )
+            yield _sse("[DONE]")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -705,7 +707,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     }
                 }
             )
-        yield _sse("[DONE]")
+            yield _sse("[DONE]")
         finally:
             controller.release()
 
