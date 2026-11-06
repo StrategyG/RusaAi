@@ -24,7 +24,8 @@ def reader_database_identity():
     ).read()
     login = "rusa_reader_test_" + uuid.uuid4().hex[:12]
     password = secrets.token_urlsafe(32)
-    tenant = "tenant-reader-test"
+    tenant = "tenant-reader-" + uuid.uuid4().hex[:10]
+    other_tenant = "tenant-other-" + uuid.uuid4().hex[:10]
 
     with psycopg.connect(DSN, autocommit=True) as admin:
         admin.execute(migration_007)
@@ -45,10 +46,10 @@ def reader_database_identity():
                 (tenant_id, collection, source_uri, title, content_hash, metadata)
             VALUES
                 (%s, 'agent', 'kb://reader-test/a', 'Reader tenant A', %s, '{}'::jsonb),
-                ('tenant-other-test', 'agent', 'kb://reader-test/b', 'Other tenant', %s, '{}'::jsonb)
+                (%s, 'agent', 'kb://reader-test/b', 'Other tenant', %s, '{}'::jsonb)
             ON CONFLICT (tenant_id, collection, source_uri) DO NOTHING
             """,
-            (tenant, "a" * 64, "b" * 64),
+            (tenant, "a" * 64, other_tenant, "b" * 64),
         )
 
     options = conninfo_to_dict(DSN)
@@ -56,12 +57,12 @@ def reader_database_identity():
     options["password"] = password
     restricted_dsn = make_conninfo(**options)
 
-    yield restricted_dsn, tenant, login
+    yield restricted_dsn, tenant, other_tenant, login
 
     with psycopg.connect(DSN, autocommit=True) as admin:
         admin.execute(
             "DELETE FROM public.rusa_knowledge_documents WHERE tenant_id IN (%s, %s)",
-            (tenant, "tenant-other-test"),
+            (tenant, other_tenant),
         )
         admin.execute(
             sql.SQL("REVOKE rusa_knowledge_reader FROM {}").format(sql.Identifier(login))
@@ -72,7 +73,18 @@ def reader_database_identity():
 def test_read_only_reader_role_is_tenant_scoped_and_cannot_mutate(reader_database_identity):
     import psycopg
 
-    restricted_dsn, tenant, _login = reader_database_identity
+    restricted_dsn, tenant, _other_tenant, _login = reader_database_identity
+    from rusa_knowledge.store import PostgresKnowledgeStore
+
+    store = PostgresKnowledgeStore(
+        restricted_dsn, min_pool_size=1, max_pool_size=1,
+        db_role="rusa_knowledge_reader",
+    )
+    try:
+        assert store.check_ready() is True
+    finally:
+        store.close()
+
     with psycopg.connect(restricted_dsn) as connection:
         connection.execute(
             "SELECT set_config('role', 'rusa_knowledge_reader', true)"
