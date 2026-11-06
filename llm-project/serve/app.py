@@ -60,7 +60,11 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    model: str = Field(default="rusa-ai-v1", min_length=1, max_length=128)
+    model: str = Field(
+        default_factory=lambda: os.getenv("RUSA_MODEL_NAME", "rusa-ai-v1"),
+        min_length=1,
+        max_length=128,
+    )
     messages: list[ChatMessage] = Field(min_length=1, max_length=128)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
