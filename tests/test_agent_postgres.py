@@ -13,11 +13,11 @@ DSN = os.getenv("RUSA_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="RUSA_TEST_DATABASE_URL is not configured")
 
 
-def make_task(tenant_id, key):
+def make_task(tenant_id, key, repository=None, objective="PostgreSQL queue integration test"):
     return CodingTask(
         tenant_id=tenant_id,
-        objective="PostgreSQL queue integration test",
-        repository=RepositoryTarget(
+        objective=objective,
+        repository=repository or RepositoryTarget(
             full_name="StrategyG/RusaAi",
             base_branch="main",
             work_branch=f"test/{uuid4().hex[:12]}",
@@ -32,10 +32,16 @@ def test_postgres_queue_idempotency_claim_and_checkpoint():
     queue.initialize()
     key = f"queue-{uuid4().hex}"
     task = make_task("tenant-integration-a", key)
-    duplicate = make_task("tenant-integration-a", key)
+    duplicate = make_task("tenant-integration-a", key, repository=task.repository)
     other_tenant = make_task("tenant-integration-b", key)
     first_id = queue.enqueue(task)
     assert queue.enqueue(duplicate) == first_id
+    conflict = make_task(
+        "tenant-integration-a", key, repository=task.repository,
+        objective="Different payload with the same key",
+    )
+    with pytest.raises(ValueError, match="different task payload"):
+        queue.enqueue(conflict)
     assert queue.enqueue(other_tenant) != first_id
 
     claimed = queue.claim()

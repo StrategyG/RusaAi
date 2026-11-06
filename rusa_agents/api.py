@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -15,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
-from .queue import PostgresTaskQueue
+from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 
@@ -260,22 +261,45 @@ def create_task(
     if body.repository not in tenant_repository_allowlist(tenant_id):
         raise HTTPException(status_code=403, detail="Repository is not allowlisted for this tenant")
     try:
+        RepositoryTarget(
+            full_name=body.repository,
+            base_branch=body.base_branch,
+            work_branch=body.work_branch,
+        )
+        task_id_seed = uuid.uuid4().hex
+        tenant_slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", tenant_id).strip(".-_")[:24] or "tenant"
+        branch_hint = re.sub(
+            r"[^A-Za-z0-9_.-]+", "-", body.work_branch.rsplit("/", 1)[-1]
+        ).strip(".-_")[:32] or "task"
+        branch_identity = idempotency_key or task_id_seed
+        branch_digest = hashlib.sha256(
+            f"{tenant_id}:{branch_identity}".encode("utf-8")
+        ).hexdigest()[:12]
+        work_branch = f"rusa-agent/{tenant_slug}/{branch_hint}-{branch_digest}"
         task = CodingTask(
+            task_id=task_id_seed,
             tenant_id=tenant_id,
             objective=body.objective,
             repository=RepositoryTarget(
                 full_name=body.repository,
                 base_branch=body.base_branch,
-                work_branch=body.work_branch,
+                work_branch=work_branch,
             ),
             acceptance_criteria=tuple(body.acceptance_criteria),
             context=body.context,
             idempotency_key=idempotency_key or "",
         )
         task_id = request.app.state.queue.enqueue(task)
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"task_id": task_id, "status": "queued", "tenant_id": tenant_id}
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "tenant_id": tenant_id,
+        "work_branch": work_branch,
+    }
 
 
 @app.get("/v1/agent/tasks/{task_id}")

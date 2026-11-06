@@ -7,6 +7,10 @@ from typing import Any
 from .contracts import CodingTask, TaskRecord, TaskState
 
 
+class IdempotencyConflictError(ValueError):
+    """Raised when an idempotency key is reused for a different task payload."""
+
+
 class PostgresTaskQueue:
     def __init__(self, dsn: str) -> None:
         if not dsn:
@@ -53,23 +57,46 @@ class PostgresTaskQueue:
             ).fetchone()
         return bool(row and row[0])
 
+    @staticmethod
+    def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(payload)
+        normalized.pop("task_id", None)
+        normalized.pop("created_at", None)
+        return normalized
+
     def enqueue(self, task: CodingTask, max_attempts: int = 4) -> str:
         if not 1 <= max_attempts <= 10:
             raise ValueError("max_attempts must be between 1 and 10")
         key = task.idempotency_key or task.task_id
+        payload = task.to_dict()
         with self._psycopg.connect(self.dsn) as connection:
             connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (task.tenant_id,))
-            connection.execute("""
+            inserted = connection.execute("""
                 INSERT INTO rusa_agent_tasks
                     (tenant_id, task_id, idempotency_key, payload, max_attempts)
                 VALUES (%s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-            """, (task.tenant_id, task.task_id, key, json.dumps(task.to_dict()), max_attempts))
-            row = connection.execute("""
-                SELECT task_id FROM rusa_agent_tasks
+                RETURNING task_id
+            """, (
+                task.tenant_id, task.task_id, key,
+                json.dumps(payload, ensure_ascii=False, sort_keys=True), max_attempts,
+            )).fetchone()
+            if inserted is not None:
+                return str(inserted[0])
+            existing = connection.execute("""
+                SELECT task_id, payload FROM rusa_agent_tasks
                 WHERE tenant_id=%s AND idempotency_key=%s
             """, (task.tenant_id, key)).fetchone()
-        return str(row[0])
+            if existing is None:
+                raise RuntimeError("idempotency conflict could not be resolved")
+            stored_payload = existing[1]
+            if isinstance(stored_payload, str):
+                stored_payload = json.loads(stored_payload)
+            if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
+            return str(existing[0])
 
     def claim(self, lease_seconds: int = 300) -> dict[str, Any] | None:
         if not 10 <= lease_seconds <= 3600:
@@ -154,6 +181,7 @@ class PostgresTaskQueue:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry' END,
+                    result=NULL,
                     available_at=now() + (%s * interval '1 second'),
                     lease_until=NULL, lease_token=NULL, last_error=%s, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s AND status='running'

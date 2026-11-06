@@ -8,11 +8,18 @@ from rusa_agents import api
 class FakeQueue:
     def __init__(self, dsn):
         self.tasks = {}
+        self.idempotency = {}
+        self.submitted = {}
 
     def check_ready(self):
         return True
 
     def enqueue(self, task):
+        key = (task.tenant_id, task.idempotency_key or task.task_id)
+        if key in self.idempotency:
+            return self.idempotency[key]
+        self.submitted[task.task_id] = task
+        self.idempotency[key] = task.task_id
         self.tasks[task.task_id] = {
             "tenant_id": task.tenant_id,
             "status": "queued",
@@ -169,3 +176,40 @@ def test_agent_api_enforces_streamed_body_limit_without_content_length():
     asyncio.run(middleware(scope, receive, send))
     response_start = next(item for item in sent if item["type"] == "http.response.start")
     assert response_start["status"] == 413
+
+
+
+def test_agent_api_idempotency_reuses_task_and_branch(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {
+        "X-API-Key": "a" * 48,
+        "X-Tenant-ID": "tenant-a",
+        "Idempotency-Key": "same-task-request-001",
+    }
+    body = task_body()
+    with TestClient(api.app) as client:
+        first = client.post("/v1/agent/tasks", headers=headers, json=body)
+        second = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["task_id"] == second.json()["task_id"]
+    assert first.json()["work_branch"] == second.json()["work_branch"]
+
+
+def test_agent_api_assigns_unique_work_branches_per_task(monkeypatch):
+    configure_api(monkeypatch)
+    body = task_body()
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    with TestClient(api.app) as client:
+        first = client.post(
+            "/v1/agent/tasks",
+            headers={**headers, "Idempotency-Key": "branch-task-001"},
+            json=body,
+        )
+        second = client.post(
+            "/v1/agent/tasks",
+            headers={**headers, "Idempotency-Key": "branch-task-002"},
+            json=body,
+        )
+    assert first.status_code == 202 and second.status_code == 202
+    assert first.json()["work_branch"] != second.json()["work_branch"]
