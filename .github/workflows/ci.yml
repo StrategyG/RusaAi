@@ -2,7 +2,7 @@ name: RUSA-AI CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/aicode-agent-enterprise]
   pull_request:
     branches: [main]
   workflow_dispatch:
