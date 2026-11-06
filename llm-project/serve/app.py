@@ -379,11 +379,6 @@ class RequestContextAndBodyLimitMiddleware:
 app.add_middleware(RequestContextAndBodyLimitMiddleware)
 
 
-@asynccontextmanager
-async def _load_task_validator_context():
-    yield
-
-
 def _load_task_validator() -> jsonschema.protocols.Validator:
     schema_path = Path(
         os.getenv("TASK_ENVELOPE_SCHEMA_PATH", str(DEFAULT_SCHEMA_PATH))
@@ -710,9 +705,9 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     }
                 }
             )
+            yield _sse("[DONE]")
         finally:
             controller.release()
-            yield _sse("[DONE]")
 
     return StreamingResponse(
         event_stream(),
