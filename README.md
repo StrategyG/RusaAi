@@ -67,7 +67,9 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+# API container/runtime dependencies only: pip install -r requirements.txt
+# Add model development/training dependencies when needed: pip install -r requirements-model.txt
 ```
 
 ### 3. Environment Variables
@@ -82,7 +84,7 @@ cp .env.example .env
 
 ### Running Locally with Uvicorn
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+PYTHONPATH=llm-project/serve uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 ### Running with Docker & Docker Compose
@@ -100,7 +102,7 @@ curl localhost:8000/health
 
 Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+pytest tests/ -v
 ```
 
 ---
@@ -117,7 +119,7 @@ pytest llm-project/tests/ -v
 
 ## Security & Governance
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
+- **API Authorization**: See docs/SECURITY_HARDENING.md for fail-closed API key authentication, RBAC and tenant authorization.
 - **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
 - **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
 
@@ -125,3 +127,16 @@ pytest llm-project/tests/ -v
 
 ## License
 This project is licensed under the MIT License.
+
+
+## Security hardening and production status
+
+See docs/SECURITY_HARDENING.md for production configuration, database provisioning, API key hashing,
+role permissions, rate limits and test evidence. The RLS migration enables and forces PostgreSQL
+row-level security for tenant records. Security changes are not released until the pull request
+checks pass.
+
+The current repository still does not contain real model weights or a production inference adapter.
+Mock chat responses are disabled in production; chat requests and readiness return HTTP 503 until
+real inference is integrated and separately acceptance-tested. Do not deploy this repository as a
+complete production LLM service until that gate is closed.
