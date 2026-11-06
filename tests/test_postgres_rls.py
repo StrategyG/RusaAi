@@ -88,7 +88,7 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
 def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
     task_a, task_b = str(uuid4()), str(uuid4())
     with connect() as conn:
-        set_role_and_tenant(conn, "rusa_worker_runtime", "rls-worker-a")
+        # Seed as the migration/test owner; the worker role intentionally has no INSERT grant.
         conn.execute(
             "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
             (task_a, "rls-worker-a", '{"objective":"a"}'),
@@ -97,5 +97,13 @@ def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
             "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
             (task_b, "rls-worker-b", '{"objective":"b"}'),
         )
+        set_role_and_tenant(conn, "rusa_worker_runtime", "rls-worker-a")
         visible = {row[0] for row in conn.execute("SELECT tenant_id FROM aicode_jobs").fetchall()}
         assert {"rls-worker-a", "rls-worker-b"}.issubset(visible)
+
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
+                    (str(uuid4()), "rls-worker-a", '{"objective":"worker cannot enqueue"}'),
+                )
