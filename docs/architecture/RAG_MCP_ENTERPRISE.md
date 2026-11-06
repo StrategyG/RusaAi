@@ -66,7 +66,7 @@ No document-write, arbitrary HTTP, shell, SQL, filesystem, or administrative too
 - Every database operation sets rusa.tenant_id transaction-locally. Both knowledge tables enable and FORCE PostgreSQL RLS.
 - The MCP service uses the restricted rusa_agent_api role with SELECT-only grants on knowledge tables. The worker uses its isolated worker role for ingestion and internal RAG retrieval.
 - The agent MCP gateway has a fixed read-only tool allowlist and a separate token per tenant.
-- MCP endpoint URLs must use HTTPS, except loopback HTTP for local development. Redirects and ambient proxy inheritance are disabled in the client.
+- MCP endpoint URLs must use HTTPS, except loopback HTTP for local development or an explicitly configured private service hostname in RUSA_MCP_INTERNAL_HTTP_HOSTS. Redirects and ambient proxy inheritance are disabled in the client.
 - Retrieved content is untrusted data. It must never override system policy or be interpreted as executable instructions.
 - Health liveness is public. Readiness reports only a generic status and does not expose connection strings, credentials, or tenant data.
 
