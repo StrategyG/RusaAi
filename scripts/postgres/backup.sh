@@ -17,6 +17,23 @@ if [[ ! "$BACKUP_AGE_RECIPIENT" =~ ^age1[0-9a-z]+$ ]]; then
     exit 1
 fi
 
+require_remote="${RUSA_BACKUP_REQUIRE_REMOTE:-false}"
+case "$require_remote" in
+    true|false) ;;
+    *)
+        echo "RUSA_BACKUP_REQUIRE_REMOTE must be true or false" >&2
+        exit 1
+        ;;
+esac
+if [[ "$require_remote" == "true" && -z "${RUSA_BACKUP_S3_URI:-}" ]]; then
+    echo "RUSA_BACKUP_S3_URI is required when remote backups are mandatory" >&2
+    exit 1
+fi
+if [[ -n "${RUSA_BACKUP_S3_URI:-}" && ! "${RUSA_BACKUP_S3_URI}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9.-]{1,61}[A-Za-z0-9](/.*)?$ ]]; then
+    echo "RUSA_BACKUP_S3_URI must be an s3://bucket/prefix URI" >&2
+    exit 1
+fi
+
 retention_days="${BACKUP_RETENTION_DAYS:-30}"
 if [[ ! "$retention_days" =~ ^[1-9][0-9]{0,3}$ ]] || (( retention_days > 3650 )); then
     echo "BACKUP_RETENTION_DAYS must be between 1 and 3650" >&2
