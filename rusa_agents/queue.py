@@ -69,7 +69,7 @@ class PostgresTaskQueue:
                 if not result_column or not result_column[0]:
                     raise RuntimeError(
                         "Production task result storage is not installed; "
-                        "apply migrations/004_aicode_task_results.sql"
+                        "apply migrations/003_aicode_task_results.sql"
                     )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
