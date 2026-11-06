@@ -1,19 +1,42 @@
 import os
 import json
 import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-import jsonschema
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
 
+TASK_SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schemas/a2a/task-envelope.schema.json"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        schema = json.loads(TASK_SCHEMA_PATH.read_text(encoding="utf-8"))
+        if not isinstance(schema, dict) or schema.get("$schema") != Draft202012Validator.META_SCHEMA["$id"]:
+            raise ValueError("Expected JSON Schema Draft 2020-12")
+        Draft202012Validator.check_schema(schema)
+    except (OSError, ValueError, SchemaError):
+        raise RuntimeError("Unable to load a valid A2A task envelope schema") from None
+
+    app.state.task_validator = Draft202012Validator(
+        schema, format_checker=Draft202012Validator.FORMAT_CHECKER
+    )
+    yield
+
+
 app = FastAPI(
     title="RUSA-AI Serving Engine",
     description="Production-ready API for RUSA-AI model inference and task validation.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 API_KEY_NAME = "X-API-Key"
@@ -96,23 +119,24 @@ def chat_completions(request: ChatCompletionRequest):
         raise HTTPException(status_code=500, detail=f"Inference engine failure: {str(e)}")
 
 @app.post("/v1/validate-task", response_model=TaskValidationResponse)
-def validate_task_envelope(request: TaskValidationRequest):
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "a2a", "task-envelope.schema.json")
-    if not os.path.exists(schema_path):
-        schema_path = "schemas/a2a/task-envelope.schema.json"
-    
-    if not os.path.exists(schema_path):
-        return TaskValidationResponse(valid=True, errors=["Schema file not found on disk, skipped validation."])
+def validate_task_envelope(payload: TaskValidationRequest, request: Request):
+    errors = []
+    for error in request.app.state.task_validator.iter_errors(payload.envelope):
+        path = "/".join(str(part) for part in error.absolute_path)
+        location = f"/{path}" if path else "$"
+        if error.validator == "required":
+            missing = [name for name in error.validator_value if name not in error.instance]
+            message = f"missing required fields: {', '.join(missing)}"
+        elif error.validator == "format":
+            message = f"expected {error.validator_value} format"
+        elif error.validator == "additionalProperties":
+            message = "remove unsupported fields"
+        else:
+            message = f"failed {error.validator} validation"
+        detail = f"{location}: {message}"
+        if detail not in errors:
+            errors.append(detail)
+        if len(errors) == 10:
+            break
 
-    try:
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema = json.load(f)
-        
-        validator = jsonschema.Draft7Validator(schema)
-        errors = [err.message for err in validator.iter_errors(request.envelope)]
-        
-        if errors:
-            return TaskValidationResponse(valid=False, errors=errors)
-        return TaskValidationResponse(valid=True, errors=[])
-    except Exception as e:
-        return TaskValidationResponse(valid=False, errors=[str(e)])
+    return TaskValidationResponse(valid=not errors, errors=errors)
