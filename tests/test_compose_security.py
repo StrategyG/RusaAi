@@ -146,11 +146,15 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     assert "age --decrypt" in restore_script
     assert "| pg_restore" in restore_script
     assert "temporary_plain" not in restore_script
+    assert 'RUSA_BACKUP_REQUIRE_REMOTE' in backup_script
+    assert 'RUSA_BACKUP_S3_URI is required' in backup_script
+    scheduler_script = (ROOT / "scripts/postgres/backup_scheduler.sh").read_text(encoding="utf-8")
+    assert "Shutdown requested; allowing the active backup to finish" in scheduler_script
 
     scheduler = services["rusa-agent-db-backup-scheduler"]
     assert scheduler["profiles"] == ["backup"]
     assert scheduler["restart"] == "unless-stopped"
-    assert scheduler["stop_grace_period"] == "180s"
+    assert scheduler["stop_grace_period"] == "${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}"
     assert scheduler["environment"]["RUSA_BACKUP_REQUIRE_REMOTE"] == (
         "${RUSA_BACKUP_REQUIRE_REMOTE:-true}"
     )
