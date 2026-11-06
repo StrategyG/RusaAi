@@ -1,0 +1,201 @@
+name: Publish and deploy staging
+
+on:
+  push:
+    branches:
+      - staging
+      - "integration/staging-baseline-*"
+  workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: Publish immutable staging images, or publish and deploy to the protected staging environment.
+        required: true
+        type: choice
+        default: build-only
+        options:
+          - build-only
+          - deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-staging
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish staging images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_prefix: ${{ steps.images.outputs.image_prefix }}
+      image_tag: ${{ steps.images.outputs.image_tag }}
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@v4
+
+      - name: Prepare image references
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image_tag="staging-${GITHUB_SHA}"
+          echo "image_prefix=$image_prefix" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        run: docker buildx create --name rusa-staging-builder --use
+
+      - name: Authenticate to GitHub Container Registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and publish API/model image
+        env:
+          IMAGE_PREFIX: ${{ steps.images.outputs.image_prefix }}
+          IMAGE_TAG: ${{ steps.images.outputs.image_tag }}
+        run: |
+          docker buildx build --pull --provenance=true --sbom=true --push \
+            --target model-runtime \
+            --tag "$IMAGE_PREFIX-api:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-api:staging" .
+
+      - name: Build and publish agent worker image
+        env:
+          IMAGE_PREFIX: ${{ steps.images.outputs.image_prefix }}
+          IMAGE_TAG: ${{ steps.images.outputs.image_tag }}
+        run: |
+          docker buildx build --pull --provenance=true --sbom=true --push \
+            --target agent-runtime \
+            --tag "$IMAGE_PREFIX-agent:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-agent:staging" .
+
+      - name: Build and publish web image
+        env:
+          IMAGE_PREFIX: ${{ steps.images.outputs.image_prefix }}
+          IMAGE_TAG: ${{ steps.images.outputs.image_tag }}
+        run: |
+          docker buildx build --pull --provenance=true --sbom=true --push \
+            --file apps/web/Dockerfile \
+            --tag "$IMAGE_PREFIX-web:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-web:staging" .
+
+      - name: Report published immutable images
+        env:
+          IMAGE_PREFIX: ${{ steps.images.outputs.image_prefix }}
+          IMAGE_TAG: ${{ steps.images.outputs.image_tag }}
+        run: |
+          {
+            echo "### Staging images published"
+            echo
+            echo "- $IMAGE_PREFIX-api:$IMAGE_TAG"
+            echo "- $IMAGE_PREFIX-agent:$IMAGE_TAG"
+            echo "- $IMAGE_PREFIX-web:$IMAGE_TAG"
+            echo
+            echo "The mutable staging tags point to this revision. Deploy only through the protected staging environment."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to protected staging environment
+    if: ${{ github.event_name == 'push' || inputs.deployment_mode == 'deploy' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    permissions:
+      contents: read
+      packages: read
+      deployments: write
+    steps:
+      - name: Check out deployment manifests
+        uses: actions/checkout@v4
+
+      - name: Validate staging deployment configuration
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_APP_DIR: ${{ vars.STAGING_APP_DIR }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+          GHCR_PULL_USER: ${{ vars.GHCR_PULL_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in STAGING_HOST STAGING_USER STAGING_APP_DIR STAGING_SSH_PRIVATE_KEY STAGING_KNOWN_HOSTS GHCR_PULL_USER GHCR_PULL_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing staging environment secret/variable: $name"
+              exit 1
+            fi
+          done
+          [[ "$STAGING_APP_DIR" =~ ^/[A-Za-z0-9_./-]+$ ]] || {
+            echo "::error::STAGING_APP_DIR must be an absolute path without spaces or shell metacharacters."
+            exit 1
+          }
+
+      - name: Configure pinned SSH host verification
+        env:
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$STAGING_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy immutable image revision
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_APP_DIR: ${{ vars.STAGING_APP_DIR }}
+          GHCR_PULL_USER: ${{ vars.GHCR_PULL_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          IMAGE_PREFIX: ${{ needs.publish.outputs.image_prefix }}
+          IMAGE_TAG: ${{ needs.publish.outputs.image_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_options=(-i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          target="$STAGING_USER@$STAGING_HOST"
+
+          printf -v login_command 'docker login ghcr.io --username %q --password-stdin' "$GHCR_PULL_USER"
+          printf '%s' "$GHCR_PULL_TOKEN" | ssh "${ssh_options[@]}" "$target" "$login_command"
+
+          scp "${ssh_options[@]}" docker-compose.yml docker-compose.staging.yml "$target:$STAGING_APP_DIR/"
+
+          printf -v remote_command 'APP_DIR=%q IMAGE_PREFIX=%q IMAGE_TAG=%q bash -s' "$STAGING_APP_DIR" "$IMAGE_PREFIX" "$IMAGE_TAG"
+          ssh "${ssh_options[@]}" "$target" "$remote_command" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          test -f .env || { echo "Missing host-managed .env file" >&2; exit 1; }
+          export RUSA_IMAGE_PREFIX="$IMAGE_PREFIX"
+          export RUSA_IMAGE_TAG="$IMAGE_TAG"
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml pull
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans --wait --wait-timeout 180
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml ps
+          REMOTE
+
+      - name: Record deployment revision
+        env:
+          IMAGE_PREFIX: ${{ needs.publish.outputs.image_prefix }}
+          IMAGE_TAG: ${{ needs.publish.outputs.image_tag }}
+        run: |
+          {
+            echo "### Staging deployment completed"
+            echo
+            echo "- Revision: $GITHUB_SHA"
+            echo "- Image tag: $IMAGE_TAG"
+            echo "- Image prefix: $IMAGE_PREFIX"
+            echo "- Environment: staging"
+          } >> "$GITHUB_STEP_SUMMARY"

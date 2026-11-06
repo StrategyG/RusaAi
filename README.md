@@ -1,6 +1,6 @@
 # RUSA-AI
 
-RUSA-AI is an AI model and agent platform under active development. This repository currently provides an API serving foundation, an A2A task-envelope contract, a local Transformers adapter, and engineering scaffolding.
+RUSA-AI is an AI model and agent platform under active development. This repository provides a FastAPI serving foundation, a durable hierarchical agent runtime, an A2A task-envelope contract, a local Transformers adapter, and a responsive role-aware web workspace for users and administrators.
 
 ## Verified scope and status
 
@@ -8,7 +8,7 @@ The complete RUSA-AI product is NOT production-ready yet. The repository now con
 
 ## Serving foundation
 
-- FastAPI serving API with mandatory API-key authentication that fails closed when misconfigured.
+- FastAPI serving API with service API-key authentication and database-backed bearer sessions for human users.
 - Local-only Hugging Face Transformers loading. Model files must already exist on disk; remote code execution and implicit downloads are disabled.
 - OpenAI-style non-streaming chat completion response with token usage.
 - A2A task-envelope validation using the schema-declared JSON Schema draft and format checks.
@@ -21,7 +21,8 @@ Mock model responses are intentionally not supported. Inference returns HTTP 503
 ## Repository layout
 
 - llm-project/model/: model architecture blueprint; not trained weights.
-- llm-project/serve/: API and local inference adapter.
+- llm-project/serve/: API, user authentication, workspace/admin endpoints, and local inference adapter.
+- apps/web/: React/TypeScript user workspace, admin control center, and same-origin Nginx gateway.
 - schemas/a2a/: A2A task envelope JSON Schema.
 - tests/: API, authentication, readiness, and schema tests.
 - rusa_agents/: hierarchical coding-agent runtime, workers, GitHub gateway, queue, memory, and audit.
@@ -31,6 +32,7 @@ Mock model responses are intentionally not supported. Inference returns HTTP 503
 ## Requirements
 
 - Python 3.11 for the supported container and CI baseline.
+- Node.js 22 and npm for the web workspace.
 - A compatible local causal language model directory with a tokenizer chat template.
 - Adequate RAM/VRAM for the selected model.
 - A random API key of at least 32 characters.
@@ -60,14 +62,44 @@ The Compose file passes explicit per-service environment variables instead of a 
 
 ## API endpoints
 
-- POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
+- POST /v1/chat/completions: requires a valid service API key or active user bearer session; accepts non-streaming chat requests.
 - POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
-- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
-- GET /v1/agent/tasks/{task_id}: requires X-API-Key; returns task status only within the authenticated tenant.
+- POST /v1/agent/tasks: requires a valid service API key or active user bearer session plus Idempotency-Key; validates and enqueues a task in PostgreSQL. Browser-created tasks are attributed to the authenticated user. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
+- GET /v1/agent/tasks/{task_id}: requires a valid service API key or active user bearer session; returns task status within the tenant and enforces task ownership for regular users.
 - POST /v1/agent/tasks/{task_id}/cancel: requires X-API-Key; cancels queued/running work for the authenticated tenant.
 - GET /v1/agent/queue/stats: returns tenant-scoped queue counts and oldest queued-task age.
 - GET /v1/agent/dead-letters: lists up to 50 dead-letter tasks for the authenticated tenant.
 - POST /v1/agent/tasks/{task_id}/retry: requeues a dead-letter task after operator review.
+
+
+## User and admin web workspace
+
+The repository includes a responsive React/TypeScript web application with separate role-aware experiences:
+
+- **User Workspace** (/ , /chat, /tasks): workspace overview, AI chat, personal agent task submission, and task tracking.
+- **Admin Control Center** (/admin, /admin/users, /admin/tasks): tenant-wide overview, account provisioning, role/active-state control, and agent task operations.
+- FastAPI-backed identity with Argon2id password hashes, short-lived signed access tokens, rotating HttpOnly refresh sessions, same-origin cookie protection, login throttling, and tenant-scoped authorization.
+- Nginx serves the frontend and reverse-proxies API/health requests over the private Compose network. Browser clients never receive database, provider, GitHub, or service API secrets.
+
+For a fresh deployment, configure RUSA_AUTH_SECRET, RUSA_BOOTSTRAP_ADMIN_EMAIL, RUSA_BOOTSTRAP_ADMIN_PASSWORD, RUSA_TENANT_ID, and RUSA_MODEL_DIR in .env. Bootstrap admin tenant must match RUSA_TENANT_ID. The Compose deployment serves the web application on 127.0.0.1:3000 by default; put a TLS-terminating reverse proxy in front of it for remote access.
+
+Start the web stack with:
+
+~~~bash
+docker compose up -d --build postgres rusa-api rusa-web
+~~~
+
+Start the optional agent worker separately after configuring its provider and GitHub credentials:
+
+~~~bash
+docker compose --profile agent up -d --build rusa-agent-worker
+~~~
+
+For local frontend development, install dependencies in apps/web and run npm run dev. The Vite development server proxies /v1 and /health to the FastAPI service. See docs/ui-ux/user-admin-workspace.md for routes, security boundaries, and setup details.
+
+## Staging deployment
+
+A GitHub Actions workflow can publish immutable API/model, agent-worker, and web images to GHCR and deploy them to a protected staging environment. It supports a protected `staging` or `integration/staging-baseline-*` branch push (with environment approval) and manual dispatch after the workflow is available on the default branch. Configure branch protection, required environment reviewers, host/SSH secrets, a read-only GHCR pull token, and a host-managed `.env` before deployment. Start with `build-only` to publish and inspect images without touching a server. See [the operations runbook](docs/OPERATIONS_RUNBOOK.md#4-staging-image-publication-and-deployment).
 
 ## Agent worker
 

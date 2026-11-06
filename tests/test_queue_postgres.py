@@ -289,3 +289,39 @@ def test_queue_release_requeues_without_consuming_retry_attempt(queue_and_tenant
     assert second is not None
     assert second["attempts"] == 1
     assert second["lease_token"] != first["lease_token"]
+
+
+
+def test_queue_task_listing_and_stats_are_user_scoped(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    user_a = "user-aaa"
+    user_b = "user-bbb"
+    task_a = str(uuid.uuid4())
+    task_b = str(uuid.uuid4())
+    queue.enqueue(
+        tenant,
+        task_a,
+        {
+            "task_id": task_a,
+            "tenant_id": tenant,
+            "user_id": user_a,
+            "objective": "user A task",
+        },
+        "user-scope-task-a",
+    )
+    queue.enqueue(
+        tenant,
+        task_b,
+        {
+            "task_id": task_b,
+            "tenant_id": tenant,
+            "user_id": user_b,
+            "objective": "user B task",
+        },
+        "user-scope-task-b",
+    )
+
+    user_a_tasks = queue.list_tasks(tenant, user_id=user_a)
+    assert [item["task_id"] for item in user_a_tasks] == [task_a]
+    assert queue.stats(tenant, user_id=user_a)["counts"]["queued"] == 1
+    assert queue.list_dead_letters(tenant, user_id=user_a) == []

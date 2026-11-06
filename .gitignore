@@ -15,3 +15,7 @@ checkpoints/
 outputs/
 dist/
 build/
+
+# Web workspace build artifacts
+apps/web/node_modules/
+apps/web/dist/

@@ -21,3 +21,8 @@ outputs
 *.pth
 tests
 docs
+
+# Web workspace dependencies and build outputs
+apps/web/node_modules
+apps/web/dist
+npm-debug.log*
