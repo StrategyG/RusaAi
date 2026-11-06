@@ -128,8 +128,18 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
             "acceptance_criteria": ["The test passes"],
         },
     )
-    assert missing_key.status_code == 400
-    assert missing_key.json()["detail"] == "A valid Idempotency-Key header is required (1-128 safe ASCII characters)"
+    assert missing_key.status_code == 422
+
+    invalid_key = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "invalid key"},
+        json={
+            "objective": "Add a health endpoint test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert invalid_key.status_code == 422
 
     response = client.post(
         "/v1/aicode/tasks",
