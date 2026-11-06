@@ -60,6 +60,7 @@ These controls are implemented in the combined branch and remain unverified unti
 - A release manifest records all four image digests.
 - Image publication is gated by the GitHub `release` environment. Production deployment is a separate manual workflow gated by the GitHub `production` environment.
 - Deployment verifies all four signatures against the exact release workflow identity and uses SSH with pinned host keys.
+- Before deployment, the workflow downloads the signed release's `release-manifest.txt`, verifies the tag/source commit, and requires all four manually supplied digests and image names to match the manifest exactly. The GHCR pull username is validated before it is placed in the remote login command.
 - The host deployment script requires existing digest-pinned rollback targets and `RUSA_AICODE_ENABLED=false`; operators must drain active tasks before deployment/rollback.
 - The script updates the API/worker/sandbox/MCP digest set, pulls the sandbox through the dedicated rootless Docker socket, includes the RAG/MCP Compose overlay only when `RUSA_RAG_ENABLED=true`, checks required service health, and restores the previous image set if the candidate fails.
 - Manual rollback is serialized with deployment and uses the previous environment snapshot.
