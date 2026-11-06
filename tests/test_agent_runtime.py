@@ -1132,3 +1132,42 @@ def test_hmac_audit_log_redacts_sensitive_detail_values(tmp_path):
     assert "raw-password-secret-value" not in serialized
     assert "[REDACTED]" in serialized
     assert audit.verify() is True
+
+
+def test_github_write_recovers_after_ambiguous_commit_response(monkeypatch):
+    import base64
+
+    task = make_task()
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+    new_content = "print('durably written')\n"
+    encoded = base64.b64encode(new_content.encode()).decode()
+    contents_reads = 0
+
+    async def request(method, path, **kwargs):
+        nonlocal contents_reads
+        if "/git/ref/heads/" in path:
+            return {"object": {"sha": "a" * 40}}
+        if "/contents/" in path and method == "GET":
+            contents_reads += 1
+            if contents_reads == 1:
+                return None
+            return {
+                "type": "file",
+                "size": len(new_content.encode()),
+                "content": encoded,
+                "sha": "b" * 40,
+            }
+        if "/contents/" in path and method == "PUT":
+            raise RuntimeError("connection lost after server commit")
+        raise AssertionError(f"unexpected GitHub request: {method} {path}")
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(
+        task,
+        ToolCall("write_file", {"path": "src/recovered.py", "content": new_content}),
+    ))
+    assert result.success is True
+    assert result.data["recovered_after_ambiguous_commit"] is True
