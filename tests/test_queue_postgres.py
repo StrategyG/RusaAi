@@ -60,10 +60,10 @@ def test_lease_owner_can_heartbeat_and_complete(queue_and_tenant):
     assert job is not None
     assert job["task_id"] == task_id
     assert queue.claim("worker-b", lease_seconds=60) is None
-    assert not queue.heartbeat(tenant, task_id, "worker-b", 60)
-    assert queue.heartbeat(tenant, task_id, "worker-a", 60)
-    assert not queue.complete(tenant, task_id, "worker-b", {"ok": True})
-    assert queue.complete(tenant, task_id, "worker-a", {"ok": True})
+    assert not queue.heartbeat(tenant, task_id, "worker-b", job["lease_token"], 60)
+    assert queue.heartbeat(tenant, task_id, "worker-a", job["lease_token"], 60)
+    assert not queue.complete(tenant, task_id, "worker-b", job["lease_token"], {"ok": True})
+    assert queue.complete(tenant, task_id, "worker-a", job["lease_token"], {"ok": True})
     assert queue.get(tenant, task_id)["state"] == "succeeded"
 
 
@@ -75,7 +75,9 @@ def test_retry_limit_transitions_job_to_failed(queue_and_tenant):
     queue.enqueue(tenant, task_id, payload, "retry-limit-key", max_attempts=2)
     first = queue.claim("worker-a", lease_seconds=60)
     assert first["attempts"] == 1
-    assert queue.fail(tenant, task_id, "worker-a", "temporary", retryable=True)
+    assert queue.fail(
+        tenant, task_id, "worker-a", first["lease_token"], "temporary", retryable=True
+    )
 
     with queue._connect() as db:
         db.execute(
@@ -84,7 +86,9 @@ def test_retry_limit_transitions_job_to_failed(queue_and_tenant):
         )
     second = queue.claim("worker-a", lease_seconds=60)
     assert second["attempts"] == 2
-    assert queue.fail(tenant, task_id, "worker-a", "final", retryable=True)
+    assert queue.fail(
+        tenant, task_id, "worker-a", second["lease_token"], "final", retryable=True
+    )
     assert queue.get(tenant, task_id)["state"] == "dead_letter"
 
 
@@ -164,10 +168,13 @@ def test_queue_cancellation_fences_running_worker(queue_and_tenant):
         {"task_id": task_id, "tenant_id": tenant, "objective": "cancel active"},
         "cancel-running-key",
     )
-    assert queue.claim("worker-a", lease_seconds=60) is not None
+    job = queue.claim("worker-a", lease_seconds=60)
+    assert job is not None
     assert queue.cancel(tenant, task_id)
-    assert not queue.heartbeat(tenant, task_id, "worker-a", lease_seconds=60)
-    assert not queue.complete(tenant, task_id, "worker-a", {"state": "succeeded"})
+    assert not queue.heartbeat(tenant, task_id, "worker-a", job["lease_token"], lease_seconds=60)
+    assert not queue.complete(
+        tenant, task_id, "worker-a", job["lease_token"], {"state": "succeeded"}
+    )
     assert queue.get(tenant, task_id)["state"] == "cancelled"
 
 
@@ -180,8 +187,9 @@ def test_queue_does_not_cancel_completed_task(queue_and_tenant):
         {"task_id": task_id, "tenant_id": tenant, "objective": "complete"},
         "cancel-completed-key",
     )
-    assert queue.claim("worker-a", lease_seconds=60) is not None
-    assert queue.complete(tenant, task_id, "worker-a", {"state": "succeeded"})
+    job = queue.claim("worker-a", lease_seconds=60)
+    assert job is not None
+    assert queue.complete(tenant, task_id, "worker-a", job["lease_token"], {"state": "succeeded"})
     assert not queue.cancel(tenant, task_id)
     assert queue.get(tenant, task_id)["state"] == "succeeded"
 
@@ -224,8 +232,12 @@ def test_dead_letter_listing_and_manual_replay_are_tenant_scoped(queue_and_tenan
         "objective": "replay after operator review",
     }
     queue.enqueue(tenant, task_id, payload, "dead-letter-replay-key", max_attempts=1)
-    assert queue.claim("worker-a", lease_seconds=60) is not None
-    assert queue.fail(tenant, task_id, "worker-a", "permanent test failure", retryable=True)
+    job = queue.claim("worker-a", lease_seconds=60)
+    assert job is not None
+    assert queue.fail(
+        tenant, task_id, "worker-a", job["lease_token"],
+        "permanent test failure", retryable=True
+    )
 
     dead_letters = queue.list_dead_letters(tenant, limit=10)
     assert [item["task_id"] for item in dead_letters] == [task_id]

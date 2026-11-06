@@ -69,7 +69,8 @@ def test_queue_heartbeat_and_lease_owner_fencing(postgres_runtime):
     )
     first = queue.claim("worker-a", lease_seconds=30)
     assert first is not None
-    assert queue.heartbeat(tenant_id, task_id, "worker-a", lease_seconds=30)
+    first_token = first["lease_token"]
+    assert queue.heartbeat(tenant_id, task_id, "worker-a", first_token, lease_seconds=30)
 
     with queue._connect() as db:
         db.execute(
@@ -81,13 +82,19 @@ def test_queue_heartbeat_and_lease_owner_fencing(postgres_runtime):
             (tenant_id, task_id),
         )
 
-    second = queue.claim("worker-b", lease_seconds=30)
+    # Same worker ID with a different lease token must fence the stale execution.
+    second = queue.claim("worker-a", lease_seconds=30)
     assert second is not None
     assert second["task_id"] == task_id
     assert second["attempts"] == 2
-    assert not queue.heartbeat(tenant_id, task_id, "worker-a", lease_seconds=30)
-    assert not queue.complete(tenant_id, task_id, "worker-a", {"state": "succeeded"})
-    assert queue.complete(tenant_id, task_id, "worker-b", {"state": "succeeded"})
+    assert second["lease_token"] != first_token
+    assert not queue.heartbeat(tenant_id, task_id, "worker-a", first_token, lease_seconds=30)
+    assert not queue.complete(
+        tenant_id, task_id, "worker-a", first_token, {"state": "succeeded"}
+    )
+    assert queue.complete(
+        tenant_id, task_id, "worker-a", second["lease_token"], {"state": "succeeded"}
+    )
 
 
 def test_expired_job_at_retry_limit_moves_to_dead_letter(postgres_runtime):
@@ -132,6 +139,7 @@ def test_non_retryable_failure_is_terminal(postgres_runtime):
         tenant_id,
         task_id,
         "worker-a",
+        claimed["lease_token"],
         "human approval required",
         retryable=False,
     )

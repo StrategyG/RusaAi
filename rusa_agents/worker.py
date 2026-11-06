@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 from typing import Any
+from uuid import uuid4
 
 from .contracts import CodingTask
 from .queue import PostgresTaskQueue
@@ -27,6 +28,7 @@ async def _run_with_heartbeat(
     tenant_id: str,
     task_id: str,
     worker_id: str,
+    lease_token: str,
     lease_seconds: int,
 ) -> Any:
     execution = asyncio.create_task(orchestrator.run(task))
@@ -41,6 +43,7 @@ async def _run_with_heartbeat(
                 tenant_id,
                 task_id,
                 worker_id,
+                lease_token,
                 lease_seconds,
             )
         except Exception as exc:
@@ -59,7 +62,8 @@ async def run_worker() -> None:
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required by the agent worker")
-    worker_id = os.getenv("RUSA_WORKER_ID", f"{socket.gethostname()}-worker")
+    worker_prefix = os.getenv("RUSA_WORKER_ID") or socket.gethostname()
+    worker_id = f"{worker_prefix[:100]}-{uuid4().hex[:16]}"
     lease_seconds = int(os.getenv("RUSA_WORKER_LEASE_SECONDS", "1800"))
     PostgresTaskQueue._validate_lease(lease_seconds)
 
@@ -81,6 +85,12 @@ async def run_worker() -> None:
 
         tenant_id = job["tenant_id"]
         task_id = job["task_id"]
+        lease_token = str(job.get("lease_token") or "")
+        try:
+            queue._validate_lease_token(lease_token)
+        except ValueError:
+            logger.error("queue returned a claim without a valid fencing token task_id=%s", task_id)
+            continue
         try:
             task = CodingTask.from_dict(job["payload"], tenant_id=tenant_id)
             record = await _run_with_heartbeat(
@@ -90,6 +100,7 @@ async def run_worker() -> None:
                 tenant_id,
                 task_id,
                 worker_id,
+                lease_token,
                 lease_seconds,
             )
             result: dict[str, Any] = {
@@ -107,6 +118,7 @@ async def run_worker() -> None:
                     tenant_id,
                     task_id,
                     worker_id,
+                    lease_token,
                     result,
                 )
                 if not completed:
@@ -117,6 +129,7 @@ async def run_worker() -> None:
                     tenant_id,
                     task_id,
                     worker_id,
+                    lease_token,
                     "; ".join(record.errors) or f"task ended in {record.state.value}",
                     record.state.value == "failed",
                 )
@@ -130,6 +143,7 @@ async def run_worker() -> None:
                     tenant_id,
                     task_id,
                     worker_id,
+                    lease_token,
                     f"{type(exc).__name__}: {str(exc)[:1000]}",
                     True,
                 )
