@@ -49,7 +49,7 @@ if [[ "$BACKUP_FILE" == s3://* ]]; then
         echo "aws CLI is required to restore an S3 backup" >&2
         exit 1
     }
-    temporary_encrypted="$(mktemp "$restore_tmp_dir/.rusa-agent-restore.XXXXXX.age")"
+    temporary_encrypted="$(mktemp "$restore_tmp_dir/.rusa-agent-restore.XXXXXX")"
     temporary_checksum="$(mktemp "$restore_tmp_dir/.rusa-agent-checksum.XXXXXX")"
     aws_args=()
     if [[ -n "${RUSA_BACKUP_S3_ENDPOINT:-}" ]]; then
