@@ -12,6 +12,10 @@ from .audit import HMACAuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
 from .github import GitHubToolGateway
 from .memory import PostgresMemoryStore
+from .mcp_gateway import LocalKnowledgeGateway, MCPKnowledgeGateway
+from .rag_memory import CompositeMemoryReader
+from .tool_router import CompositeToolGateway
+from rusa_knowledge.service import KnowledgeService
 from .orchestrator import AICodeOrchestrator, CheckpointPersistenceError
 from .provider import OpenAICompatibleProvider
 from .queue import PostgresTaskQueue
@@ -336,10 +340,47 @@ def build_worker() -> QueueWorker:
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
         os.environ["RUSA_AGENT_AUDIT_KEY"],
     )
-    workers = [AgentWorker(role, provider, memory) for role in WorkerRole]
+    rag_enabled = os.getenv("RUSA_RAG_ENABLED", "false").lower() == "true"
+    memory_reader = memory
+    tool_gateway = github
+    knowledge_service = None
+    if rag_enabled:
+        knowledge_service = KnowledgeService.from_env(check_ready=True)
+        memory_reader = CompositeMemoryReader(memory, knowledge_service)
+        mcp_server_url = os.getenv("RUSA_MCP_SERVER_URL", "").strip()
+        if mcp_server_url:
+            try:
+                tenant_tokens = json.loads(os.getenv("RUSA_MCP_TENANT_TOKENS", "{}"))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("RUSA_MCP_TENANT_TOKENS must be valid JSON") from exc
+            if not isinstance(tenant_tokens, dict):
+                raise RuntimeError("RUSA_MCP_TENANT_TOKENS must map tenant IDs to bearer tokens")
+            allowed_tools = {
+                item.strip() for item in os.getenv(
+                    "RUSA_MCP_ALLOWED_TOOLS",
+                    "search_knowledge,get_document,list_collections",
+                ).split(",") if item.strip()
+            }
+            allowed_hosts = {
+                item.strip() for item in os.getenv("RUSA_MCP_INTERNAL_HTTP_HOSTS", "rusa-mcp").split(",")
+                if item.strip()
+            }
+            knowledge_gateway = MCPKnowledgeGateway(
+                server_url=mcp_server_url,
+                tenant_tokens=tenant_tokens,
+                allowed_tools=allowed_tools,
+                allow_http_hosts=allowed_hosts,
+            )
+        else:
+            knowledge_gateway = LocalKnowledgeGateway(
+                knowledge_service,
+                default_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+            )
+        tool_gateway = CompositeToolGateway(github, knowledge_gateway)
+    workers = [AgentWorker(role, provider, memory_reader) for role in WorkerRole]
     orchestrator = AICodeOrchestrator(
         workers=workers,
-        tools=github,
+        tools=tool_gateway,
         audit=audit,
         worker_timeout_seconds=float(os.getenv("RUSA_AGENT_WORKER_TIMEOUT", "120")),
         max_repair_cycles=int(os.getenv("RUSA_AGENT_MAX_REPAIR_CYCLES", "2")),
