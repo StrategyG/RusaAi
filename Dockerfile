@@ -11,6 +11,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "whe
 COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
 RUN python -m pip install --no-cache-dir --prefix=/install --no-deps .
+RUN PYTHONPATH=/install/lib/python3.12/site-packages python -m pip check \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
+    && python -m pip uninstall -y pip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 # Start the final image from a clean Debian runtime. Copying the merged Python
 # filesystem (rather than inheriting Python-image layers) prevents stale,
@@ -34,15 +38,22 @@ COPY --chown=appuser:appuser . /app
 
 RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
-    && python -m pip check \
     && python - <<'PY'
-from importlib.metadata import distributions
+from importlib import import_module, metadata
 
-for dist in distributions():
-    if (dist.metadata.get("Name") or "").lower() == "setuptools":
-        version = tuple(int(part) for part in dist.version.split(".")[:3] if part.isdigit())
-        if version < (84, 1, 0):
-            raise SystemExit(f"Vulnerable setuptools {dist.version} remains at {dist._path}")
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        metadata.version(package)
+    except metadata.PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package} remains in the API runtime")
+
+for module in (
+    "fastapi", "uvicorn", "pydantic", "jsonschema",
+    "httpx", "psycopg", "prometheus_client", "rusa_agents",
+):
+    import_module(module)
+print("API runtime imports verified; build tooling is absent.")
 PY
 
 USER 10001:10001
