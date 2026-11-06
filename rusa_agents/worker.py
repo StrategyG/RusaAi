@@ -15,6 +15,7 @@ from .contracts import TaskStatus, WorkerMessage, WorkerRole, validate_transitio
 from .messaging import AgentMessageBus
 from .orchestrator import HierarchicalOrchestrator
 from .policy import AutonomyPolicy
+from .security import redact_sensitive_data
 from .providers import OpenAICompatibleProvider
 from .storage import Database, TaskRow, utcnow
 from .tools import ToolError, ToolRegistry
@@ -83,6 +84,9 @@ class AgentRuntime:
         if not idempotency_key or len(idempotency_key) > 128:
             raise ValueError("Invalid idempotency key")
         task = TaskCreate.model_validate(payload)
+        safe_objective = redact_sensitive_data(task.objective)
+        safe_context = redact_sensitive_data(task.context)
+        safe_acceptance_criteria = redact_sensitive_data(task.acceptance_criteria)
         async with self.database.session() as session:
             existing = await session.scalar(
                 select(TaskRow).where(
@@ -96,12 +100,12 @@ class AgentRuntime:
                 id=str(uuid4()),
                 tenant_id=tenant_id,
                 idempotency_key=idempotency_key,
-                objective=task.objective,
+                objective=safe_objective,
                 repository=task.repository,
                 base_branch=task.base_branch,
                 work_branch=task.work_branch,
-                context=task.context,
-                acceptance_criteria=task.acceptance_criteria,
+                context=safe_context,
+                acceptance_criteria=safe_acceptance_criteria,
                 allowed_tools=task.allowed_tools,
                 max_attempts=task.max_attempts,
                 require_ci=task.require_ci,
@@ -132,7 +136,7 @@ class AgentRuntime:
             WorkerRole.SUPERVISOR,
             WorkerRole.ANALYST,
             "task.accepted",
-            {"objective": task.objective, "repository": task.repository},
+            {"objective": safe_objective, "repository": task.repository},
         )
         return task_id
 
