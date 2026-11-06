@@ -196,9 +196,10 @@ def _checkpoint_safe_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
             )
         return safe
     if isinstance(value, (list, tuple)):
+        item_limit = 1000 if key.lower() == "checks" else 30
         return [
             _checkpoint_safe_value(item, depth=depth + 1)
-            for item in list(value)[:30]
+            for item in list(value)[:item_limit]
         ]
     if value is None or isinstance(value, (bool, int, float)):
         return value
