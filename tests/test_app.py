@@ -189,3 +189,15 @@ def test_request_body_limit_rejects_large_content(client):
     oversized = b"x" * (1_048_576 + 1)
     response = client.post("/health/live", content=oversized)
     assert response.status_code == 413
+
+
+
+def test_production_authentication_fails_closed_without_secret(monkeypatch):
+    from fastapi import HTTPException
+    import app as serving_app
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    with pytest.raises(HTTPException) as error:
+        serving_app.verify_api_key(None)
+    assert error.value.status_code == 503
