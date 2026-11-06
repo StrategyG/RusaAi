@@ -33,7 +33,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    networks: [rusa-internal]
+    networks: [rusa-internal, rusa-egress]
 
   worker:
     profiles: ["worker"]
@@ -56,7 +56,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [rusa-internal]
+    networks: [rusa-internal, rusa-egress]
 
 volumes:
   rusa-postgres:
@@ -65,3 +65,5 @@ networks:
   rusa-internal:
     driver: bridge
     internal: true
+  rusa-egress:
+    driver: bridge
