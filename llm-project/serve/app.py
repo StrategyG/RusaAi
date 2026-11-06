@@ -1,11 +1,133 @@
 import os
 import json
 import logging
-from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+import hmac
+from typing import Any, Dict, List, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
 import jsonschema
+from pydantic import BaseModel, Field
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("rusa-ai-serve")
+
+app = FastAPI(
+    title="RUSA-AI Serving Engine",
+    description="Production-ready API for RUSA-AI model inference and task validation.",
+    version="1.0.0",
+)
+
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+
+def verify_api_key(api_key: Optional[str] = Depends(api_key_header)):
+    expected_key = os.getenv("RUSA_API_KEY")
+    if not expected_key or not api_key or not hmac.compare_digest(api_key, expected_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="Message role: system, user, or assistant")
+    content: str = Field(..., description="Content of the message")
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str = Field(default="rusa-v1", description="Model identifier")
+    messages: List[ChatMessage] = Field(..., description="List of messages in conversation")
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature")
+    max_tokens: Optional[int] = Field(default=512, gt=0, description="Max tokens to generate")
+
+
+class TaskValidationRequest(BaseModel):
+    task_envelope: Dict[str, Any] = Field(..., description="Task envelope JSON matching A2A schema")
+
+
+class TaskValidationResponse(BaseModel):
+    valid: bool
+    errors: List[str] = Field(default_factory=list, description="Validation errors if any")
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "rusa-ai-serve"}
+
+
+@app.post(
+    "/v1/chat/completions",
+    dependencies=[Depends(verify_api_key)],
+)
+def chat_completions(req: ChatCompletionRequest):
+    return {
+        "id": "chatcmpl-rusa-001",
+        "object": "chat.completion",
+        "created": 1700000000,
+        "model": req.model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Halo! Saya RUSA AI, asisten AI Anda. Ada yang bisa saya bantu?",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 15,
+            "total_tokens": 25,
+        },
+    }
+
+
+@app.post(
+    "/v1/validate-task",
+    response_model=TaskValidationResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+def validate_task(req: TaskValidationRequest):
+    schema_path = os.getenv(
+        "TASK_ENVELOPE_SCHEMA_PATH",
+        os.path.join(
+            os.path.dirname(__file__),
+            "../../schemas/a2a/task-envelope.schema.json",
+        ),
+    )
+    if not os.path.exists(schema_path):
+        return TaskValidationResponse(
+            valid=False,
+            errors=[f"Schema file not found on disk at {schema_path}"],
+        )
+
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema = json.load(f)
+    except Exception as e:
+        return TaskValidationResponse(
+            valid=False,
+            errors=[f"Failed to load/parse schema file: {str(e)}"],
+        )
+
+    try:
+        validator = jsonschema.Draft202012Validator(schema)
+        errors = [err.message for err in validator.iter_errors(req.task_envelope)]
+        if errors:
+            return TaskValidationResponse(valid=False, errors=errors)
+        return TaskValidationResponse(valid=True, errors=[])
+    except Exception as e:
+        return TaskValidationResponse(
+            valid=False,
+            errors=[f"Schema validation error: {str(e)}"],
+        )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
