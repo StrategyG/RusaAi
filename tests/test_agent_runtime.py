@@ -143,14 +143,15 @@ def make_orchestrator(tools, overrides=None, audit=None):
     overrides = overrides or {}
     workers = []
     for role in WorkerRole:
-        default_result = (
-            worker_result(
+        if role == WorkerRole.SECURITY:
+            default_result = worker_result(
                 role,
                 [ToolCall("get_ci_status"), ToolCall("get_branch_diff")],
             )
-            if role == WorkerRole.SECURITY
-            else worker_result(role)
-        )
+        elif role == WorkerRole.TESTER:
+            default_result = worker_result(role, [ToolCall("get_ci_status")])
+        else:
+            default_result = worker_result(role)
         workers.append(overrides.get(role, ScriptedWorker(role, [default_result])))
     return AICodeOrchestrator(
         workers=workers,
@@ -560,7 +561,7 @@ def test_worker_can_list_repository_root_without_file_path():
     result = asyncio.run(orchestrator._run_worker(record, WorkerRole.ANALYST))
     assert result.blockers == ()
     assert [item.name for item in result.tool_results] == ["list_files"]
-    assert tools.calls[0].name == "list_files"
+    assert tools.calls[0][0] == "list_files"
 
 
 
