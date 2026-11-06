@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16-alpine
+        image: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
         env:
           POSTGRES_DB: rusa_test
           POSTGRES_USER: rusa_test
@@ -112,13 +112,43 @@ jobs:
           docker compose --file docker-compose.production.yml config --quiet
 
       - name: Build inference API image
-        run: docker build --pull --file Dockerfile --tag rusa-ai:${{ github.sha }} .
+        run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --file Dockerfile --tag rusa-ai:${{ github.sha }} .
 
       - name: Build agent runtime image
-        run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
+        run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
 
       - name: Pull pinned PostgreSQL image
-        run: docker pull postgres:16.15-alpine3.22
+        run: docker pull docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
+
+      - name: Checkout rollback baseline
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: 1881dad952193cdc6bb8b9245fc293a997e553ac
+          path: rollback-baseline
+          persist-credentials: false
+
+      - name: Build rollback baseline images
+        run: |
+          docker build --pull --label org.opencontainers.image.revision=1881dad952193cdc6bb8b9245fc293a997e553ac --file rollback-baseline/Dockerfile --tag rusa-ai:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
+          docker build --pull --label org.opencontainers.image.revision=1881dad952193cdc6bb8b9245fc293a997e553ac --file rollback-baseline/Dockerfile.worker --tag rusa-agent-runtime:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
+
+      - name: Exercise deployment and rollback with PostgreSQL
+        env:
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_API_IMAGE: rusa-ai:${{ github.sha }}
+          RUSA_AGENT_IMAGE: rusa-agent-runtime:${{ github.sha }}
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        run: bash tests/smoke_release_stack.sh "$GITHUB_SHA" "1881dad952193cdc6bb8b9245fc293a997e553ac"
 
       - name: Block all CRITICAL inference API vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -187,7 +217,7 @@ jobs:
       - name: Block all CRITICAL PostgreSQL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -197,7 +227,7 @@ jobs:
       - name: Gate PostgreSQL HIGH vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -207,7 +237,7 @@ jobs:
       - name: Export complete PostgreSQL vulnerability report
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: json
           output: trivy-postgres-full.json
           exit-code: "0"
@@ -251,49 +281,13 @@ jobs:
       - name: Generate PostgreSQL SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: postgres:16.15-alpine3.22
+          image: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: cyclonedx-json
           output-file: sbom-postgres.cdx.json
           artifact-name: sbom-postgres-${{ github.sha }}
           syft-version: v1.57.0
           upload-artifact: true
           upload-release-assets: false
-
-      - name: Smoke-test production Compose stack
-        env:
-          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
-          RUSA_MODEL_DIR: .
-          RUSA_API_IMAGE: rusa-ai:${{ github.sha }}
-          RUSA_AGENT_IMAGE: rusa-agent-runtime:${{ github.sha }}
-          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
-          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
-          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
-          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
-          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
-          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
-          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
-          RUSA_AGENT_MODEL: ci-model
-          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
-          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        run: |
-          set -euo pipefail
-          cleanup() {
-            docker compose down --volumes --remove-orphans
-          }
-          trap cleanup EXIT
-
-          docker compose up --detach --no-build --wait --wait-timeout 180
-          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
-            http://127.0.0.1:${RUSA_PORT:-8000}/health/live >/dev/null
-          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
-            http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/live >/dev/null
-
-          auth_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"health probe"}]}' \
-            http://127.0.0.1:${RUSA_PORT:-8000}/v1/chat/completions)"
-          test "$auth_status" = "401"
 
   release-gate:
     name: Release Gate
