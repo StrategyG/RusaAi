@@ -155,6 +155,8 @@ All task endpoints require `X-API-Key` and map the key to a tenant.
 | `/health/ready` | GET | Verify model and database readiness |
 | `/metrics` | GET | Authenticated Prometheus API metrics |
 
+Task creation at `POST /v1/aicode/tasks` requires an `Idempotency-Key` header (1–128 safe ASCII characters). Keys are hashed and scoped to the authenticated tenant. Repeating the same key with the same request returns the original task ID; reusing it with a different payload returns HTTP 409.
+
 Example task request:
 
 ```json
