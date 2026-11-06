@@ -24,8 +24,99 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-agent.txt pytest pytest-asyncio ruff
       - name: Lint
-        run: ruff check rusa_agents tests
+        run: ruff check rusa_agents migrations tests
       - name: Compile
-        run: python -m compileall -q rusa_agents tests
+        run: python -m compileall -q rusa_agents migrations tests
       - name: Test
         run: pytest -q tests/test_agent_runtime.py
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: rusa
+          POSTGRES_USER: rusa
+          POSTGRES_PASSWORD: rusa-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusa -d rusa"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSA_DATABASE_URL: postgresql+asyncpg://rusa:rusa-ci-password@127.0.0.1:5432/rusa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-agent.txt
+      - name: Install migration dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-agent.txt
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Verify PostgreSQL and pgvector schema
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          async def main():
+              engine = create_async_engine(os.environ["RUSA_DATABASE_URL"])
+              async with engine.connect() as connection:
+                  result = await connection.execute(
+                      text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+                  )
+                  tables = {row[0] for row in result}
+                  expected = {
+                      "agent_tasks",
+                      "agent_audit_events",
+                      "agent_memory",
+                      "agent_messages",
+                      "agent_documents",
+                      "alembic_version",
+                  }
+                  assert expected.issubset(tables), expected - tables
+                  extension = await connection.scalar(
+                      text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+                  )
+                  assert extension == "vector"
+              await engine.dispose()
+
+          asyncio.run(main())
+          PY
+
+  agent-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build lightweight agent image
+        run: docker build --pull -f Dockerfile.agent -t rusa-agent:ci .
+      - name: Run agent API container
+        run: |
+          docker run -d --name rusa-agent-ci \
+            -p 127.0.0.1:8010:8010 \
+            -e RUSA_DATABASE_URL=sqlite+aiosqlite:////tmp/rusa-agent-ci.db \
+            -e RUSA_DB_AUTO_CREATE=true \
+            rusa-agent:ci
+      - name: Verify agent API liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8010/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-agent-ci
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rusa-agent-ci || true
