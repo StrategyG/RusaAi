@@ -59,6 +59,34 @@ class PostgresTaskQueue:
                         "Production queue lease fencing is not installed; "
                         "apply migrations/002_aicode_lease_fencing.sql"
                     )
+                protected = conn.execute("""
+                    SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+                    FROM pg_class AS c
+                    JOIN pg_namespace AS n ON n.oid=c.relnamespace
+                    WHERE n.nspname='public'
+                      AND c.relname = ANY(%s)
+                """, (["aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"],)).fetchall()
+                states = {row[0]: (row[1], row[2]) for row in protected}
+                if set(states) != {"aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"}:
+                    raise RuntimeError("Production RLS migration is incomplete; apply migrations/003_aicode_tenant_rls.sql")
+                if any(not enabled or not forced for enabled, forced in states.values()):
+                    raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
+                policies = conn.execute("""
+                    SELECT tablename, policyname FROM pg_policies
+                    WHERE schemaname='public' AND policyname = ANY(%s)
+                """, ([
+                    "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
+                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_all",
+                    "aicode_audit_worker_all",
+                ],)).fetchall()
+                policy_names = {row[1] for row in policies}
+                required_policies = {
+                    "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
+                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_all",
+                    "aicode_audit_worker_all",
+                }
+                if not required_policies.issubset(policy_names):
+                    raise RuntimeError("Production tenant RLS policies are missing; apply migrations/003_aicode_tenant_rls.sql")
                 return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
@@ -96,6 +124,12 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             row = conn.execute("SELECT 1").fetchone()
         return row is not None and row[0] == 1
+
+    @staticmethod
+    def _set_tenant_context(conn: Any, tenant_id: str) -> None:
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("A non-empty tenant_id is required")
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     def enqueue(self, task_id: str, tenant_id: str, payload: dict[str, Any],
                 max_attempts: int = 3, priority: int = 0) -> bool:
