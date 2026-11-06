@@ -71,6 +71,29 @@ def test_uri_format_is_enforced(valid_envelope):
     assert "$.evidence[0].uri: must use the uri format" in response.json()["errors"]
 
 
+def test_valid_uri_is_accepted(valid_envelope):
+    valid_envelope["evidence"] = [
+        {"kind": "commit", "uri": "https://github.com/StrategyG/RusaAi/commit/abc1234"}
+    ]
+
+    response = validate(valid_envelope)
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": True, "errors": []}
+
+
+def test_validation_error_response_is_bounded(valid_envelope):
+    valid_envelope["task"]["acceptance_criteria"] = [""] * 60
+
+    response = validate(valid_envelope)
+
+    errors = response.json()["errors"]
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert len(errors) == 51
+    assert errors[-1].startswith("$: more than 50 validation errors")
+
+
 def test_required_errors_identify_every_missing_field(valid_envelope):
     del valid_envelope["task_id"]
     del valid_envelope["message_id"]
