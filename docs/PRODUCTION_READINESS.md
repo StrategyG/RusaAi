@@ -15,29 +15,32 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - Request IDs, basic security headers, a content-length limit, and generic internal error responses are added.
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
+- The tenant API database role receives only `SELECT`, `INSERT`, and `UPDATE` on the task queue; it has no `DELETE` or memory-table/sequence privileges, broad table/sequence defaults are revoked, and it remains subject to forced RLS.
 - Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
-- The tenant-scoped agent API supports task status, cancellation, and explicit retry of failed tasks; cancellation revokes the active worker lease.
-- The tenant API database role receives only `SELECT`, `INSERT`, and `UPDATE` on the task queue; broad table/sequence defaults are revoked, and readiness verifies the required queue privileges.
-- Compose publishes API ports on host loopback only, keeps database/worker/migration ports private, and runs a one-shot schema bootstrap before the API and worker.
+- The tenant-scoped agent API supports task status, cancellation, and explicit retry of failed tasks; cancellation revokes the active worker lease and is cooperative for external requests already in flight.
+- Compose publishes API ports on host loopback by default and runs a one-shot schema bootstrap before the API and worker.
 
 ## Current verification boundary
 
-The tenant task-lifecycle and database-permission remediation passed GitHub Actions on PR #16 head `6fee8d09565f52900ace4d7e1e1c95c7311d0c95` (run `42190607014`): 134 tests passed, Ruff and compile passed, both dependency audits reported no known vulnerabilities, Compose validation passed, both container images built, agent runtime imports passed, and inference API liveness passed. This is code/container CI evidence only. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
-
-PR #16 remains a draft and GitHub currently reports it as not mergeable because its base snapshot predates the latest PR #15 branch head. Synchronize/rebase the stacked branch after PR #15 is finalized; do not merge or deploy the stale branch.
+Latest CI on PR #15 commit d4c941e passed both required jobs: lint, compile, 123 tests (including PostgreSQL integration), dependency audit, Docker Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. The task-lifecycle and database-permission remediation then passed GitHub Actions on PR #16 code commit 6fee8d0 (run 42190607014): 134 tests passed, Ruff and compile passed, both dependency audits reported no known vulnerabilities, Compose validation passed, both images built, agent runtime imports passed, and inference API liveness passed. The current PR #16 head bf0338b also has successful required checks. This is code/container CI evidence only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
 
 ## Release gates still open
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | CI passed on PR #16 head 6fee8d0 (run 42190607014: 134 tests, lint, compile, dependency audits, Compose validation, both image builds, runtime import smoke test, and inference liveness); staging deployment verification pending |
+| API foundation | CI, schema tests, auth tests, container smoke test | PR #15 and PR #16 required CI checks passed; live deployment configuration and staging verification pending |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | CI passed on PR #16 head 6fee8d0 (run 42190607014), including PostgreSQL tenant/RLS and lease-fencing integration tests, task lifecycle tests, least-privilege API database tests, and both container builds; staging verification pending |
-| Memory/RAG | Tenant-scoped PostgreSQL storage, retrieval, redaction, deletion, relevance evaluation | Storage and isolation implemented; relevance evaluation and production retention verification pending |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | PR #16 CI passed, including PostgreSQL tenant/RLS, lease-fencing, task-lifecycle, least-privilege API DB tests, and both container builds; staging verification pending |
+| Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; CI tenant-isolation/redaction tests passed; staging retention verification pending |
+| Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
+| MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
+| Task lifecycle API | Tenant-scoped status, cancellation, retry, idempotency, and lease revocation | Implemented in PR #16; CI passed on current draft head; staging verification pending |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
+| Repository governance | Protected main branch, required CI checks, mandatory review | Blocked: GitHub currently reports main as unprotected; repository administrator action required |
+| PR integration | Conflict-free integration into main and merged dependency chain | Blocked: PR #8 remains dirty; PR #15/16 stacked integration pending; no production merge performed |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
 
@@ -51,13 +54,8 @@ through an idempotent schema migration and is required by queue readiness.
 
 The worker credential is an internal service identity and must never be exposed
 to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
-PostgreSQL same-worker-ID stale-token test before release. Tenant cancellation
-clears the active lease token. The worker rechecks ownership immediately before
-each repository tool action and fails closed when the lease is revoked or the
-database check fails. Cancellation is cooperative: an external request already
-in flight may finish, but the worker cannot start another tool or acknowledge
-success. Explicit API retry is restricted to failed tasks and does not requeue
-policy-blocked tasks.
+PostgreSQL same-worker-ID stale-token test before release.
+Tenant cancellation clears the active lease token. The worker rechecks ownership immediately before each repository tool action and fails closed when the lease is revoked or the database check fails. Cancellation is cooperative: an external request already in flight may finish, but the worker cannot start another tool or acknowledge success. Explicit API retry is restricted to failed tasks and does not requeue policy-blocked tasks.
 
 For rollout from a worker version that does not send lease tokens, drain and stop
 all old worker replicas before enabling the new queue migration and starting the

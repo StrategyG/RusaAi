@@ -120,6 +120,121 @@ def test_postgres_memory_is_tenant_scoped_and_deletable():
         )
 
 
+def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
+    queue = PostgresTaskQueue(DSN)
+    memory = PostgresMemoryStore(DSN)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            DO $rusa$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'
+                ) THEN
+                    CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'
+                ) THEN
+                    CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOBYPASSRLS;
+                END IF;
+            END
+            $rusa$
+        """)
+        connection.execute(
+            "ALTER ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+        )
+        connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
+        connection.execute("GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker")
+        connection.execute("""
+            ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO rusa_agent_api
+        """)
+        connection.execute("""
+            ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO rusa_agent_api
+        """)
+
+    queue.initialize()
+    memory.initialize()
+    tenant_a = f"rusa-test-api-a-{uuid4().hex}"
+    tenant_b = f"rusa-test-api-b-{uuid4().hex}"
+    task_a = make_task(tenant_a, f"api-a-{uuid4().hex}")
+    task_b = make_task(tenant_b, f"api-b-{uuid4().hex}")
+    task_a_id = queue.enqueue(task_a)
+    task_b_id = queue.enqueue(task_b)
+
+    try:
+        with psycopg.connect(DSN) as connection:
+            privileges = connection.execute("""
+                SELECT
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'SELECT'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'INSERT'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'UPDATE'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_tasks', 'DELETE'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_memory', 'SELECT'),
+                    has_table_privilege('rusa_agent_api', 'public.rusa_agent_memory', 'INSERT'),
+                    has_sequence_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_memory_memory_id_seq', 'USAGE'
+                    ),
+                    (SELECT rolbypassrls FROM pg_roles WHERE rolname='rusa_agent_api')
+            """).fetchone()
+        assert privileges == (True, True, False, False, False, False, False, False)
+
+        with psycopg.connect(DSN) as connection:
+            connection.execute("SET ROLE rusa_agent_worker")
+            connection.execute("""
+                CREATE TABLE public.rusa_agent_privilege_probe (
+                    id BIGSERIAL PRIMARY KEY,
+                    payload TEXT NOT NULL
+                )
+            """)
+        with psycopg.connect(DSN) as connection:
+            probe_privileges = connection.execute("""
+                SELECT
+                    has_table_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_privilege_probe', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_privilege_probe', 'INSERT'
+                    ),
+                    has_sequence_privilege(
+                        'rusa_agent_api', 'public.rusa_agent_privilege_probe_id_seq', 'USAGE'
+                    )
+            """).fetchone()
+            connection.execute("DROP TABLE public.rusa_agent_privilege_probe")
+        assert probe_privileges == (False, False, False)
+
+        with psycopg.connect(DSN) as connection:
+            connection.execute("SET ROLE rusa_agent_api")
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)", (tenant_a,),
+            )
+            rows = connection.execute("""
+                SELECT tenant_id, task_id FROM rusa_agent_tasks
+                WHERE task_id IN (%s, %s)
+            """, (task_a_id, task_b_id)).fetchall()
+        assert rows == [(tenant_a, task_a_id)]
+
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with psycopg.connect(DSN) as connection:
+                connection.execute("SET ROLE rusa_agent_api")
+                connection.execute(
+                    "SELECT set_config('rusa.tenant_id', %s, true)", (tenant_a,),
+                )
+                connection.execute("""
+                    INSERT INTO rusa_agent_tasks
+                        (tenant_id, task_id, idempotency_key, payload)
+                    VALUES (%s, %s, %s, '{}'::jsonb)
+                """, (tenant_b, f"forbidden-{uuid4().hex}", f"forbidden-{uuid4().hex}"))
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "DELETE FROM rusa_agent_tasks WHERE tenant_id IN (%s, %s)",
+                (tenant_a, tenant_b),
+            )
+
+
 def test_postgres_row_level_security_filters_and_rejects_other_tenants():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()

@@ -52,9 +52,9 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 6. Configure RUSA_AGENT_TENANT_REPOSITORIES as a JSON map assigning each tenant only its permitted repositories. Every tenant in this map must have a unique API key and every assigned repository must also appear in the global allowlist.
 7. Restrict the GitHub App or fine-grained token to the same global repository set. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
 8. Start the services with docker compose up --build -d.
-9. Compose runs the one-shot `rusa-agent-migrate` service before starting the agent API and worker. Published API ports bind to host loopback; terminate TLS at a trusted reverse proxy rather than exposing the containers directly.
+9. Compose runs the one-shot `rusa-agent-migrate` service before starting the agent API and worker. Published API ports bind to host loopback by default; terminate TLS at a trusted reverse proxy rather than exposing the containers directly.
 
-The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. All agent task endpoints require X-API-Key and X-Tenant-ID; the API validates the key against RUSA_AGENT_TENANT_KEYS and enforces each tenant's repository assignment.
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The inference API binds to 127.0.0.1 by default; put it behind a TLS reverse proxy and change RUSA_BIND_ADDRESS only when binding to a deliberate private interface. All agent task endpoints require X-API-Key and X-Tenant-ID; the API validates the key against RUSA_AGENT_TENANT_KEYS and enforces each tenant's repository assignment.
 
 | Method | Endpoint | Purpose |
 |---|---|---|

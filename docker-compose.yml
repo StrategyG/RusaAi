@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "127.0.0.1:${RUSA_PORT:-8000}:8000"
+      - "${RUSA_BIND_ADDRESS:-127.0.0.1}:${RUSA_PORT:-8000}:8000"
     environment:
       ENVIRONMENT: production
       RUSA_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}

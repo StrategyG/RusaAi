@@ -27,11 +27,11 @@ The Compose bootstrap creates three database identities:
 
 - rusa_agent_owner: database bootstrap/owner identity; never used by application services.
 - rusa_agent_worker: worker identity with BYPASSRLS because workers claim tasks across tenants. It is not a superuser and has no role-creation/database-creation permission.
-- rusa_agent_api: API identity without BYPASSRLS. It has table privileges but is subject to row-level security on task and memory tables.
+- rusa_agent_api: API identity without BYPASSRLS. It has only SELECT and INSERT on rusa_agent_tasks, no UPDATE/DELETE/TRUNCATE, and no privileges on rusa_agent_memory or its sequence. Forced RLS restricts its task rows to the validated tenant context.
 
-The task and memory tables enable and force row-level security. The API sets a transaction-local tenant context only after validating the tenant-specific API key. Queue insert/read operations also filter by tenant_id. The worker identity is intentionally privileged to process all tenants; keep its credential isolated from the API service.
+The task and memory tables enable and force row-level security. The API sets a transaction-local tenant context only after validating the tenant-specific API key. Queue insert/read operations also filter by tenant_id. The worker identity is intentionally privileged to process all tenants; keep its credential isolated from the API service. Queue schema initialization explicitly grants the API role only the task operations it needs and revokes legacy/default memory and sequence grants, including on existing database volumes.
 
-The worker healthcheck verifies both schemas and their forced RLS policies. The init script runs only when the PostgreSQL data volume is first initialized. For an existing volume, apply role grants and RLS migrations explicitly; do not assume a new init script will be replayed automatically.
+The worker healthcheck verifies both schemas and their forced RLS policies. The init script runs only when the PostgreSQL data volume is first initialized. On existing volumes, worker startup migrations re-apply forced RLS policies and minimum API table grants; verify role creation and password changes separately because the init script is not replayed.
 
 ## Repository permission model
 

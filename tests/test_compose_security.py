@@ -11,11 +11,11 @@ def load_compose():
         return yaml.safe_load(stream)
 
 
-def test_api_host_ports_are_loopback_only():
+def test_api_host_ports_default_to_loopback_and_database_ports_are_private():
     services = load_compose()["services"]
 
     assert services["rusa-api"]["ports"] == [
-        "127.0.0.1:${RUSA_PORT:-8000}:8000"
+        "${RUSA_BIND_ADDRESS:-127.0.0.1}:${RUSA_PORT:-8000}:8000"
     ]
     assert services["rusa-agent-api"]["ports"] == [
         "127.0.0.1:${RUSA_AGENT_PORT:-8001}:8001"
