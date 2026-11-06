@@ -77,7 +77,7 @@ jobs:
           docker run -d --name rusa-minio-ci --network host \
             -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
             -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
-            minio/minio:latest server /data
+            quay.io/minio/minio:latest server /data
           for attempt in $(seq 1 30); do
             if curl --fail --silent --max-time 3 http://127.0.0.1:9000/minio/health/live; then
               break
