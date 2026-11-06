@@ -79,3 +79,19 @@ def test_gateway_rejects_symlink_paths(tmp_path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.read_file("linked.txt")
+
+
+def test_gateway_rejects_unknown_tool_arguments(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.execute(
+            {"name": "list_files", "arguments": {"path": ".", "shell": "id"}},
+            WorkerRole.ANALYST,
+        )
+
+
+def test_gateway_atomic_write_creates_expected_content(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    result = gateway.write_file("src/generated.py", "VALUE = 42\n", WorkerRole.DEVELOPER)
+    assert result.ok
+    assert (tmp_path / "src" / "generated.py").read_text() == "VALUE = 42\n"
