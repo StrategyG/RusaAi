@@ -58,4 +58,4 @@ def test_postgres_memory_and_audit_integrity():
     audit.initialize()
     audit.record("test.event", task_id, "pytest", {"result": "pass"}, tenant_id="tenant-memory")
     assert audit.verify()
-    assert not PostgresAuditLog(DSN, "wrong-key").verify()
+    assert not PostgresAuditLog(DSN, "wrong-key-" + "x" * 32).verify()
