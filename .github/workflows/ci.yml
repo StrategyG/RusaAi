@@ -19,6 +19,24 @@ jobs:
     name: Test, lint, and security
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rusa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: development
+      RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
+      RUSA_AUDIT_HMAC_KEY: ci-only-test-audit-key-change-me
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
