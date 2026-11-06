@@ -53,7 +53,7 @@ RusaAi/
 ## Quick Start & Local Setup
 
 ### 1. Prerequisites
-- Python 3.10 or higher
+- Python 3.12 or higher
 - Docker & Docker Compose (optional for containerized deployment)
 
 ### 2. Environment Setup
