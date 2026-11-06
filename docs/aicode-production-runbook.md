@@ -45,7 +45,7 @@ Runtime permissions:
 - Neither role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
-The database policies use transaction-local `rusa.tenant_id` context set by the trusted API/worker process. This is defense-in-depth against missing tenant predicates and accidental cross-tenant queries; a custom PostgreSQL setting is not a cryptographic tenant identity and can be changed by any code already executing SQL under that login. Keep database credentials private to the services, parameterize every query, and never expose direct database access to tenants. If the threat model includes a compromised API process or arbitrary SQL execution, use separate database identities (or databases/schemas) per tenant rather than relying on a shared login plus a session setting. The worker is a privileged internal queue consumer and can read the global audit chain, but its task memory is tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py` and `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
+The database policies use transaction-local `rusa.tenant_id` context set by the trusted API/worker process. This is defense-in-depth against missing tenant predicates and accidental cross-tenant queries; a custom PostgreSQL setting is not a cryptographic tenant identity and can be changed by any code already executing SQL under that login. Keep database credentials private to the services, parameterize every query, and never expose direct database access to tenants. If the threat model includes a compromised API process or arbitrary SQL execution, use separate database identities (or databases/schemas) per tenant rather than relying on a shared login plus a session setting. The worker is a privileged internal queue consumer and can read the global audit chain, but its task memory is tenant-scoped. Verify these boundaries with `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
@@ -93,11 +93,12 @@ The current CI builds images but does not publish them to a registry automatical
 
 ## 6. Prepare Git mirrors and storage
 
-Create persistent directories on the worker host:
+Create persistent directories on the worker host. The group must match the rootless Docker daemon's socket group; the setgid bit makes task worktrees inherit it so the daemon can traverse read-only sandbox snapshots:
 
 ```bash
-sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/rusa/workspaces
-sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/rusa/mirrors
+RUSA_DOCKER_GID="$(id -g rusa-worker)"
+sudo install -d -o 10001 -g "$RUSA_DOCKER_GID" -m 2770 /var/lib/rusa/workspaces
+sudo install -d -o 10001 -g "$RUSA_DOCKER_GID" -m 2770 /var/lib/rusa/mirrors
 ```
 
 Create one bare mirror per authorized repository:
