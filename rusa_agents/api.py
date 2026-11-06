@@ -230,6 +230,19 @@ async def approve_task(
     return {"task_id": task_id, "status": "queued"}
 
 
+@app.post("/v1/agent/tasks/{task_id}/resume")
+async def resume_task(
+    task_id: str,
+    tenant: str = Depends(approver_dependency),
+    runtime: AgentRuntime = Depends(runtime_dependency),
+) -> dict[str, str]:
+    try:
+        await runtime.resume(tenant, task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"task_id": task_id, "status": "queued"}
+
+
 @app.post("/v1/agent/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: str,
