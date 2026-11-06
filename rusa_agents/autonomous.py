@@ -118,6 +118,19 @@ class AutonomousCodeWorker:
                     blockers=["Provider did not return the required JSON action envelope."],
                 )
             last_message = response["message"]
+            acceptance_review = (
+                self.role == WorkerRole.ANALYST
+                and task.metadata.get("aicode_phase") == "acceptance_review"
+            )
+            if response.get("evidence") and not acceptance_review:
+                return WorkerResult(
+                    role=self.role,
+                    summary="Model-supplied evidence is only permitted during the read-only acceptance review.",
+                    success=False,
+                    artifacts=artifacts,
+                    evidence=evidence,
+                    blockers=["Verification evidence must originate from registered tool results."],
+                )
             actions = response.get("actions", [])
             if response.get("blocked", False):
                 return WorkerResult(
