@@ -115,3 +115,27 @@ python -m rusa_knowledge.cli check
 ```
 
 The RAG/MCP feature remains subject to PostgreSQL/pgvector integration tests, MCP protocol tests, tenant-isolation verification, and staging deployment checks. It is not a production certification.
+
+
+## User and admin workspace
+
+The staging branch also includes the React/TypeScript workspace served by the unprivileged Nginx container:
+
+- User workspace: login, dashboard, AI chat, and personal task list.
+- Admin workspace: tenant user management, task monitoring, retry, and cancellation.
+- Browser authentication: short-lived bearer access tokens and rotating HttpOnly refresh cookies.
+- Backend identity storage: PostgreSQL tables managed by migration `006_user_identity.sql`.
+- Separate database credentials: `rusa_web_api` for identity records and `rusa_agent_api` for tenant-scoped task operations.
+- The API writes HMAC-chained audit events to the shared audit volume.
+
+Set the web/authentication variables in `.env` (copy from `.env.example`), including a unique `RUSA_WEB_DB_PASSWORD`, `RUSA_AUTH_SECRET`, and bootstrap administrator credentials. The bootstrap administrator is created idempotently and an existing password is not reset.
+
+Start the API and web workspace with:
+
+```bash
+docker compose up -d --build
+```
+
+The web workspace is published on the loopback interface at `http://127.0.0.1:3000` by default. Put a TLS reverse proxy in front of it before exposing it beyond a trusted local network. Keep `RUSA_COOKIE_SECURE=true` when serving over HTTPS. Agent task submission remains disabled until `RUSA_AGENT_ENABLED=true` and the provider, GitHub, queue, and worker configuration are valid.
+
+The chat page currently uses non-streaming completions. Conversation history persistence and live task updates are follow-on UI capabilities; do not treat the workspace as production-certified until browser E2E, authorization, CSRF, and staging tests pass.
