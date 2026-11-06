@@ -290,3 +290,12 @@ The current implementation tightens the original target design in the following 
 - The API limits actual streamed request bytes before JSON parsing and rejects stalled body uploads.
 
 These are code-level controls. They do not replace live GitHub permission validation, external TLS/rate limiting, immutable audit export, load/chaos testing, model quality evaluation, or protected-branch review.
+
+
+## 13. Tenant repository assignments and evidence review
+
+The global repository allowlist is not the only authorization boundary. RUSA_AGENT_TENANT_REPOSITORIES maps each tenant ID to a non-empty set of repositories; each assignment must be a subset of RUSA_AGENT_ALLOWED_REPOSITORIES and the tenant must also have a unique API credential. The API rejects unassigned repository submissions, and the GitHub gateway independently checks the tenant mapping before any repository request.
+
+The Security workflow is two-phase. First, the Security worker requests fresh CI check-runs and the branch compare diff. The orchestrator validates completeness, the configured required check names, and exact tester/security/diff commit SHA equality. Second, a read-only Security model pass receives the retrieved diff and CI evidence and is forbidden from requesting tools. The master evaluates this second pass, not the initial evidence-fetch response.
+
+Security context is bounded to at most 20 changed files, with each patch capped at 5,500 characters and total diff text capped at 100,000 characters. A diff that exceeds these limits, includes a protected path, omits a patch, or contains detected secret-redaction markers is blocked. It is never silently treated as a complete review.
