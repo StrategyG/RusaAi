@@ -54,6 +54,11 @@ export function TasksPage() {
       setError("Agent processing is not ready. Ask an administrator to enable the agent runtime and worker.");
       return;
     }
+    const criteriaItems = criteria.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (objective.trim().length > 4000 || context.length > 16000 || criteriaItems.length > 20 || criteriaItems.some((item) => item.length > 500)) {
+      setError("Objective maksimal 4.000 karakter, konteks 16.000 karakter, dan kriteria 1–20 baris (maksimal 500 karakter per baris).");
+      return;
+    }
     setSaving(true);
     setError("");
     const taskId = crypto.randomUUID();
@@ -68,10 +73,10 @@ export function TasksPage() {
       task: {
         objective: objective.trim(),
         context: context.trim(),
-        acceptance_criteria: criteria.split("\n").map((line) => line.trim()).filter(Boolean),
+        acceptance_criteria: criteriaItems,
         repository: repository.trim(),
         base_branch: baseBranch.trim(),
-        work_branch: "feature/rusa-" + taskId.slice(0, 8),
+        work_branch: "rusa-agent/unassigned/unassigned",
       },
       policy: {
         allowed_actions: ["read_repository", "write_branch", "run_tests", "create_pull_request"],
@@ -114,7 +119,7 @@ export function TasksPage() {
       {error && <div className="error-banner"><AlertCircle size={17} /> {error}</div>}
       {agentReady === false && <div className="notice-card warning"><AlertCircle size={18} /><div><strong>Agent processing is unavailable</strong><p>Task submission is paused because the agent runtime or queue is not ready. Ask an administrator to enable the worker, then refresh this page.</p></div></div>}
       {agentReady === null && <div className="loading-line">Checking agent runtime…</div>}
-      {showForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowForm(false); }}><section className="modal-card"><div className="modal-heading"><div><div className="eyebrow muted">NEW AGENT TASK</div><h2>Describe the work</h2></div><button className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19} /></button></div><form onSubmit={(event) => void createTask(event)} className="form-stack"><label>Objective<textarea required minLength={1} maxLength={8000} rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="What should the agent accomplish?" /></label><div className="form-grid"><label>GitHub repository<input required pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="owner/repository" /></label><label>Base branch<input required value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} /></label></div><label>Additional context<textarea rows={3} maxLength={20000} value={context} onChange={(e) => setContext(e.target.value)} placeholder="Relevant files, constraints, or background…" /></label><label>Acceptance criteria<textarea required rows={3} value={criteria} onChange={(e) => setCriteria(e.target.value)} placeholder="One criterion per line" /></label><div className="modal-note">Merge, deployment, secret changes, and destructive actions remain subject to human approval.</div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button" disabled={saving || agentReady !== true || !objective.trim() || !repository.trim() || !criteria.trim()}>{saving ? "Submitting…" : <>Submit task <ArrowRight size={16} /></>}</button></div></form></section></div>}
+      {showForm && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowForm(false); }}><section className="modal-card"><div className="modal-heading"><div><div className="eyebrow muted">NEW AGENT TASK</div><h2>Describe the work</h2></div><button className="icon-button" onClick={() => setShowForm(false)} aria-label="Close"><X size={19} /></button></div><form onSubmit={(event) => void createTask(event)} className="form-stack"><label>Objective<textarea required minLength={1} maxLength={4000} rows={3} value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="What should the agent accomplish?" /></label><div className="form-grid"><label>GitHub repository<input required pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="owner/repository" /></label><label>Base branch<input required maxLength={128} value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} /></label></div><label>Additional context<textarea rows={3} maxLength={16000} value={context} onChange={(e) => setContext(e.target.value)} placeholder="Relevant files, constraints, or background…" /></label><label>Acceptance criteria<textarea required rows={3} value={criteria} onChange={(e) => setCriteria(e.target.value)} placeholder="One criterion per line" /></label><div className="modal-note">Merge, deployment, secret changes, and destructive actions remain subject to human approval.</div><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowForm(false)}>Cancel</button><button className="primary-button" disabled={saving || agentReady !== true || !objective.trim() || !repository.trim() || !criteria.trim()}>{saving ? "Submitting…" : <>Submit task <ArrowRight size={16} /></>}</button></div></form></section></div>}
       <div className="panel-card">
         {loading ? <div className="loading-line">Loading tasks…</div> : items.length ? <div className="task-list">{items.map((task) => <article className="task-row" key={task.task_id}><div className="task-row-main"><div className="task-row-title"><strong>{task.objective || "Agent task"}</strong><StatePill state={task.state} /></div><div className="task-meta"><span>{task.repository || "Repository not specified"}</span><span>Attempt {task.attempts}/{task.max_attempts}</span><span>{new Date(task.created_at).toLocaleString()}</span></div>{task.last_error && <div className="task-error">{task.last_error}</div>}<small className="sub-id">{task.task_id}</small></div>{["queued", "running"].includes(task.state) && <button className="text-danger-button" onClick={() => void cancelTask(task.task_id)}>Cancel</button>}</article>)}</div> : <div className="empty-state"><div className="empty-icon"><Plus size={23} /></div><strong>No tasks yet</strong><p>Create a task and RUSA-AI will add it to the agent queue.</p><button className="primary-button" onClick={() => setShowForm(true)} disabled={agentReady !== true}>Create a task</button></div>}
       </div>
