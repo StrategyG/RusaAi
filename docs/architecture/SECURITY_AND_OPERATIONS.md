@@ -37,7 +37,7 @@ The worker healthcheck verifies both schemas and their forced RLS policies. The 
 
 Configure RUSA_AGENT_ALLOWED_REPOSITORIES as an exact comma-separated global list of owner/name repositories. Configure RUSA_AGENT_TENANT_REPOSITORIES as a JSON map from each tenant ID to a non-empty list of repositories. Every tenant must have an API key and every tenant repository must be a subset of the global allowlist.
 
-The API rejects submissions outside the authenticated tenant's assignment. The GitHub gateway independently enforces both the global list and tenant assignment before making a request. The task contract derives its work branch from the tenant and idempotency identity; clients cannot select arbitrary shared branches.
+The API rejects submissions outside the authenticated tenant's assignment. The GitHub gateway independently enforces both the global list and tenant assignment before making a request. The task contract derives its work branch from the tenant and idempotency identity; clients cannot select arbitrary shared branches. Exact required check-run names are configured through RUSA_AGENT_REQUIRED_CI_CHECKS.
 
 Create a dedicated GitHub App or fine-grained token scoped to the same global repository list. Minimum permissions:
 
@@ -59,6 +59,7 @@ Required worker environment variables are RUSA_AGENT_DATABASE_URL, RUSA_AGENT_PR
 - Checkpoints, heartbeats, retry, and acknowledgement are fenced by worker identity and lease expiry.
 - A retry clears the prior failed checkpoint so a transient failure restarts from the task entry point; GitHub writes and PR creation must remain idempotent.
 - Completed worker stage results are reused from a checkpoint after restart; external CI is always refreshed after a WAITING_EXTERNAL pause.
+- Dependency manifests, container definitions, infrastructure, and deployment paths require human approval before modification.
 - Worker and tool timeout default: 120 seconds.
 - CI pending recheck default: 30 seconds.
 - Repair cycles default: 2.
