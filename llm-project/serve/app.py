@@ -16,9 +16,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import Response
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rusa_agents.config import RuntimeConfig
+from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
@@ -79,6 +80,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+def _request_body_limit() -> int:
+    try:
+        limit = int(os.getenv("RUSA_MAX_REQUEST_BYTES", "1048576"))
+    except ValueError as exc:
+        raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be an integer") from exc
+    if not 1024 <= limit <= 50_000_000:
+        raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be between 1024 and 50000000")
+    return limit
+
+
+def _request_body_timeout() -> float:
+    try:
+        timeout = float(os.getenv("RUSA_REQUEST_BODY_TIMEOUT_SECONDS", "15"))
+    except ValueError as exc:
+        raise RuntimeError("RUSA_REQUEST_BODY_TIMEOUT_SECONDS must be numeric") from exc
+    if not 0.1 <= timeout <= 60:
+        raise RuntimeError("RUSA_REQUEST_BODY_TIMEOUT_SECONDS must be between 0.1 and 60")
+    return timeout
+
+
+app.add_middleware(
+    BodyLimitMiddleware,
+    max_bytes=_request_body_limit,
+    timeout=_request_body_timeout(),
+)
+
 
 @app.middleware("http")
 async def collect_request_metrics(request: Request, call_next):
@@ -98,11 +125,15 @@ async def collect_request_metrics(request: Request, call_next):
 
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     role: Literal["system", "user", "assistant"]
     content: str = Field(min_length=1, max_length=100_000)
 
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     model: str = Field(default="rusa-ai", min_length=1, max_length=128)
     messages: list[ChatMessage] = Field(min_length=1, max_length=128)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -126,6 +157,8 @@ class ChatCompletionResponse(BaseModel):
 
 
 class TaskValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     envelope: dict[str, Any]
 
 
@@ -135,6 +168,8 @@ class TaskValidationResponse(BaseModel):
 
 
 class RepositoryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     full_name: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     base_branch: str = Field(
         default="main", pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$"
@@ -157,6 +192,8 @@ class RepositoryInput(BaseModel):
 
 
 class AICodeTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     objective: str = Field(min_length=1, max_length=8000)
     context: str = Field(default="", max_length=20000)
     repository: RepositoryInput
