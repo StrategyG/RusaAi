@@ -327,6 +327,7 @@ services:
     image: rusa-agent-db-backup:local
     command: ["/app/scripts/postgres/backup.sh"]
     restart: "no"
+    stop_grace_period: ${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}
     environment:
       DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
       BACKUP_DIR: /backups
