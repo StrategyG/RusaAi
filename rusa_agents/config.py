@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-
 KNOWN_API_ROLES = {"platform_admin", "tenant_admin", "developer", "read_only"}
 
 
