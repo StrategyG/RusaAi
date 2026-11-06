@@ -53,13 +53,14 @@ def test_inference_provider_rejects_oversized_model_response():
             )
         )
 
+
 def test_agent_provider_stream_parses_crlf_sse_and_finish_reason():
     body = (
-        b'data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\\r\\n'
-        b"\\r\\n"
-        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\r\\n'
-        b"\\r\\n"
-        b"data: [DONE]\\r\\n\\r\\n"
+        b'data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null}]}\r\n'
+        b"\r\n"
+        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\r\n'
+        b"\r\n"
+        b"data: [DONE]\r\n\r\n"
     )
     transport = httpx.MockTransport(
         lambda request: httpx.Response(
