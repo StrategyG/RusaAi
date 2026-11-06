@@ -190,3 +190,72 @@ def test_postgres_rls_and_service_role_separation():
             """
         ).fetchone()
         assert privileges == (False, False, False, False)
+
+
+
+def test_postgres_dedicated_login_roles_enforce_tenant_boundaries(monkeypatch):
+    import psycopg
+    from psycopg.errors import InsufficientPrivilege
+
+    api_dsn = os.getenv("RUSA_API_DATABASE_URL")
+    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL")
+    if not api_dsn or not worker_dsn:
+        pytest.skip("Dedicated PostgreSQL API/worker test DSNs are not configured")
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    api_queue = PostgresTaskQueue(api_dsn)
+    worker_queue = PostgresTaskQueue(worker_dsn)
+    api_queue.initialize()
+    worker_queue.initialize()
+
+    limiter = PostgresRateLimiter(api_dsn)
+    limiter.initialize()
+    memory = PostgresMemory(worker_dsn)
+    memory.initialize()
+    audit = PostgresAuditLog(worker_dsn, os.getenv("RUSA_AUDIT_HMAC_KEY", "ci-only-test-audit-key-change-me"))
+    audit.initialize()
+
+    task_id = str(uuid4())
+    tenant_id = "tenant-login-" + task_id[:8]
+    assert api_queue.enqueue(
+        task_id, tenant_id, {"objective": "verify role-level RLS"}, priority=100000
+    )
+    assert api_queue.get(task_id, tenant_id)["status"] == "queued"
+    assert api_queue.get(task_id, "tenant-not-owner") is None
+
+    # The API role cannot act as a global queue consumer without tenant context.
+    assert api_queue.claim("api-must-not-claim", lease_seconds=30) is None
+    with psycopg.connect(api_dsn) as conn:
+        unscoped = conn.execute(
+            "SELECT task_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert unscoped is None
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute("SELECT task_id FROM public.aicode_memory LIMIT 1")
+    with psycopg.connect(api_dsn) as conn:
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute("SELECT id FROM public.aicode_audit_events LIMIT 1")
+
+    job = worker_queue.claim("worker-login-canary", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    result = {"branch": "feature/aicode/login-rls"}
+    assert worker_queue.complete(
+        job.id, tenant_id, "worker-login-canary", job.lease_token, result
+    )
+    assert api_queue.get(task_id, tenant_id)["result"] == result
+
+    memory.save(
+        task_id, "StrategyG/RusaAi", "completed",
+        {"tenant_scope": tenant_id}, tenant_id=tenant_id,
+    )
+    assert memory.get(task_id, tenant_id)["payload"]["tenant_scope"] == tenant_id
+    assert memory.get(task_id, "different-tenant") is None
+
+    route = "rls-login:" + task_id
+    assert limiter.hit(tenant_id, route, 1)[0] is True
+    assert limiter.hit(tenant_id, route, 1)[0] is False
+    assert limiter.hit("other-tenant", route, 1)[0] is True
+
+    audit.record("rls.login.test", task_id, "ci-worker", {"ok": True}, tenant_id=tenant_id)
+    assert audit.verify()
