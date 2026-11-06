@@ -298,7 +298,7 @@ def check_generation_limit(runtime: ModelRuntime, max_tokens: int) -> None:
 
 
 def make_completion(
-    result: Dict[str, Any], model_name: str, request_id: str
+    result: Dict[str, Any], model_name: str, request_id: str, max_tokens: int
 ) -> ChatCompletionResponse:
     completion_tokens = int(result["completion_tokens"])
     return ChatCompletionResponse(
@@ -478,6 +478,7 @@ async def batch_chat_completions(
     if not runtime.ready:
         raise HTTPException(status_code=503, detail="Inference model is not ready")
     check_requested_model(payload.model, runtime)
+    check_generation_limit(runtime, payload.max_tokens)
 
     semaphore = await acquire_capacity(request)
     message_batches = [
@@ -496,7 +497,7 @@ async def batch_chat_completions(
         data = []
         for index, result in enumerate(results):
             completion = make_completion(
-                result, runtime.model_name, f"{request.state.request_id}-{index}"
+                result, runtime.model_name, f"{request.state.request_id}-{index}", payload.max_tokens
             )
             data.append(completion.model_dump())
         return {"object": "list", "data": data, "created": created}
