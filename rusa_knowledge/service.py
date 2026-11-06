@@ -8,8 +8,8 @@ from typing import Any
 
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
-from .store import PostgresKnowledgeStore
 from .safety import reject_credential_material, validate_document_metadata
+from .store import PostgresKnowledgeStore
 
 
 class KnowledgeService:
