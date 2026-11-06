@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -101,6 +102,15 @@ class PostgresAuditLog:
 
     def initialize(self) -> None:
         with self._connect() as conn:
+            if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                trigger_rows = conn.execute("""
+                    SELECT tgname FROM pg_trigger
+                    WHERE tgrelid='public.aicode_audit_events'::regclass AND NOT tgisinternal
+                """).fetchall()
+                trigger_names = {row[0] for row in trigger_rows}
+                if not {"trg_aicode_audit_immutable", "trg_aicode_audit_no_truncate"}.issubset(trigger_names):
+                    raise RuntimeError("Production audit immutability triggers are missing; apply migrations/001_aicode_core.sql")
+                return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_audit_events (
                     id BIGSERIAL PRIMARY KEY,
@@ -128,6 +138,12 @@ class PostgresAuditLog:
                 BEFORE UPDATE OR DELETE ON aicode_audit_events
                 FOR EACH ROW EXECUTE FUNCTION rusa_audit_immutable()
             """)
+            conn.execute("DROP TRIGGER IF EXISTS trg_aicode_audit_no_truncate ON aicode_audit_events")
+            conn.execute("""
+                CREATE TRIGGER trg_aicode_audit_no_truncate
+                BEFORE TRUNCATE ON aicode_audit_events
+                FOR EACH STATEMENT EXECUTE FUNCTION rusa_audit_immutable()
+            """)
 
     def _digest(self, payload: dict[str, Any]) -> str:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -136,7 +152,7 @@ class PostgresAuditLog:
     def record(self, event: str, task_id: str, actor: str,
                details: dict[str, Any] | None = None, tenant_id: str = "default") -> None:
         with self._connect() as conn:
-            conn.execute("LOCK TABLE aicode_audit_events IN EXCLUSIVE MODE")
+            conn.execute("SELECT pg_advisory_xact_lock(741203091)")
             previous_row = conn.execute(
                 "SELECT record_hash FROM aicode_audit_events ORDER BY id DESC LIMIT 1"
             ).fetchone()
