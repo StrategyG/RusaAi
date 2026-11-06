@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 class PostgresTaskQueue:
@@ -50,6 +50,7 @@ class PostgresTaskQueue:
                         CHECK (max_attempts BETWEEN 1 AND 20),
                     available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     lease_owner TEXT,
+                    lease_token UUID,
                     lease_until TIMESTAMPTZ,
                     lease_heartbeat_at TIMESTAMPTZ,
                     result JSONB,
@@ -74,6 +75,18 @@ class PostgresTaskQueue:
                     "ALTER TABLE rusa_agent_jobs "
                     "ADD COLUMN lease_heartbeat_at TIMESTAMPTZ"
                 )
+            db.execute(
+                "ALTER TABLE rusa_agent_jobs ADD COLUMN IF NOT EXISTS lease_token UUID"
+            )
+            # Re-queue legacy active jobs; new claims must always carry a fencing token.
+            db.execute(
+                """
+                UPDATE rusa_agent_jobs
+                SET state='queued', lease_owner=NULL, lease_until=NULL,
+                    lease_heartbeat_at=NULL, lease_token=NULL, updated_at=now()
+                WHERE state='running' AND lease_token IS NULL
+                """
+            )
 
             state_constraint = db.execute(
                 """
@@ -123,6 +136,13 @@ class PostgresTaskQueue:
             )
 
     @staticmethod
+    def _validate_lease_token(lease_token: str) -> None:
+        try:
+            UUID(lease_token)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("lease_token must be a UUID returned by claim()") from exc
+
+    @staticmethod
     def _decode(row: dict[str, Any] | None) -> dict[str, Any] | None:
         if row is None:
             return None
@@ -132,6 +152,8 @@ class PostgresTaskQueue:
                 result[key] = json.loads(result[key])
         if "task_id" in result:
             result["task_id"] = str(result["task_id"])
+        if result.get("lease_token") is not None:
+            result["lease_token"] = str(result["lease_token"])
         return result
 
     def enqueue(
@@ -203,6 +225,7 @@ class PostgresTaskQueue:
         if not worker_id or len(worker_id) > 128:
             raise ValueError("worker_id must contain 1 to 128 characters")
         self._validate_lease(lease_seconds)
+        lease_token = str(uuid4())
         with self._connect() as db:
             with db.transaction():
                 # Expired jobs that exhausted their retry budget must not remain running forever.
@@ -211,6 +234,7 @@ class PostgresTaskQueue:
                     UPDATE rusa_agent_jobs
                     SET state='dead_letter',
                         lease_owner=NULL,
+                        lease_token=NULL,
                         lease_until=NULL,
                         last_error=COALESCE(last_error, 'worker lease expired after max attempts'),
                         updated_at=now()
@@ -241,13 +265,15 @@ class PostgresTaskQueue:
                     SET state='running',
                         attempts=attempts+1,
                         lease_owner=%s,
+                        lease_token=%s::uuid,
                         lease_until=now() + (%s * interval '1 second'),
                         lease_heartbeat_at=now(),
                         updated_at=now()
                     WHERE task_id=%s
-                    RETURNING task_id, tenant_id, payload, attempts, max_attempts, lease_until
+                    RETURNING task_id, tenant_id, payload, attempts, max_attempts,
+                              lease_until, lease_token
                     """,
-                    (worker_id, lease_seconds, row["task_id"]),
+                    (worker_id, lease_token, lease_seconds, row["task_id"]),
                 ).fetchone()
         return self._decode(claimed)
 
@@ -256,9 +282,11 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         worker_id: str,
+        lease_token: str,
         lease_seconds: int = 1800,
     ) -> bool:
         self._validate_lease(lease_seconds)
+        self._validate_lease_token(lease_token)
         with self._connect() as db:
             cursor = db.execute(
                 """
@@ -268,9 +296,10 @@ class PostgresTaskQueue:
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                   AND state='running' AND lease_owner=%s
+                  AND lease_token=%s::uuid
                   AND lease_until > now()
                 """,
-                (lease_seconds, tenant_id, task_id, worker_id),
+                (lease_seconds, tenant_id, task_id, worker_id, lease_token),
             )
         return cursor.rowcount == 1
 
@@ -279,19 +308,28 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         worker_id: str,
+        lease_token: str,
         result: dict[str, Any],
     ) -> bool:
+        self._validate_lease_token(lease_token)
         with self._connect() as db:
             cursor = db.execute(
                 """
                 UPDATE rusa_agent_jobs
                 SET state='succeeded', result=%s::jsonb, lease_owner=NULL,
-                    lease_until=NULL, last_error=NULL, updated_at=now()
+                    lease_token=NULL, lease_until=NULL, last_error=NULL, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                     AND state='running' AND lease_owner=%s
+                    AND lease_token=%s::uuid
                     AND lease_until > now()
                 """,
-                (json.dumps(result, ensure_ascii=False), tenant_id, task_id, worker_id),
+                (
+                    json.dumps(result, ensure_ascii=False),
+                    tenant_id,
+                    task_id,
+                    worker_id,
+                    lease_token,
+                ),
             )
         return cursor.rowcount == 1
 
@@ -300,9 +338,11 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         worker_id: str,
+        lease_token: str,
         error: str,
         retryable: bool = True,
     ) -> bool:
+        self._validate_lease_token(lease_token)
         with self._connect() as db:
             cursor = db.execute(
                 """
@@ -317,14 +357,16 @@ class PostgresTaskQueue:
                         * interval '1 second'
                     ),
                     lease_owner=NULL,
+                    lease_token=NULL,
                     lease_until=NULL,
                     last_error=%s,
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                     AND state='running' AND lease_owner=%s
+                    AND lease_token=%s::uuid
                     AND lease_until > now()
                 """,
-                (retryable, error[:4000], tenant_id, task_id, worker_id),
+                (retryable, error[:4000], tenant_id, task_id, worker_id, lease_token),
             )
         return cursor.rowcount == 1
 
@@ -336,6 +378,7 @@ class PostgresTaskQueue:
                 UPDATE rusa_agent_jobs
                 SET state='cancelled',
                     lease_owner=NULL,
+                    lease_token=NULL,
                     lease_until=NULL,
                     last_error='cancelled by authenticated tenant',
                     updated_at=now()
@@ -380,6 +423,7 @@ class PostgresTaskQueue:
                     attempts=0,
                     available_at=now(),
                     lease_owner=NULL,
+                    lease_token=NULL,
                     lease_until=NULL,
                     result=NULL,
                     last_error=NULL,
