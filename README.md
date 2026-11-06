@@ -72,7 +72,7 @@ The API returns HTTP 503 when no model is loaded, HTTP 429 when inference admiss
     export RUSA_MODEL_MANIFEST_SHA256="<manifest-sha256>"
     uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
 
-For GPU deployment with vLLM, configure NVIDIA Container Toolkit and a supported driver, then use docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d. The GPU override builds the optional vLLM runtime and requests NVIDIA devices. Verify the vLLM, PyTorch, CUDA, driver, and GPU combination on staging before production. The default image remains the Transformers baseline.
+For GPU deployment with vLLM, ensure the host model directory is readable by container UID 10001, configure NVIDIA Container Toolkit and a supported driver, then use docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d. The GPU override builds the optional vLLM runtime and requests NVIDIA devices. Verify the vLLM, PyTorch, CUDA, driver, and GPU combination on staging before production. The default image remains the Transformers baseline.
 
 ## Benchmark
 
