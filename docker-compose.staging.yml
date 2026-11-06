@@ -2,13 +2,13 @@
 # Images are published by .github/workflows/deploy-staging.yml.
 services:
   rusa-api:
-    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}/api:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
+    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}-api:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
     build: null
 
   rusa-web:
-    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}/web:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
+    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}-web:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
     build: null
 
   rusa-agent-worker:
-    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}/agent:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
+    image: ${RUSA_IMAGE_PREFIX:?Set RUSA_IMAGE_PREFIX}-agent:${RUSA_IMAGE_TAG:?Set RUSA_IMAGE_TAG}
     build: null

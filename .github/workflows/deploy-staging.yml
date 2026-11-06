@@ -60,8 +60,8 @@ jobs:
         run: |
           docker buildx build --pull --provenance=true --sbom=true --push \
             --target model-runtime \
-            --tag "$IMAGE_PREFIX/api:$IMAGE_TAG" \
-            --tag "$IMAGE_PREFIX/api:staging" .
+            --tag "$IMAGE_PREFIX-api:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-api:staging" .
 
       - name: Build and publish agent worker image
         env:
@@ -70,8 +70,8 @@ jobs:
         run: |
           docker buildx build --pull --provenance=true --sbom=true --push \
             --target agent-runtime \
-            --tag "$IMAGE_PREFIX/agent:$IMAGE_TAG" \
-            --tag "$IMAGE_PREFIX/agent:staging" .
+            --tag "$IMAGE_PREFIX-agent:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-agent:staging" .
 
       - name: Build and publish web image
         env:
@@ -80,8 +80,8 @@ jobs:
         run: |
           docker buildx build --pull --provenance=true --sbom=true --push \
             --file apps/web/Dockerfile \
-            --tag "$IMAGE_PREFIX/web:$IMAGE_TAG" \
-            --tag "$IMAGE_PREFIX/web:staging" .
+            --tag "$IMAGE_PREFIX-web:$IMAGE_TAG" \
+            --tag "$IMAGE_PREFIX-web:staging" .
 
       - name: Report published immutable images
         env:
@@ -91,9 +91,9 @@ jobs:
           {
             echo "### Staging images published"
             echo
-            echo "- $IMAGE_PREFIX/api:$IMAGE_TAG"
-            echo "- $IMAGE_PREFIX/agent:$IMAGE_TAG"
-            echo "- $IMAGE_PREFIX/web:$IMAGE_TAG"
+            echo "- $IMAGE_PREFIX-api:$IMAGE_TAG"
+            echo "- $IMAGE_PREFIX-agent:$IMAGE_TAG"
+            echo "- $IMAGE_PREFIX-web:$IMAGE_TAG"
             echo
             echo "The mutable staging tags point to this revision. Deploy only through the protected staging environment."
           } >> "$GITHUB_STEP_SUMMARY"
