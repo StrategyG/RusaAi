@@ -23,7 +23,6 @@ services:
     image: rusa-ai-model:local
     restart: unless-stopped
     init: true
-    env_file: .env
     ports:
       - "127.0.0.1:${RUSA_PORT:-8000}:8000"
     environment:
@@ -36,6 +35,7 @@ services:
       DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_AGENT_ENABLED: ${RUSA_AGENT_ENABLED:-false}
       RUSA_TENANT_ID: ${RUSA_TENANT_ID:-default}
+      RUSA_API_KEY_TENANTS_JSON: ${RUSA_API_KEY_TENANTS_JSON:-}
     volumes:
       - type: bind
         source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
@@ -79,13 +79,16 @@ services:
     command: ["python", "-m", "rusa_agents.worker"]
     restart: unless-stopped
     init: true
-    env_file: .env
     environment:
       DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_AGENT_DATA_DIR: /data
       RUSA_PROVIDER_BASE_URL: ${RUSA_PROVIDER_BASE_URL:?Set RUSA_PROVIDER_BASE_URL in .env}
       RUSA_PROVIDER_MODEL: ${RUSA_PROVIDER_MODEL:?Set RUSA_PROVIDER_MODEL in .env}
       RUSA_PROVIDER_API_KEY: ${RUSA_PROVIDER_API_KEY:-}
+      RUSA_PROVIDER_ALLOWED_HOSTS: ${RUSA_PROVIDER_ALLOWED_HOSTS:-}
+      RUSA_API_KEY_TENANTS_JSON: ${RUSA_API_KEY_TENANTS_JSON:-}
+      RUSA_GITHUB_ALLOWED_REPOSITORIES: ${RUSA_GITHUB_ALLOWED_REPOSITORIES:-}
+      RUSA_GITHUB_TENANT_REPOSITORIES_JSON: ${RUSA_GITHUB_TENANT_REPOSITORIES_JSON:-}
       RUSA_GITHUB_TOKEN: ${RUSA_GITHUB_TOKEN:?Set RUSA_GITHUB_TOKEN in .env}
       RUSA_AGENT_MAX_TURNS: ${RUSA_AGENT_MAX_TURNS:-8}
       RUSA_WORKER_LEASE_SECONDS: ${RUSA_WORKER_LEASE_SECONDS:-1800}

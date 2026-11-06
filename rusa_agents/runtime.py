@@ -37,8 +37,10 @@ def build_orchestrator() -> AICodeOrchestrator:
             if host.strip()
         },
     )
-    raw_tenant_repositories = os.getenv("RUSA_GITHUB_TENANT_REPOSITORIES_JSON")
-    raw_api_tenants = os.getenv("RUSA_API_KEY_TENANTS_JSON")
+    raw_tenant_repositories = (
+        os.getenv("RUSA_GITHUB_TENANT_REPOSITORIES_JSON", "").strip() or None
+    )
+    raw_api_tenants = os.getenv("RUSA_API_KEY_TENANTS_JSON", "").strip() or None
     tenant_repositories = None
     if raw_tenant_repositories is not None:
         try:
