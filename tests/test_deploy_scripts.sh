@@ -101,6 +101,16 @@ grep -Fx "RUSA_WORKER_IMAGE=$old_worker" "$failure_dir/.env" >/dev/null
 grep -Fx "RUSA_SANDBOX_IMAGE=$old_sandbox" "$failure_dir/.env" >/dev/null
 echo "PASS: unhealthy candidate automatically restores the previous healthy image set"
 
+enabled_dir="$tmp_root/enabled"
+make_case "$enabled_dir"
+sed -i 's/^RUSA_AICODE_ENABLED=false$/RUSA_AICODE_ENABLED=true/' "$enabled_dir/.env"
+if run_deploy "$enabled_dir" 0 "$new_api" "$new_worker" "$new_sandbox"; then
+  echo "Deployment must be rejected while AICode intake is enabled." >&2
+  exit 1
+fi
+grep -Fx "RUSA_API_IMAGE=$old_api" "$enabled_dir/.env" >/dev/null
+echo "PASS: deployment is blocked until AICode intake is disabled"
+
 if run_deploy "$failure_dir" 0 "ghcr.io/strategyg/rusa-ai-api:latest" "$new_worker" "$new_sandbox"; then
   echo "Mutable image tags must be rejected." >&2
   exit 1
