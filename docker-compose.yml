@@ -202,6 +202,32 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  rusa-knowledge-migrate:
+    profiles: ["migrate"]
+    image: pgvector/pgvector:pg16
+    restart: "no"
+    entrypoint: ["/bin/sh", "/scripts/apply-rag-migration.sh"]
+    environment:
+      RUSA_AGENT_DB_PASSWORD: ${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}
+      RUSA_AGENT_DB_HOST: rusa-agent-db
+      RUSA_AGENT_DB_PORT: "5432"
+      RUSA_AGENT_DB_NAME: rusa_agent
+      RUSA_AGENT_DB_USER: rusa_agent_owner
+    volumes:
+      - ./scripts/postgres/apply-rag-migration.sh:/scripts/apply-rag-migration.sh:ro
+      - ./migrations/005_rag_knowledge_pgvector.sql:/migrations/005_rag_knowledge_pgvector.sql:ro
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 32
+
 volumes:
   rusa-agent-postgres-data:
   rusa-agent-audit-data:
