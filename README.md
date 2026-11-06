@@ -56,7 +56,7 @@ Run the worker in a separate process:
 
     python -m rusa_agents.worker_cli
 
-Inspect registered tools and their schemas at GET /v1/agent/tools. Submit tasks with X-API-Key and Idempotency-Key headers at POST /v1/agent/tasks. Use GET /v1/agent/tasks/{task_id} for task state and evidence, and GET /v1/agent/tasks/{task_id}/messages for the communication trace. Reviewer rejection pauses the task; a human approver can approve that review override at POST /v1/agent/tasks/{task_id}/approve. Supported CI/PR blockers can be resumed at POST /v1/agent/tasks/{task_id}/resume. Both approval and resume require the separate X-RUSA-Approver-Key credential. Cancellation is available at POST /v1/agent/tasks/{task_id}/cancel. Tenant IDs are resolved server-side from credentials; clients cannot select a tenant through request data.
+Inspect registered tools and their schemas at GET /v1/agent/tools, operational metrics at GET /v1/agent/evaluation/metrics, and tenant audit-chain integrity at GET /v1/agent/audit/verify. Submit tasks with X-API-Key and Idempotency-Key headers at POST /v1/agent/tasks. Use GET /v1/agent/tasks/{task_id} for task state and evidence, and GET /v1/agent/tasks/{task_id}/messages for the communication trace. Reviewer rejection pauses the task; a human approver can approve that review override at POST /v1/agent/tasks/{task_id}/approve. Supported CI/PR blockers can be resumed at POST /v1/agent/tasks/{task_id}/resume. Both approval and resume require the separate X-RUSA-Approver-Key credential. Cancellation is available at POST /v1/agent/tasks/{task_id}/cancel. Tenant IDs are resolved server-side from credentials; clients cannot select a tenant through request data.
 
 ## Memory and RAG
 
