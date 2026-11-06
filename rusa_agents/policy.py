@@ -37,7 +37,7 @@ class AutonomyPolicy:
         if not path or path.startswith("/") or "\\" in path:
             return False
         parts = path.split("/")
-        if any(part in {"", ".", "..", ".git"} for part in parts):
+        if any(part.lower() in {"", ".", "..", ".git"} for part in parts):
             return False
         candidate = PurePosixPath(path)
         if candidate.is_absolute():
@@ -51,7 +51,8 @@ class AutonomyPolicy:
         if lowered.endswith((".pem", ".key", ".p12", ".pfx", ".env")):
             return False
         return not any(
-            part.lower() in {"id_rsa", "id_ed25519", "secrets", "credentials"}
+            part.lower() in {"id_rsa", "id_ed25519", "secrets", "credentials", ".env"}
+            or part.lower().startswith(".env.")
             for part in parts
         )
 
