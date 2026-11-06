@@ -87,8 +87,8 @@ class AgentRuntime:
 
         if not tenant_id or len(tenant_id) > 128:
             raise ValueError("Invalid tenant identifier")
-        if not idempotency_key or len(idempotency_key) > 128:
-            raise ValueError("Invalid idempotency key")
+        if not idempotency_key or not 8 <= len(idempotency_key) <= 128:
+            raise ValueError("Idempotency key must contain 8 to 128 characters")
         task = TaskCreate.model_validate(payload)
         safe_objective = redact_sensitive_data(task.objective)
         safe_context = redact_sensitive_data(task.context)
