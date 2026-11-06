@@ -299,3 +299,10 @@ The global repository allowlist is not the only authorization boundary. RUSA_AGE
 The Security workflow is two-phase. First, the Security worker requests fresh CI check-runs and the branch compare diff. The orchestrator validates completeness, the configured required check names, and exact tester/security/diff commit SHA equality. Second, a read-only Security model pass receives the retrieved diff and CI evidence and is forbidden from requesting tools. The master evaluates this second pass, not the initial evidence-fetch response.
 
 Security context is bounded to at most 20 changed files, with each patch capped at 5,500 characters and total diff text capped at 100,000 characters. A diff that exceeds these limits, includes a protected path, omits a patch, or contains detected secret-redaction markers is blocked. It is never silently treated as a complete review.
+
+
+## 14. Configurable CI and protected operational files
+
+Required GitHub check-run names are supplied as a JSON array in RUSA_AGENT_REQUIRED_CI_CHECKS. The orchestrator requires every configured check to exist in the complete check-run set and requires every check run to be completed successfully. The names must match the GitHub Actions job names exactly.
+
+Writes to dependency manifests, lockfiles, Dockerfiles, Compose definitions, infrastructure, deployment, Kubernetes, Helm, Terraform, and GitHub configuration paths require human approval. Repository code changes remain autonomous within the normal allowlist; dependency and infrastructure changes do not silently expand the agent's authority.
