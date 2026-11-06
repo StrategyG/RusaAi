@@ -16,6 +16,8 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
 - Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
+- The tenant-scoped agent API supports task status, cancellation, and explicit retry of failed tasks; cancellation revokes the active worker lease.
+- Compose publishes API ports on host loopback only, keeps database/worker/migration ports private, and runs a one-shot schema bootstrap before the API and worker.
 
 ## Current verification boundary
 
@@ -25,13 +27,13 @@ The code changes require successful CI on the remediation pull request. The mode
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | Pending CI on remediation PR |
+| API foundation | CI, schema tests, auth tests, container smoke test | CI passed on PR #15 head 7bc4ba1; staging deployment verification pending |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented in code; PostgreSQL integration CI and staging verification pending |
-| Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | CI passed on PR #15 head 7bc4ba1, including PostgreSQL integration and both container builds; staging verification pending |
+| Memory/RAG | Tenant-scoped PostgreSQL storage, retrieval, redaction, deletion, relevance evaluation | Storage and isolation implemented; relevance evaluation and production retention verification pending |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
@@ -46,7 +48,10 @@ through an idempotent schema migration and is required by queue readiness.
 
 The worker credential is an internal service identity and must never be exposed
 to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
-PostgreSQL same-worker-ID stale-token test before release.
+PostgreSQL same-worker-ID stale-token test before release. Tenant cancellation
+clears the active lease token; the worker must fail its next ownership check and
+stop before starting another repository tool action. Explicit API retry is
+restricted to failed tasks and does not requeue policy-blocked tasks.
 
 For rollout from a worker version that does not send lease tokens, drain and stop
 all old worker replicas before enabling the new queue migration and starting the
