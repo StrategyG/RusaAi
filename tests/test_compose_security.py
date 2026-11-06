@@ -38,11 +38,18 @@ def test_schema_and_privilege_migration_gates_api_and_worker():
         "rusa-agent-migrate": {"condition": "service_completed_successfully"}
     }
     assert services["rusa-agent-migrate"]["restart"] == "no"
+    assert services["rusa-agent-api"]["profiles"] == ["agent"]
+    assert services["rusa-agent-worker"]["profiles"] == ["agent"]
     migration_command = " ".join(services["rusa-agent-migrate"]["command"])
     assert "queue = PostgresTaskQueue(dsn)" in migration_command
     assert "queue.initialize()" in migration_command
     assert "PostgresMemoryStore(dsn).initialize()" in migration_command
     assert "queue.configure_api_permissions()" in migration_command
+    worker_environment = services["rusa-agent-worker"]["environment"]
+    assert worker_environment["RUSA_AGENT_PROVIDER_BASE_URL"] == "${RUSA_AGENT_PROVIDER_BASE_URL:-}"
+    assert worker_environment["RUSA_AGENT_PROVIDER_API_KEY"] == "${RUSA_AGENT_PROVIDER_API_KEY:-}"
+    assert worker_environment["RUSA_AGENT_MODEL"] == "${RUSA_AGENT_MODEL:-}"
+    assert worker_environment["RUSA_AGENT_GITHUB_TOKEN"] == "${RUSA_AGENT_GITHUB_TOKEN:-}"
 
 
 def test_knowledge_service_is_optional_and_loopback_bound():
