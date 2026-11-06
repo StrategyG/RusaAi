@@ -4,16 +4,20 @@
 
 | Threat | Control | Residual requirement |
 |---|---|---|
-| Prompt injection in repository files | Treat retrieved content as untrusted; role/tool allowlists; policy outside model | Red-team corpus and continuous adversarial tests |
-| Credential exfiltration | No secret-read tool; no shell tool; secrets only in process environment | Secret manager, rotation, log scanning |
-| Cross-tenant data leakage | Per-tenant API keys, tenant_id filters, PostgreSQL RLS on queue and memory tables | Test RLS with the exact restricted API database role in staging |
-| Unauthorized repository mutation | One repository per task; work branch only; protected paths denied | GitHub App installation restricted to target repositories |
+| Prompt injection in repository files | Treat repository, issue, memory, and tool content as untrusted; role/tool allowlists; policy outside model | Versioned red-team corpus and continuous adversarial tests |
+| Credential exfiltration | No secret-read tool; no shell tool; secrets only in process environment; protected paths blocked | Secret manager, rotation, log scanning, repository secret scanning |
+| Cross-tenant data leakage | Per-tenant API keys, tenant_id filters, PostgreSQL RLS on queue and memory tables | Run isolation tests with the exact restricted API database role in staging |
+| Unauthorized repository mutation | Exact repository allowlist, deterministic tenant/task work branch, protected paths denied | GitHub App installation must match the configured allowlist |
+| Branch collision or takeover | Branch identity is derived from tenant plus idempotency key/task ID; arbitrary work branches are rejected | Test duplicate submissions and branch-creation races against live GitHub |
 | Malicious code execution | Worker never executes repository code; GitHub Actions performs CI in hosted runners | Pin actions and runner images; review workflow changes manually |
-| Duplicate task delivery | tenant-scoped idempotency key, lease, idempotent branch/file/PR operations | Chaos test worker crash and concurrent claim |
-| Audit tampering | HMAC chain, file locking, fsync | Ship logs to immutable remote storage; rotate keys via KMS |
-| Provider outage | bounded HTTP timeout, durable queue, worker lease | Circuit breaker, provider fallback policy, SLO and alerting |
+| Duplicate task delivery | Payload-checked tenant idempotency, fenced lease owner, heartbeat, checkpoint, idempotent branch/file/PR operations | Chaos test worker crash, database failover, and concurrent claim |
+| Stale worker writes | Checkpoint, heartbeat, retry, and acknowledgement require current lease owner and unexpired lease | Validate with multiple worker replicas under load |
+| Incomplete CI evidence | Bounded pagination; total-count consistency; exact commit SHA; all check runs complete and successful | GitHub API evidence is adapter provenance, not a cryptographic attestation |
+| Changed code after test | Security worker re-reads CI and complete compare diff; success requires identical tester/security/diff head SHA | Deployment must bind to the immutable verified commit and re-check release gates |
+| Audit tampering | HMAC chain, file locking, fsync | Ship logs to immutable remote storage; manage key rotation through KMS |
+| Provider/GitHub response exhaustion | Streaming response limits, timeouts, bounded file and diff sizes | Load-test limits and configure outbound egress allowlists |
 | Dependency compromise | pip-audit in CI, constrained dependencies | Lockfile, SBOM, signed artifacts and provenance |
-| Public API abuse | per-tenant API keys, tenant header, request validation | TLS gateway, distributed rate limits, WAF and IP policy |
+| Public API abuse | Per-tenant API keys, tenant header, request byte limit, request timeout | TLS gateway, distributed rate limits, WAF and IP policy |
 
 ## Database permission model
 
@@ -25,11 +29,13 @@ The Compose bootstrap creates three database identities:
 
 The task and memory tables enable and force row-level security. The API sets a transaction-local tenant context only after validating the tenant-specific API key. Queue insert/read operations also filter by tenant_id. The worker identity is intentionally privileged to process all tenants; keep its credential isolated from the API service.
 
-The init script runs only when the PostgreSQL data volume is first initialized. For an existing volume, apply the role grants and RLS migrations explicitly; do not assume a new init script will be replayed automatically.
+The worker healthcheck verifies both schemas and their forced RLS policies. The init script runs only when the PostgreSQL data volume is first initialized. For an existing volume, apply role grants and RLS migrations explicitly; do not assume a new init script will be replayed automatically.
 
 ## Repository permission model
 
-Create a dedicated GitHub App or fine-grained token scoped to the single target repository. Minimum permissions:
+Configure RUSA_AGENT_ALLOWED_REPOSITORIES as an exact comma-separated list of owner/name repositories. The API rejects submissions outside this list, and the GitHub gateway independently enforces the same list before making a request. The task contract derives its work branch from the tenant and idempotency identity; clients cannot select arbitrary shared branches.
+
+Create a dedicated GitHub App or fine-grained token scoped to the same repository list. Minimum permissions:
 
 - Contents: read/write, required for branch file changes.
 - Pull requests: read/write, required to create a draft PR.
@@ -40,24 +46,27 @@ Do not grant Administration, Actions write, Secrets, Environments, Deployments, 
 
 ## Secret handling
 
-Required worker environment variables are RUSA_AGENT_DATABASE_URL, RUSA_AGENT_PROVIDER_BASE_URL, RUSA_AGENT_PROVIDER_API_KEY, RUSA_AGENT_MODEL, RUSA_AGENT_GITHUB_TOKEN, and RUSA_AGENT_AUDIT_KEY. The API requires RUSA_AGENT_API_DATABASE_URL and RUSA_AGENT_TENANT_KEYS as a JSON map of tenant identifiers to unique API keys of at least 32 characters. Keep the database owner, worker, and API database passwords separate. Use a secret manager in production. Never commit real values to Git, task metadata, memory, or logs.
+Required worker environment variables are RUSA_AGENT_DATABASE_URL, RUSA_AGENT_PROVIDER_BASE_URL, RUSA_AGENT_PROVIDER_API_KEY, RUSA_AGENT_MODEL, RUSA_AGENT_GITHUB_TOKEN, RUSA_AGENT_ALLOWED_REPOSITORIES, and RUSA_AGENT_AUDIT_KEY. The API requires RUSA_AGENT_API_DATABASE_URL, RUSA_AGENT_ALLOWED_REPOSITORIES, and RUSA_AGENT_TENANT_KEYS as a JSON map of tenant identifiers to unique ASCII API keys of at least 32 characters. Keep the database owner, worker, and API database passwords separate. Use a secret manager in production. Never commit real values to Git, task metadata, memory, or logs.
 
 ## Reliability
 
 - Queue lease default: 300 seconds; task attempt default: 4.
+- Worker renews its lease at approximately one-third of the lease interval.
+- Checkpoints, heartbeats, retry, and acknowledgement are fenced by worker identity and lease expiry.
+- A retry clears the prior failed checkpoint so a transient failure restarts from the task entry point; GitHub writes and PR creation must remain idempotent.
 - Worker and tool timeout default: 120 seconds.
 - CI pending recheck default: 30 seconds.
 - Repair cycles default: 2.
 - PostgreSQL backup and restore drills are mandatory before launch.
-- Alert on expired leases, repeated retries, queue age, blocked tasks, provider failures, and audit verification failures.
+- Alert on expired leases, repeated retries, queue age, blocked/approval tasks, provider failures, audit verification failures, and stale CI evidence.
 
 ## Human approval boundary
 
-The runtime can autonomously create a branch, modify permitted files, and open a draft PR. It cannot merge, deploy, release, change secrets, change permissions, modify CI workflows, or perform destructive actions. Human reviewers approve the PR and release through GitHub protected-branch and environment controls. High/critical risk and protected-path requests stop in awaiting_approval and require operator review; the runtime does not auto-approve them.
+The runtime can autonomously create a deterministic work branch, modify permitted files, and open a draft PR. It cannot merge, deploy, release, change secrets, change permissions, modify CI workflows, or perform destructive actions. Human reviewers approve the PR and release through GitHub protected-branch and environment controls. High/critical risk and protected-path requests stop in awaiting_approval and require operator review; the runtime does not auto-approve them.
 
 ## Production checklist
 
-- [ ] GitHub App/token has minimum repository scope and no administration/secrets/deployment rights.
+- [ ] GitHub App/token has minimum repository scope and matches the exact configured repository allowlist.
 - [ ] main branch protection requires review and all required CI checks.
 - [ ] Each tenant has a unique API key; rotation and revocation are tested.
 - [ ] API uses the restricted non-BYPASSRLS database role; worker uses the isolated BYPASSRLS role.
@@ -66,5 +75,6 @@ The runtime can autonomously create a branch, modify permitted files, and open a
 - [ ] Agent API is behind TLS gateway and distributed rate limiting.
 - [ ] Provider/GitHub outbound egress is allowlisted.
 - [ ] Audit is shipped to immutable remote storage and HMAC key is managed by KMS.
-- [ ] Prompt-injection, tool abuse, duplicate delivery, and worker crash tests pass.
+- [ ] Prompt-injection, tool abuse, duplicate delivery, stale-worker, and worker-crash tests pass.
 - [ ] Staging load/soak test, monitoring, alerting, incident response, and rollback are approved.
+- [ ] Production model quality and safety benchmark has an owner, golden dataset, acceptance threshold, and signed result.
