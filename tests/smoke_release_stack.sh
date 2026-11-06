@@ -15,9 +15,18 @@ cleanup() {
   local result=$?
   if (( result != 0 )); then
     compose ps --all || true
+    for service in rusa-agent-migrate rusa-agent-worker rusa-agent-api; do
+      local container_id
+      container_id="$(compose ps --all --quiet "$service" || true)"
+      if [[ -n "$container_id" ]]; then
+        echo "Health diagnostics for $service"
+        docker inspect --format '{{json .State.Health.Log}}' "$container_id" || true
+      fi
+    done
     compose logs --tail 100 || true
   fi
   compose down --volumes --remove-orphans
+  return "$result"
 }
 trap cleanup EXIT
 
@@ -31,12 +40,47 @@ deploy() {
   export RUSA_API_IMAGE="rusa-ai:$1"
   export RUSA_AGENT_IMAGE="rusa-agent-runtime:$1"
   echo "Starting Compose stack for $1"
-  compose up --detach --no-build --pull never --wait --wait-timeout 180
+  compose up --detach --no-build --pull never
+
+  # The one-shot migration must finish before the worker can become healthy.
+  local migration_id migration_state api_ready agent_ready
+  migration_id="$(compose ps --all --quiet rusa-agent-migrate)"
+  test -n "$migration_id"
+  for attempt in {1..180}; do
+    migration_state="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+    [[ "$migration_state" == "exited" ]] && break
+    sleep 1
+  done
+  test "$migration_state" = "exited"
+  test "$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")" = "0"
+  test "$(docker inspect --format '{{.Image}}' "$migration_id")" = \
+    "$(docker image inspect --format '{{.Id}}' "$RUSA_AGENT_IMAGE")"
+
+  sql -c "SELECT tablename, policyname, qual, with_check FROM pg_policies WHERE schemaname='public' AND tablename IN ('rusa_agent_tasks','rusa_agent_memory') ORDER BY tablename, policyname"
+
+  api_ready=false
+  for attempt in {1..90}; do
+    if curl --fail --silent "$api/health/live" >/dev/null; then
+      api_ready=true
+      break
+    fi
+    sleep 2
+  done
+  test "$api_ready" = "true"
+
+  agent_ready=false
+  for attempt in {1..90}; do
+    if curl --fail --silent "$agent/health/ready" | jq -e '.status == "ready"' >/dev/null 2>&1; then
+      agent_ready=true
+      break
+    fi
+    sleep 2
+  done
+  test "$agent_ready" = "true"
+
   assert_image rusa-api "$RUSA_API_IMAGE"
   assert_image rusa-agent-api "$RUSA_AGENT_IMAGE"
   assert_image rusa-agent-worker "$RUSA_AGENT_IMAGE"
-  curl --fail --silent --show-error "$api/health/live" >/dev/null
-  curl --fail --silent --show-error "$agent/health/ready" | jq -e '.status == "ready"'
 }
 
 sql() {
