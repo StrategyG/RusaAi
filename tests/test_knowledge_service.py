@@ -172,3 +172,45 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+def test_invalid_scope_is_rejected_before_embedding_or_store_access():
+    for tenant_id, collection, expected in [
+        ("tenant-a", "Invalid Collection", "collection"),
+        ("bad tenant", "agent", "tenant_id"),
+    ]:
+        store = FakeStore()
+        embeddings = FakeEmbeddings()
+        service = KnowledgeService(store, embeddings)
+        try:
+            service.search(
+                tenant_id=tenant_id,
+                collection=collection,
+                query="valid search query",
+            )
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError("invalid scope was accepted")
+        assert embeddings.inputs == []
+        assert store.search_args is None
+
+
+def test_ingest_invalid_scope_is_rejected_before_embedding_or_store_access():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.ingest_text(
+            tenant_id="tenant-a",
+            collection="INVALID",
+            source_uri="file:///guide.txt",
+            title="Guide",
+            content="Safe document content.",
+        )
+    except ValueError as exc:
+        assert "collection" in str(exc)
+    else:
+        raise AssertionError("invalid collection was accepted")
+    assert embeddings.inputs == []
+    assert store.ingested is None
+
