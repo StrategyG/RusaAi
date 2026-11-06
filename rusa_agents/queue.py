@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class Job:
     attempts: int
     max_attempts: int
     lease_owner: str
+    lease_token: str
 
 
 class PostgresTaskQueue:
@@ -39,6 +41,18 @@ class PostgresTaskQueue:
                 exists = conn.execute("SELECT to_regclass('public.aicode_jobs')").fetchone()
                 if not exists or exists[0] is None:
                     raise RuntimeError("Production database schema is missing; apply migrations/001_aicode_core.sql")
+                lease_column = conn.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='aicode_jobs'
+                          AND column_name='lease_token'
+                    )
+                """).fetchone()
+                if not lease_column or not lease_column[0]:
+                    raise RuntimeError(
+                        "Production queue lease fencing is not installed; "
+                        "apply migrations/002_aicode_lease_fencing.sql"
+                    )
                 return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
@@ -54,12 +68,14 @@ class PostgresTaskQueue:
                     available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     lease_owner TEXT,
                     lease_until TIMESTAMPTZ,
+                    lease_token UUID,
                     last_error TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (tenant_id, task_id)
                 )
             """)
+            conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_claim
                 ON aicode_jobs(status, available_at, priority DESC, created_at)
@@ -89,12 +105,13 @@ class PostgresTaskQueue:
         return row is not None
 
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
-        if not worker_id or lease_seconds < 15:
-            raise ValueError("worker_id is required and lease_seconds must be at least 15")
+        if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
+            raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
+        lease_token = str(uuid4())
         with self._connect() as conn:
             conn.execute("""
                 UPDATE aicode_jobs
-                SET status='failed', lease_owner=NULL, lease_until=NULL,
+                SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
                 WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
             """)
@@ -110,57 +127,91 @@ class PostgresTaskQueue:
                 )
                 UPDATE aicode_jobs AS job
                 SET status='running', attempts=job.attempts+1, lease_owner=%s,
+                    lease_token=%s::uuid,
                     lease_until=NOW() + (%s * INTERVAL '1 second'), updated_at=NOW()
                 FROM candidate
                 WHERE job.id=candidate.id
                 RETURNING job.id, job.task_id::text, job.tenant_id, job.payload,
-                          job.attempts, job.max_attempts, job.lease_owner
-            """, (worker_id, lease_seconds)).fetchone()
+                          job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text
+            """, (worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6])
+        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7])
 
-    def heartbeat(self, job_id: int, tenant_id: str, worker_id: str,
-                  lease_seconds: int = 180) -> bool:
+    def heartbeat(
+        self, job_id: int, tenant_id: str, worker_id: str,
+        lease_token: str, lease_seconds: int = 180,
+    ) -> bool:
+        if not lease_token or not 15 <= lease_seconds <= 3600:
+            raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
                     updated_at=NOW()
-                WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND status='running'
-            """, (lease_seconds, job_id, tenant_id, worker_id))
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
-    def complete(self, job_id: int, tenant_id: str, worker_id: str) -> bool:
+    def complete(
+        self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
+    ) -> bool:
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='succeeded', lease_owner=NULL,
-                    lease_until=NULL, updated_at=NOW()
-                WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND status='running'
-            """, (job_id, tenant_id, worker_id))
+                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+            """, (job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
-    def await_approval(self, job_id: int, tenant_id: str, worker_id: str, reason: str) -> bool:
+    def await_approval(
+        self, job_id: int, tenant_id: str, worker_id: str,
+        lease_token: str, reason: str,
+    ) -> bool:
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='awaiting_approval', lease_owner=NULL,
-                    lease_until=NULL, last_error=%s, updated_at=NOW()
-                WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND status='running'
-            """, (reason[:4000], job_id, tenant_id, worker_id))
+                    lease_until=NULL, lease_token=NULL, last_error=%s, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+            """, (reason[:4000], job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
-    def fail(self, job_id: int, tenant_id: str, worker_id: str,
-             error: str, retry_delay_seconds: int = 30) -> bool:
+    def fail(
+        self, job_id: int, tenant_id: str, worker_id: str,
+        lease_token: str, error: str, retry_delay_seconds: int = 30,
+    ) -> bool:
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs
                 SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
                     available_at=NOW() + (%s * INTERVAL '1 second'),
-                    lease_owner=NULL, lease_until=NULL, last_error=%s, updated_at=NOW()
-                WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND status='running'
-            """, (max(0, retry_delay_seconds), error[:4000], job_id, tenant_id, worker_id))
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                    last_error=%s, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+            """, (
+                max(0, retry_delay_seconds), error[:4000],
+                job_id, tenant_id, worker_id, lease_token,
+            ))
         return cur.rowcount == 1
 
+
+    def owns_lease(
+        self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
+    ) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM aicode_jobs
+                    WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                      AND lease_token=%s::uuid AND status='running'
+                      AND lease_until > NOW()
+                )
+            """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
+        return bool(row and row[0])
 
     def retry(self, task_id: str, tenant_id: str) -> bool:
         """Explicitly requeue a failed or approval-paused task for a tenant."""
@@ -170,7 +221,7 @@ class PostgresTaskQueue:
             row = conn.execute("""
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, available_at=NOW(),
-                    lease_owner=NULL, lease_until=NULL, last_error=NULL, updated_at=NOW()
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
                   AND status IN ('awaiting_approval', 'failed')
                 RETURNING id
@@ -181,7 +232,7 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
-                    lease_until=NULL, updated_at=NOW()
+                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
             """, (task_id, tenant_id))
         return cur.rowcount == 1
