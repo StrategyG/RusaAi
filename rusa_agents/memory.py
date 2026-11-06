@@ -19,7 +19,7 @@ class PostgresMemoryStore:
         self.dsn = dsn
 
     def initialize(self) -> None:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute("SELECT pg_advisory_xact_lock(99101002)")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS rusa_agent_memory (
@@ -47,7 +47,7 @@ class PostgresMemoryStore:
             """)
 
     def check_ready(self) -> bool:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute("""
                 SELECT c.relrowsecurity, c.relforcerowsecurity,
                        EXISTS (
@@ -85,7 +85,7 @@ class PostgresMemoryStore:
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
         if len(metadata_json) > 8000:
             raise ValueError("memory metadata exceeds 8000 characters")
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
             row = connection.execute("""
                 INSERT INTO rusa_agent_memory
@@ -112,7 +112,7 @@ class PostgresMemoryStore:
         terms = " ".join(query.split()[:20])
         if not terms:
             return []
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
             rows = connection.execute("""
                 SELECT memory_id, content, source, metadata, created_at
@@ -136,7 +136,7 @@ class PostgresMemoryStore:
         ]
 
     def delete_tenant(self, tenant_id: str) -> int:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
             cursor = connection.execute(
                 "DELETE FROM rusa_agent_memory WHERE tenant_id=%s",
@@ -145,7 +145,7 @@ class PostgresMemoryStore:
             return cursor.rowcount
 
     def purge_expired(self) -> int:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute(
                 "DELETE FROM rusa_agent_memory WHERE expires_at IS NOT NULL AND expires_at <= now()"
             )
