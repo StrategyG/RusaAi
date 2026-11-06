@@ -62,6 +62,15 @@ class TaskCreate(BaseModel):
     require_ci: bool = True
     require_pull_request: bool = True
 
+    @field_validator("base_branch")
+    @classmethod
+    def validate_base_branch(cls, value: str) -> str:
+        if value.startswith("/") or value.endswith("/") or any(
+            segment in {"", ".", ".."} for segment in value.split("/")
+        ):
+            raise ValueError("base_branch contains an unsafe Git ref segment")
+        return value
+
     @field_validator("work_branch")
     @classmethod
     def validate_work_branch(cls, value: str) -> str:
