@@ -41,7 +41,10 @@ def configure_api(monkeypatch):
     )
     monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
     monkeypatch.setenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "StrategyG/RusaAi,other-owner/other-repo")
-    monkeypatch.setenv("RUSA_AGENT_TENANT_REPOSITORIES", json.dumps({"tenant-a": ["StrategyG/RusaAi"]}))
+    monkeypatch.setenv("RUSA_AGENT_TENANT_REPOSITORIES", json.dumps({
+        "tenant-a": ["StrategyG/RusaAi"],
+        "tenant-b": ["other-owner/other-repo"],
+    }))
     monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
 
 
