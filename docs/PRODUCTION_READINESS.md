@@ -15,6 +15,7 @@ This ledger distinguishes repository controls from evidence that must be collect
 - Optional RAG ingestion and retrieval through PostgreSQL/pgvector, plus a separate read-only bearer-authenticated MCP knowledge service.
 - Separate API, worker, MCP, and knowledge-reader database identities; the API cannot read knowledge content, and worker/MCP retrieval is restricted to the read-only knowledge role.
 - Non-root API, worker, sandbox, and MCP container build definitions. Production Compose uses an external PostgreSQL service; the RAG/MCP overlay is included only when `RUSA_RAG_ENABLED=true`.
+- The proposed eight-stage Agentic DevOps lifecycle is not yet implemented as deployable agents. Current autonomous execution is the AICode worker path; the DevOps Orchestrator, specialist Plan/Code/Build/Test/Release/Deploy/Operate/Monitor agents, and cross-cutting Security Guard remain a separate phased workstream.
 - CI coverage for Python tests, PostgreSQL-backed queue/tenant/idempotency tests, image builds, sandbox execution, Trivy vulnerability scanning, production Compose validation, and RAG/MCP integration tests.
 
 ## 2. CI evidence snapshot
@@ -84,6 +85,8 @@ These workflows do not provision a production host, configure GitHub environment
 | RAG/MCP operations | pgvector database, restricted reader/ingestion roles, tenant key provisioning, TLS/network isolation, ingestion/retrieval acceptance tests | Code and CI coverage exist; production deployment not performed |
 | Backup and DR | Encrypted off-host backups, PITR policy, restore drill, approved RPO/RTO, infrastructure-loss exercise | Not completed |
 | Observability | Centralized logs, metrics scraping, alert rules, paging test, incident ownership, SLO/error budget | Not completed in target environment |
+| Agentic DevOps lifecycle | Eight specialist agents, durable orchestrator state, validated inter-agent contracts/events, Security Guard, human approval boundaries | Not implemented; Phase 1 contract foundation is a separate draft PR |
+| Worker/sandbox egress | Deny-by-default outbound allowlist or controlled egress proxy with negative tests | Open blocker; Compose bridge alone is not isolation |
 | Security review | Independent threat model/penetration test, secret rotation, TLS verification, least-privilege GitHub token review | Pending |
 | Release sign-off | Product owner, SRE/operations, security, and data/model owner approval | Not obtained |
 
