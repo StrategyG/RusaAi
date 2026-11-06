@@ -356,3 +356,30 @@ def test_request_body_limit_rejects_oversized_payload(client):
     )
     assert response.status_code == 413
     assert response.headers["Connection"] == "close"
+
+
+def test_production_serving_source_contains_no_mock_response():
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    production_files = [
+        os.path.join(root, "llm-project", "serve", "app.py"),
+        os.path.join(root, "llm-project", "serve", "model_runtime.py"),
+    ]
+    for filename in production_files:
+        source = open(filename, encoding="utf-8").read()
+        assert "mock_response" not in source
+        assert "[RUSA-AI Model Output]" not in source
+        assert "Processed prompt:" not in source
+
+
+def test_startup_without_model_stays_not_ready(monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
+    with TestClient(app) as test_client:
+        response = test_client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["checks"]["model_loaded"] is False
+        assert test_client.post(
+            "/v1/chat/completions",
+            headers=auth_headers(),
+            json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+        ).status_code == 503
