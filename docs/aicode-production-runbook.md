@@ -7,7 +7,7 @@ This runbook deploys AICode as a production candidate. Complete every preflight 
 - PostgreSQL 15+ with automated encrypted backups, point-in-time recovery, TLS, and a dedicated runtime role.
 - Dedicated Linux worker host running a rootless Docker daemon.
 - Persistent Git mirror and workspace volumes mounted at the same absolute paths inside the worker container and visible to the rootless Docker daemon.
-- Registry containing the API image and AICode sandbox image.
+- Registry containing immutable API, worker, and AICode sandbox images.
 - Self-hosted or approved OpenAI-compatible model endpoint.
 - Fine-grained GitHub token restricted to the repository allowlist.
 - TLS-terminating reverse proxy/ingress, Prometheus-compatible scraper, and alerting.
@@ -161,14 +161,26 @@ The included Compose file is a development/single-host example. It uses a local 
 6. Restrict the API to a TLS-terminating reverse proxy.
 7. Keep worker metrics on an internal network only.
 
-After migration and image verification:
+For local development only, use the bundled PostgreSQL stack:
 
 ```bash
-docker compose up -d api
-docker compose --profile worker up -d worker
-docker compose ps
-docker compose logs --tail=200 api worker
+docker compose up -d
+docker compose --profile worker up -d --build
 ```
+
+For production, set the API and worker image references to immutable registry digests in the deployment environment, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then validate and deploy the external-database stack:
+
+```bash
+export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
+export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
+docker compose -f docker-compose.production.yml config
+docker compose -f docker-compose.production.yml pull
+docker compose -f docker-compose.production.yml up -d
+docker compose -f docker-compose.production.yml ps
+docker compose -f docker-compose.production.yml logs --tail=200 api worker
+```
+
+The production Compose file has no local PostgreSQL service. It uses the managed TLS DSN from `.env`, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 
 API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 
