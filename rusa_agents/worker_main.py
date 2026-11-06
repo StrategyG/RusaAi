@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
+
+from prometheus_client import start_http_server
 
 from .runtime import AICodeRuntime
 
@@ -13,6 +16,12 @@ async def serve() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    metrics_port = int(os.getenv("RUSA_METRICS_PORT", "9100"))
+    if metrics_port > 0:
+        start_http_server(
+            metrics_port,
+            addr=os.getenv("RUSA_METRICS_BIND", "0.0.0.0"),
+        )
     runtime = AICodeRuntime()
     await asyncio.to_thread(runtime.initialize)
     stop_event = asyncio.Event()
