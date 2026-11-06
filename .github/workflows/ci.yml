@@ -1,46 +1,70 @@
-name: CI/CD Pipeline
+name: Security and Regression CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "fix/**" ]
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Run Python Tests and Linting
+    name: Unit, Security and PostgreSQL RLS Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rusa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: test
+      RUSA_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
+      RUSA_TEST_DB_PASSWORD: ci-only-ephemeral
+      RUSA_DATABASE_URL: postgresql://rusa_app:ci-only-ephemeral@localhost:5432/rusa_test
+      RUSA_REDIS_URL: redis://localhost:6379/0
+      RUSA_RATE_LIMIT_MAX_REQUESTS: "100"
+      RUSA_RATE_LIMIT_WINDOW_SECONDS: "60"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
+          python-version: "3.11"
+          cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
-
-      - name: Lint and syntax check
+          pip install -r requirements.txt flake8 bandit pip-audit
+      - name: Provision least-privilege database role and RLS
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
-
-      - name: Run tests with pytest
+          PGPASSWORD=postgres psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_tenant_records_rls.sql
+          PGPASSWORD=postgres psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -c "ALTER ROLE rusa_app WITH PASSWORD '$RUSA_TEST_DB_PASSWORD';"
+      - name: Compile and lint
         run: |
-          pytest
-
-  docker-build:
-    name: Verify Docker Image Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: |
-          docker build -t rusa-ai:latest .
+          python -m compileall -q llm-project tests
+          flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          bandit -q -r llm-project/serve
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt --strict
+      - name: Run regression and security tests
+        run: pytest -q --strict-config --strict-markers

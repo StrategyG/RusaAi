@@ -1,15 +1,11 @@
 """PostgreSQL access with transaction-local tenant context and enforced RLS."""
 from __future__ import annotations
-
-import json
-import os
+import json, os
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-
 class DatabaseConfigurationError(RuntimeError):
     pass
-
 
 class TenantDatabase:
     def __init__(self, dsn: str):
@@ -37,7 +33,6 @@ class TenantDatabase:
 
     @contextmanager
     def tenant_connection(self, tenant_id: str) -> Iterator[Any]:
-        # Transaction-local context is reset before a pooled connection is reused.
         with self._pool.connection() as conn:
             conn.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
             yield conn
@@ -52,14 +47,12 @@ class TenantDatabase:
                 "SELECT c.relrowsecurity, c.relforcerowsecurity, "
                 "pg_get_userbyid(c.relowner) AS owner "
                 "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-                "WHERE n.nspname = 'public' AND c.relname = 'tenant_records' "
-                "AND c.relkind = 'r'"
+                "WHERE n.nspname = 'public' AND c.relname = 'tenant_records' AND c.relkind = 'r'"
             ).fetchone()
             policies = conn.execute(
                 "SELECT policyname, permissive, cmd, roles, qual, with_check "
                 "FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_records'"
             ).fetchall()
-
         if not role or role["rolsuper"] or role["rolbypassrls"]:
             raise DatabaseConfigurationError("Application database role must not bypass RLS")
         if not table or not table["relrowsecurity"] or not table["relforcerowsecurity"]:
