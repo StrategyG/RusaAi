@@ -22,6 +22,7 @@ from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
 
+from rusa_agents.audit import PostgresAuditLog
 from rusa_agents.queue import PostgresTaskQueue
 
 logger = logging.getLogger("rusa-ai-serve")
@@ -367,6 +368,7 @@ async def lifespan(application: FastAPI):
             logger.exception("Local inference model initialization failed")
 
     application.state.task_queue = None
+    application.state.audit_log = None
     application.state.task_queue_error = None
     agent_enabled = os.getenv("RUSA_AGENT_ENABLED", "false").lower() == "true"
     if agent_enabled:
@@ -378,10 +380,15 @@ async def lifespan(application: FastAPI):
             application.state.task_queue_error = "RUSA_TENANT_ID is invalid"
         else:
             try:
-                application.state.task_queue = PostgresTaskQueue(database_url)
+                task_queue = PostgresTaskQueue(database_url)
+                audit_log = PostgresAuditLog(database_url)
+                application.state.task_queue = task_queue
+                application.state.audit_log = audit_log
             except Exception as exc:
+                application.state.task_queue = None
+                application.state.audit_log = None
                 application.state.task_queue_error = type(exc).__name__
-                logger.exception("Agent queue initialization failed")
+                logger.exception("Agent queue/audit initialization failed")
 
     yield
 
@@ -531,11 +538,16 @@ def readiness_check(request: Request):
         not agent_enabled
         or getattr(request.app.state, "task_queue", None) is not None
     )
+    agent_audit_loaded = (
+        not agent_enabled
+        or getattr(request.app.state, "audit_log", None) is not None
+    )
     checks = {
         "model_loaded": model_loaded,
         "authentication_configured": authentication_is_configured(),
         "task_schema_loaded": schema_loaded,
         "agent_queue_loaded": agent_queue_loaded,
+        "agent_audit_loaded": agent_audit_loaded,
     }
     ready = all(checks.values())
     return JSONResponse(
@@ -612,6 +624,34 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
     )
 
 
+def _record_agent_api_event(
+    http_request: Request,
+    event: str,
+    tenant_id: str,
+    task_id: str,
+) -> None:
+    audit_log = getattr(http_request.app.state, "audit_log", None)
+    if audit_log is None:
+        raise HTTPException(status_code=503, detail="Agent audit log is not configured")
+    try:
+        audit_log.record(
+            event,
+            task_id,
+            f"tenant:{tenant_id}",
+            {"source": "authenticated_api"},
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Agent API audit write failed request_id=%s",
+            getattr(http_request.state, "request_id", "unknown"),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Agent audit log is temporarily unavailable",
+        ) from exc
+
+
 @app.post("/v1/agent/tasks", status_code=status.HTTP_202_ACCEPTED)
 def submit_agent_task(
     request: AgentTaskSubmission,
@@ -645,6 +685,12 @@ def submit_agent_task(
         },
         "tenant_id": tenant_id,
     }
+    _record_agent_api_event(
+        http_request,
+        "task.enqueue_requested",
+        tenant_id,
+        envelope["task_id"],
+    )
     try:
         result = queue.enqueue(tenant_id, envelope["task_id"], payload, idempotency_key)
     except ValueError as exc:
@@ -718,13 +764,26 @@ def retry_agent_task(
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Agent task queue is not configured")
-    if not queue.retry_dead_letter(tenant_id, str(task_id)):
-        record = queue.get(tenant_id, str(task_id))
-        if record is None:
-            raise HTTPException(status_code=404, detail="Agent task was not found")
+    record = queue.get(tenant_id, str(task_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task was not found")
+    if record["state"] != "dead_letter":
         raise HTTPException(
             status_code=409,
             detail=f"Only dead-letter tasks can be replayed; current state is {record['state']}",
+        )
+    _record_agent_api_event(
+        http_request,
+        "task.retry_requested",
+        tenant_id,
+        str(task_id),
+    )
+    if not queue.retry_dead_letter(tenant_id, str(task_id)):
+        current = queue.get(tenant_id, str(task_id))
+        state = current["state"] if current else "unknown"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task state changed before replay; current state is {state}",
         )
     return {"task_id": str(task_id), "state": "queued", "attempts": 0}
 
@@ -740,6 +799,12 @@ def cancel_agent_task(
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    _record_agent_api_event(
+        http_request,
+        "task.cancel_requested",
+        tenant_id,
+        str(task_id),
+    )
     cancelled = queue.cancel(tenant_id, str(task_id))
     if not cancelled:
         record = queue.get(tenant_id, str(task_id))

@@ -100,6 +100,7 @@ All task operations require the tenant's API key in the `X-API-Key` header.
 
 - Submit: `POST /v1/agent/tasks` with an A2A `task.create` envelope and an `Idempotency-Key` header. The runtime appends the first eight task-ID characters to the requested work-branch prefix to isolate concurrent tasks.
 - Inspect: `GET /v1/agent/tasks/{task_id}`.
+- Submit, cancel, and replay requests are appended to the tenant-scoped PostgreSQL audit chain before queue mutation; task execution lifecycle events are recorded by the orchestrator.
 - Cancel: `POST /v1/agent/tasks/{task_id}/cancel`. The current lease is fenced immediately; the worker observes lease loss within at most 30 seconds and cancels its orchestration.
 - Queue statistics: `GET /v1/agent/queue/stats`.
 - Dead letters: `GET /v1/agent/dead-letters`.

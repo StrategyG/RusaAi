@@ -22,6 +22,22 @@ from app import (  # noqa: E402
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
 
+class FakeAuditLog:
+    def __init__(self):
+        self.calls = []
+
+    def record(self, event, task_id, actor, details=None, tenant_id="default"):
+        self.calls.append(
+            {
+                "event": event,
+                "task_id": task_id,
+                "actor": actor,
+                "details": details or {},
+                "tenant_id": tenant_id,
+            }
+        )
+
+
 class FakeBackend:
     def generate(
         self,
@@ -55,9 +71,11 @@ def client(monkeypatch):
 
     with TestClient(app) as test_client:
         app.state.backend = FakeBackend()
+        app.state.audit_log = FakeAuditLog()
         yield test_client
         app.state.backend = None
         app.state.task_queue = None
+        app.state.audit_log = None
 
     _load_task_validator.cache_clear()
 
@@ -272,6 +290,8 @@ def test_agent_task_submission_is_authenticated_and_idempotent(client, monkeypat
     assert len(queue.calls) == 1
     assert queue.calls[0][0] == "default"
     assert queue.calls[0][3] == "task-key-0001"
+    assert app.state.audit_log.calls[0]["event"] == "task.enqueue_requested"
+    assert app.state.audit_log.calls[0]["tenant_id"] == "default"
 
 
 def test_agent_task_submission_requires_authentication(client):
@@ -427,6 +447,8 @@ def test_agent_task_cancellation_is_tenant_scoped_and_idempotent(client, monkeyp
     assert response.status_code == 202
     assert response.json() == {"task_id": task_id, "state": "cancelled"}
     assert queue.calls == [("tenant-cancel", task_id)]
+    assert app.state.audit_log.calls[0]["event"] == "task.cancel_requested"
+    assert app.state.audit_log.calls[0]["tenant_id"] == "tenant-cancel"
 
 
 def test_agent_task_cancellation_returns_409_for_terminal_task(client, monkeypatch):
@@ -516,3 +538,51 @@ def test_multi_tenant_api_key_must_meet_minimum_entropy_length(client, monkeypat
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 401
+
+
+
+def test_agent_task_submission_fails_closed_when_audit_is_unavailable(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, *args):
+            self.calls.append(args)
+            return {"task_id": args[1], "state": "queued"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    app.state.audit_log = None
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "audit-required-01"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 503
+    assert queue.calls == []
+
+
+def test_agent_task_retry_is_audited_before_replay(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.replayed = False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "dead_letter"}
+
+        def retry_dead_letter(self, tenant_id, task_id):
+            self.replayed = True
+            return True
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent/tasks/{task_id}/retry",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 202
+    assert queue.replayed is True
+    assert app.state.audit_log.calls[0]["event"] == "task.retry_requested"

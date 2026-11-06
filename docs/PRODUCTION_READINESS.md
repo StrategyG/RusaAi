@@ -14,7 +14,7 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - PostgreSQL durable queue with idempotency keys, per-claim UUID lease fencing, bounded retries, graceful shutdown/release, cancellation, and worker process.
 - Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
 - API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.
-- Authenticated A2A task submission endpoint using Idempotency-Key.
+- Authenticated A2A task submission, cancellation, and replay requests are recorded in the tenant-scoped PostgreSQL audit chain before queue mutation.
 - CI for lint, compile, tests, Bandit, dependency audit, container build, and API smoke test.
 
 ## Current verification
@@ -29,7 +29,7 @@ The AICode branch CI passed on commit 5a5a24dfd64eadaab5d3bb658d827967809f668f (
 | Container runtime | API and worker image build, startup, health and queue smoke tests | All image builds, Compose validation, worker import, liveness, and readiness smoke checks passed at 5a5a24d; live queue runtime validation remains open |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
 | Queue reliability | UUID lease fencing, lease heartbeat, tenant-scoped cancellation, dead-letter inspection/replay, queue-age reporting and alerts | Lease, cancellation, dead-letter inspection/replay, and age reporting implemented; alerting and operator replay approval remain open |
-| Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
+| Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, tenant-scoped queue/memory/audit isolation, and audited API mutations | Implemented in code; production configuration and penetration validation required |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
 | Provider security | HTTPS, explicit hostname allowlist, disabled ambient proxy inheritance, secret manager, egress restrictions | Host allowlist enforced by runtime; secret manager and network egress controls remain deployment requirements |
