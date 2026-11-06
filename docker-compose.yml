@@ -370,6 +370,8 @@ services:
     depends_on:
       rusa-agent-db:
         condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
@@ -411,6 +413,8 @@ services:
     depends_on:
       rusa-agent-db:
         condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
