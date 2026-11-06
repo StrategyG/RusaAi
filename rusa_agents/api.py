@@ -12,12 +12,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field
 
+from .bootstrap import build_planner, build_tooling
 from .contracts import TaskCreate
 from .memory import MemoryStore
-from .mcp_gateway import MCPGateway
-from .providers import OpenAICompatibleProvider
+from .rag import RAGService
 from .storage import Database
-from .tools import GitHubTools, ToolRegistry
 from .worker import AgentRuntime
 
 logger = logging.getLogger("rusa-agent-api")
@@ -33,6 +32,14 @@ class ApprovalRequest(BaseModel):
 class MemoryWriteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1, max_length=100000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RAGIngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_id: str = Field(min_length=1, max_length=255)
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1, max_length=2000000)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -92,21 +99,21 @@ async def lifespan(app: FastAPI):
     app.state.database = database
     app.state.memory = MemoryStore(database)
     app.state.runtime = None
-    mcp_gateway = MCPGateway.from_env()
-    app.state.mcp_gateway = mcp_gateway
+    app.state.rag = None
+    mcp_gateway = None
     if (
         tenant_keys()
         and os.getenv("RUSA_AGENT_MODEL_BASE_URL")
         and os.getenv("RUSA_AGENT_MODEL_NAME")
         and os.getenv("GITHUB_TOKEN")
     ):
-        provider = OpenAICompatibleProvider()
-        tools = ToolRegistry()
-        GitHubTools().register(tools)
-        await mcp_gateway.connect_and_register(tools)
-        app.state.runtime = AgentRuntime(database, provider, tools)
+        tools, mcp_gateway, rag_service = await build_tooling(database)
+        app.state.mcp_gateway = mcp_gateway
+        app.state.rag = rag_service
+        app.state.runtime = AgentRuntime(database, build_planner(), tools)
     yield
-    await mcp_gateway.close()
+    if mcp_gateway is not None:
+        await mcp_gateway.close()
     await database.close()
 
 
@@ -295,3 +302,71 @@ async def delete_memory(
     if not deleted:
         raise HTTPException(status_code=404, detail="Memory entry not found")
     return {"deleted": True}
+
+
+def rag_dependency(request: Request) -> RAGService:
+    rag = getattr(request.app.state, "rag", None)
+    if rag is None:
+        raise HTTPException(status_code=503, detail="RAG service is not configured")
+    return rag
+
+
+@app.post("/v1/agent/rag/documents", status_code=202)
+async def ingest_rag_document(
+    payload: RAGIngestRequest,
+    tenant: str = Depends(tenant_dependency),
+    rag: RAGService = Depends(rag_dependency),
+) -> dict[str, Any]:
+    try:
+        chunks = await rag.ingest_text(
+            tenant_id=tenant,
+            source_id=payload.source_id,
+            title=payload.title,
+            content=payload.content,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"source_id": payload.source_id, "chunks_indexed": chunks}
+
+
+@app.get("/v1/agent/rag/search")
+async def search_rag(
+    q: str = Query(min_length=1, max_length=4000),
+    top_k: int = Query(default=5, ge=1, le=20),
+    source_ids: list[str] | None = Query(default=None),
+    tenant: str = Depends(tenant_dependency),
+    rag: RAGService = Depends(rag_dependency),
+) -> dict[str, Any]:
+    try:
+        chunks = await rag.retrieve(
+            tenant_id=tenant,
+            query=q,
+            top_k=top_k,
+            allowed_source_ids=source_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "results": [
+            {
+                "chunk_id": chunk.chunk_id,
+                "source_id": chunk.source_id,
+                "text": chunk.text,
+                "score": chunk.score,
+                "metadata": chunk.metadata,
+                "citation": f"[{chunk.source_id}#{chunk.chunk_id[:12]}]",
+            }
+            for chunk in chunks
+        ]
+    }
+
+
+@app.delete("/v1/agent/rag/documents/{source_id}")
+async def delete_rag_document(
+    source_id: str,
+    tenant: str = Depends(tenant_dependency),
+    rag: RAGService = Depends(rag_dependency),
+) -> dict[str, Any]:
+    deleted = await rag.delete_source(tenant, source_id)
+    return {"source_id": source_id, "chunks_deleted": deleted}
