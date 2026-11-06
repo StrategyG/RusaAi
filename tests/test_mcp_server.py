@@ -1,14 +1,13 @@
 import asyncio
 import hashlib
-import json
 import importlib
+import json
 
 import pytest
 
 mcp = pytest.importorskip("mcp", reason="optional MCP runtime is not installed")
 Client = mcp.Client
 server = importlib.import_module("rusa_mcp.server")
-
 
 class FakeKnowledgeService:
     def search(self, **kwargs):
