@@ -38,8 +38,8 @@ class MCPRemoteServer:
         parsed = urlparse(endpoint)
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
             raise ValueError("MCP endpoints must use HTTPS except for local development")
-        if parsed.username or parsed.password or parsed.fragment:
-            raise ValueError("MCP endpoint URLs cannot embed credentials or fragments")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("MCP endpoint URLs cannot embed credentials, query tokens, or fragments")
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Invalid MCP endpoint URL")
         if not allowed_tools:
