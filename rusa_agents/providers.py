@@ -24,6 +24,11 @@ class OpenAICompatibleProvider:
             raise ModelProviderError("RUSA_AGENT_MODEL_MAX_TOKENS must be an integer") from exc
         if not 256 <= self.max_tokens <= 4096:
             raise ModelProviderError("RUSA_AGENT_MODEL_MAX_TOKENS must be between 256 and 4096")
+        self.last_usage: dict[str, int] | None = None
+        self.usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.request_count = 0
+        self.usage_calls = 0
+        self.usage_missing_calls = 0
         if not self.base_url or not self.model:
             raise ModelProviderError("RUSA_AGENT_MODEL_BASE_URL and RUSA_AGENT_MODEL_NAME are required")
         parsed = urlparse(self.base_url)
@@ -58,14 +63,39 @@ class OpenAICompatibleProvider:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        self.request_count += 1
+        self.last_usage = None
+        usage_recorded = False
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
                 response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
                 data: dict[str, Any] = response.json()
+                usage = data.get("usage")
+                if isinstance(usage, dict):
+                    prompt_tokens = usage.get("prompt_tokens")
+                    completion_tokens = usage.get("completion_tokens")
+                    total_tokens = usage.get("total_tokens")
+                    if all(
+                        isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                        for value in (prompt_tokens, completion_tokens, total_tokens)
+                    ):
+                        self.last_usage = {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens,
+                        }
+                        for key, value in self.last_usage.items():
+                            self.usage_totals[key] += value
+                        self.usage_calls += 1
+                        usage_recorded = True
+                if not usage_recorded:
+                    self.usage_missing_calls += 1
                 content = data["choices"][0]["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
                     raise ModelProviderError("Model provider returned empty content")
                 return content.strip()
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            if not usage_recorded:
+                self.usage_missing_calls += 1
             raise ModelProviderError("Model provider request failed or returned an invalid response") from exc
