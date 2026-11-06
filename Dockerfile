@@ -15,9 +15,14 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
-    RUSA_MODEL_PATH=/models/rusa-ai
+    RUSA_MODEL_PATH=/models/rusa-ai \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONFAULTHANDLER=1
 
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
     && mkdir -p /models/rusa-ai \
     && chown -R appuser:appuser /models
 
