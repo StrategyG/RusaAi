@@ -1073,3 +1073,21 @@ def test_worker_rejects_invalid_required_ci_check_configuration(monkeypatch):
     monkeypatch.setenv("RUSA_AGENT_REQUIRED_CI_CHECKS", "not-json")
     with pytest.raises(RuntimeError, match="JSON array"):
         _load_required_ci_checks()
+
+
+def test_sensitive_text_redaction_covers_credentials_and_private_keys():
+    from rusa_agents.github import redact_sensitive_text
+
+    private_key = "-----BEGIN OPENSSH PRIVATE KEY-----\\nsecret-material\\n-----END OPENSSH PRIVATE KEY-----"
+    value = (
+        'api_key = "private-value-123456"\\n'
+        'token = "generic-token-value-123456"\\n'
+        'password: "strong-password-value"\\n'
+        + private_key
+    )
+    redacted = redact_sensitive_text(value)
+    assert "private-value-123456" not in redacted
+    assert "generic-token-value-123456" not in redacted
+    assert "strong-password-value" not in redacted
+    assert "secret-material" not in redacted
+    assert "[REDACTED" in redacted
