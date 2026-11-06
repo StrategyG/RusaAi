@@ -88,8 +88,7 @@ jobs:
         run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
       - name: Smoke-test RAG and MCP imports
         run: |
-          docker run --rm rusa-knowledge-mcp:${{ github.sha }} \\
-            python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
+          docker run --rm rusa-knowledge-mcp:${{ github.sha }} python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
       - name: Smoke-test agent runtime imports
         run: |
           docker run --rm rusa-agent-runtime:${{ github.sha }} \
@@ -110,6 +109,18 @@ jobs:
           done
           docker logs rusa-ai-ci
           exit 1
+      - name: Run web workspace container
+        run: docker run -d --name rusa-web-ci -p 127.0.0.1:3000:8080 rusa-ai-web:${{ github.sha }}
+      - name: Verify web workspace liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:3000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-web-ci
+          exit 1
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci || true
+        run: docker rm -f rusa-ai-ci rusa-web-ci || true
