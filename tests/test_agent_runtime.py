@@ -705,6 +705,7 @@ async def test_worker_executes_full_plan_and_verifies_completion(database):
     assert task["cursor"] == 7
     assert task["result"]["verified"] is True
     assert task["result"]["acceptance_criteria_evaluated"] is False
+    assert task["result"]["acceptance_criteria_model_assessed"] is True
     assert task["result"]["final_answer"]["summary"]
     assert task["result"]["final_answer"]["acceptance_criteria_assessment"][0]["status"] == "met"
     messages = await runtime.messages.history("tenant-e2e", task_id)
