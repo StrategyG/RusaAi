@@ -705,7 +705,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     }
                 }
             )
-            yield _sse("[DONE]")
+        yield _sse("[DONE]")
         finally:
             controller.release()
 
