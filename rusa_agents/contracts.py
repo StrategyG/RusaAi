@@ -28,6 +28,7 @@ class WorkerRole(StrEnum):
     REVIEWER = "reviewer"
     TESTER = "tester"
     SECURITY = "security"
+    SYNTHESIZER = "synthesizer"
 
 
 class TaskCreate(BaseModel):
@@ -110,6 +111,26 @@ class ReviewResult(BaseModel):
     summary: str = Field(min_length=1, max_length=4000)
     findings: list[str] = Field(default_factory=list, max_length=30)
     risk_level: Literal["low", "medium", "high", "critical"]
+
+
+class CriterionAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criterion: str = Field(min_length=1, max_length=1000)
+    status: Literal["met", "not_met", "uncertain"]
+    evidence: str = Field(min_length=1, max_length=2000)
+
+
+class SynthesisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1, max_length=4000)
+    key_findings: list[str] = Field(default_factory=list, max_length=30)
+    citations: list[str] = Field(default_factory=list, max_length=30)
+    acceptance_criteria_assessment: list[CriterionAssessment] = Field(
+        default_factory=list,
+        max_length=30,
+    )
 
 
 class AgentPlan(BaseModel):
