@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
 
-from database import TenantDatabase
+from database import DatabaseConfigurationError, TenantDatabase
 from security import Principal, require_permission, load_api_key_registry
 
 logger = logging.getLogger("rusa-ai-serve")
@@ -173,7 +173,10 @@ def create_app(*, max_request_bytes: int | None = None) -> FastAPI:
                 database = TenantDatabase(os.environ["RUSA_DATABASE_URL"])
                 database.open()
             except Exception as exc:
-                logger.error("database_startup_failed", extra={"error_type": type(exc).__name__})
+                if isinstance(exc, DatabaseConfigurationError):
+                    logger.error("database_startup_failed reason=%s", str(exc))
+                else:
+                    logger.error("database_startup_failed error_type=%s", type(exc).__name__)
                 raise RuntimeError("PostgreSQL security preflight failed") from None
         if os.getenv("RUSA_REDIS_URL"):
             try:
