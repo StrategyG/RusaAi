@@ -110,6 +110,8 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
 
 
 def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
+    import psycopg
+
     task_a, task_b = str(uuid4()), str(uuid4())
     with connect() as conn:
         # Seed as the migration/test owner; the worker role intentionally has no INSERT grant.
@@ -147,16 +149,13 @@ def test_runtime_role_groups_are_non_login_non_bypass():
 
 
 def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog):
-    import json
-
     import psycopg
     from app import app
     from fastapi.testclient import TestClient
+    from psycopg import sql
 
     from rusa_agents.audit import PostgresTaskPolicyAudit
     from rusa_agents.queue import PostgresTaskQueue
-
-    from psycopg import sql
 
     api_password = "test-api-" + uuid4().hex
     worker_password = "test-worker-" + uuid4().hex
