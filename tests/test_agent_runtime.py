@@ -1054,6 +1054,7 @@ async def test_non_draft_pull_request_blocks_task_success(database, registry):
     async with database.session() as session:
         row = await session.scalar(select(TaskRow).where(TaskRow.id == task_id))
         row.status = TaskStatus.RUNNING.value
+        row.lease_owner = runtime.worker_id
         row.plan = valid_plan().model_dump(mode="json")
         row.cursor = len(results)
         row.tool_results = results
