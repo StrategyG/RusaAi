@@ -86,9 +86,6 @@ if "$PROJECT/scripts/deploy/compose-deploy.sh" "ghcr.io/strategyg/rusa-ai:latest
   exit 1
 fi
 
-grep -q ' pull
-grep -q ' up -d --no-build' "$DOCKER_LOG"
-echo "Deployment script tests passed: immutable deploy, manual rollback, and automatic rollback."
- "$DOCKER_LOG"
-grep -q 'compose up -d --no-build' "$DOCKER_LOG"
+grep -q " pull$" "$DOCKER_LOG"
+grep -q " up -d --no-build" "$DOCKER_LOG"
 echo "Deployment script tests passed: immutable deploy, manual rollback, and automatic rollback."
