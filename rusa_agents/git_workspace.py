@@ -191,6 +191,9 @@ class GitWorkspaceManager:
 class GitHubPublisher:
     """Commits only safe workspace changes, pushes one feature branch, and opens a draft PR."""
 
+    REQUIRED_CI_CHECKS = frozenset({"Test, lint, and security", "Build production image"})
+    GITHUB_ACTIONS_APP_ID = 15368
+
     def __init__(self, github_token: str | None = None):
         self.token = github_token or os.getenv("RUSA_GITHUB_TOKEN")
         if not self.token:
@@ -368,6 +371,73 @@ class GitHubPublisher:
             return created.json()["html_url"]
 
 
+    @staticmethod
+    def _evaluate_check_runs(
+        check_runs: list[dict],
+        commit_sha: str,
+    ) -> tuple[str, str]:
+        """Evaluate only the newest trusted GitHub Actions suite for this SHA.
+
+        A commit can have multiple suites (for example, push and pull_request).
+        Required jobs must belong to one suite; an older green suite must never
+        mask a newer pending or failed suite.
+        """
+        suites: dict[int, list[dict]] = {}
+        for run in check_runs:
+            if not isinstance(run, dict) or run.get("name") not in GitHubPublisher.REQUIRED_CI_CHECKS:
+                continue
+            if run.get("head_sha") != commit_sha:
+                continue
+            app = run.get("app")
+            if (
+                not isinstance(app, dict)
+                or app.get("id") != GitHubPublisher.GITHUB_ACTIONS_APP_ID
+                or app.get("slug") != "github-actions"
+            ):
+                continue
+            suite = run.get("check_suite")
+            suite_id = suite.get("id") if isinstance(suite, dict) else None
+            run_id = run.get("id")
+            if type(suite_id) is not int or suite_id <= 0:
+                continue
+            if type(run_id) is not int or run_id <= 0:
+                continue
+            suites.setdefault(suite_id, []).append(run)
+
+        if not suites:
+            return "pending", "No trusted GitHub Actions checks were found for the requested commit"
+
+        latest_suite_id = max(suites)
+        latest_by_name: dict[str, dict] = {}
+        for run in suites[latest_suite_id]:
+            name = run["name"]
+            previous = latest_by_name.get(name)
+            if previous is None or run["id"] > previous["id"]:
+                latest_by_name[name] = run
+
+        missing = GitHubPublisher.REQUIRED_CI_CHECKS.difference(latest_by_name)
+        if missing:
+            return (
+                "pending",
+                "Latest trusted CI suite is incomplete; missing: " + ", ".join(sorted(missing)),
+            )
+
+        pending = [
+            name for name, run in latest_by_name.items()
+            if run.get("status") != "completed"
+        ]
+        if pending:
+            return "pending", "Required CI jobs are still running: " + ", ".join(sorted(pending))
+
+        failed = [
+            name for name, run in latest_by_name.items()
+            if run.get("conclusion") not in {"success", "neutral"}
+        ]
+        if failed:
+            return "failure", "Required CI jobs failed or were skipped: " + ", ".join(sorted(failed))
+
+        return "success", "Latest trusted GitHub Actions suite passed for the exact commit SHA"
+
     async def wait_for_ci(
         self,
         repository: str,
@@ -375,48 +445,83 @@ class GitHubPublisher:
         timeout_seconds: int = 900,
         poll_seconds: int = 15,
     ) -> tuple[bool, str]:
-        """Wait for the required PR CI jobs; missing or failed evidence never passes."""
+        """Wait for complete, trusted CI evidence on the exact commit SHA."""
         import asyncio
 
         import httpx
 
-        required = {"Test, lint, and security", "Build production image"}
+        if not repository or "/" not in repository:
+            return False, "CI repository must be an owner/name identifier"
+        if timeout_seconds <= 0 or poll_seconds <= 0:
+            return False, "CI timeout and polling interval must be positive"
+
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        max_pages = 10
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             while asyncio.get_running_loop().time() < deadline:
                 try:
-                    response = await client.get(
-                        f"https://api.github.com/repos/{repository}/commits/{commit_sha}/check-runs",
-                        headers=headers,
-                        params={"per_page": 100},
-                    )
-                    response.raise_for_status()
-                    check_runs = response.json().get("check_runs", [])
+                    check_runs: list[dict] = []
+                    expected_total: int | None = None
+                    seen_ids: set[int] = set()
+                    stable_snapshot = True
+
+                    for page in range(1, max_pages + 1):
+                        response = await client.get(
+                            f"https://api.github.com/repos/{repository}/commits/{commit_sha}/check-runs",
+                            headers=headers,
+                            params={"per_page": 100, "page": page},
+                        )
+                        response.raise_for_status()
+                        payload = response.json()
+                        if not isinstance(payload, dict):
+                            return False, "GitHub returned an invalid check-run response"
+                        total = payload.get("total_count")
+                        page_runs = payload.get("check_runs")
+                        if type(total) is not int or total < 0 or not isinstance(page_runs, list):
+                            return False, "GitHub returned incomplete check-run metadata"
+                        if expected_total is None:
+                            expected_total = total
+                            if expected_total > max_pages * 100:
+                                return False, "CI evidence exceeds the bounded pagination limit"
+                        elif total != expected_total:
+                            stable_snapshot = False
+                            break
+
+                        for run in page_runs:
+                            if not isinstance(run, dict) or type(run.get("id")) is not int:
+                                return False, "GitHub returned a malformed check-run record"
+                            run_id = run["id"]
+                            if run_id in seen_ids:
+                                stable_snapshot = False
+                                break
+                            seen_ids.add(run_id)
+                            check_runs.append(run)
+                        if not stable_snapshot:
+                            break
+                        if len(check_runs) >= expected_total:
+                            break
+                        if not page_runs:
+                            stable_snapshot = False
+                            break
+
+                    if not stable_snapshot:
+                        await asyncio.sleep(poll_seconds)
+                        continue
+                    if expected_total is None or len(check_runs) != expected_total:
+                        return False, "GitHub check-run pagination was incomplete; refusing to certify CI"
+
+                    state, reason = self._evaluate_check_runs(check_runs, commit_sha)
+                    if state == "success":
+                        return True, reason
+                    if state == "failure":
+                        return False, reason
                 except Exception as exc:
                     return False, f"CI status could not be verified: {type(exc).__name__}"
 
-                relevant = {
-                    run.get("name"): run for run in check_runs
-                    if run.get("name") in required
-                }
-                failed = [
-                    name for name, run in relevant.items()
-                    if run.get("status") == "completed"
-                    and run.get("conclusion") not in {"success", "neutral", "skipped"}
-                ]
-                if failed:
-                    return False, "Required CI jobs failed: " + ", ".join(sorted(failed))
-                if required.issubset(relevant):
-                    if all(
-                        relevant[name].get("status") == "completed"
-                        and relevant[name].get("conclusion") in {"success", "neutral"}
-                        for name in required
-                    ):
-                        return True, "All required GitHub Actions checks passed"
                 await asyncio.sleep(poll_seconds)
         return False, "Required GitHub Actions checks did not finish before the CI deadline"
