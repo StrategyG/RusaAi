@@ -366,6 +366,16 @@ class PostgresTaskQueue:
         lease_token: str,
     ) -> bool:
         """Atomically verify a live tenant-bound lease and append its policy decision."""
+        if (
+            type(job_id) is not int
+            or job_id <= 0
+            or not task_id
+            or not tenant_id
+            or not worker_id
+            or len(worker_id) > 128
+            or not lease_token
+        ):
+            raise ValueError("Worker lease identity is invalid")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute(
