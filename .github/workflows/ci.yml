@@ -67,7 +67,7 @@ jobs:
       - name: Build container
         run: docker build --pull -t rusa-ai:ci .
 
-      - name: Smoke-test container startup, health, and authentication
+      - name: Smoke-test container startup, health, authentication, and A2A validation
         shell: bash
         run: |
           set -euo pipefail
@@ -94,6 +94,41 @@ jobs:
           done
           test "$ready" = "1"
           grep --quiet '"status":"healthy"' /tmp/rusa-health.json
+          test "$(docker inspect --format '{{.Config.User}}' rusa-ai-ci)" = "app:app"
+
+          cat > /tmp/rusa-validation.json <<'JSON'
+          {
+            "envelope": {
+              "protocol_version": "1.0",
+              "task_id": "123e4567-e89b-12d3-a456-426614174000",
+              "message_id": "123e4567-e89b-12d3-a456-426614174001",
+              "type": "task.create",
+              "from": {"agent_id": "ci-client", "role": "human"},
+              "to": {"agent_id": "rusa-orchestrator", "role": "rusa_orchestrator"},
+              "created_at": "2026-11-06T12:00:00Z",
+              "task": {
+                "objective": "Container A2A smoke test",
+                "acceptance_criteria": ["Envelope is accepted"],
+                "repository": "StrategyG/RusaAi",
+                "base_branch": "main",
+                "work_branch": "fix/ci-smoke"
+              },
+              "policy": {
+                "allowed_actions": ["read"],
+                "prohibited_actions": ["deploy"],
+                "human_approval_required": ["merge"]
+              }
+            }
+          }
+          JSON
+
+          validation_status="$(curl --silent --output /tmp/rusa-validation-response.json --write-out '%{http_code}' \
+            --request POST http://127.0.0.1:8000/v1/validate-task \
+            --header 'Content-Type: application/json' \
+            --header "X-API-Key: $api_key" \
+            --data-binary @/tmp/rusa-validation.json)"
+          test "$validation_status" = "200"
+          grep --quiet '"valid":true' /tmp/rusa-validation-response.json
 
           unauthenticated_status="$(curl --silent --output /tmp/rusa-unauth.json --write-out '%{http_code}' \
             --request POST http://127.0.0.1:8000/v1/chat/completions \
