@@ -1,10 +1,10 @@
 """Fail-closed production configuration validation."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
