@@ -16,6 +16,11 @@ def test_audit_redaction_covers_nested_secrets_and_common_token_formats(tmp_path
             },
             "connection": "postgresql://rusa:db-secret@db.internal/rusa?sslmode=verify-full",
             "message": "token=plain-token-value",
+            "cloud": "AKIAABCDEFGHIJKLMNOP",
+            "slack": "xoxb-1234567890-abcdefghij",
+            "stripe": "sk_live_12345678901234567890",
+            "google": "AIza12345678901234567890123456789012345",
+            "private_key": "-----BEGIN PRIVATE KEY-----\\nprivate-key-material\\n-----END PRIVATE KEY-----",
         },
     )
     raw = path.read_text(encoding="utf-8")
@@ -25,6 +30,11 @@ def test_audit_redaction_covers_nested_secrets_and_common_token_formats(tmp_path
         "github_pat_abcdefghijklmnopqrstuvwxyz0123456789",
         "db-secret",
         "plain-token-value",
+        "AKIAABCDEFGHIJKLMNOP",
+        "xoxb-1234567890-abcdefghij",
+        "sk_live_12345678901234567890",
+        "AIza12345678901234567890123456789012345",
+        "private-key-material",
     ):
         assert secret not in raw
     assert "[REDACTED]" in raw
