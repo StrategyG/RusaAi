@@ -1,6 +1,6 @@
 """JSON Schema validation for the Agentic DevOps task/result/event contracts."""
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import json
 from functools import lru_cache
