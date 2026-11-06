@@ -29,7 +29,8 @@ The code changes require successful CI on the remediation pull request. The mode
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Hierarchical agent runtime | Supervisor, worker pool, durable queue, retries, leases, cancellation | Implemented in feature branch; CI and load evidence pending |
+| Hierarchical agent runtime | Supervisor, worker pool, durable queue, retries, leases, cancellation, reviewer and synthesis roles | Implemented in feature branch; CI and load evidence pending |
+| Agent operational evaluation | Tenant-scoped success, retries, validated plans, reviewer, citations, latency metrics | Implemented in feature branch; benchmark accuracy and token/cost instrumentation pending |
 | Memory and messaging | Tenant-scoped durable memory and message trace | Implemented in feature branch; retention and operational tests pending |
 | RAG | pgvector ingestion/retrieval, source ACL, citations | Implemented in feature branch; real embedding and retrieval benchmarks pending |
 | MCP | Streamable HTTP gateway, tool allowlists, JSON Schema validation | Implemented in feature branch; external server review/configuration pending |
