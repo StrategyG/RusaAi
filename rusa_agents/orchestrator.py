@@ -125,14 +125,13 @@ class AICodeOrchestrator:
             None,
         )
 
-    @staticmethod
-    def _ci_outcome(result: ToolResult) -> str:
+    def _ci_outcome(self, result: ToolResult) -> str:
         if not result.success or result.name != "get_ci_status":
             return "pending"
         head_sha = result.data.get("head_sha")
         if (
             not isinstance(head_sha, str)
-            or not AICodeOrchestrator.SHA_PATTERN.fullmatch(head_sha)
+            or not self.SHA_PATTERN.fullmatch(head_sha)
             or result.evidence.get("source") != "github_check_runs_api"
             or result.evidence.get("head_sha") != head_sha
             or result.data.get("checks_complete") is not True
@@ -141,10 +140,10 @@ class AICodeOrchestrator:
         checks = result.data.get("checks")
         if not isinstance(checks, list) or not checks:
             return "pending"
-        required = {
+        by_name = {
             item.get("name"): item for item in checks if isinstance(item, dict)
         }
-        if not AICodeOrchestrator._REQUIRED_CHECKS.issubset(required):
+        if not self.required_ci_checks.issubset(by_name):
             return "pending"
         if any(
             not isinstance(item, dict) or item.get("status") != "completed"
@@ -154,11 +153,6 @@ class AICodeOrchestrator:
         if any(item.get("conclusion") != "success" for item in checks):
             return "failed"
         return "passed"
-
-    _REQUIRED_CHECKS = {
-        "Lint, test, and audit dependencies",
-        "Build and smoke-test containers",
-    }
 
     async def _run_worker(
         self,
@@ -227,8 +221,7 @@ class AICodeOrchestrator:
         await self._persist(record, checkpoint_callback)
         return completed
 
-    @staticmethod
-    def _tester_sha(record: TaskRecord) -> str | None:
+    def _tester_sha(self, record: TaskRecord) -> str | None:
         tester = next(
             (
                 item for item in reversed(record.worker_results)
@@ -238,8 +231,8 @@ class AICodeOrchestrator:
         )
         if tester is None:
             return None
-        ci = AICodeOrchestrator._tool_result(tester, "get_ci_status")
-        if ci is None or AICodeOrchestrator._ci_outcome(ci) != "passed":
+        ci = self._tool_result(tester, "get_ci_status")
+        if ci is None or self._ci_outcome(ci) != "passed":
             return None
         return str(ci.data.get("head_sha"))
 
@@ -322,7 +315,7 @@ class AICodeOrchestrator:
                     pr = self._tool_result(result, "create_pull_request")
                     if (
                         pr is None
-                        or not isinstance(pr.data.get("number"), int)
+                        or type(pr.data.get("number")) is not int
                         or not isinstance(pr.data.get("url"), str)
                         or pr.data.get("draft") is not True
                         or pr.evidence.get("source") != "github_pull_requests_api"
