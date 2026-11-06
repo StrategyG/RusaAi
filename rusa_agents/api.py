@@ -180,6 +180,17 @@ async def ready(request: Request) -> dict[str, Any]:
     return {"status": "ready", "checks": checks}
 
 
+@app.get("/v1/agent/audit/verify")
+async def verify_audit_chain(
+    tenant: str = Depends(tenant_dependency),
+    runtime: AgentRuntime = Depends(runtime_dependency),
+) -> dict[str, Any]:
+    valid = await runtime.audit.verify_chain(tenant)
+    if not valid:
+        raise HTTPException(status_code=503, detail="Tenant audit chain integrity verification failed")
+    return {"status": "valid", "tenant_audit_chain_valid": True}
+
+
 @app.get("/v1/agent/tools")
 async def list_agent_tools(
     tenant: str = Depends(tenant_dependency),
