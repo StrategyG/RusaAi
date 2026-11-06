@@ -262,13 +262,13 @@ class OpenAIChatInferenceProvider:
                             f"Model provider stream exceeds the {self.max_response_bytes}-byte limit"
                         )
                     buffer.extend(chunk)
-                    if len(buffer) > 65536 and b"\\n" not in buffer:
+                    if len(buffer) > 65536 and b"\n" not in buffer:
                         raise RuntimeError("Model provider SSE line exceeds the 65536-byte limit")
 
-                    while b"\\n" in buffer:
-                        line, _, remainder = buffer.partition(b"\\n")
+                    while b"\n" in buffer:
+                        line, _, remainder = buffer.partition(b"\n")
                         buffer = bytearray(remainder)
-                        line = line.rstrip(b"\\r")
+                        line = line.rstrip(b"\r")
                         if line.startswith(b"data:"):
                             data_lines.append(line[5:].lstrip())
                             if sum(map(len, data_lines)) > 65536:
@@ -277,7 +277,7 @@ class OpenAIChatInferenceProvider:
                         if line or not data_lines:
                             continue
 
-                        event_data = b"\\n".join(data_lines)
+                        event_data = b"\n".join(data_lines)
                         data_lines.clear()
                         if event_data == b"[DONE]":
                             done = True
@@ -292,11 +292,11 @@ class OpenAIChatInferenceProvider:
 
                 if not done and (buffer or data_lines):
                     if buffer:
-                        line = bytes(buffer).rstrip(b"\\r")
+                        line = bytes(buffer).rstrip(b"\r")
                         if line.startswith(b"data:"):
                             data_lines.append(line[5:].lstrip())
                     if data_lines:
-                        event_data = b"\\n".join(data_lines)
+                        event_data = b"\n".join(data_lines)
                         if event_data == b"[DONE]":
                             done = True
                         else:
