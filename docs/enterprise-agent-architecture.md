@@ -56,7 +56,7 @@ PostgreSQL is required for multi-replica deployments. SQLite is supported only f
 - Durable key/value memory: tenant-scoped agent_memory with CRUD and keyword search.
 - Inter-agent memory: tenant-scoped persisted messages in agent_messages.
 - Semantic memory: pgvector-backed document chunks, tenant filters, optional source allowlists, and citation metadata.
-- Audit memory: hash-chained event rows; an immutable external export is still required before claiming tamper-proof audit.
+- Audit memory: per-tenant serialized hash chains with monotonic sequence numbers, a locked chain-head row, and an integrity-verification method; immutable external/WORM export is still required for tamper-resistant retention.
 
 ## RAG pipeline
 
