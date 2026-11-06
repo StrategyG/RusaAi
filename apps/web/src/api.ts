@@ -39,26 +39,33 @@ export async function refreshSession(): Promise<AuthSession | null> {
       headers: { Accept: "application/json" },
     })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          if (authRevision === revisionAtStart) accessToken = null;
+          return null;
+        }
         const session = (await response.json()) as AuthSession;
         if (authRevision !== revisionAtStart) return null;
         accessToken = session.access_token;
         authRevision += 1;
         return session;
       })
-      .catch(() => null)
+      .catch(() => {
+        if (authRevision === revisionAtStart) accessToken = null;
+        return null;
+      })
       .finally(() => {
         refreshPromise = null;
       });
   }
-  const session = await refreshPromise;
-  if (!session) accessToken = null;
-  return session;
+  return refreshPromise;
 }
 
 async function refreshAccessToken(): Promise<boolean> {
+  const revisionBeforeRefresh = authRevision;
   const session = await refreshSession();
   if (session) return true;
+  // A login/logout or another token update superseded this request.
+  if (authRevision !== revisionBeforeRefresh) return Boolean(accessToken);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("rusa:session-expired"));
   }
@@ -98,7 +105,13 @@ export async function api<T>(
     const detail =
       typeof data === "object" && data !== null && "detail" in data
         ? String((data as { detail: unknown }).detail)
-        : "Request failed (" + response.status + ")";
+        : typeof data === "object" && data !== null &&
+            "error" in data &&
+            typeof (data as { error?: unknown }).error === "object" &&
+            (data as { error: object }).error !== null &&
+            "message" in (data as { error: object }).error
+          ? String(((data as { error: { message: unknown } }).error).message)
+          : "Request failed (" + response.status + ")";
     throw new Error(detail);
   }
   return data as T;
