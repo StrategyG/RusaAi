@@ -2,14 +2,18 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Run Python Tests and Linting
+  lint-and-test:
+    name: Lint and Python tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -17,30 +21,108 @@ jobs:
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install test and lint dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
+          python -m pip install \
+            "fastapi>=0.100.0" \
+            "pydantic>=2.0" \
+            "jsonschema[format]>=4.17.0" \
+            "httpx>=0.24.0" \
+            "pytest>=7.3.0" \
+            "flake8>=7.0,<8.0"
 
-      - name: Lint and syntax check
+      - name: Lint application and tests
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
+          python -m flake8 \
+            llm-project/serve/app.py \
+            llm-project/tests/test_task_validation.py \
+            --max-line-length=100 \
+            --count \
+            --show-source \
+            --statistics
 
-      - name: Run tests with pytest
+      - name: Verify lint gate rejects violations
         run: |
-          pytest
+          probe="$(mktemp --suffix=.py)"
+          printf 'def lint_probe():\n    return undefined_name\n' > "$probe"
+          if python -m flake8 "$probe" --select=F821; then
+            echo "Lint accepted an undefined name." >&2
+            exit 1
+          fi
+
+      - name: Compile Python package
+        run: python -m compileall -q llm-project
+
+      - name: Run tests
+        run: python -m pytest -q llm-project/tests
 
   docker-build:
-    name: Verify Docker Image Build
+    name: Verify Docker image build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Build Docker image
+        run: docker build --pull -t rusa-ai:${{ github.sha }} .
+
+      - name: Smoke test container startup and A2A validation
         run: |
-          docker build -t rusa-ai:latest .
+          set -euo pipefail
+          image="rusa-ai:${GITHUB_SHA}"
+          container="rusa-ai-smoke-${GITHUB_RUN_ID}"
+          cleanup() {
+            docker logs "$container" || true
+            docker rm -f "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d --name "$container" -p 127.0.0.1:8000:8000 "$image"
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:8000/health >/tmp/health.json; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "Container did not become healthy." >&2
+            exit 1
+          fi
+          grep -q '"status":"healthy"' /tmp/health.json
+
+          response="$(curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            --data-binary @- \
+            http://127.0.0.1:8000/v1/validate-task <<'JSON'
+          {
+            "envelope": {
+              "protocol_version": "1.0",
+              "task_id": "123e4567-e89b-12d3-a456-426614174000",
+              "message_id": "123e4567-e89b-12d3-a456-426614174001",
+              "type": "task.create",
+              "from": {"agent_id": "ci-client", "role": "human"},
+              "to": {"agent_id": "rusa-orchestrator", "role": "rusa_orchestrator"},
+              "created_at": "2026-11-06T12:00:00Z",
+              "task": {
+                "objective": "Container A2A smoke test",
+                "acceptance_criteria": ["Envelope is accepted"],
+                "repository": "StrategyG/RusaAi",
+                "base_branch": "main",
+                "work_branch": "fix/ci-smoke"
+              },
+              "policy": {
+                "allowed_actions": ["read"],
+                "prohibited_actions": ["deploy"],
+                "human_approval_required": ["merge"]
+              }
+            }
+          }
+          JSON
+          )"
+          printf '%s' "$response" | grep -q '"valid":true'

@@ -113,6 +113,22 @@ pytest llm-project/tests/ -v
 | `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
 | `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
 
+### A2A Task Envelope Validation
+
+The `/v1/validate-task` endpoint validates the `envelope` object against
+`schemas/a2a/task-envelope.schema.json`, which declares JSON Schema Draft 2020-12.
+The service loads and checks this schema during application startup and enables
+format validation, including `uuid`, `date-time`, and `uri`.
+
+Startup fails if the schema is missing, malformed, declares an unsupported draft,
+or does not conform to its declared draft. The service never skips validation when
+the schema is unavailable.
+
+A successful validation returns `{"valid": true, "errors": []}`. A rejected
+envelope returns `{"valid": false, "errors": ["$.task_id: must use the uuid format"]}`
+with JSONPath-like field locations. Error messages describe the constraint without
+echoing submitted field values.
+
 ---
 
 ## Security & Governance
