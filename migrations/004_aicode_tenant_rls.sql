@@ -51,8 +51,8 @@ CREATE POLICY aicode_jobs_api_tenant ON public.aicode_jobs
 
 -- Queue workers are trusted cross-tenant consumers. Each transition is still
 -- fenced by tenant, worker ID, lease token, status, and lease expiry.
-DROP POLICY IF EXISTS aicode_jobs_worker_all ON public.aicode_jobs;
-CREATE POLICY aicode_jobs_worker_all ON public.aicode_jobs
+DROP POLICY IF EXISTS aicode_jobs_worker_queue ON public.aicode_jobs;
+CREATE POLICY aicode_jobs_worker_queue ON public.aicode_jobs
     FOR ALL TO rusa_worker_runtime
     USING (true)
     WITH CHECK (true);
@@ -71,8 +71,8 @@ CREATE POLICY aicode_memory_worker_tenant ON public.aicode_memory
 
 -- Only the worker can read/append the global audit integrity chain.
 -- Table grants and immutable triggers prohibit mutation of existing records.
-DROP POLICY IF EXISTS aicode_audit_worker_all ON public.aicode_audit_events;
-CREATE POLICY aicode_audit_worker_all ON public.aicode_audit_events
+DROP POLICY IF EXISTS aicode_audit_worker_only ON public.aicode_audit_events;
+CREATE POLICY aicode_audit_worker_only ON public.aicode_audit_events
     FOR ALL TO rusa_worker_runtime
     USING (true)
     WITH CHECK (true);
