@@ -27,6 +27,12 @@ INFERENCE_DURATION = Histogram(
     ["model"],
     buckets=(0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 45, 90, 180),
 )
+INFERENCE_TOKENS_PER_SECOND = Histogram(
+    "rusa_inference_tokens_per_second",
+    "Generated completion tokens per second for completed model requests.",
+    ["model"],
+    buckets=(0.1, 0.5, 1, 2, 5, 10, 20, 40, 80, 120, 200),
+)
 TOKEN_USAGE = Counter(
     "rusa_token_usage",
     "Exact token usage reported by local inference or an OpenAI-compatible provider.",
@@ -138,6 +144,11 @@ DB_POOL_WAITING = Gauge(
     "Requests waiting for a psycopg connection.",
     ["service"],
 )
+DB_SIZE_LIMIT = Gauge(
+    "rusa_database_size_limit_bytes",
+    "Configured database capacity alert threshold; this does not enforce a PostgreSQL hard limit.",
+    ["database"],
+)
 RAG_EVAL_LAST_RUN.set(0)
 
 
@@ -156,12 +167,24 @@ def record_inference(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
 ) -> None:
-    INFERENCE_REQUESTS.labels(model[:64], outcome).inc()
-    INFERENCE_DURATION.labels(model[:64]).observe(max(0.0, duration))
+    model_label = model[:64]
+    INFERENCE_REQUESTS.labels(model_label, outcome).inc()
+    safe_duration = max(0.0, duration)
+    INFERENCE_DURATION.labels(model_label).observe(safe_duration)
     if prompt_tokens > 0:
-        TOKEN_USAGE.labels(model[:64], "prompt").inc(prompt_tokens)
+        TOKEN_USAGE.labels(model_label, "prompt").inc(prompt_tokens)
     if completion_tokens > 0:
-        TOKEN_USAGE.labels(model[:64], "completion").inc(completion_tokens)
+        TOKEN_USAGE.labels(model_label, "completion").inc(completion_tokens)
+        if safe_duration > 0:
+            INFERENCE_TOKENS_PER_SECOND.labels(model_label).observe(
+                completion_tokens / safe_duration
+            )
+
+
+def record_database_capacity_limit(limit_bytes: int, database: str = "rusa_agent") -> None:
+    if type(limit_bytes) is not int or not 1 <= limit_bytes <= 10**15:
+        raise ValueError("database capacity threshold must be a positive byte count")
+    DB_SIZE_LIMIT.labels(database[:63]).set(limit_bytes)
 
 
 def record_agent_execution(outcome: str, duration: float) -> None:
@@ -206,11 +229,16 @@ def record_agent_provider(
 ) -> None:
     model_label = model[:64]
     AGENT_PROVIDER_REQUESTS.labels(model_label, outcome).inc()
-    AGENT_PROVIDER_DURATION.labels(model_label).observe(max(0.0, duration))
+    safe_duration = max(0.0, duration)
+    AGENT_PROVIDER_DURATION.labels(model_label).observe(safe_duration)
     if prompt_tokens > 0:
         TOKEN_USAGE.labels(model_label, "prompt").inc(prompt_tokens)
     if completion_tokens > 0:
         TOKEN_USAGE.labels(model_label, "completion").inc(completion_tokens)
+        if safe_duration > 0:
+            INFERENCE_TOKENS_PER_SECOND.labels(model_label).observe(
+                completion_tokens / safe_duration
+            )
 
 
 def record_rag_retrieval(outcome: str, duration: float, result_count: int) -> None:

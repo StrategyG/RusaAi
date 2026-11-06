@@ -8,6 +8,7 @@ import re
 from typing import Any
 from uuid import UUID
 
+from rusa_observability.metrics import update_db_pool_metrics
 from .safety import validate_document_metadata
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -74,6 +75,7 @@ class PostgresKnowledgeStore:
     def _set_tenant(self, connection: Any, tenant_id: str) -> None:
         self._set_db_role(connection)
         connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+        update_db_pool_metrics(self._pool, "knowledge")
 
     def check_ready(self) -> bool:
         with self._pool.connection() as connection:

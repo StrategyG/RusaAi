@@ -6,6 +6,8 @@ import math
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from rusa_observability.metrics import record_retrieval_evaluation
+
 
 def recall_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> float:
     if k < 1:
@@ -85,10 +87,12 @@ def evaluate_retrieval(
 
     if count == 0:
         raise ValueError("evaluation dataset must contain at least one case")
-    return {
+    report = {
         "queries": count,
         "k": k,
         "recall_at_k": sum(recall_values) / count,
         "mrr_at_k": sum(reciprocal_values) / count,
         "ndcg_at_k": sum(ndcg_values) / count,
     }
+    record_retrieval_evaluation(report)
+    return report

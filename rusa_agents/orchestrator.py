@@ -1,6 +1,7 @@
 """Hierarchical master orchestrator with fenced checkpoints and commit-bound evidence."""
 
 import asyncio
+from time import perf_counter
 import re
 from dataclasses import replace
 from typing import Any, Awaitable, Callable, Protocol
@@ -10,6 +11,12 @@ from .contracts import (
 )
 from .policy import AutonomyPolicy
 from .workers import AgentWorker
+from rusa_observability.metrics import (
+    record_agent_execution,
+    record_agent_tool_call,
+    record_agent_worker,
+)
+from rusa_observability.telemetry import trace_span
 
 
 class ToolGateway(Protocol):
@@ -199,6 +206,34 @@ class AICodeOrchestrator:
         checkpoint_callback: CheckpointCallback | None,
         tool_guard: LeaseGuard | None,
     ) -> WorkerResult:
+        started = perf_counter()
+        outcome = "failed"
+        with trace_span("rusa.agent.worker", {"agent.role": role.value}):
+            try:
+                result = await self._run_worker_impl(
+                    record, role, checkpoint_callback, tool_guard
+                )
+                outcome = "completed"
+                return result
+            except _ApprovalRequired:
+                outcome = "approval_required"
+                raise
+            except _TaskBlocked:
+                outcome = "blocked"
+                raise
+            except asyncio.TimeoutError:
+                outcome = "timeout"
+                raise
+            finally:
+                record_agent_worker(role.value, outcome, perf_counter() - started)
+
+    async def _run_worker_impl(
+        self,
+        record: TaskRecord,
+        role: WorkerRole,
+        checkpoint_callback: CheckpointCallback | None,
+        tool_guard: LeaseGuard | None,
+    ) -> WorkerResult:
         result = await asyncio.wait_for(
             self.workers[role].run(record.task, list(record.worker_results)),
             timeout=self.worker_timeout_seconds,
@@ -239,10 +274,19 @@ class AICodeOrchestrator:
                     lease_valid = False
                 if not lease_valid:
                     raise _LeaseLost("task lease is no longer valid before tool execution")
-            tool_result = await asyncio.wait_for(
-                self.tools.execute(record.task, call),
-                timeout=self.worker_timeout_seconds,
-            )
+            tool_started = perf_counter()
+            tool_outcome = "error"
+            try:
+                with trace_span("rusa.agent.tool", {"tool.name": call.name}):
+                    tool_result = await asyncio.wait_for(
+                        self.tools.execute(record.task, call),
+                        timeout=self.worker_timeout_seconds,
+                    )
+                tool_outcome = "success" if tool_result.success else "failure"
+            finally:
+                record_agent_tool_call(
+                    call.name, tool_outcome, perf_counter() - tool_started
+                )
             tool_results.append(tool_result)
             self._event(
                 "tool.completed",
@@ -327,6 +371,29 @@ class AICodeOrchestrator:
         return record
 
     async def run(
+        self,
+        task: CodingTask,
+        record: TaskRecord | None = None,
+        *,
+        checkpoint_callback: CheckpointCallback | None = None,
+        tool_guard: LeaseGuard | None = None,
+    ) -> TaskRecord:
+        started = perf_counter()
+        outcome = "exception"
+        with trace_span("rusa.agent.execute"):
+            try:
+                result = await self._run_impl(
+                    task,
+                    record,
+                    checkpoint_callback=checkpoint_callback,
+                    tool_guard=tool_guard,
+                )
+                outcome = result.state.value
+                return result
+            finally:
+                record_agent_execution(outcome, perf_counter() - started)
+
+    async def _run_impl(
         self,
         task: CodingTask,
         record: TaskRecord | None = None,

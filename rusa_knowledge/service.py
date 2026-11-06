@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+from time import perf_counter
 from typing import Any
+
+from rusa_observability.metrics import record_rag_retrieval
+from rusa_observability.telemetry import trace_span
 
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
@@ -123,14 +127,23 @@ class KnowledgeService:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         reject_credential_material(query)
-        vector = self.embeddings.embed([query])[0]
-        return self.store.search(
-            tenant_id=tenant_id,
-            collection=collection,
-            query=query,
-            query_embedding=vector,
-            limit=limit,
-        )
+        started = perf_counter()
+        outcome = "error"
+        results: list[dict[str, Any]] = []
+        try:
+            with trace_span("rusa.rag.retrieve", {"rag.limit": limit}):
+                vector = self.embeddings.embed([query])[0]
+                results = self.store.search(
+                    tenant_id=tenant_id,
+                    collection=collection,
+                    query=query,
+                    query_embedding=vector,
+                    limit=limit,
+                )
+            outcome = "success"
+            return results
+        finally:
+            record_rag_retrieval(outcome, perf_counter() - started, len(results))
 
     def get_document(
         self,

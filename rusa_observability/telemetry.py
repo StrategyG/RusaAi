@@ -23,10 +23,7 @@ def configure_telemetry(service_name: str) -> Any | None:
         if _tracer_provider is not None:
             return _tracer_provider
 
-        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -46,13 +43,19 @@ def configure_telemetry(service_name: str) -> Any | None:
         )
         trace.set_tracer_provider(tracer_provider)
 
-        logger_provider = LoggerProvider(resource=resource)
-        logger_provider.add_log_record_processor(
-            BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint, insecure=insecure))
-        )
-        logging.getLogger().addHandler(
-            LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
-        )
+        logger_provider = None
+        if os.getenv("RUSA_OTEL_LOGS_ENABLED", "false").lower() == "true":
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+            from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+            logger_provider = LoggerProvider(resource=resource)
+            logger_provider.add_log_record_processor(
+                BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint, insecure=insecure))
+            )
+            logging.getLogger().addHandler(
+                LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
+            )
 
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
