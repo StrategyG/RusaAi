@@ -67,7 +67,24 @@ jobs:
           SOURCE_DATABASE_URL: postgresql://rusa_backup_ci:rusa_backup_ci_password_1234567890@127.0.0.1:5432/rusa_test
           RESTORE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_restore_test
           RESTORE_CONFIRM_DATABASE: rusa_restore_test
+          RUSA_BACKUP_REQUIRE_REMOTE: "true"
+          RUSA_BACKUP_S3_URI: s3://rusa-agent-ci-backups/drill
+          RUSA_BACKUP_S3_ENDPOINT: http://127.0.0.1:9000
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: rusa-ci-minio-user
+          AWS_SECRET_ACCESS_KEY: rusa-ci-minio-secret-1234567890
         run: |
+          docker run -d --name rusa-minio-ci --network host \
+            -e MINIO_ROOT_USER="$AWS_ACCESS_KEY_ID" \
+            -e MINIO_ROOT_PASSWORD="$AWS_SECRET_ACCESS_KEY" \
+            minio/minio:latest server /data
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:9000/minio/health/live; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --max-time 3 http://127.0.0.1:9000/minio/health/live
           mkdir -p "$RUNNER_TEMP/rusa-agent-backups" "$RUNNER_TEMP/rusa-backup-drill"
           docker build --pull -f Dockerfile.backup -t rusa-agent-db-backup:dr .
           docker run --rm -i --network host --user "$(id -u):$(id -g)" \
@@ -77,11 +94,18 @@ jobs:
             -e SOURCE_DATABASE_URL \
             -e RESTORE_DATABASE_URL \
             -e RESTORE_CONFIRM_DATABASE \
+            -e RUSA_BACKUP_REQUIRE_REMOTE \
+            -e RUSA_BACKUP_S3_URI \
+            -e RUSA_BACKUP_S3_ENDPOINT \
+            -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
             -e BACKUP_DIR=/backups \
             -e BACKUP_AGE_IDENTITY_FILE=/drill/age-identity.txt \
             --entrypoint bash rusa-agent-db-backup:dr -euo pipefail -s <<'DRILL'
           age-keygen -o "$BACKUP_AGE_IDENTITY_FILE" 2>/dev/null
           export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
+          aws --endpoint-url "$RUSA_BACKUP_S3_ENDPOINT" s3 mb s3://rusa-agent-ci-backups --region "$AWS_DEFAULT_REGION"
           psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE rusa_backup_ci
               LOGIN PASSWORD 'rusa_backup_ci_password_1234567890'
@@ -111,6 +135,9 @@ jobs:
           test "$restored_value" = "encrypted-restore-drill-ok"
           psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE rusa_restore_test"
           DRILL
+      - name: Cleanup DR object storage
+        if: always()
+        run: docker rm -f rusa-minio-ci || true
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
