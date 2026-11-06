@@ -138,7 +138,8 @@ class PostgresTaskQueue:
                     raise RuntimeError("Legacy permissive RLS policies remain; reapply migrations/004_aicode_tenant_rls.sql")
 
                 roles = conn.execute("""
-                    SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+                    SELECT rolname, rolcanlogin, rolsuper, rolcreatedb,
+                           rolcreaterole, rolreplication, rolbypassrls
                     FROM pg_roles
                     WHERE rolname = ANY(%s)
                 """, (["rusa_api_runtime", "rusa_worker_runtime"],)).fetchall()
@@ -147,7 +148,8 @@ class PostgresTaskQueue:
                     raise RuntimeError("Separate API/worker database role groups are missing")
                 if any(any(flags) for flags in role_flags.values()):
                     raise RuntimeError(
-                        "API/worker role groups must be NOLOGIN, NOSUPERUSER, and NOBYPASSRLS"
+                        "API/worker role groups must be NOLOGIN, NOSUPERUSER, NOCREATEDB, "
+                        "NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS"
                     )
 
                 identity = conn.execute("""
@@ -155,7 +157,8 @@ class PostgresTaskQueue:
                            pg_has_role(current_user, 'rusa_api_runtime', 'member'),
                            pg_has_role(current_user, 'rusa_worker_runtime', 'member'),
                            COALESCE((
-                               SELECT rolsuper OR rolbypassrls OR NOT rolcanlogin
+                               SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication
+                                      OR rolbypassrls OR NOT rolcanlogin OR NOT rolinherit
                                FROM pg_roles WHERE rolname=current_user
                            ), true)
                 """).fetchone()
