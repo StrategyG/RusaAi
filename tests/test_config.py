@@ -24,6 +24,7 @@ def set_worker_environment(monkeypatch):
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_WORKSPACE_ROOT", "/srv/rusa/workspaces")
     monkeypatch.setenv("RUSA_GIT_MIRROR_ROOT", "/srv/rusa/mirrors")
+    monkeypatch.setenv("RUSA_DOCKER_GID", "1001")
     monkeypatch.setenv("RUSA_GITHUB_TOKEN", "github_pat_" + "g" * 32)
     monkeypatch.setenv(
         "RUSA_SANDBOX_IMAGE",
