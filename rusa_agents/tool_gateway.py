@@ -230,8 +230,17 @@ class WorkspaceToolGateway:
         ):
             raise ToolDenied("Dependency, deployment, schema, and migration files require human review")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return ToolResult(True, f"Wrote {raw_path}", {"path": raw_path, "bytes": len(content.encode("utf-8"))})
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return ToolResult(
+            True,
+            f"Wrote {raw_path}",
+            {"path": raw_path, "bytes": len(content.encode("utf-8"))},
+        )
 
     def list_files(self, raw_path: str = ".") -> ToolResult:
         target = self.workspace if raw_path == "." else self._resolve(raw_path)
@@ -245,7 +254,15 @@ class WorkspaceToolGateway:
                 rel = item.relative_to(self.workspace).as_posix()
             except ValueError:
                 continue
-            if any(part.lower() in self.PROTECTED_PARTS for part in PurePosixPath(rel).parts):
+            parts = {part.lower() for part in PurePosixPath(rel).parts}
+            if any(
+                part in self.PROTECTED_PARTS
+                or (part.startswith(".env") and part != ".env.example")
+                or part in self.PROTECTED_NAMES
+                for part in parts
+            ):
+                continue
+            if PurePosixPath(rel).suffix.lower() in self.PROTECTED_SUFFIXES:
                 continue
             if any(rel.startswith(prefix) for prefix in self.PROTECTED_PREFIXES):
                 continue
@@ -274,16 +291,25 @@ class WorkspaceToolGateway:
         args = action.get("arguments", {})
         if not isinstance(args, dict):
             raise ToolDenied("Tool arguments must be an object")
+        schemas = {
+            "list_files": {"path"},
+            "read_file": {"path"},
+            "write_file": {"path", "content"},
+            "run_check": {"profile"},
+            "git_diff": set(),
+        }
+        if name not in schemas:
+            raise ToolDenied(f"Tool '{name}' is not registered")
+        if set(args) - schemas[name]:
+            raise ToolDenied(f"Unexpected arguments for tool '{name}'")
         if name == "list_files":
-            return self.list_files(str(args.get("path", ".")))
+            return self.list_files(args.get("path", "."))
         if name == "read_file":
-            return self.read_file(str(args.get("path", "")))
+            return self.read_file(args.get("path", ""))
         if name == "write_file":
-            return self.write_file(str(args.get("path", "")), args.get("content", ""), role)
+            return self.write_file(args.get("path", ""), args.get("content", ""), role)
         if name == "run_check":
-            return self.run_check(str(args.get("profile", "")), role)
+            return self.run_check(args.get("profile", ""), role)
         if name == "git_diff":
-            if role not in {WorkerRole.ANALYST, WorkerRole.ARCHITECT, WorkerRole.DEVELOPER, WorkerRole.DEBUGGER, WorkerRole.TESTER, WorkerRole.SECURITY}:
-                raise ToolDenied("Role cannot inspect Git diff")
             return self.git_diff()
         raise ToolDenied(f"Tool '{name}' is not registered")
