@@ -64,7 +64,7 @@ class AICodeRuntime:
         )
 
     async def _build_orchestrator(self, task: CodingTask, tenant_id: str) -> tuple[AICodeOrchestrator, str]:
-        workspace = self.workspace_manager.create(task, tenant_id)
+        workspace = await asyncio.to_thread(self.workspace_manager.create, task, tenant_id)
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=DockerSandbox(image=self.config.sandbox_image),
@@ -108,8 +108,29 @@ class AICodeRuntime:
             if self.config.environment == "production" and not allowed_repositories:
                 raise PermissionError("Tenant has no configured repository permissions")
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+            if lost_lease.is_set():
+                raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
-            record = await asyncio.wait_for(orchestrator.run(task), timeout=task_timeout)
+            execution = asyncio.create_task(
+                asyncio.wait_for(orchestrator.run(task), timeout=task_timeout)
+            )
+            lease_watch = asyncio.create_task(lost_lease.wait())
+            done, _ = await asyncio.wait(
+                {execution, lease_watch}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if lease_watch in done and lost_lease.is_set():
+                execution.cancel()
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                raise RuntimeError("Worker lost its task lease; execution was cancelled")
+            lease_watch.cancel()
+            try:
+                await lease_watch
+            except asyncio.CancelledError:
+                pass
+            record = await execution
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease; refusing to publish")
             if record.state != TaskState.SUCCEEDED:
