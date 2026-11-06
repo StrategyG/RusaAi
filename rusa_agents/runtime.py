@@ -276,15 +276,19 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease)
-            commit_sha = await self._await_with_lease(
-                asyncio.to_thread(
-                    self.publisher.commit_and_push,
+            commit_sha = await asyncio.to_thread(
+                self.queue.publish_if_lease_owned,
+                job.id,
+                job.tenant_id,
+                self.worker_id,
+                job.lease_token,
+                lambda: self.publisher.commit_and_push(
                     workspace,
                     task.repository.full_name,
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
                 ),
-                lost_lease,
+                lease_seconds=900,
             )
             await self._assert_lease(job, lost_lease)
             pr_url = await self._await_with_lease(
