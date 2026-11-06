@@ -214,7 +214,7 @@ class AICodeOrchestrator:
             )
         tool_results = []
         for call in result.tool_calls:
-            if call.name not in self.ROLE_TOOLS[role]:
+            if call.name not in self.workers[role].allowed_tools:
                 raise _TaskBlocked(f"{role.value} is not authorized to use {call.name}")
             action = self.ACTIONS[call.name]
             path = (
