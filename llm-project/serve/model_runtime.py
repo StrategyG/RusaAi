@@ -11,7 +11,8 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Literal, Protocol
 
 logger = logging.getLogger("rusa-ai-runtime")
 MANIFEST_NAME = "rusa-model-manifest.json"
@@ -247,7 +248,7 @@ class TransformersBackend:
         *,
         timeout_seconds: float,
         max_model_len: int,
-    ) -> "TransformersBackend":
+    ) -> TransformersBackend:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -484,7 +485,7 @@ class VLLMBackend:
         max_num_batched_tokens: int,
         tensor_parallel_size: int,
         gpu_memory_utilization: float,
-    ) -> "VLLMBackend":
+    ) -> VLLMBackend:
         try:
             from transformers import AutoTokenizer
             from vllm import SamplingParams
