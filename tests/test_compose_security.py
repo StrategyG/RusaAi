@@ -124,6 +124,7 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
 
     assert backup["profiles"] == ["backup-once"]
     assert backup["restart"] == "no"
+    assert backup["stop_grace_period"] == "${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}"
     assert "ports" not in backup
     assert "rusa-agent-db-backups:/backups" in backup["volumes"]
     assert backup["environment"]["BACKUP_AGE_RECIPIENT"] == (
