@@ -121,6 +121,14 @@ class PostgresTaskQueue:
                     "API permission migration must run as rusa_agent_worker or a database superuser"
                 )
 
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                IN SCHEMA public REVOKE ALL ON TABLES FROM rusa_agent_api
+            """)
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                IN SCHEMA public REVOKE ALL ON SEQUENCES FROM rusa_agent_api
+            """)
             connection.execute(
                 "REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM rusa_agent_api"
             )
@@ -207,10 +215,10 @@ class PostgresTaskQueue:
                 "REVOKE ALL ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) FROM PUBLIC"
             )
             connection.execute(
-                "GRANT EXECUTE ON FUNCTION public.rusa_agent_cancel_task(TEXT, TEXT) TO rusa_agent_api"
+                "GRANT EXECUTE ON FUNCTION public.rusa_agent_cancel_task(TEXT, TEXT) TO rusa_agent_api, rusa_agent_worker"
             )
             connection.execute(
-                "GRANT EXECUTE ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) TO rusa_agent_api"
+                "GRANT EXECUTE ON FUNCTION public.rusa_agent_requeue_failed_task(TEXT, TEXT) TO rusa_agent_api, rusa_agent_worker"
             )
 
     def check_ready(self) -> bool:
