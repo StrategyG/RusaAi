@@ -5,6 +5,7 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 """
 from __future__ import annotations  # noqa: I001
 
+import json
 import os
 import shutil
 import stat
@@ -246,12 +247,23 @@ class WorkspaceToolGateway:
         workspace: str | Path,
         sandbox: DockerSandbox | None = None,
         max_file_bytes: int = 1_000_000,
+        knowledge_service: Any | None = None,
+        knowledge_tenant_id: str | None = None,
+        knowledge_collection: str = "agent",
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
             raise ValueError("workspace must be an existing directory")
         self.sandbox = sandbox or DockerSandbox()
         self.max_file_bytes = max_file_bytes
+        if knowledge_service is not None and (
+            not isinstance(knowledge_tenant_id, str)
+            or not knowledge_tenant_id.strip()
+        ):
+            raise ValueError("knowledge tenant identity must come from the authenticated task")
+        self.knowledge_service = knowledge_service
+        self.knowledge_tenant_id = knowledge_tenant_id
+        self.knowledge_collection = knowledge_collection
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -377,6 +389,62 @@ class WorkspaceToolGateway:
             return ToolResult(False, completed.stderr[-8000:])
         return ToolResult(True, completed.stdout[-20000:], {"exit_code": completed.returncode})
 
+    def _knowledge_context(self) -> tuple[Any, str]:
+        if self.knowledge_service is None or not self.knowledge_tenant_id:
+            raise ToolDenied("Tenant-scoped knowledge retrieval is not enabled for this worker")
+        return self.knowledge_service, self.knowledge_tenant_id
+
+    def _search_knowledge(self, args: dict[str, Any]) -> ToolResult:
+        service, tenant_id = self._knowledge_context()
+        query = args.get("query")
+        collection = args.get("collection", self.knowledge_collection)
+        limit = args.get("limit", 5)
+        if not isinstance(query, str) or not query.strip() or len(query) > 2000:
+            raise ToolDenied("Knowledge query must be a non-empty string of at most 2000 characters")
+        if not isinstance(collection, str) or not collection:
+            raise ToolDenied("Knowledge collection is invalid")
+        if type(limit) is not int or not 1 <= limit <= 10:
+            raise ToolDenied("Knowledge result limit must be between 1 and 10")
+        results = service.search(
+            tenant_id=tenant_id, collection=collection, query=query, limit=limit
+        )
+        output = json.dumps(
+            {"query": query, "collection": collection, "results": results},
+            ensure_ascii=False,
+            default=str,
+        )[:12_000]
+        return ToolResult(True, output, {"source": "tenant_knowledge", "collection": collection})
+
+    def _get_knowledge_document(self, args: dict[str, Any]) -> ToolResult:
+        service, tenant_id = self._knowledge_context()
+        document_id = args.get("document_id")
+        collection = args.get("collection", self.knowledge_collection)
+        if not isinstance(document_id, str) or not document_id or len(document_id) > 64:
+            raise ToolDenied("Knowledge document ID is invalid")
+        if not isinstance(collection, str) or not collection:
+            raise ToolDenied("Knowledge collection is invalid")
+        document = service.get_document(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            max_chars=12_000,
+        )
+        output = json.dumps(
+            {"found": document is not None, "document": document},
+            ensure_ascii=False,
+            default=str,
+        )[:12_500]
+        return ToolResult(True, output, {"source": "tenant_knowledge", "collection": collection})
+
+    def _list_knowledge_collections(self) -> ToolResult:
+        service, tenant_id = self._knowledge_context()
+        collections = service.list_collections(tenant_id=tenant_id)
+        return ToolResult(
+            True,
+            json.dumps({"collections": collections}, ensure_ascii=False, default=str)[:4000],
+            {"source": "tenant_knowledge"},
+        )
+
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
         name = action.get("name")
         args = action.get("arguments", {})
@@ -388,6 +456,9 @@ class WorkspaceToolGateway:
             "write_file": {"path", "content"},
             "run_check": {"profile"},
             "git_diff": set(),
+            "search_knowledge": {"query", "collection", "limit"},
+            "get_document": {"document_id", "collection"},
+            "list_collections": set(),
         }
         if name not in schemas:
             TOOL_EXECUTIONS.labels(str(name)[:64], "denied").inc()
@@ -404,8 +475,16 @@ class WorkspaceToolGateway:
                 result = self.write_file(args.get("path", ""), args.get("content", ""), role)
             elif name == "run_check":
                 result = self.run_check(args.get("profile", ""), role)
-            else:
+            elif name == "search_knowledge":
+                result = self._search_knowledge(args)
+            elif name == "get_document":
+                result = self._get_knowledge_document(args)
+            elif name == "list_collections":
+                result = self._list_knowledge_collections()
+            elif name == "git_diff":
                 result = self.git_diff()
+            else:
+                raise ToolDenied(f"Tool '{name}' is not registered")
             TOOL_EXECUTIONS.labels(name, "success" if result.ok else "failure").inc()
             return result
         except ToolDenied:
