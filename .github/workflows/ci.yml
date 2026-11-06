@@ -49,11 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Compile
-        run: python -m compileall -q rusa_agents llm-project/serve tests
+        run: python -m compileall -q rusa_agents llm-project/serve tests scripts
       - name: Lint
-        run: ruff check rusa_agents tests llm-project/serve
+        run: ruff check rusa_agents tests llm-project/serve scripts
       - name: Security static analysis
-        run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
+        run: bandit -q -r rusa_agents scripts --severity-level medium --confidence-level medium
       - name: Tests
         run: python -m pytest -q
 
