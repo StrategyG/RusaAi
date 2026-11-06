@@ -159,7 +159,8 @@ class QueueWorker:
                     f"{result.role.value}: {result.summary}"
                     for result in record.worker_results
                 )
-                self.memory.store(
+                await asyncio.to_thread(
+                    self.memory.store,
                     tenant_id,
                     f"Objective: {task.objective}\nOutcome: {record.state.value}\n{summary}"[:7900],
                     source=f"task:{task_id}",
@@ -175,8 +176,10 @@ class QueueWorker:
         while not stop_event.is_set():
             if loop.time() >= next_maintenance:
                 try:
-                    removed_tasks = self.queue.purge_terminal(retention_days=30)
-                    removed_memory = self.memory.purge_expired()
+                    removed_tasks, removed_memory = await asyncio.gather(
+                        asyncio.to_thread(self.queue.purge_terminal, retention_days=30),
+                        asyncio.to_thread(self.memory.purge_expired),
+                    )
                     logger.info(
                         "agent maintenance completed removed_tasks=%s removed_memory=%s",
                         removed_tasks,
