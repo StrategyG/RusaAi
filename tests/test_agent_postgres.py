@@ -204,3 +204,25 @@ def test_api_database_role_has_only_task_submit_and_read_privileges():
                 has_table_privilege('rusa_agent_api', 'rusa_agent_memory', 'SELECT')
         """).fetchone()
     assert privileges == (True, True, False, False, False)
+
+
+def test_postgres_readiness_fails_closed_when_tenant_rls_is_disabled():
+    queue = PostgresTaskQueue(DSN)
+    memory = PostgresMemoryStore(DSN)
+    queue.initialize()
+    memory.initialize()
+    assert queue.check_ready()
+    assert memory.check_ready()
+
+    try:
+        with psycopg.connect(DSN) as connection:
+            connection.execute("ALTER TABLE rusa_agent_tasks DISABLE ROW LEVEL SECURITY")
+            connection.execute("ALTER TABLE rusa_agent_memory DISABLE ROW LEVEL SECURITY")
+        assert not queue.check_ready()
+        assert not memory.check_ready()
+    finally:
+        queue.initialize()
+        memory.initialize()
+
+    assert queue.check_ready()
+    assert memory.check_ready()
