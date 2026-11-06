@@ -96,7 +96,7 @@ class DockerSandbox:
 
         sensitive_parts = {
             ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
-            ".azure", ".rusa-ai", ".venv", "venv", "node_modules",
+            ".azure", ".rusa-ai", ".terraform", ".venv", "venv", "node_modules",
         }
         sensitive_names = {
             ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
