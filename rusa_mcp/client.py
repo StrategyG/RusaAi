@@ -21,10 +21,18 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
-def validate_server_url(server_url: str) -> str:
+def validate_server_url(
+    server_url: str,
+    *,
+    allow_http_hosts: set[str] | frozenset[str] = frozenset(),
+) -> str:
     parsed = urlsplit(server_url)
     secure = parsed.scheme == "https"
-    local = parsed.scheme == "http" and bool(parsed.hostname) and _is_loopback(parsed.hostname)
+    local = (
+        parsed.scheme == "http"
+        and bool(parsed.hostname)
+        and (_is_loopback(parsed.hostname) or parsed.hostname.lower() in allow_http_hosts)
+    )
     if (
         not (secure or local)
         or not parsed.hostname
@@ -47,12 +55,16 @@ class MCPToolClient:
         server_url: str,
         api_key: str,
         allowed_tools: set[str] | frozenset[str],
+        allow_http_hosts: set[str] | frozenset[str] = frozenset(),
         timeout_seconds: float = 60.0,
         max_argument_bytes: int = 32_768,
         max_response_bytes: int = 1_000_000,
     ) -> None:
-        self.server_url = validate_server_url(server_url)
-        if not api_key or len(api_key) < 32:
+        self.server_url = validate_server_url(
+            server_url,
+            allow_http_hosts=frozenset(host.lower() for host in allow_http_hosts),
+        )
+        if not api_key or len(api_key) < 32 or len(api_key) > 512:
             raise ValueError("MCP bearer key must contain at least 32 characters")
         if not allowed_tools or any(not isinstance(name, str) or not name for name in allowed_tools):
             raise ValueError("an explicit non-empty MCP tool allowlist is required")
