@@ -483,6 +483,33 @@ def test_gateway_reads_regular_file_without_missing_policy_attribute(monkeypatch
     assert result.data["content"] == raw.decode("utf-8")
 
 
+def test_gateway_can_read_human_review_control_plane_files(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+    raw = b"tenant-safe knowledge implementation"
+
+    async def request(method, path, *, json_body=None, params=None, allow_not_found=False):
+        assert method == "GET"
+        assert path.endswith("/contents/rusa_knowledge/store.py")
+        return {
+            "type": "file",
+            "size": len(raw),
+            "encoding": "base64",
+            "content": base64.b64encode(raw).decode("ascii"),
+            "sha": "knowledge-file-sha",
+        }
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(
+        make_task(),
+        ToolCall("read_file", {"path": "rusa_knowledge/store.py"}),
+    ))
+    assert result.success is True
+    assert result.data["content"] == raw.decode("utf-8")
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -520,6 +547,8 @@ def test_gateway_blocks_control_plane_and_container_writes_before_network(monkey
     [
         "token = ghp_" + ("a" * 36),
         "api_key = sk-proj-" + ("b" * 36),
+        "password = \"sensitive-password-value\"",
+        "api_key = ordinary-provider-secret-value",
         "-----BEGIN RSA PRIVATE KEY-----\\n" + ("C" * 64) + "\\n-----END RSA PRIVATE KEY-----",
         "jwt = eyJ" + ("a" * 16) + "." + ("b" * 16) + "." + ("c" * 16),
     ],
