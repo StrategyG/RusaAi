@@ -23,7 +23,6 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
-psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 ```
 
 The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, and forced row-level security (RLS). Apply migrations 001, 002, 003 task-results, and 004 tenant-RLS in that order. The API and worker fail closed if the expected columns, RLS flags, or required policies are missing.
@@ -44,7 +43,7 @@ Runtime permissions:
 - Neither role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
-The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py`; application-level WHERE clauses alone are not sufficient.
+The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
