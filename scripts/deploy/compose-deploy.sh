@@ -46,6 +46,12 @@ get_env_value() {
   ' "$env_file"
 }
 
+aicode_enabled="$(get_env_value RUSA_AICODE_ENABLED)" || { echo "Exactly one RUSA_AICODE_ENABLED setting must exist in .env." >&2; exit 64; }
+case "${aicode_enabled,,}" in
+  false|0|no) ;;
+  *) echo "Disable AICode and drain active tasks before deploying or rolling back." >&2; exit 64 ;;
+esac
+
 old_api_image="$(get_env_value RUSA_API_IMAGE)" || { echo "Exactly one RUSA_API_IMAGE must exist in .env." >&2; exit 64; }
 old_worker_image="$(get_env_value RUSA_WORKER_IMAGE)" || { echo "Exactly one RUSA_WORKER_IMAGE must exist in .env." >&2; exit 64; }
 old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
