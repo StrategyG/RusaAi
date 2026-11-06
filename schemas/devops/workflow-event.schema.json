@@ -49,7 +49,7 @@
             "required": ["capability", "input_ref", "deadline_at", "idempotency_key", "priority"],
             "properties": {
               "capability": { "type": "string", "minLength": 1, "maxLength": 128 },
-              "input_ref": { "type": "string", "format": "uri" },
+              "input_ref": { "type": "string", "minLength": 1, "maxLength": 2048 },
               "deadline_at": { "type": "string", "format": "date-time" },
               "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 256 },
               "priority": { "type": "string", "enum": ["P1", "P2", "P3"] }
@@ -127,7 +127,7 @@
             "properties": {
               "lease_epoch": { "type": "integer", "minimum": 1 },
               "state_version": { "type": "integer", "minimum": 1 },
-              "result_ref": { "type": "string", "format": "uri" },
+              "result_ref": { "type": "string", "minLength": 1, "maxLength": 2048 },
               "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
             }
           }
@@ -149,7 +149,7 @@
               "code": { "type": "string", "minLength": 1 },
               "category": { "type": "string", "enum": ["TRANSIENT", "PERMANENT", "POLICY", "AMBIGUOUS"] },
               "side_effect": { "type": "string", "enum": ["NONE", "APPLIED", "UNKNOWN"] },
-              "diagnostic_ref": { "type": "string", "format": "uri" }
+              "diagnostic_ref": { "type": "string", "minLength": 1, "maxLength": 2048 }
             }
           }
         }
