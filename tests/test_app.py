@@ -141,6 +141,15 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     )
     assert invalid_key.status_code == 422
 
+    openapi = client.get("/openapi.json").json()
+    parameters = openapi["paths"]["/v1/aicode/tasks"]["post"]["parameters"]
+    idempotency_header = next(
+        parameter for parameter in parameters
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["in"] == "header"
+    assert idempotency_header["required"] is True
+
     response = client.post(
         "/v1/aicode/tasks",
         headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-tenant-scope-001"},
