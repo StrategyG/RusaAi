@@ -1,21 +1,21 @@
 """RUSA-AI API. Inference fails closed until a real backend is injected."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import hmac
 import json
 import logging
 import os
-from pathlib import Path
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import Response
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, field_validator
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel, Field, field_validator
 
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
