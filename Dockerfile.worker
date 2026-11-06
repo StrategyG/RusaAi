@@ -15,6 +15,7 @@ RUN python -m pip install --no-cache-dir -r requirements-agent.txt -r requiremen
 COPY rusa_agents /app/rusa_agents
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
+COPY rusa_observability /app/rusa_observability
 COPY migrations /app/migrations
 
 USER 10001:10001

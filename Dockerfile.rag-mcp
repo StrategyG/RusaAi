@@ -16,6 +16,7 @@ RUN python -m pip install --no-cache-dir -r requirements-rag-mcp.txt \
 
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
+COPY rusa_observability /app/rusa_observability
 
 USER 10001:10001
 

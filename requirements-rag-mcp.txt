@@ -7,3 +7,13 @@ psycopg[binary,pool]>=3.2,<4
 pypdf>=5,<7
 python-docx>=1.1,<2
 uvicorn[standard]>=0.30,<1
+
+# Prometheus metrics and OpenTelemetry tracing/log export
+prometheus-client>=0.21,<1
+opentelemetry-api>=1.30,<2
+opentelemetry-sdk>=1.30,<2
+opentelemetry-exporter-otlp-proto-grpc>=1.30,<2
+opentelemetry-instrumentation-asgi>=0.51b0,<1
+opentelemetry-instrumentation-fastapi>=0.51b0,<1
+opentelemetry-instrumentation-httpx>=0.51b0,<1
+opentelemetry-instrumentation-psycopg>=0.51b0,<1

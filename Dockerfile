@@ -32,6 +32,7 @@ COPY llm-project/serve /app/llm-project/serve
 COPY schemas /app/schemas
 COPY rusa_agents /app/rusa_agents
 COPY rusa_knowledge /app/rusa_knowledge
+COPY rusa_observability /app/rusa_observability
 
 USER 10001:10001
 
