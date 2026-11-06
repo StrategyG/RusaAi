@@ -339,10 +339,12 @@ def create_aicode_task(
     request: AICodeTaskRequest,
     tenant_id: str = Depends(verify_api_key),
 ):
+    config = RuntimeConfig.from_env()
+    if not config.aicode_enabled:
+        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
-    config = RuntimeConfig.from_env()
     allowed_repositories = config.tenant_repositories.get(tenant_id)
     if config.environment == "production" and not allowed_repositories:
         raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
@@ -388,6 +390,8 @@ def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
 @app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
 def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
     """Require an explicit tenant-authenticated retry after failure or human review."""
+    if not RuntimeConfig.from_env().aicode_enabled:
+        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
