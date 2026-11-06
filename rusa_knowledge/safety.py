@@ -17,6 +17,10 @@ _PATTERNS = (
         re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
         "GitHub credential",
     ),
+    (
+        re.compile(r"\bsk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}\b"),
+        "provider API credential",
+    ),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access-key identifier"),
 )
 
