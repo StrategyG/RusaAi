@@ -263,7 +263,6 @@ class TransformersBackend:
             tokenizer.pad_token = tokenizer.eos_token
 
         use_cuda = torch.cuda.is_available()
-        device = "cuda" if use_cuda else "cpu"
         dtype = (
             torch.bfloat16
             if use_cuda and torch.cuda.is_bf16_supported()
