@@ -24,11 +24,24 @@ RUN apt-get update \
 COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser . /app
 
-# Upgrade after copying dependencies so base-image or build-stage tooling cannot
-# reintroduce versions with known packaging vulnerabilities.
-RUN python -m pip install --no-cache-dir --upgrade \
-      pip "setuptools>=78.1.1" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && python -m pip check
+# Build tooling is not required at runtime. Remove it (including stale metadata
+# copied from the builder) to keep the final image free of the setuptools CVE.
+RUN python -m pip uninstall -y setuptools wheel jaraco.context || true
+RUN SITE_PACKAGES="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" \
+    && rm -rf "${SITE_PACKAGES}/setuptools" "${SITE_PACKAGES}"/setuptools-*.dist-info \
+         "${SITE_PACKAGES}/wheel" "${SITE_PACKAGES}"/wheel-*.dist-info \
+         "${SITE_PACKAGES}/jaraco/context" "${SITE_PACKAGES}"/jaraco_context-*.dist-info \
+    && python -m pip check \
+    && python - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+
+for package in ("setuptools", "wheel", "jaraco.context"):
+    try:
+        installed = version(package)
+    except PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package} ({installed}) must not ship in runtime")
+PY
 
 USER appuser
 EXPOSE 8000
