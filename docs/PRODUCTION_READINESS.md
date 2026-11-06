@@ -36,6 +36,8 @@ The code changes require successful CI on the remediation pull request. The mode
 | Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
 | MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
+| Repository governance | Protected main branch, required CI checks, mandatory review | Blocked: GitHub currently reports main as unprotected; repository administrator action required |
+| PR integration | Conflict-free integration into main and merged dependency chain | Blocked: PR #8 is dirty and PR #15 remains stacked; no production merge performed |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
 

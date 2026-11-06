@@ -31,7 +31,7 @@ The Compose bootstrap creates three database identities:
 
 The task and memory tables enable and force row-level security. The API sets a transaction-local tenant context only after validating the tenant-specific API key. Queue insert/read operations also filter by tenant_id. The worker identity is intentionally privileged to process all tenants; keep its credential isolated from the API service. Queue schema initialization explicitly grants the API role only the task operations it needs and revokes legacy/default memory and sequence grants, including on existing database volumes.
 
-The worker healthcheck verifies both schemas and their forced RLS policies. The init script runs only when the PostgreSQL data volume is first initialized. For an existing volume, apply role grants and RLS migrations explicitly; do not assume a new init script will be replayed automatically.
+The worker healthcheck verifies both schemas and their forced RLS policies. The init script runs only when the PostgreSQL data volume is first initialized. On existing volumes, worker startup migrations re-apply forced RLS policies and minimum API table grants; verify role creation and password changes separately because the init script is not replayed.
 
 ## Repository permission model
 

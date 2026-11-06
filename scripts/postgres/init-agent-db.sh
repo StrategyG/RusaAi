@@ -23,5 +23,5 @@ GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api;
 GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker;
 GRANT USAGE ON SCHEMA public TO rusa_agent_api;
 
-# Runtime migrations grant the API role only the minimum task-queue privileges.
+-- Runtime migrations grant the API role only the minimum task-queue privileges.
 SQL
