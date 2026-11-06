@@ -1,4 +1,5 @@
 """Fail-closed production configuration validation."""
+
 from __future__ import annotations
 
 import json
