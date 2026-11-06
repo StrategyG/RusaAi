@@ -41,9 +41,39 @@ class PostgresTaskQueue:
             raise ValueError("tenant_id is required for tenant-scoped database access")
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
+    @staticmethod
+    def _validate_production_role(conn) -> None:
+        """Reject shared, privileged, or incorrectly assigned production DB identities."""
+        row = conn.execute(
+            """
+            SELECT current_user, rolcanlogin, rolsuper, rolbypassrls, rolinherit,
+                   pg_has_role(current_user, 'rusa_api_runtime', 'member'),
+                   pg_has_role(current_user, 'rusa_worker_runtime', 'member')
+            FROM pg_roles
+            WHERE rolname = current_user
+            """
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Could not identify the production PostgreSQL login role")
+        role_name, can_login, is_superuser, bypass_rls, inherits, api_member, worker_member = row
+        if not can_login or is_superuser or bypass_rls or not inherits:
+            raise RuntimeError(
+                "Production database identity must be a non-superuser LOGIN role "
+                "with INHERIT and NOBYPASSRLS"
+            )
+        if role_name == "rusa_api_login" and api_member and not worker_member:
+            return
+        if role_name == "rusa_worker_login" and worker_member and not api_member:
+            return
+        raise RuntimeError(
+            "Production database identity must belong exclusively to its matching "
+            "rusa_api_runtime or rusa_worker_runtime privilege group"
+        )
+
     def initialize(self) -> None:
         with self._connect() as conn:
             if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                self._validate_production_role(conn)
                 exists = conn.execute("SELECT to_regclass('public.aicode_jobs')").fetchone()
                 if not exists or exists[0] is None:
                     raise RuntimeError("Production database schema is missing; apply migrations/001_aicode_core.sql")
