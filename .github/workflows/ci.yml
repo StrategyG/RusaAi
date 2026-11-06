@@ -57,6 +57,10 @@ jobs:
         run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
       - name: Tests
         run: python -m pytest -q
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate GitHub Actions workflows
+        run: "$(go env GOPATH)/bin/actionlint" -color
       - name: Validate deployment scripts
         run: |
           bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
