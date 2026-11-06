@@ -477,6 +477,13 @@ class AICodeOrchestrator:
                         raise _TaskBlocked(
                             "security review requires a complete, non-empty, bounded repository diff"
                         )
+                    if any(
+                        "[REDACTED" in item.get("patch", "")
+                        for item in files
+                    ):
+                        raise _TaskBlocked(
+                            "repository diff contains potential secret material; remediation is required"
+                        )
                     review = await self._run_security_review(
                         record,
                         checkpoint_callback,
