@@ -33,6 +33,29 @@ def _safe_branch(value: str) -> str:
     return value
 
 
+def _assert_safe_file_path(value: str) -> None:
+    parts = [part.lower() for part in value.split("/")]
+    basename = parts[-1]
+    safe_env_examples = {".env.example", ".env.sample", ".env.template"}
+    if basename == ".env" or (basename.startswith(".env.") and basename not in safe_env_examples):
+        raise ToolError("Reading or writing environment secret files is prohibited")
+    if any(part in {".ssh", ".aws", ".azure", ".gcloud", "secrets", "credentials", "private"} for part in parts):
+        raise ToolError("Reading or writing credential directories is prohibited")
+    if basename in {
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "id_rsa",
+        "id_ed25519",
+        "credentials.json",
+        "service-account.json",
+        "secrets.json",
+        "kubeconfig",
+        "config.json.enc",
+    } or basename.endswith((".pem", ".p12", ".pfx", ".key", ".keystore")):
+        raise ToolError("Reading or writing credential material is prohibited")
+
+
 def _safe_path(value: str) -> str:
     if (
         not value
@@ -228,6 +251,7 @@ class GitHubTools:
     ) -> dict[str, Any]:
         repo = _safe_repo(repository)
         safe_path = _safe_path(path)
+        _assert_safe_file_path(path)
         safe_ref = _safe_branch(ref)
         data = await self._request(
             "GET",
@@ -275,6 +299,7 @@ class GitHubTools:
     ) -> dict[str, Any]:
         repo = _safe_repo(repository)
         safe_path = _safe_path(path)
+        _assert_safe_file_path(path)
         safe_branch = _safe_branch(branch)
         if len(content) > 100000:
             raise ToolError("File content exceeds the configured limit")
