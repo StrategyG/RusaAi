@@ -2,43 +2,48 @@
 
 ## Scope
 
-This ledger separates the API serving foundation from the complete RUSA-AI model and agent product. A successful build or unit-test run is not a production certification.
+This ledger distinguishes implemented repository foundations from evidence required to operate the complete RUSA-AI model and agent platform in production. A green CI run is necessary but is not a production certification.
 
-## Remediation delivered in this branch
+## Implemented in the current development branch
 
-- API-key authentication is mandatory on inference and task-validation endpoints. Missing or weak configuration fails closed.
-- The mock completion was removed. Inference returns HTTP 503 until a local model is loaded.
-- A local Transformers adapter uses on-disk model files only and disables remote custom code.
-- A2A validation uses the schema-declared JSON Schema draft and a format checker.
-- Missing or malformed schema configuration fails closed.
-- Liveness and readiness checks are separated.
-- Request IDs, basic security headers, a content-length limit, and generic internal error responses are added.
-- Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
-- CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
+- Authenticated API inference and A2A schema validation; missing/weak API-key configuration fails closed.
+- Local-only Transformers adapter with no implicit model downloads or remote custom code.
+- Liveness/readiness separation, request IDs, security headers, and request-size guard.
+- Hierarchical AICode workers: analyst, architect, developer, debugger, tester, and security.
+- Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, and draft PR creation.
+- PostgreSQL durable queue with idempotency keys, leases, bounded retries, and worker process.
+- Tenant-scoped SQLite task memory for single-node development and hash-chained audit log.
+- Authenticated A2A task submission endpoint using Idempotency-Key.
+- CI for lint, compile, tests, Bandit, dependency audit, container build, and API smoke test.
 
-## Current verification boundary
+## Current verification
 
-The code changes require successful CI on the remediation pull request. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+The AICode branch CI must pass after the latest changes. The runtime has not yet been validated against a live GitHub App installation, a real approved model provider, or a multi-worker PostgreSQL deployment. The API model adapter has not been benchmarked with real model weights and target hardware.
 
-## Release gates still open
+## Release gates
 
-| Gate | Evidence required | Status |
+| Gate | Required evidence | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | Pending CI on remediation PR |
-| Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
-| Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
-| Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
-| High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Orchestrator, workers, queue, retries, idempotency, cancellation | Not implemented |
-| Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
-| Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
-| Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
-| Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
+| Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Pending current branch CI |
+| Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
+| PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
+| Queue reliability | Lease heartbeat, cancellation, dead-letter queue, replay controls, queue-age alerts | Open |
+| Tenant security | Authenticated tenant identity mapping; cross-tenant authorization tests for API, queue, memory, audit | Open; current API task intake is single-tenant default |
+| GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
+| Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
+| Provider security | Approved endpoint allowlist, HTTPS, secret manager, egress restrictions | Deployment configuration required |
+| Model artifact | License, immutable revision, checksum, tokenizer/chat template, provenance | Blocked: no model artifact supplied |
+| Model quality | Versioned benchmark dataset, task success, safety and regression evaluation | Blocked |
+| Hardware capacity | p50/p95 latency, throughput, concurrency, RAM/VRAM and context limits | Blocked |
+| Observability | Central logs, metrics, traces, alerts, kill switch and incident runbook | Open |
+| Resilience | Load/soak, failover, rollback, backup/restore and disaster recovery drills | Open |
+| Production rollout | Staging canary, SLO approval, security review and owner sign-off | Not performed |
 
 ## Deployment rules
 
-- Do not merge or deploy while required CI checks are failing.
-- Do not set readiness to healthy unless the model, API-key configuration, and task schema are present.
-- Do not expose the API directly to the public internet. Use a TLS gateway with distributed rate limits, timeouts, and network controls.
-- Do not commit model weights, secrets, or private datasets to Git.
-- Do not call the full product production-ready until every applicable release gate has objective evidence and human approval.
+- Do not merge or deploy while required CI checks are failing or stale.
+- AICode must only use least-privilege repository credentials and must not receive production secrets.
+- Do not expose the API directly to the public internet; use a TLS gateway with distributed rate limits, request limits, timeouts, and network controls.
+- Keep task worker egress restricted to the approved model provider and GitHub API.
+- Do not treat SQLite memory or local JSONL audit as multi-replica production storage.
+- Do not mark the complete RUSA-AI product production-ready until all applicable release gates have objective evidence and owner approval.
