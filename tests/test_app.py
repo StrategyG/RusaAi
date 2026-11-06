@@ -345,3 +345,14 @@ def test_admission_controller_never_exceeds_active_limit():
         assert peak_active <= 2
 
     asyncio.run(exercise())
+
+
+def test_request_body_limit_rejects_oversized_payload(client):
+    oversized_body = b"x" * (1024 * 1024 + 1)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={**auth_headers(), "Content-Type": "application/json"},
+        content=oversized_body,
+    )
+    assert response.status_code == 413
+    assert response.headers["Connection"] == "close"
