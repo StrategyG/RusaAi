@@ -677,7 +677,56 @@ def get_agent_task(
         "result": record["result"],
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],
+        "last_error": record["last_error"],
     }
+
+
+@app.get("/v1/agent/queue/stats")
+def get_agent_queue_stats(
+    http_request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    return queue.stats(tenant_id)
+
+
+@app.get("/v1/agent/dead-letters")
+def list_agent_dead_letters(
+    http_request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    return {"items": queue.list_dead_letters(tenant_id, limit=50)}
+
+
+@app.post("/v1/agent/tasks/{task_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+def retry_agent_task(
+    task_id: uuid.UUID,
+    http_request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    if not queue.retry_dead_letter(tenant_id, str(task_id)):
+        record = queue.get(tenant_id, str(task_id))
+        if record is None:
+            raise HTTPException(status_code=404, detail="Agent task was not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only dead-letter tasks can be replayed; current state is {record['state']}",
+        )
+    return {"task_id": str(task_id), "state": "queued", "attempts": 0}
 
 
 @app.post("/v1/agent/tasks/{task_id}/cancel", status_code=status.HTTP_202_ACCEPTED)

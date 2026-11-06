@@ -212,3 +212,42 @@ def test_queue_requires_payload_task_id(queue_and_tenant):
             {"tenant_id": tenant, "objective": "missing id"},
             "missing-payload-task-id",
         )
+
+
+
+def test_dead_letter_listing_and_manual_replay_are_tenant_scoped(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    task_id = str(uuid.uuid4())
+    payload = {
+        "task_id": task_id,
+        "tenant_id": tenant,
+        "objective": "replay after operator review",
+    }
+    queue.enqueue(tenant, task_id, payload, "dead-letter-replay-key", max_attempts=1)
+    assert queue.claim("worker-a", lease_seconds=60) is not None
+    assert queue.fail(tenant, task_id, "worker-a", "permanent test failure", retryable=True)
+
+    dead_letters = queue.list_dead_letters(tenant, limit=10)
+    assert [item["task_id"] for item in dead_letters] == [task_id]
+    assert queue.list_dead_letters("different-tenant", limit=10) == []
+    assert queue.retry_dead_letter("different-tenant", task_id) is False
+    assert queue.retry_dead_letter(tenant, task_id) is True
+    assert queue.get(tenant, task_id)["state"] == "queued"
+    assert queue.get(tenant, task_id)["attempts"] == 0
+    assert queue.retry_dead_letter(tenant, task_id) is False
+
+
+def test_queue_stats_are_tenant_scoped_and_include_queue_age(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    task_id = str(uuid.uuid4())
+    queue.enqueue(
+        tenant,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant, "objective": "stats"},
+        "queue-stats-key",
+    )
+    stats = queue.stats(tenant)
+    assert stats["tenant_id"] == tenant
+    assert stats["counts"]["queued"] == 1
+    assert stats["oldest_queued_age_seconds"] >= 0
+    assert queue.stats("another-tenant")["counts"]["queued"] == 0

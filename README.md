@@ -65,6 +65,9 @@ The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only 
 - POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
 - GET /v1/agent/tasks/{task_id}: requires X-API-Key; returns task status only within the authenticated tenant.
 - POST /v1/agent/tasks/{task_id}/cancel: requires X-API-Key; cancels queued/running work for the authenticated tenant.
+- GET /v1/agent/queue/stats: returns tenant-scoped queue counts and oldest queued-task age.
+- GET /v1/agent/dead-letters: lists up to 50 dead-letter tasks for the authenticated tenant.
+- POST /v1/agent/tasks/{task_id}/retry: requeues a dead-letter task after operator review.
 
 ## Agent worker
 

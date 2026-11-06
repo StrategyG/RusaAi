@@ -439,3 +439,53 @@ def test_agent_task_cancellation_returns_409_for_terminal_task(client, monkeypat
         headers=auth_headers(),
     )
     assert response.status_code == 409
+
+
+
+def test_agent_queue_stats_are_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def stats(self, tenant_id):
+            return {
+                "tenant_id": tenant_id,
+                "counts": {"queued": 2},
+                "oldest_queued_age_seconds": 12.5,
+            }
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-metrics")
+    response = client.get("/v1/agent/queue/stats", headers=auth_headers())
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == "tenant-metrics"
+
+
+def test_agent_dead_letter_list_is_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def list_dead_letters(self, tenant_id, limit):
+            assert tenant_id == "tenant-dead"
+            assert limit == 50
+            return [{"task_id": str(uuid.uuid4()), "state": "dead_letter"}]
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-dead")
+    response = client.get("/v1/agent/dead-letters", headers=auth_headers())
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+
+
+def test_agent_dead_letter_replay_requires_dead_letter_state(client, monkeypatch):
+    class FakeQueue:
+        def retry_dead_letter(self, tenant_id, task_id):
+            return False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "succeeded"}
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        f"/v1/agent/tasks/{uuid.uuid4()}/retry",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 409

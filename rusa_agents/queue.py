@@ -352,6 +352,88 @@ class PostgresTaskQueue:
             ).fetchone()
         return bool(row and row["state"] == "cancelled")
 
+    def list_dead_letters(self, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
+            raise ValueError("tenant_id must contain 1 to 128 safe characters")
+        if not 1 <= limit <= 100:
+            raise ValueError("dead-letter limit must be between 1 and 100")
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT task_id, state, attempts, max_attempts, last_error,
+                       created_at, updated_at
+                FROM rusa_agent_jobs
+                WHERE tenant_id=%s AND state='dead_letter'
+                ORDER BY updated_at DESC
+                LIMIT %s
+                """,
+                (tenant_id, limit),
+            ).fetchall()
+        return [self._decode(row) for row in rows]
+
+    def retry_dead_letter(self, tenant_id: str, task_id: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE rusa_agent_jobs
+                SET state='queued',
+                    attempts=0,
+                    available_at=now(),
+                    lease_owner=NULL,
+                    lease_until=NULL,
+                    result=NULL,
+                    last_error=NULL,
+                    updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s::uuid
+                    AND state='dead_letter'
+                """,
+                (tenant_id, task_id),
+            )
+        return cursor.rowcount == 1
+
+    def stats(self, tenant_id: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
+            raise ValueError("tenant_id must contain 1 to 128 safe characters")
+        counts = {
+            "queued": 0,
+            "running": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "dead_letter": 0,
+            "cancelled": 0,
+        }
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT state, COUNT(*)::int AS task_count
+                FROM rusa_agent_jobs
+                WHERE tenant_id=%s
+                GROUP BY state
+                """,
+                (tenant_id,),
+            ).fetchall()
+            age_row = db.execute(
+                """
+                SELECT COALESCE(
+                    EXTRACT(EPOCH FROM now() - MIN(created_at)),
+                    0
+                )::float AS oldest_queued_age_seconds
+                FROM rusa_agent_jobs
+                WHERE tenant_id=%s AND state='queued'
+                """,
+                (tenant_id,),
+            ).fetchone()
+        for row in rows:
+            counts[row["state"]] = row["task_count"]
+        return {
+            "tenant_id": tenant_id,
+            "counts": counts,
+            "oldest_queued_age_seconds": max(
+                0.0,
+                age_row["oldest_queued_age_seconds"] if age_row else 0.0,
+            ),
+        }
+
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
             row = db.execute(
