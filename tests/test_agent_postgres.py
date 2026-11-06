@@ -49,6 +49,7 @@ def test_postgres_queue_idempotency_claim_and_checkpoint():
     assert claimed["task_id"] == first_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
+    assert queue.checkpoint(task.tenant_id, first_id, claimed["lease_token"], record)
     queue.acknowledge(task.tenant_id, first_id, record, claimed["lease_token"])
     fetched = queue.get(task.tenant_id, first_id)
     assert fetched is not None
@@ -148,6 +149,9 @@ def test_postgres_queue_fences_expired_lease_owners():
             )
         first = queue.claim(lease_seconds=10)
         assert first is not None and first["task_id"] == task_id
+        record = TaskRecord(task=task)
+        record.transition(TaskState.OBSERVING)
+        assert queue.checkpoint(task.tenant_id, task_id, first["lease_token"], record)
         with psycopg.connect(DSN) as connection:
             connection.execute(
                 "UPDATE rusa_agent_tasks SET lease_until=now()-interval '1 second' "
@@ -158,8 +162,7 @@ def test_postgres_queue_fences_expired_lease_owners():
         assert second is not None and second["task_id"] == task_id
         assert second["lease_token"] != first["lease_token"]
 
-        record = TaskRecord(task=task)
-        record.transition(TaskState.OBSERVING)
+        assert not queue.checkpoint(task.tenant_id, task_id, first["lease_token"], record)
         with pytest.raises(RuntimeError, match="lease was lost"):
             queue.acknowledge(task.tenant_id, task_id, record, first["lease_token"])
         assert not queue.renew_lease(
@@ -175,3 +178,25 @@ def test_postgres_queue_fences_expired_lease_owners():
                 "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s AND task_id=%s",
                 (task.tenant_id, task_id),
             )
+
+
+def test_postgres_readiness_fails_closed_when_tenant_rls_is_disabled():
+    queue = PostgresTaskQueue(DSN)
+    memory = PostgresMemoryStore(DSN)
+    queue.initialize()
+    memory.initialize()
+    assert queue.check_ready()
+    assert memory.check_ready()
+
+    try:
+        with psycopg.connect(DSN) as connection:
+            connection.execute("ALTER TABLE rusa_agent_tasks DISABLE ROW LEVEL SECURITY")
+            connection.execute("ALTER TABLE rusa_agent_memory DISABLE ROW LEVEL SECURITY")
+        assert not queue.check_ready()
+        assert not memory.check_ready()
+    finally:
+        queue.initialize()
+        memory.initialize()
+
+    assert queue.check_ready()
+    assert memory.check_ready()
