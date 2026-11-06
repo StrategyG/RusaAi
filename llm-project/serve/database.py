@@ -69,7 +69,9 @@ class TenantDatabase:
             raise DatabaseConfigurationError("tenant_records RLS policy has an unexpected role scope")
         expected = "tenant_id = NULLIF(current_setting('app.tenant_id', true), '')"
         for expression in (policy["qual"] or "", policy["with_check"] or ""):
-            normalized = " ".join(expression.split()).replace("::text", "").strip("() ")
+            normalized = " ".join(expression.split()).replace("::text", "").strip()
+            while normalized.startswith("(") and normalized.endswith(")"):
+                normalized = normalized[1:-1].strip()
             if normalized != expected:
                 raise DatabaseConfigurationError("tenant_records RLS policy expression is not the reviewed tenant predicate")
 
