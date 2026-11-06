@@ -427,23 +427,30 @@ class PostgresTaskQueue:
             ).fetchone()
         return bool(row and row["state"] == "cancelled")
 
-    def list_dead_letters(self, tenant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    def list_dead_letters(
+        self,
+        tenant_id: str,
+        limit: int = 50,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
             raise ValueError("tenant_id must contain 1 to 128 safe characters")
         if not 1 <= limit <= 100:
             raise ValueError("dead-letter limit must be between 1 and 100")
+        query = """
+            SELECT task_id, state, attempts, max_attempts, last_error,
+                   created_at, updated_at
+            FROM rusa_agent_jobs
+            WHERE tenant_id=%s AND state='dead_letter'
+        """
+        params: list[Any] = [tenant_id]
+        if user_id is not None:
+            query += " AND payload->>'user_id'=%s"
+            params.append(user_id)
+        query += " ORDER BY updated_at DESC LIMIT %s"
+        params.append(limit)
         with self._connect() as db:
-            rows = db.execute(
-                """
-                SELECT task_id, state, attempts, max_attempts, last_error,
-                       created_at, updated_at
-                FROM rusa_agent_jobs
-                WHERE tenant_id=%s AND state='dead_letter'
-                ORDER BY updated_at DESC
-                LIMIT %s
-                """,
-                (tenant_id, limit),
-            ).fetchall()
+            rows = db.execute(query, tuple(params)).fetchall()
         return [self._decode(row) for row in rows]
 
     def retry_dead_letter(self, tenant_id: str, task_id: str) -> bool:
@@ -467,7 +474,11 @@ class PostgresTaskQueue:
             )
         return cursor.rowcount == 1
 
-    def stats(self, tenant_id: str) -> dict[str, Any]:
+    def stats(
+        self,
+        tenant_id: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
             raise ValueError("tenant_id must contain 1 to 128 safe characters")
         counts = {
@@ -478,26 +489,31 @@ class PostgresTaskQueue:
             "dead_letter": 0,
             "cancelled": 0,
         }
+        where = "tenant_id=%s"
+        params: list[Any] = [tenant_id]
+        if user_id is not None:
+            where += " AND payload->>'user_id'=%s"
+            params.append(user_id)
         with self._connect() as db:
             rows = db.execute(
-                """
+                f"""
                 SELECT state, COUNT(*)::int AS task_count
                 FROM rusa_agent_jobs
-                WHERE tenant_id=%s
+                WHERE {where}
                 GROUP BY state
                 """,
-                (tenant_id,),
+                tuple(params),
             ).fetchall()
             age_row = db.execute(
-                """
+                f"""
                 SELECT COALESCE(
                     EXTRACT(EPOCH FROM now() - MIN(created_at)),
                     0
                 )::float AS oldest_queued_age_seconds
                 FROM rusa_agent_jobs
-                WHERE tenant_id=%s AND state='queued'
+                WHERE {where} AND state='queued'
                 """,
-                (tenant_id,),
+                tuple(params),
             ).fetchone()
         for row in rows:
             counts[row["state"]] = row["task_count"]
@@ -510,12 +526,39 @@ class PostgresTaskQueue:
             ),
         }
 
+    def list_tasks(
+        self,
+        tenant_id: str,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
+            raise ValueError("tenant_id must contain 1 to 128 safe characters")
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Task pagination parameters are invalid")
+        query = """
+            SELECT task_id, tenant_id, state, attempts, max_attempts,
+                   payload, result, last_error, created_at, updated_at
+            FROM rusa_agent_jobs
+            WHERE tenant_id=%s
+        """
+        params: list[Any] = [tenant_id]
+        if user_id is not None:
+            query += " AND payload->>'user_id'=%s"
+            params.append(user_id)
+        query += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        with self._connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
+        return [self._decode(row) for row in rows]
+
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._connect() as db:
             row = db.execute(
                 """
                 SELECT task_id, tenant_id, state, attempts, max_attempts,
-                       result, last_error, created_at, updated_at
+                       payload, result, last_error, created_at, updated_at
                 FROM rusa_agent_jobs
                 WHERE tenant_id=%s AND task_id=%s::uuid
                 """,

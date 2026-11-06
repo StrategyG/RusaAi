@@ -28,6 +28,12 @@ services:
     environment:
       ENVIRONMENT: production
       RUSA_API_KEY: ${RUSA_API_KEY:-}
+      RUSA_AUTH_ENABLED: ${RUSA_AUTH_ENABLED:-true}
+      RUSA_AUTH_SECRET: ${RUSA_AUTH_SECRET:?Set RUSA_AUTH_SECRET in .env}
+      RUSA_BOOTSTRAP_ADMIN_EMAIL: ${RUSA_BOOTSTRAP_ADMIN_EMAIL:?Set RUSA_BOOTSTRAP_ADMIN_EMAIL in .env}
+      RUSA_BOOTSTRAP_ADMIN_PASSWORD: ${RUSA_BOOTSTRAP_ADMIN_PASSWORD:?Set RUSA_BOOTSTRAP_ADMIN_PASSWORD in .env}
+      RUSA_BOOTSTRAP_ADMIN_TENANT_ID: ${RUSA_BOOTSTRAP_ADMIN_TENANT_ID:-default}
+      RUSA_COOKIE_SECURE: "true"
       RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
       RUSA_MODEL_PATH: /models
       RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
@@ -68,6 +74,40 @@ services:
         max-size: "10m"
         max-file: "3"
     networks: [rusa-internal, rusa-egress]
+
+  rusa-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: rusa-ai-web:local
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${RUSA_WEB_PORT:-3000}:8080"
+    depends_on:
+      rusa-api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=8m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks: [rusa-internal]
 
   rusa-agent-worker:
     profiles: ["agent"]

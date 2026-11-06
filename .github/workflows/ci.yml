@@ -46,10 +46,19 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package.json
       - name: Install package and development dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Install web dependencies
+        run: npm install --prefix apps/web --no-audit --no-fund
+      - name: Typecheck and build web workspace
+        run: npm run build --prefix apps/web
       - name: Lint
         run: ruff check rusa_agents llm-project/serve tests
       - name: Compile
@@ -64,7 +73,7 @@ jobs:
         run: pip-audit -r requirements-model.txt
 
   container:
-    name: Build and smoke-test container
+    name: Build and smoke-test containers
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -74,25 +83,27 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
           rm .env
-      - name: Build API, model, and worker images
+      - name: Build API, model, worker, and web images
         run: |
           docker build --pull --target api -t rusa-ai-api:${{ github.sha }} .
           docker build --pull --target model-runtime -t rusa-ai-model:${{ github.sha }} .
           docker build --pull --target agent-runtime -t rusa-ai-agent:${{ github.sha }} .
+          docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
       - name: Verify worker package imports
         run: |
           docker run --rm rusa-ai-agent:${{ github.sha }} \
             python -c "from rusa_agents.worker import run_worker; print('worker import ok')"
-      - name: Run model-serving container
+      - name: Start smoke-test network and API
         run: |
-          docker run -d --name rusa-ai-ci \
+          docker network create rusa-ui-ci
+          docker run -d --name rusa-ai-ci --network rusa-ui-ci --network-alias rusa-api \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
             rusa-ai-model:${{ github.sha }}
       - name: Verify application imports
         run: |
           docker exec rusa-ai-ci python -c "import app; import rusa_agents; print('application imports ok')"
-      - name: Verify liveness
+      - name: Verify API liveness
         run: |
           for attempt in $(seq 1 20); do
             if curl --fail --silent http://127.0.0.1:8000/health/live; then
@@ -102,6 +113,18 @@ jobs:
           done
           docker logs rusa-ai-ci
           exit 1
+      - name: Start web workspace and verify same-origin proxy
+        run: |
+          docker run -d --name rusa-web-ci --network rusa-ui-ci \
+            -p 127.0.0.1:3000:8080 rusa-ai-web:${{ github.sha }}
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3000/ | grep -q "RUSA-AI Workspace"
+          curl --fail --silent http://127.0.0.1:3000/health/live | grep -q '"status":"ok"'
       - name: Verify readiness fails closed without a model artifact
         run: |
           status=$(curl --silent --output /tmp/rusa-ready.json --write-out "%{http_code}" http://127.0.0.1:8000/health/ready)
@@ -109,4 +132,6 @@ jobs:
           python -c "import json; data=json.load(open('/tmp/rusa-ready.json')); assert data['status']=='not_ready' and data['checks']['model_loaded'] is False"
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci || true
+        run: |
+          docker rm -f rusa-web-ci rusa-ai-ci || true
+          docker network rm rusa-ui-ci || true
