@@ -263,3 +263,29 @@ def test_queue_stats_are_tenant_scoped_and_include_queue_age(queue_and_tenant):
     assert stats["counts"]["queued"] == 1
     assert stats["oldest_queued_age_seconds"] >= 0
     assert queue.stats("another-tenant")["counts"]["queued"] == 0
+
+
+
+def test_queue_release_requeues_without_consuming_retry_attempt(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    task_id = str(uuid.uuid4())
+    payload = {
+        "task_id": task_id,
+        "tenant_id": tenant,
+        "objective": "resume after graceful worker shutdown",
+    }
+    queue.enqueue(tenant, task_id, payload, "graceful-release-key", max_attempts=2)
+    first = queue.claim("worker-a", lease_seconds=60)
+    assert first is not None
+    assert first["attempts"] == 1
+
+    assert queue.release(tenant, task_id, "worker-a", first["lease_token"])
+    stored = queue.get(tenant, task_id)
+    assert stored["state"] == "queued"
+    assert stored["attempts"] == 0
+    assert not queue.heartbeat(tenant, task_id, "worker-a", first["lease_token"], 60)
+
+    second = queue.claim("worker-b", lease_seconds=60)
+    assert second is not None
+    assert second["attempts"] == 1
+    assert second["lease_token"] != first["lease_token"]

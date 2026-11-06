@@ -21,6 +21,10 @@ class LeaseLostError(RuntimeError):
     """Raised when a worker no longer owns the task lease."""
 
 
+class WorkerShutdownError(RuntimeError):
+    """Raised after safely cancelling and releasing a task during shutdown."""
+
+
 async def _run_with_heartbeat(
     orchestrator: Any,
     task: CodingTask,
@@ -30,14 +34,30 @@ async def _run_with_heartbeat(
     worker_id: str,
     lease_token: str,
     lease_seconds: int,
+    stopping: asyncio.Event | None = None,
 ) -> Any:
     execution = asyncio.create_task(orchestrator.run(task))
+    stop_waiter = asyncio.create_task(stopping.wait()) if stopping is not None else None
     heartbeat_interval = min(30, max(5, lease_seconds // 3))
-    while True:
-        done, _ = await asyncio.wait({execution}, timeout=heartbeat_interval)
-        if done:
-            return await execution
-        try:
+    try:
+        while True:
+            wait_for = {execution}
+            if stop_waiter is not None:
+                wait_for.add(stop_waiter)
+            done, _ = await asyncio.wait(
+                wait_for,
+                timeout=heartbeat_interval,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if execution in done:
+                return await execution
+            if stop_waiter is not None and stop_waiter in done:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+                raise WorkerShutdownError("worker shutdown requested; task was cancelled")
+            if execution.done():
+                return await execution
+            try:
             renewed = await asyncio.to_thread(
                 queue.heartbeat,
                 tenant_id,
@@ -45,15 +65,20 @@ async def _run_with_heartbeat(
                 worker_id,
                 lease_token,
                 lease_seconds,
+                stopping,
             )
         except Exception as exc:
             execution.cancel()
             await asyncio.gather(execution, return_exceptions=True)
             raise LeaseLostError("could not renew the worker lease") from exc
-        if not renewed:
-            execution.cancel()
-            await asyncio.gather(execution, return_exceptions=True)
-            raise LeaseLostError("worker lease ownership was lost")
+            if not renewed:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+                raise LeaseLostError("worker lease ownership was lost")
+    finally:
+        if stop_waiter is not None:
+            stop_waiter.cancel()
+            await asyncio.gather(stop_waiter, return_exceptions=True)
 
 
 async def run_worker() -> None:
@@ -133,6 +158,20 @@ async def run_worker() -> None:
                     "; ".join(record.errors) or f"task ended in {record.state.value}",
                     record.state.value == "failed",
                 )
+        except WorkerShutdownError:
+            released = await asyncio.to_thread(
+                queue.release,
+                tenant_id,
+                task_id,
+                worker_id,
+                lease_token,
+            )
+            if not released:
+                logger.warning(
+                    "could not safely release task during shutdown task_id=%s",
+                    task_id,
+                )
+            break
         except LeaseLostError:
             logger.warning("worker lost lease for task_id=%s; execution was cancelled", task_id)
         except Exception as exc:

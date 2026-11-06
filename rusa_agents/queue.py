@@ -370,6 +370,38 @@ class PostgresTaskQueue:
             )
         return cursor.rowcount == 1
 
+    def release(
+        self,
+        tenant_id: str,
+        task_id: str,
+        worker_id: str,
+        lease_token: str,
+        reason: str = "worker shutdown; task safely requeued",
+    ) -> bool:
+        """Release a live lease without consuming a retry attempt."""
+        self._validate_lease_token(lease_token)
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE rusa_agent_jobs
+                SET state='queued',
+                    attempts=GREATEST(0, attempts - 1),
+                    available_at=now(),
+                    lease_owner=NULL,
+                    lease_token=NULL,
+                    lease_until=NULL,
+                    lease_heartbeat_at=NULL,
+                    last_error=%s,
+                    updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s::uuid
+                    AND state='running' AND lease_owner=%s
+                    AND lease_token=%s::uuid
+                    AND lease_until > now()
+                """,
+                (reason[:1000], tenant_id, task_id, worker_id, lease_token),
+            )
+        return cursor.rowcount == 1
+
     def cancel(self, tenant_id: str, task_id: str) -> bool:
         """Cancel queued/running work and fence off any current worker lease."""
         with self._connect() as db:

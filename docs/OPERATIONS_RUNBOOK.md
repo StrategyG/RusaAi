@@ -92,7 +92,7 @@ For multiple worker replicas:
 docker compose --profile agent up -d --scale rusa-agent-worker=3
 ```
 
-Workers claim jobs using PostgreSQL row locks and leases. Give each replica a unique worker hostname/ID and monitor provider/GitHub rate limits.
+Workers claim jobs using PostgreSQL row locks and leases. SIGTERM/SIGINT cancels the active orchestration, records cancellation, and releases the current lease for safe requeue without consuming a retry attempt. Give each replica a unique worker hostname/ID and monitor provider/GitHub rate limits.
 
 ## 4. Task operations
 
@@ -122,6 +122,7 @@ Do not treat a successful dump as a restore test. Before production, automate en
 - Keep the API behind a TLS-terminating gateway. Compose binds the API to loopback by default.
 - Configure distributed rate limits, request timeouts, ingress size limits, and network egress restrictions at the gateway/platform layer.
 - Keep GitHub credentials least-privileged and scoped to the allowlisted repositories.
+- Repository files under .ssh, .aws, .kube, .docker, .config/gcloud, .config/gh, and secret-bearing Terraform state/variable paths are blocked from model reads.
 - Do not grant workers merge, release, deployment, workflow, or secret-management permissions.
 - Rotate API, provider, GitHub, and database credentials using the deployment secret manager.
 - If a worker behaves unexpectedly, stop the worker service, revoke its GitHub installation token, and inspect tenant-scoped task status, dead letters, and the PostgreSQL audit chain.

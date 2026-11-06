@@ -500,3 +500,19 @@ def test_agent_dead_letter_replay_requires_dead_letter_state(client, monkeypatch
 def test_blank_api_key_tenant_map_uses_single_tenant_mode(monkeypatch):
     monkeypatch.setenv("RUSA_API_KEY_TENANTS_JSON", "   ")
     assert _load_api_key_tenants() is None
+
+
+
+def test_multi_tenant_api_key_must_meet_minimum_entropy_length(client, monkeypatch):
+    short_key = "short-key"
+    short_hash = hashlib.sha256(short_key.encode("utf-8")).hexdigest()
+    monkeypatch.setenv(
+        "RUSA_API_KEY_TENANTS_JSON",
+        json.dumps({short_hash: "tenant-short-key"}),
+    )
+    response = client.post(
+        "/v1/validate-task",
+        headers={"X-API-Key": short_key},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 401

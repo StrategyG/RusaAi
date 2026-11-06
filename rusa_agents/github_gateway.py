@@ -446,6 +446,10 @@ class GitHubToolGateway:
             ".netrc",
             "id_rsa",
             "id_ed25519",
+            "id_ecdsa",
+            "id_dsa",
+            "id_ed25519_sk",
+            "master.key",
             "credentials",
             "credentials.json",
             "secrets.json",
@@ -458,6 +462,10 @@ class GitHubToolGateway:
         ".pfx",
         ".tfstate",
         ".tfstate.backup",
+        ".tfvars",
+        ".tfvars.json",
+        ".jks",
+        ".keystore",
     )
 
     @classmethod
@@ -471,8 +479,21 @@ class GitHubToolGateway:
             or basename in cls.SENSITIVE_NAMES
             or basename in {"secret", "secrets", ".envrc", "kubeconfig"}
             or basename.startswith(("secret.", "secrets.", "credentials."))
+            or (basename == "config.json" and ".docker" in parts)
+            or (
+                ".config" in parts
+                and any(part in {"gcloud", "gh", "hub"} for part in parts)
+            )
             or any(
-                part in {".ssh", ".aws", ".gnupg", ".kube", "secrets", "secret"}
+                part in {
+                    ".ssh",
+                    ".aws",
+                    ".gnupg",
+                    ".kube",
+                    ".docker",
+                    "secrets",
+                    "secret",
+                }
                 for part in parts
             )
             or normalized.endswith(cls.SENSITIVE_SUFFIXES)

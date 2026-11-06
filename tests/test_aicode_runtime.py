@@ -20,7 +20,12 @@ from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents.runtime import build_orchestrator
-from rusa_agents.worker import run_worker
+from rusa_agents.worker import (
+    LeaseLostError,
+    WorkerShutdownError,
+    _run_with_heartbeat,
+    run_worker,
+)
 from rusa_agents.workers import AgentWorker
 
 
@@ -787,3 +792,39 @@ def test_agent_worker_does_not_send_tenant_id_to_model_provider():
     )
     assert result.success is True
     assert "tenant-private-marker" not in captured["prompt"]
+
+
+
+def test_worker_shutdown_cancels_orchestration_before_lease_expiry():
+    started = asyncio.Event()
+    stopping = asyncio.Event()
+
+    class BlockingOrchestrator:
+        async def run(self, task):
+            started.set()
+            await asyncio.Event().wait()
+
+    class UnusedQueue:
+        def heartbeat(self, *args, **kwargs):
+            raise AssertionError("shutdown should be observed before heartbeat")
+
+    async def scenario():
+        running = asyncio.create_task(
+            _run_with_heartbeat(
+                BlockingOrchestrator(),
+                make_task(),
+                UnusedQueue(),
+                "tenant-a",
+                str(uuid.uuid4()),
+                "worker-a",
+                str(uuid.uuid4()),
+                60,
+                stopping,
+            )
+        )
+        await started.wait()
+        stopping.set()
+        with pytest.raises(WorkerShutdownError):
+            await running
+
+    asyncio.run(scenario())

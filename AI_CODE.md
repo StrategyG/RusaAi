@@ -81,7 +81,7 @@ Missing, pending, stale, or failed checks must not be interpreted as success. A 
 
 PostgreSQL is the multi-worker queue of record. Use SKIP LOCKED claims, unique (tenant_id, idempotency_key), lease ownership, bounded attempts, and exponential retry delay. Queue operations must be idempotent. GitHub branch/PR creation and task commits must also be idempotent across worker retries. Workers must complete/fail only jobs for which they still own the lease.
 
-The worker renews leases during long-running tasks; queue completion/failure operations must require an unexpired lease. Tenant-scoped cancellation, dead-letter inspection, manual replay, and queue-age reporting are implemented. Alerting, retention policy, and operator approval workflow for replay remain release gates before sustained workloads.
+The worker renews leases during long-running tasks; queue completion/failure operations must require an unexpired lease. Tenant-scoped cancellation, graceful-shutdown lease release, dead-letter inspection, manual replay, and queue-age reporting are implemented. Graceful shutdown requeues the interrupted task without consuming a retry attempt. Alerting, retention policy, and operator approval workflow for replay remain release gates before sustained workloads.
 
 ## 8. Memory and audit
 
@@ -94,7 +94,7 @@ The worker renews leases during long-running tasks; queue completion/failure ope
 
 ## 9. Provider and secrets
 
-Use the configured OpenAI-compatible provider endpoint only. Provider URL, model ID, and credentials are deployment configuration, never task content. Remote providers require HTTPS. Inject secrets from a secret manager at runtime; never put them in prompts, task context, database payloads, audit logs, CI artifacts, or Git.
+Use the configured OpenAI-compatible provider endpoint only. API keys must contain at least 32 bytes before authentication. Provider URL, model ID, and credentials are deployment configuration, never task content. Remote providers require HTTPS. Inject secrets from a secret manager at runtime; never put them in prompts, task context, database payloads, audit logs, CI artifacts, or Git.
 
 ## 10. Operational controls
 

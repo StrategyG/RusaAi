@@ -321,7 +321,7 @@ def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Service tenant authentication is not configured correctly",
             )
-        if api_key:
+        if api_key and len(api_key.encode("utf-8")) >= 32:
             supplied_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
             for expected_hash, tenant_id in tenant_mapping.items():
                 if hmac.compare_digest(supplied_hash, expected_hash):

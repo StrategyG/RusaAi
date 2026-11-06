@@ -11,7 +11,7 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - Liveness/readiness separation, request IDs, security headers, and request-size guard.
 - Hierarchical AICode workers: analyst, architect, developer, debugger, tester, and security.
 - Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, task-owned commit markers, and idempotent draft PR reuse.
-- PostgreSQL durable queue with idempotency keys, per-claim UUID lease fencing, bounded retries, and worker process.
+- PostgreSQL durable queue with idempotency keys, per-claim UUID lease fencing, bounded retries, graceful shutdown/release, cancellation, and worker process.
 - Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
 - API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.
 - Authenticated A2A task submission endpoint using Idempotency-Key.
@@ -19,14 +19,14 @@ This ledger distinguishes implemented repository foundations from evidence requi
 
 ## Current verification
 
-The AICode branch CI must pass after the latest changes. The runtime has not yet been validated against a live GitHub App installation, a real approved model provider, or a multi-worker PostgreSQL deployment. Multi-tenant API keys require a matching RUSA_GITHUB_TENANT_REPOSITORIES_JSON entry for every tenant; this is enforced at worker startup. The API model adapter has not been benchmarked with real model weights and target hardware.
+The AICode branch CI passed on commit 5a5a24dfd64eadaab5d3bb658d827967809f668f (GitHub Actions run 42182300772): 97 tests passed, Ruff lint, compile, Bandit, both dependency audits, Docker Compose validation, all three image builds, worker import, API liveness, and fail-closed readiness smoke test passed. The runtime has not yet been validated against a live GitHub App installation, a real approved model provider, or a multi-worker PostgreSQL deployment. Multi-tenant API keys require a matching RUSA_GITHUB_TENANT_REPOSITORIES_JSON entry for every tenant; this is enforced at worker startup. The API model adapter has not been benchmarked with real model weights and target hardware.
 
 ## Release gates
 
 | Gate | Required evidence | Status |
 |---|---|---|
-| Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Pending current branch CI |
-| Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
+| Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Passed at 5a5a24d; rerun required after subsequent code changes |
+| Container runtime | API and worker image build, startup, health and queue smoke tests | All image builds, Compose validation, worker import, liveness, and readiness smoke checks passed at 5a5a24d; live queue runtime validation remains open |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
 | Queue reliability | UUID lease fencing, lease heartbeat, tenant-scoped cancellation, dead-letter inspection/replay, queue-age reporting and alerts | Lease, cancellation, dead-letter inspection/replay, and age reporting implemented; alerting and operator replay approval remain open |
 | Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
