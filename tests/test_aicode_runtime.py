@@ -14,12 +14,29 @@ from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
 class StubWorker:
-    def __init__(self, role, evidence=None):
+    def __init__(self, role, evidence=None, review_acceptance=True):
         self.role = role
         self.evidence = evidence or {}
+        self.review_acceptance = review_acceptance
 
     async def run(self, task, prior_results):
-        return WorkerResult(role=self.role, summary="ok", success=True, evidence=self.evidence)
+        evidence = self.evidence
+        if (
+            self.role == WorkerRole.ANALYST
+            and task.metadata.get("aicode_phase") == "acceptance_review"
+            and self.review_acceptance
+        ):
+            evidence = {
+                "acceptance_criteria": [
+                    {
+                        "criterion": criterion,
+                        "passed": True,
+                        "evidence": "src/implementation.py and current QA evidence",
+                    }
+                    for criterion in task.acceptance_criteria
+                ]
+            }
+        return WorkerResult(role=self.role, summary="ok", success=True, evidence=evidence)
 
 
 def task():
@@ -38,7 +55,7 @@ def workers(with_evidence=True):
         "check:compile": {"exit_code": 0},
     } if with_evidence else {}
     return [
-        StubWorker(WorkerRole.ANALYST),
+        StubWorker(WorkerRole.ANALYST, review_acceptance=with_evidence),
         StubWorker(WorkerRole.ARCHITECT),
         StubWorker(WorkerRole.DEVELOPER),
         StubWorker(WorkerRole.DEBUGGER),
@@ -297,3 +314,55 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_failed_acceptance_criterion_triggers_bounded_repair(tmp_path):
+    class CountingDeveloper(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.DEVELOPER)
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return WorkerResult(role=self.role, summary=f"implementation {self.calls}", success=True)
+
+    class FirstReviewFails(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.ANALYST)
+            self.review_calls = 0
+
+        async def run(self, task, prior_results):
+            if task.metadata.get("aicode_phase") == "acceptance_review":
+                self.review_calls += 1
+                passed = self.review_calls > 1
+                evidence = {
+                    "acceptance_criteria": [
+                        {
+                            "criterion": criterion,
+                            "passed": passed,
+                            "evidence": "src/implementation.py and test evidence",
+                        }
+                        for criterion in task.acceptance_criteria
+                    ]
+                }
+                return WorkerResult(
+                    role=self.role, summary="acceptance review", success=True, evidence=evidence
+                )
+            return WorkerResult(role=self.role, summary="analysis", success=True)
+
+    developer = CountingDeveloper()
+    analyst = FirstReviewFails()
+    configured = workers()
+    configured[0] = analyst
+    configured[2] = developer
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=1,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.SUCCEEDED
+    assert analyst.review_calls == 2
+    assert developer.calls == 2
