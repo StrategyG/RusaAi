@@ -189,33 +189,29 @@ async def lifespan(application: FastAPI):
             application.state.artifact = artifact
             application.state.model_name = os.getenv("RUSA_MODEL_NAME", "rusa-ai-v1")
 
-            load_timeout = _positive_float("RUSA_MODEL_LOAD_TIMEOUT_SECONDS", 1800.0)
             attempts = _positive_int("RUSA_MODEL_LOAD_RETRIES", 2)
             backend_name = os.getenv("RUSA_INFERENCE_BACKEND", "transformers")
             last_error: Exception | None = None
             for attempt in range(1, attempts + 1):
                 try:
-                    backend = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            load_inference_backend,
-                            str(artifact.root),
-                            backend_name=backend_name,
-                            timeout_seconds=_positive_float(
-                                "RUSA_GENERATION_TIMEOUT_SECONDS", 180.0
-                            ),
-                            max_model_len=_positive_int("RUSA_MAX_MODEL_LEN", 8192),
-                            max_num_seqs=_positive_int("RUSA_MAX_NUM_SEQS", 16),
-                            max_num_batched_tokens=_positive_int(
-                                "RUSA_MAX_NUM_BATCHED_TOKENS", 8192
-                            ),
-                            tensor_parallel_size=_positive_int(
-                                "RUSA_TENSOR_PARALLEL_SIZE", 1
-                            ),
-                            gpu_memory_utilization=_positive_float(
-                                "RUSA_GPU_MEMORY_UTILIZATION", 0.9, maximum=1.0
-                            ),
+                    backend = await asyncio.to_thread(
+                        load_inference_backend,
+                        str(artifact.root),
+                        backend_name=backend_name,
+                        timeout_seconds=_positive_float(
+                            "RUSA_GENERATION_TIMEOUT_SECONDS", 180.0
                         ),
-                        timeout=load_timeout,
+                        max_model_len=_positive_int("RUSA_MAX_MODEL_LEN", 8192),
+                        max_num_seqs=_positive_int("RUSA_MAX_NUM_SEQS", 16),
+                        max_num_batched_tokens=_positive_int(
+                            "RUSA_MAX_NUM_BATCHED_TOKENS", 8192
+                        ),
+                        tensor_parallel_size=_positive_int(
+                            "RUSA_TENSOR_PARALLEL_SIZE", 1
+                        ),
+                        gpu_memory_utilization=_positive_float(
+                            "RUSA_GPU_MEMORY_UTILIZATION", 0.9, maximum=1.0
+                        ),
                     )
                     application.state.backend = backend
                     application.state.backend_error = None
@@ -226,10 +222,6 @@ async def lifespan(application: FastAPI):
                         artifact.model_id,
                         artifact.manifest_sha256,
                     )
-                    break
-                except asyncio.TimeoutError as exc:
-                    last_error = exc
-                    logger.error("Model loading exceeded its startup deadline; process remains not-ready")
                     break
                 except Exception as exc:
                     last_error = exc
