@@ -1,0 +1,162 @@
+name: Deploy RUSA-AI production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Signed semantic release tag, for example v1.2.3"
+        required: true
+        type: string
+      api_digest:
+        description: "API image digest from release-manifest.txt (sha256:...)"
+        required: true
+        type: string
+      worker_digest:
+        description: "Worker image digest from release-manifest.txt (sha256:...)"
+        required: true
+        type: string
+      sandbox_digest:
+        description: "Sandbox image digest from release-manifest.txt (sha256:...)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Verify signed release and deploy immutable digests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout deployment manifest and scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ inputs.release_tag }}
+
+      - name: Validate release tag and image digest inputs
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          API_DIGEST: ${{ inputs.api_digest }}
+          WORKER_DIGEST: ${{ inputs.worker_digest }}
+          SANDBOX_DIGEST: ${{ inputs.sandbox_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Release tag must use vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          }
+          for digest in "$API_DIGEST" "$WORKER_DIGEST" "$SANDBOX_DIGEST"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+              echo "Every image digest must be a full lowercase sha256 digest." >&2
+              exit 1
+            }
+          done
+          {
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "API_IMAGE=ghcr.io/strategyg/rusa-ai-api"
+            echo "API_DIGEST=$API_DIGEST"
+            echo "WORKER_IMAGE=ghcr.io/strategyg/rusa-ai-worker"
+            echo "WORKER_DIGEST=$WORKER_DIGEST"
+            echo "SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox"
+            echo "SANDBOX_DIGEST=$SANDBOX_DIGEST"
+          } >> "$GITHUB_ENV"
+
+      - name: Authenticate to GHCR for signature verification
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Verify all image signatures against the exact release workflow identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_identity="https://github.com/StrategyG/RusaAi/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          issuer="https://token.actions.githubusercontent.com"
+          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$API_IMAGE@$API_DIGEST"
+          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$WORKER_IMAGE@$WORKER_DIGEST"
+          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$SANDBOX_IMAGE@$SANDBOX_DIGEST"
+
+      - name: Configure pinned SSH host identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_SSH_PRIVATE_KEY:?Configure production secret PRODUCTION_SSH_PRIVATE_KEY}"
+          : "${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production secret PRODUCTION_SSH_KNOWN_HOSTS}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Transfer production Compose and deployment scripts
+        env:
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCTION_SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || {
+            echo "PRODUCTION_SSH_HOST must be a DNS name or IPv4 address." >&2
+            exit 1
+          }
+          [[ "$PRODUCTION_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || {
+            echo "PRODUCTION_SSH_USER is invalid." >&2
+            exit 1
+          }
+          [[ "$PRODUCTION_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+            echo "PRODUCTION_DEPLOY_PATH must be a safe absolute path." >&2
+            exit 1
+          }
+          remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "mkdir -p '$PRODUCTION_DEPLOY_PATH/scripts/deploy'"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes docker-compose.production.yml \
+            "$remote:$PRODUCTION_DEPLOY_PATH/docker-compose.production.yml"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/deploy/compose-deploy.sh \
+            "$remote:$PRODUCTION_DEPLOY_PATH/scripts/deploy/compose-deploy.sh"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/deploy/compose-rollback.sh \
+            "$remote:$PRODUCTION_DEPLOY_PATH/scripts/deploy/compose-rollback.sh"
+
+      - name: Authenticate the production host to GHCR
+        env:
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          GHCR_PULL_USERNAME: ${{ vars.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
+          : "${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
+          remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
+          printf '%s' "$GHCR_PULL_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "docker login ghcr.io --username '$GHCR_PULL_USERNAME' --password-stdin"
+
+      - name: Deploy signed image digests with automatic rollback
+        env:
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
+          api_ref="$API_IMAGE@$API_DIGEST"
+          worker_ref="$WORKER_IMAGE@$WORKER_DIGEST"
+          sandbox_ref="$SANDBOX_IMAGE@$SANDBOX_DIGEST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "cd '$PRODUCTION_DEPLOY_PATH' && chmod 0755 scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh && ./scripts/deploy/compose-deploy.sh '$api_ref' '$worker_ref' '$sandbox_ref'"

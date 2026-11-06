@@ -1,0 +1,204 @@
+name: RUSA-AI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-version:
+    name: Validate semantic version and main ancestry
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Require a semantic version tag on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "A release tag must point to a commit already merged into main." >&2
+            exit 1
+          fi
+
+  ci:
+    name: Re-run complete CI for the exact release commit
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish, scan, sign, and attest immutable images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs:
+      - validate-version
+      - ci
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      worker_digest: ${{ steps.worker.outputs.digest }}
+      sandbox_digest: ${{ steps.sandbox.outputs.digest }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish API image
+        id: api
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/strategyg/rusa-ai-api:${{ github.ref_name }}
+            ghcr.io/strategyg/rusa-ai-api:${{ github.sha }}
+          cache-from: type=gha,scope=rusa-api
+          cache-to: type=gha,mode=max,scope=rusa-api
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and publish worker image with optional RAG runtime
+        id: worker
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile.worker
+          build-args: |
+            RUSA_INSTALL_RAG=1
+          push: true
+          tags: |
+            ghcr.io/strategyg/rusa-ai-worker:${{ github.ref_name }}
+            ghcr.io/strategyg/rusa-ai-worker:${{ github.sha }}
+          cache-from: type=gha,scope=rusa-worker
+          cache-to: type=gha,mode=max,scope=rusa-worker
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and publish isolated sandbox image
+        id: sandbox
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile.agent-sandbox
+          push: true
+          tags: |
+            ghcr.io/strategyg/rusa-ai-sandbox:${{ github.ref_name }}
+            ghcr.io/strategyg/rusa-ai-sandbox:${{ github.sha }}
+          cache-from: type=gha,scope=rusa-sandbox
+          cache-to: type=gha,mode=max,scope=rusa-sandbox
+          provenance: mode=max
+          sbom: true
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0
+        with:
+          version: v0.70.0
+          cache: true
+
+      - name: Scan the exact published image digests
+        shell: bash
+        env:
+          API_IMAGE: ghcr.io/strategyg/rusa-ai-api
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox
+          SANDBOX_DIGEST: ${{ steps.sandbox.outputs.digest }}
+        run: |
+          set -euo pipefail
+          for image in "$API_IMAGE@$API_DIGEST" "$WORKER_IMAGE@$WORKER_DIGEST" "$SANDBOX_IMAGE@$SANDBOX_DIGEST"; do
+            trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
+              --severity CRITICAL,HIGH --pkg-types os,library "$image"
+          done
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Sign all immutable image digests with GitHub OIDC
+        env:
+          API_IMAGE: ghcr.io/strategyg/rusa-ai-api
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox
+          SANDBOX_DIGEST: ${{ steps.sandbox.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$API_IMAGE@$API_DIGEST"
+          cosign sign --yes "$WORKER_IMAGE@$WORKER_DIGEST"
+          cosign sign --yes "$SANDBOX_IMAGE@$SANDBOX_DIGEST"
+
+      - name: Attest API image build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-api
+          subject-digest: ${{ steps.api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest worker image build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-worker
+          subject-digest: ${{ steps.worker.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest sandbox image build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-sandbox
+          subject-digest: ${{ steps.sandbox.outputs.digest }}
+          push-to-registry: true
+
+      - name: Create release manifest
+        env:
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          SANDBOX_DIGEST: ${{ steps.sandbox.outputs.digest }}
+        run: |
+          cat > release-manifest.txt <<EOF
+          release_tag=$GITHUB_REF_NAME
+          source_commit=$GITHUB_SHA
+          api_image=ghcr.io/strategyg/rusa-ai-api
+          api_digest=$API_DIGEST
+          worker_image=ghcr.io/strategyg/rusa-ai-worker
+          worker_digest=$WORKER_DIGEST
+          sandbox_image=ghcr.io/strategyg/rusa-ai-sandbox
+          sandbox_digest=$SANDBOX_DIGEST
+          EOF
+
+      - name: Publish GitHub Release and immutable digest manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
+          gh release upload "$GITHUB_REF_NAME" release-manifest.txt --clobber
