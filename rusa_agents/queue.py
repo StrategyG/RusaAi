@@ -149,8 +149,8 @@ class PostgresTaskQueue:
                            WHERE table_schema='public'
                              AND table_name='rusa_agent_tasks'
                              AND column_name='lease_token'
-                       )
-                       AND has_table_privilege(
+                       ),
+                       has_table_privilege(
                            current_user, 'public.rusa_agent_tasks', 'SELECT'
                        ),
                        has_table_privilege(
