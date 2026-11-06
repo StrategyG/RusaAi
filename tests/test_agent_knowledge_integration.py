@@ -1,10 +1,12 @@
 import asyncio
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget, ToolCall
-from rusa_agents.mcp_gateway import MCPKnowledgeGateway
+from rusa_agents.mcp_gateway import LocalKnowledgeGateway, MCPKnowledgeGateway
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.rag_memory import CompositeMemoryReader
 from rusa_agents.tool_router import CompositeToolGateway
+from rusa_agents.workers import AgentWorker
+from rusa_agents.contracts import WorkerRole
 
 
 class FakeEpisodic:
@@ -21,6 +23,12 @@ class FakeKnowledge:
             "document_id": "doc-1",
             "score": 0.02,
         }]
+
+    def get_document(self, **kwargs):
+        return {"document_id": kwargs["document_id"], "content": "document body"}
+
+    def list_collections(self, **kwargs):
+        return [{"collection": "agent", "document_count": 1}]
 
     def close(self):
         pass
@@ -91,3 +99,30 @@ def test_composite_tool_gateway_routes_knowledge_tools():
         )
     )
     assert result == "knowledge-result"
+
+
+def test_local_knowledge_gateway_executes_tenant_scoped_search():
+    gateway = LocalKnowledgeGateway(FakeKnowledge(), default_collection="agent")
+    result = asyncio.run(
+        gateway.execute(
+            _task(),
+            ToolCall(name="search_knowledge", arguments={"query": "architecture"}),
+        )
+    )
+    assert result.success is True
+    assert result.data["results"][0]["document_id"] == "doc-1"
+    assert result.evidence["source"] == "local_rag"
+
+
+def test_worker_tool_allowlist_can_disable_unconfigured_knowledge_tools():
+    class FakeProvider:
+        async def complete(self, *, system_prompt, user_prompt):
+            return "{}"
+
+    worker = AgentWorker(
+        WorkerRole.ANALYST,
+        FakeProvider(),
+        enabled_tools={"read_file", "list_files"},
+    )
+    assert worker.allowed_tools == frozenset({"read_file", "list_files"})
+    assert "search_knowledge" not in worker.allowed_tools
