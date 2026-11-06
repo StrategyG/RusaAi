@@ -62,7 +62,7 @@ jobs:
       - name: Lint
         run: ruff check rusa_agents tests llm-project/serve
       - name: Security static analysis
-        run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
+        run: bandit -q -r rusa_agents llm-project/serve --severity-level medium --confidence-level medium
       - name: Dependency vulnerability audit
         run: pip-audit
       - name: Tests with coverage report
