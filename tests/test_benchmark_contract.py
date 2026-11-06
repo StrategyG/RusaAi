@@ -160,7 +160,13 @@ def test_percentile_uses_nearest_rank_and_handles_empty_samples():
 
 
 @pytest.mark.asyncio
-async def test_policy_accuracy_requires_independent_labeled_decisions(database):
+async def test_policy_accuracy_requires_independent_labeled_decisions(database, registry):
+    runtime = AgentRuntime(database, FakeProvider(), registry)
+    task_id = await runtime.submit(
+        "tenant-policy-metrics",
+        "policy-metrics-task",
+        make_task().model_dump(),
+    )
     audit = AuditLog(database)
     await audit.record(
         "tenant-policy-metrics",
@@ -188,7 +194,7 @@ async def test_policy_accuracy_requires_independent_labeled_decisions(database):
     )
     await audit.record(
         "tenant-policy-metrics",
-        "case-runtime",
+        task_id,
         "worker-1",
         "policy.decision",
         {
@@ -205,6 +211,7 @@ async def test_policy_accuracy_requires_independent_labeled_decisions(database):
     assert metrics["false_allow_count"] == 1
     assert metrics["false_deny_count"] == 0
     assert metrics["policy_decision_count"] == 1
+    assert metrics["policy_unlabeled_decision_count"] == 1
     assert metrics["policy_version"] == "rusa-autonomy-policy-v1"
     assert metrics["cost_per_task"] is None
     assert "cost_per_task" in metrics["unmeasured_metrics"]
