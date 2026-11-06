@@ -60,22 +60,46 @@ class PostgresTaskQueue:
                 )
                 """
             )
-            # Upgrade installations created by earlier queue versions.
-            db.execute(
-                "ALTER TABLE rusa_agent_jobs ADD COLUMN IF NOT EXISTS "
-                "lease_heartbeat_at TIMESTAMPTZ"
-            )
-            db.execute(
-                "ALTER TABLE rusa_agent_jobs DROP CONSTRAINT IF EXISTS "
-                "rusa_agent_jobs_state_check"
-            )
-            db.execute(
+            # Apply compatibility DDL only when the existing schema needs it.
+            heartbeat_column = db.execute(
                 """
-                ALTER TABLE rusa_agent_jobs
-                ADD CONSTRAINT rusa_agent_jobs_state_check
-                CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter', 'cancelled'))
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema=current_schema()
+                  AND table_name='rusa_agent_jobs'
+                  AND column_name='lease_heartbeat_at'
                 """
-            )
+            ).fetchone()
+            if heartbeat_column is None:
+                db.execute(
+                    "ALTER TABLE rusa_agent_jobs "
+                    "ADD COLUMN lease_heartbeat_at TIMESTAMPTZ"
+                )
+
+            state_constraint = db.execute(
+                """
+                SELECT pg_get_constraintdef(oid) AS definition
+                FROM pg_constraint
+                WHERE conrelid='rusa_agent_jobs'::regclass
+                  AND conname='rusa_agent_jobs_state_check'
+                """
+            ).fetchone()
+            if state_constraint and "'cancelled'" not in state_constraint["definition"]:
+                db.execute(
+                    "ALTER TABLE rusa_agent_jobs "
+                    "DROP CONSTRAINT rusa_agent_jobs_state_check"
+                )
+                state_constraint = None
+            if state_constraint is None:
+                db.execute(
+                    """
+                    ALTER TABLE rusa_agent_jobs
+                    ADD CONSTRAINT rusa_agent_jobs_state_check
+                    CHECK (state IN (
+                        'queued', 'running', 'succeeded', 'failed',
+                        'dead_letter', 'cancelled'
+                    ))
+                    """
+                )
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rusa_agent_jobs_claim "
                 "ON rusa_agent_jobs(state, available_at, created_at)"

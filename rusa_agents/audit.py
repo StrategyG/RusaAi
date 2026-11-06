@@ -133,19 +133,22 @@ class PostgresAuditLog:
                 $$
                 """
             )
-            db.execute(
+            trigger_exists = db.execute(
                 """
-                DROP TRIGGER IF EXISTS rusa_agent_audit_no_mutation
-                ON rusa_agent_audit_events
+                SELECT 1 FROM pg_trigger
+                WHERE tgrelid='rusa_agent_audit_events'::regclass
+                  AND tgname='rusa_agent_audit_no_mutation'
+                  AND NOT tgisinternal
                 """
-            )
-            db.execute(
-                """
-                CREATE TRIGGER rusa_agent_audit_no_mutation
-                BEFORE UPDATE OR DELETE ON rusa_agent_audit_events
-                FOR EACH ROW EXECUTE FUNCTION rusa_agent_audit_reject_mutation()
-                """
-            )
+            ).fetchone()
+            if trigger_exists is None:
+                db.execute(
+                    """
+                    CREATE TRIGGER rusa_agent_audit_no_mutation
+                    BEFORE UPDATE OR DELETE ON rusa_agent_audit_events
+                    FOR EACH ROW EXECUTE FUNCTION rusa_agent_audit_reject_mutation()
+                    """
+                )
 
     @staticmethod
     def _canonical(payload: dict[str, Any]) -> str:

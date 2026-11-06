@@ -167,3 +167,11 @@ def test_postgres_audit_chain_is_verifiable_and_append_only(postgres_runtime):
                 (tenant_id, task_id),
             )
     assert audit.verify()
+
+
+
+def test_postgres_schema_initialization_is_idempotent(postgres_runtime):
+    dsn, _, _ = postgres_runtime
+    PostgresTaskQueue(dsn)
+    PostgresMemory(dsn)
+    PostgresAuditLog(dsn)
