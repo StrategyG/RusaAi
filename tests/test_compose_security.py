@@ -116,7 +116,7 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     services = compose["services"]
     backup = services["rusa-agent-db-backup"]
 
-    assert backup["profiles"] == ["backup"]
+    assert backup["profiles"] == ["backup-once"]
     assert backup["restart"] == "no"
     assert "ports" not in backup
     assert "rusa-agent-db-backups:/backups" in backup["volumes"]
@@ -134,3 +134,12 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     assert "RESTORE_CONFIRM_DATABASE" in restore_script
     assert "--single-transaction" in restore_script
     assert "--clean" in restore_script
+
+    scheduler = services["rusa-agent-db-backup-scheduler"]
+    assert scheduler["profiles"] == ["backup"]
+    assert scheduler["restart"] == "unless-stopped"
+    assert "rusa-agent-db-backups:/backups" in scheduler["volumes"]
+    assert scheduler["environment"]["RUSA_BACKUP_INTERVAL_SECONDS"] == (
+        "${RUSA_BACKUP_INTERVAL_SECONDS:-3600}"
+    )
+    assert (ROOT / "scripts/postgres/backup_scheduler.sh").is_file()
