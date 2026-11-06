@@ -68,6 +68,12 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
         )
         connection.execute(
             """
+            ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+            GRANT USAGE, SELECT ON SEQUENCES TO rusa_agent_api
+            """
+        )
+        connection.execute(
+            """
             ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public
             GRANT USAGE, SELECT ON SEQUENCES TO rusa_agent_api
             """
