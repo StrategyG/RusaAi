@@ -6,7 +6,7 @@ import os
 from datetime import timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from .policy import POLICY_VERSION
 from .storage import AuditRow, Database, TaskRow
@@ -45,15 +45,26 @@ class AgentEvaluator:
                     .limit(bounded_limit)
                 )
             ).all()
+            task_ids = [task.id for task in tasks]
+            event_scopes = [AuditRow.event == "policy.benchmark_decision"]
+            if task_ids:
+                event_scopes.append(
+                    and_(
+                        AuditRow.event.in_(
+                            ("task.awaiting_approval", "policy.decision", "task.started")
+                        ),
+                        AuditRow.task_id.in_(task_ids),
+                    )
+                )
             audit_events = (
                 await session.scalars(
                     select(AuditRow)
                     .where(
                         AuditRow.tenant_id == tenant_id,
-                        AuditRow.event.in_(EVALUATION_EVENTS),
+                        or_(*event_scopes),
                     )
                     .order_by(AuditRow.created_at.desc())
-                    .limit(bounded_limit * 100)
+                    .limit(max(5000, bounded_limit * 250))
                 )
             ).all()
 
