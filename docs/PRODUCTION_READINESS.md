@@ -79,6 +79,11 @@ Run with a read-only checkpoint mount and secret-managed environment file:
 
 ```bash
 docker run --rm --gpus all \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=1g \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --pids-limit 256 \
   --publish 127.0.0.1:8000:8000 \
   --env-file /etc/rusa-ai/production.env \
   --mount type=bind,src=/srv/models/rusa-ai,dst=/models/rusa-ai,readonly \
