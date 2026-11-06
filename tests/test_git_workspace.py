@@ -37,7 +37,7 @@ def test_github_origin_must_match_exact_repository():
         )
 
 
-def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path):
+def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypatch):
     source = tmp_path / "source"
     source.mkdir()
     git("init", "--initial-branch=main", cwd=source)
@@ -54,6 +54,7 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path):
 
     workspace_root = tmp_path / "workspaces"
     manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
+    monkeypatch.setattr(manager, "refresh", lambda repository: None)
     task = CodingTask(
         objective="test worktree",
         repository=RepositoryTarget(
@@ -100,3 +101,17 @@ def test_workspace_manager_rejects_unsafe_branch_before_checkout(tmp_path):
     )
     with pytest.raises(ValueError, match="safe feature"):
         manager.create(task, "tenant-a")
+
+
+
+def test_workspace_manager_refuses_untrusted_mirror_origin(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--bare", str(source))
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        manager.refresh("StrategyG/RusaAi")
