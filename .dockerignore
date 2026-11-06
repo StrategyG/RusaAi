@@ -21,3 +21,7 @@ outputs
 *.pth
 tests
 docs
+
+node_modules
+apps/web/node_modules
+apps/web/dist
