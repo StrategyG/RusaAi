@@ -24,6 +24,12 @@ services:
       RUSA_TENANT_ID: ${RUSA_TENANT_ID:-tenant-a}
       RUSA_COOKIE_SECURE: ${RUSA_COOKIE_SECURE:-true}
       RUSA_AGENT_ENABLED: ${RUSA_AGENT_ENABLED:-false}
+      RUSA_RAG_ENABLED: ${RUSA_RAG_ENABLED:-false}
+      RUSA_KNOWLEDGE_DATABASE_URL: postgresql://rusa_agent_api:${RUSA_AGENT_API_DB_PASSWORD:?Set RUSA_AGENT_API_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:-}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-text-embedding-3-small}
+      RUSA_KNOWLEDGE_COLLECTION: ${RUSA_KNOWLEDGE_COLLECTION:-agent}
       DATABASE_URL: postgresql://rusa_web_api:${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
       RUSA_AGENT_API_DATABASE_URL: postgresql://rusa_agent_api:${RUSA_AGENT_API_DB_PASSWORD:?Set RUSA_AGENT_API_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
       RUSA_AGENT_AUDIT_KEY: ${RUSA_AGENT_AUDIT_KEY:?Set RUSA_AGENT_AUDIT_KEY in .env}
