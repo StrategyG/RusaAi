@@ -56,6 +56,7 @@ async def build_tooling(database: Database) -> tuple[ToolRegistry, MCPGateway, R
             {
                 "type": "object",
                 "properties": {
+                    "tenant_id": {"type": "string", "minLength": 1, "maxLength": 128},
                     "query": {"type": "string", "minLength": 1, "maxLength": 4000},
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 20},
                     "allowed_source_ids": {
