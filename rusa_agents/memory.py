@@ -1,5 +1,6 @@
 """Tenant-scoped SQLite memory for development and single-node deployments."""
 import json
+import os
 import sqlite3
 from pathlib import Path
 from threading import RLock
@@ -91,7 +92,7 @@ class PostgresMemory:
 
     def initialize(self) -> None:
         with self._connect() as conn:
-            if __import__("os").getenv("ENVIRONMENT", "development").lower() == "production":
+            if os.getenv("ENVIRONMENT", "development").lower() == "production":
                 exists = conn.execute("SELECT to_regclass('public.aicode_memory')").fetchone()
                 if not exists or exists[0] is None:
                     raise RuntimeError("Production memory schema is missing; apply migrations/001_aicode_core.sql")
