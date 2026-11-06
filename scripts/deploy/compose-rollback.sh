@@ -13,6 +13,27 @@ LOCK_FILE="$ROOT_DIR/.deploy.lock"
 [[ -s "$ENV_FILE" ]] || { echo "Current production .env is missing." >&2; exit 1; }
 [[ -s "$BACKUP_FILE" ]] || { echo "No previous production environment snapshot exists." >&2; exit 1; }
 
+IMAGE_REGISTRY="${RUSA_IMAGE_REGISTRY:-ghcr.io}"
+[[ "$IMAGE_REGISTRY" =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?$ ]] || {
+  echo "RUSA_IMAGE_REGISTRY must be a registry hostname with an optional port." >&2
+  exit 1
+}
+is_immutable_image() {
+  local reference="$1"
+  [[ "$reference" == "$IMAGE_REGISTRY/"* ]] || return 1
+  local image_path="${reference#"$IMAGE_REGISTRY/"}"
+  [[ "$image_path" =~ ^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$ ]]
+}
+for file in "$ENV_FILE" "$BACKUP_FILE"; do
+  for key in RUSA_API_IMAGE RUSA_AGENT_IMAGE; do
+    reference="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file")"
+    is_immutable_image "$reference" || {
+      echo "$key in $file must be an immutable sha256 digest from $IMAGE_REGISTRY." >&2
+      exit 1
+    }
+  done
+done
+
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo "Another deployment or rollback is already running." >&2; exit 1; }
 
