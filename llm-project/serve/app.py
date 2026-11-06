@@ -9,6 +9,8 @@ import re
 import threading
 import time
 import uuid
+from datetime import datetime
+from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -37,6 +39,35 @@ from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.identity import IdentityError, PostgresIdentityStore
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_knowledge.service import KnowledgeService
+
+def _is_rfc3339_datetime(value: object) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(
+        r"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})",
+        value,
+    ):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
+def _is_absolute_uri(value: object) -> bool:
+    if not isinstance(value, str) or not value or re.search(r"\\s", value):
+        return False
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+        return False
+    try:
+        urlsplit(value)
+    except ValueError:
+        return False
+    return True
+
+
+FormatChecker.checks("date-time")(_is_rfc3339_datetime)
+FormatChecker.checks("uri")(_is_absolute_uri)
+
 
 logger = logging.getLogger("rusa-ai-serve")
 logging.basicConfig(
