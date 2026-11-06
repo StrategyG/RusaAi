@@ -9,6 +9,7 @@ from typing import Any
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
 from .store import PostgresKnowledgeStore
+from .safety import reject_credential_material
 
 
 class KnowledgeService:
@@ -66,6 +67,7 @@ class KnowledgeService:
             raise ValueError("document content is empty")
         if len(normalized) > 2_000_000:
             raise ValueError("document content exceeds the 2 million character limit")
+        reject_credential_material(normalized)
         chunks = chunk_text(normalized, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             raise ValueError("document did not produce any searchable chunks")
