@@ -31,6 +31,8 @@ logging.basicConfig(
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = REPOSITORY_ROOT / "schemas" / "a2a" / "task-envelope.schema.json"
 MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", "1048576"))
+if MAX_REQUEST_BYTES <= 0:
+    raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be positive")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
