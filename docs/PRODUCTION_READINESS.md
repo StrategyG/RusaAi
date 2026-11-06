@@ -49,7 +49,7 @@ This is evidence for the exact code commit above. It is not evidence of a deploy
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency, target-hardware soak test | Blocked |
 | High-throughput serving | Runtime selection and measured load test for the selected model | Open |
 | Agent runtime | End-to-end staging tasks, GitHub permissions, queue recovery, lease fencing, CI evidence freshness | Core runtime and lease fencing implemented; staging verification and lifecycle-control integration pending |
-| Memory/RAG/MCP | Tenant-separated gold set, Recall@K/MRR/nDCG, citation accuracy, prompt-injection and cross-tenant tests | Code, pgvector/RLS integration, and container smoke checks passed; domain evaluation and staging verification pending |
+| Memory/RAG/MCP | Tenant-separated gold set, Recall@K/MRR/nDCG, citation accuracy, prompt-injection and cross-tenant tests | Code, pgvector/RLS integration, and container smoke checks passed; Compose migration smoke added to next CI; domain evaluation and staging verification pending |
 | Security operations | TLS ingress, distributed rate limiting, egress allowlists, secret rotation, external penetration test | Partial; deployment controls required |
 | Reliability operations | PostgreSQL backup/PITR, restore drill, immutable remote audit, monitoring, alerting, incident runbook, rollback rehearsal | Partial; operational drills pending |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
@@ -60,7 +60,7 @@ This is evidence for the exact code commit above. It is not evidence of a deploy
 - [ ] Run model quality, safety, and target-hardware performance benchmarks.
 - [ ] Use a TLS gateway with distributed rate limits, request timeouts, and network/egress controls.
 - [ ] Store secrets in a secret manager; test tenant credential rotation and revocation.
-- [ ] Use separate PostgreSQL owner, worker, API, and restricted knowledge roles; verify RLS using the actual runtime identities.
+- [ ] Back up PostgreSQL before applying the opt-in migration with `docker compose --profile migrate run --rm rusa-knowledge-migrate`; verify separate owner, worker, API, and restricted knowledge roles and forced RLS using the actual runtime identities.
 - [ ] Configure encryption, backups, point-in-time recovery, and complete a restore drill.
 - [ ] Ship HMAC audit records to immutable remote retention and test key rotation.
 - [ ] Complete prompt-injection, tool-abuse, cross-tenant, worker-crash, duplicate-delivery, and lease-expiry tests.

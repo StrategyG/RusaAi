@@ -54,6 +54,10 @@ jobs:
         run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+      - name: Validate PostgreSQL migration scripts
+        run: |
+          sh -n scripts/postgres/init-agent-db.sh
+          sh -n scripts/postgres/apply-rag-migration.sh
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -75,7 +79,7 @@ jobs:
           if [ -f .env.example ]; then
             cp .env.example .env
             docker compose config --quiet
-            rm -f .env
+            docker compose --profile migrate config --quiet
           fi
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
@@ -83,6 +87,54 @@ jobs:
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
       - name: Build knowledge MCP image
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Start PostgreSQL for migration smoke test
+        run: docker compose up -d rusa-agent-db
+      - name: Apply RAG migration through Compose
+        run: docker compose --profile migrate run --rm rusa-knowledge-migrate
+      - name: Verify RAG roles, grants, and forced RLS
+        run: |
+          docker compose exec -T rusa-agent-db psql --no-psqlrc --set ON_ERROR_STOP=1 -U rusa_agent_owner -d rusa_agent <<'SQL'
+          DO $verify$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+              RAISE EXCEPTION 'pgvector extension is missing';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_roles
+              WHERE rolname = 'rusa_knowledge_worker'
+                AND NOT rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
+            ) THEN
+              RAISE EXCEPTION 'restricted knowledge worker role is missing or unsafe';
+            END IF;
+            IF NOT pg_has_role('rusa_agent_worker', 'rusa_knowledge_worker', 'MEMBER') THEN
+              RAISE EXCEPTION 'agent worker is not a member of the restricted knowledge role';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_class
+              WHERE oid = 'public.rusa_knowledge_documents'::regclass
+                AND relrowsecurity AND relforcerowsecurity
+            ) OR NOT EXISTS (
+              SELECT 1 FROM pg_class
+              WHERE oid = 'public.rusa_knowledge_chunks'::regclass
+                AND relrowsecurity AND relforcerowsecurity
+            ) THEN
+              RAISE EXCEPTION 'knowledge tables do not enforce row-level security';
+            END IF;
+            IF NOT has_table_privilege(
+              'rusa_agent_api', 'public.rusa_knowledge_documents', 'SELECT'
+            ) OR has_table_privilege(
+              'rusa_agent_api', 'public.rusa_knowledge_documents', 'INSERT'
+            ) THEN
+              RAISE EXCEPTION 'MCP API role is not read-only';
+            END IF;
+            IF NOT has_table_privilege(
+              'rusa_knowledge_worker', 'public.rusa_knowledge_documents', 'INSERT'
+            ) THEN
+              RAISE EXCEPTION 'restricted knowledge worker lacks ingestion privileges';
+            END IF;
+          END;
+          $verify$;
+          SQL
       - name: Run knowledge MCP container
         run: |
           docker run -d --name rusa-mcp-ci \
@@ -117,4 +169,7 @@ jobs:
           exit 1
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci rusa-mcp-ci || true
+        run: |
+          docker rm -f rusa-ai-ci rusa-mcp-ci || true
+          docker compose down -v --remove-orphans || true
+          rm -f .env
