@@ -33,7 +33,11 @@ class KnowledgeService:
             dimensions=1536,
             timeout_seconds=float(os.getenv("RUSA_EMBEDDING_TIMEOUT", "30")),
         )
-        store = PostgresKnowledgeStore(dsn, dimensions=1536)
+        store = PostgresKnowledgeStore(
+            dsn,
+            dimensions=1536,
+            db_role=os.getenv("RUSA_KNOWLEDGE_DB_ROLE") or None,
+        )
         service = cls(store, provider)
         if check_ready:
             try:
