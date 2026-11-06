@@ -144,7 +144,7 @@ RUSA-AI includes an autonomous coding subsystem that operates within tenant-auth
 
 ### AICode API
 
-All task endpoints require `X-API-Key` and map the key to a tenant.
+All task endpoints require `X-API-Key` and map the key to a tenant. `POST /v1/aicode/tasks` also requires an `Idempotency-Key` header containing 1–128 visible ASCII characters. Reuse the same key when retrying the same logical request: the key is scoped to the authenticated tenant, an identical payload returns the original task ID, and a different payload with the same key returns HTTP 409.
 
 | Endpoint | Method | Purpose |
 |---|---|---|
