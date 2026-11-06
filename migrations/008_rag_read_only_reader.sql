@@ -25,6 +25,10 @@ GRANT SELECT
     ON TABLE public.rusa_knowledge_documents, public.rusa_knowledge_chunks
     TO rusa_knowledge_reader;
 
+REVOKE SELECT
+    ON TABLE public.rusa_knowledge_documents, public.rusa_knowledge_chunks
+    FROM rusa_api_runtime;
+
 DROP POLICY IF EXISTS rusa_knowledge_documents_reader_tenant_isolation
     ON public.rusa_knowledge_documents;
 CREATE POLICY rusa_knowledge_documents_reader_tenant_isolation
