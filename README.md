@@ -63,7 +63,7 @@ The inference API reports not-ready and returns HTTP 503 until a real local mode
 | POST | /v1/agent/tasks/{task_id}/retry | Explicitly requeue a failed task |
 | DELETE | /v1/agent/tasks/{task_id} | Cancel a queued, waiting, or running task and revoke its worker lease |
 
-Cancellation clears the active lease token. A worker that loses ownership must stop before its next repository tool action. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
+Cancellation clears the active lease token. The worker rechecks lease ownership immediately before each repository tool action and fails closed if the check is false or unavailable. Cancellation is cooperative: an external API request already in flight may finish, but no subsequent tool action or successful acknowledgement is permitted. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
 
 Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
 
