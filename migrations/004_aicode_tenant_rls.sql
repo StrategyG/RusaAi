@@ -18,22 +18,26 @@ ALTER ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
 ALTER ROLE rusa_worker_runtime NOLOGIN NOBYPASSRLS;
 
 -- Retire broad legacy shared-role grants from migration 001.
-REVOKE ALL ON public.aicode_jobs FROM PUBLIC, rusa_runtime;
-REVOKE ALL ON public.aicode_memory FROM PUBLIC, rusa_runtime;
-REVOKE ALL ON public.aicode_rate_limits FROM PUBLIC, rusa_runtime;
-REVOKE ALL ON public.aicode_audit_events FROM PUBLIC, rusa_runtime;
-REVOKE ALL ON SEQUENCE public.aicode_jobs_id_seq FROM PUBLIC, rusa_runtime;
-REVOKE ALL ON SEQUENCE public.aicode_audit_events_id_seq FROM PUBLIC, rusa_runtime;
+REVOKE ALL ON public.aicode_jobs FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
+REVOKE ALL ON public.aicode_memory FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
+REVOKE ALL ON public.aicode_rate_limits FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
+REVOKE ALL ON public.aicode_audit_events FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
+REVOKE ALL ON SEQUENCE public.aicode_jobs_id_seq FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
+REVOKE ALL ON SEQUENCE public.aicode_audit_events_id_seq FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime;
 
 GRANT USAGE ON SCHEMA public TO rusa_api_runtime, rusa_worker_runtime;
 
 -- API can enqueue and manage only the authenticated tenant's jobs.
-GRANT SELECT, INSERT, UPDATE ON public.aicode_jobs TO rusa_api_runtime;
+GRANT SELECT ON public.aicode_jobs TO rusa_api_runtime, rusa_worker_runtime;
+GRANT INSERT (task_id, tenant_id, payload, max_attempts, priority)
+    ON public.aicode_jobs TO rusa_api_runtime;
+GRANT UPDATE (status, attempts, available_at, lease_owner, lease_until, lease_token,
+              last_error, result, updated_at)
+    ON public.aicode_jobs TO rusa_api_runtime, rusa_worker_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.aicode_jobs_id_seq TO rusa_api_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.aicode_rate_limits TO rusa_api_runtime;
 
--- Worker can claim/update jobs across tenants, but cannot enqueue new jobs.
-GRANT SELECT, UPDATE ON public.aicode_jobs TO rusa_worker_runtime;
+-- Worker can claim/update jobs across tenants, but cannot enqueue or rewrite task identity/payload.
 GRANT SELECT, INSERT, UPDATE ON public.aicode_memory TO rusa_worker_runtime;
 GRANT SELECT, INSERT ON public.aicode_audit_events TO rusa_worker_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.aicode_audit_events_id_seq TO rusa_worker_runtime;
