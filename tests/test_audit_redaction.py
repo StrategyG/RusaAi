@@ -20,7 +20,7 @@ def test_audit_redaction_covers_nested_secrets_and_common_token_formats(tmp_path
             "slack": "xoxb-1234567890-abcdefghij",
             "stripe": "sk_live_12345678901234567890",
             "google": "AIza12345678901234567890123456789012345",
-            "private_key": "-----BEGIN PRIVATE KEY-----\\nprivate-key-material\\n-----END PRIVATE KEY-----",
+            "pem": "-----BEGIN PRIVATE KEY-----\\nprivate-key-material\\n-----END PRIVATE KEY-----",
         },
     )
     raw = path.read_text(encoding="utf-8")
