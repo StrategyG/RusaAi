@@ -34,9 +34,17 @@ class KnowledgeService:
         )
         store = PostgresKnowledgeStore(dsn, dimensions=1536)
         service = cls(store, provider)
-        if check_ready and not store.check_ready():
-            store.close()
-            raise RuntimeError("knowledge database is not ready; apply migrations/005_rag_knowledge_pgvector.sql")
+        if check_ready:
+            try:
+                ready = store.check_ready()
+            except Exception:
+                store.close()
+                raise
+            if not ready:
+                store.close()
+                raise RuntimeError(
+                    "knowledge database is not ready; apply migrations/005_rag_knowledge_pgvector.sql"
+                )
         return service
 
     def ingest_text(
@@ -51,6 +59,8 @@ class KnowledgeService:
         chunk_size: int = 1200,
         overlap: int = 180,
     ) -> dict[str, Any]:
+        if not isinstance(metadata, (dict, type(None))):
+            raise ValueError("document metadata must be an object")
         normalized = normalize_text(content)
         if not normalized:
             raise ValueError("document content is empty")
@@ -87,7 +97,7 @@ class KnowledgeService:
         query: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        if not query.strip() or len(query) > 2000:
+        if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         vector = self.embeddings.embed([query])[0]
         return self.store.search(
