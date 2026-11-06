@@ -147,9 +147,15 @@ def test_unmanifested_extra_weight_shard_is_rejected(tmp_path):
 
 def test_real_transformers_backend_generates_from_verified_local_artifact(tmp_path):
     """Exercise actual Transformers loading and token generation without network access."""
-    import torch
-    from tokenizers import Tokenizer, models, pre_tokenizers
-    from transformers import AutoModelForCausalLM, GPT2Config, PreTrainedTokenizerFast
+    torch = pytest.importorskip("torch", reason="optional local-model dependencies are not installed")
+    tokenizers = pytest.importorskip("tokenizers", reason="optional local-model dependencies are not installed")
+    transformers = pytest.importorskip("transformers", reason="optional local-model dependencies are not installed")
+    Tokenizer = tokenizers.Tokenizer
+    models = tokenizers.models
+    pre_tokenizers = tokenizers.pre_tokenizers
+    AutoModelForCausalLM = transformers.AutoModelForCausalLM
+    GPT2Config = transformers.GPT2Config
+    PreTrainedTokenizerFast = transformers.PreTrainedTokenizerFast
 
     vocabulary = {
         "[UNK]": 0,
