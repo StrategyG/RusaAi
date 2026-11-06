@@ -125,3 +125,14 @@ def test_case_insensitive_migration_write_is_protected(tmp_path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file("MIGRATIONS/unsafe.sql", "DROP TABLE users;", WorkerRole.DEVELOPER)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["Dockerfile.worker", "docker-compose.override.yml", "compose.yaml",
+     "requirements-dev.txt", "infra/prod.tf", "K8S/deployment.yaml"],
+)
+def test_protected_deployment_paths(tmp_path, path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.write_file(path, "x", WorkerRole.DEVELOPER)
