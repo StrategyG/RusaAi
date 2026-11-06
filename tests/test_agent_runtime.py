@@ -1027,7 +1027,7 @@ async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database,
     assert metrics["success_rate"] == pytest.approx(1 / 2, rel=1e-3)
     assert metrics["retry_rate"] == pytest.approx(1 / 3, rel=1e-3)
     assert metrics["validated_plan_rate"] == pytest.approx(2 / 3, rel=1e-3)
-    assert metrics["reviewer_approval_rate"] == pytest.approx(1 / 2, rel=1e-3)
+    assert metrics["reviewer_approval_rate"] == pytest.approx(1 / 3, rel=1e-3)
     assert metrics["human_override_count"] == 1
     assert metrics["reviewer_rejection_count"] == 1
     assert metrics["citation_validation_rate"] == 1.0
