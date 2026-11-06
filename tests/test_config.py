@@ -9,7 +9,13 @@ def set_api_environment(monkeypatch):
         "RUSA_API_DATABASE_URL",
         "postgresql://rusa_api_login:secret@db/rusa?sslmode=verify-full",
     )
-    monkeypatch.setenv("RUSA_API_KEYS", '{"' + "a" * 40 + '":"tenant-a"}')
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"e33cdf9c7f7120b98e8c78408953e07f2ecd183006b5606df349b4c212acf43e":'
+        '{"subject":"api-test","tenant_id":"tenant-a","roles":["tenant_admin"]}}',
+    )
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
@@ -109,4 +115,20 @@ def test_aicode_kill_switch_defaults_to_enabled_in_development(monkeypatch):
 def test_aicode_kill_switch_rejects_ambiguous_values(monkeypatch):
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "sometimes")
     with pytest.raises(ValueError, match="RUSA_AICODE_ENABLED"):
+        RuntimeConfig.from_env()
+
+
+def test_production_api_rejects_legacy_raw_api_key_registry(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_API_KEYS", '{"' + "a" * 40 + '":"tenant-a"}')
+    with pytest.raises(RuntimeError, match="legacy RUSA_API_KEYS"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_api_key_registry_rejects_unknown_roles(monkeypatch):
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"' + "a" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["root"]}}',
+    )
+    with pytest.raises(ValueError, match="roles"):
         RuntimeConfig.from_env()
