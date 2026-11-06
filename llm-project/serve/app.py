@@ -856,7 +856,7 @@ def create_aicode_task(
     }
     try:
         if idempotency_key is not None:
-            task_id, created = queue.enqueue_idempotent(
+            task_id, created, status_value = queue.enqueue_idempotent(
                 task_id,
                 tenant_id,
                 payload,
@@ -882,16 +882,6 @@ def create_aicode_task(
     )
     if not accepted:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
-    status_value = "queued"
-    if idempotency_key is not None and not created:
-        try:
-            existing = queue.get(
-                task_id, tenant_id, audit_actor=_api_task_actor(http_request)
-            )
-            if existing is not None:
-                status_value = existing["status"]
-        except Exception:
-            logger.exception("Could not read idempotent task replay status")
     return AICodeTaskResponse(
         task_id=task_id,
         status=status_value,
