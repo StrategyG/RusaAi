@@ -319,7 +319,7 @@ services:
         max-file: "3"
 
   rusa-agent-db-backup:
-    profiles: ["backup"]
+    profiles: ["backup-once"]
     build:
       context: .
       dockerfile: Dockerfile.backup
@@ -331,6 +331,46 @@ services:
       BACKUP_DIR: /backups
       BACKUP_AGE_RECIPIENT: ${RUSA_BACKUP_AGE_RECIPIENT:?Set RUSA_BACKUP_AGE_RECIPIENT in .env}
       BACKUP_RETENTION_DAYS: ${RUSA_BACKUP_RETENTION_DAYS:-30}
+      RUSA_BACKUP_S3_URI: ${RUSA_BACKUP_S3_URI:-}
+      RUSA_BACKUP_S3_ENDPOINT: ${RUSA_BACKUP_S3_ENDPOINT:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-southeast-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - rusa-agent-db-backups:/backups
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  rusa-agent-db-backup-scheduler:
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    image: rusa-agent-db-backup:local
+    command: ["/app/scripts/postgres/backup_scheduler.sh"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
+      BACKUP_DIR: /backups
+      BACKUP_AGE_RECIPIENT: ${RUSA_BACKUP_AGE_RECIPIENT:?Set RUSA_BACKUP_AGE_RECIPIENT in .env}
+      BACKUP_RETENTION_DAYS: ${RUSA_BACKUP_RETENTION_DAYS:-30}
+      RUSA_BACKUP_INTERVAL_SECONDS: ${RUSA_BACKUP_INTERVAL_SECONDS:-3600}
+      RUSA_BACKUP_RETRY_SECONDS: ${RUSA_BACKUP_RETRY_SECONDS:-300}
       RUSA_BACKUP_S3_URI: ${RUSA_BACKUP_S3_URI:-}
       RUSA_BACKUP_S3_ENDPOINT: ${RUSA_BACKUP_S3_ENDPOINT:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-southeast-1}
