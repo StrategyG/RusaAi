@@ -122,6 +122,22 @@ class AICodeTaskRequest(BaseModel):
     repository: RepositoryInput
     acceptance_criteria: list[str] = Field(min_length=1, max_length=30)
 
+    @field_validator("objective")
+    @classmethod
+    def validate_objective(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Objective cannot be blank")
+        return value
+
+    @field_validator("acceptance_criteria")
+    @classmethod
+    def validate_acceptance_criteria(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() for item in value):
+            raise ValueError("Acceptance criteria cannot contain blank items")
+        if any(len(item) > 1000 for item in value):
+            raise ValueError("Each acceptance criterion must be 1000 characters or fewer")
+        return value
+
 
 class AICodeTaskResponse(BaseModel):
     task_id: str
