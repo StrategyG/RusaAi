@@ -109,11 +109,14 @@ pytest llm-project/tests/ -v
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
+| `/health`, `/health/live` | `GET` | Process liveness and system metadata |
+| `/health/ready` | `GET` | Returns 200 when the inference model is loaded and 503 otherwise |
+| `/v1/chat/completions` | `POST` | Chat completion with optional SSE streaming |
 | `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
 
 ---
+
+Configure a local checkpoint and run the real-model smoke test using the [serving guide](llm-project/serve/README.md).
 
 ## Security & Governance
 
