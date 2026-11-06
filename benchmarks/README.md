@@ -34,9 +34,26 @@ GitHub Actions runs lint, compile, the deterministic pytest suite, and the execu
 
 ## Model benchmark (separate, repeated, non-blocking)
 
-Model evaluation must use a real configured provider and an immutable model revision. Run at least 10 repetitions per case for exploratory comparison and 30+ per case before promotion decisions. Record each attempt's outcome, first-attempt success, policy expected/actual decision, elapsed time, retry count, input/output tokens, and provider-reported cost when available.
+The optional model runner executes the same five lifecycle scenarios through the real configured OpenAI-compatible provider while all repository tools remain deterministic local fixtures; it never writes to a real GitHub repository. It measures end-to-end task success, first-attempt success, policy handling, p95 latency, retries, provider usage, and cost when both token usage and price rates are supplied.
 
-Do not compare runs unless dataset version, model revision, policy version, provider/hardware configuration, and evaluation settings match. Keep raw per-attempt JSONL and the aggregate report together. Missing revision identifiers invalidate a model-quality comparison.
+Run manually:
+
+```bash
+export RUSA_AGENT_MODEL_BASE_URL="https://your-model-endpoint/v1"
+export RUSA_AGENT_MODEL_NAME="your-model-name"
+export RUSA_AGENT_MODEL_REVISION="immutable-provider-revision"
+export RUSA_AGENT_MODEL_API_KEY="..." # when required
+export RUSA_AGENT_MODEL_INPUT_USD_PER_1M="..." # optional
+export RUSA_AGENT_MODEL_OUTPUT_USD_PER_1M="..." # optional
+PYTHONPATH=. python benchmarks/run_model_benchmark.py --repetitions 10
+```
+
+Or dispatch **Agent Evaluation Benchmark** in GitHub Actions with `run_model_benchmark=true`. Configure the corresponding repository secrets:
+`RUSA_AGENT_MODEL_BASE_URL`, `RUSA_AGENT_MODEL_NAME`, `RUSA_AGENT_MODEL_REVISION`, optional `RUSA_AGENT_MODEL_API_KEY`, and optional input/output USD-per-million token rates.
+
+The runner writes an aggregate JSON report and raw per-attempt JSONL. It requires a model revision and rejects a policy version that does not match the policy code. It records provider token usage only when the response reports prompt, completion, and total tokens. Cost per task remains `null` unless every provider call for every sampled task reports usage and both price rates are configured.
+
+Run at least 10 repetitions per case for an exploratory baseline candidate and 30+ per case before promotion decisions. The model job is manually invoked and is not a merge-blocking check. Do not compare runs unless dataset version, model revision, policy version, provider/hardware configuration, and evaluation settings match.
 
 ## Metric definitions
 
