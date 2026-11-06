@@ -89,7 +89,8 @@ class PostgresTaskQueue:
                 """, ([
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_only",
+                    "aicode_audit_worker_only", "aicode_jobs_worker_all",
+                    "aicode_memory_worker_all", "aicode_audit_worker_all",
                 ],)).fetchall()
                 policy_names = {row[1] for row in policies}
                 required_policies = {
@@ -99,6 +100,12 @@ class PostgresTaskQueue:
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                legacy_permissive = {
+                    "aicode_jobs_worker_all", "aicode_memory_worker_all",
+                    "aicode_audit_worker_all",
+                }
+                if policy_names.intersection(legacy_permissive):
+                    raise RuntimeError("Legacy permissive RLS policies remain; reapply migrations/004_aicode_tenant_rls.sql")
                 return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
