@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -78,7 +78,7 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
             "SELECT record_hash FROM aicode_audit_events ORDER BY id DESC LIMIT 1"
         ).fetchone()
         previous_hash = previous_row[0] if previous_row else "GENESIS"
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
         audit = PostgresAuditLog(DSN, os.environ["RUSA_AUDIT_HMAC_KEY"])
         audit_row = {
             "timestamp": timestamp,
