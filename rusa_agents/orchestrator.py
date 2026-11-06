@@ -87,9 +87,12 @@ class AICodeOrchestrator:
             if call.name not in self.ROLE_TOOLS[role]:
                 raise _TaskBlocked(f"{role.value} is not authorized to use {call.name}")
             action = self.ACTIONS[call.name]
-            path = str(call.arguments.get("path", "")) if call.name in {
-                "read_file", "list_files", "write_file",
-            } else None
+            path = (
+                str(call.arguments.get("path", ""))
+                if call.name in {"read_file", "write_file"}
+                or (call.name == "list_files" and call.arguments.get("path"))
+                else None
+            )
             decision = self.policy.evaluate(
                 action, risk=result.risk, repository=record.task.repository, path=path,
             )

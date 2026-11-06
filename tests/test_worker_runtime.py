@@ -80,3 +80,17 @@ def test_worker_renews_lease_during_long_task():
         task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test",
     )
     assert queue.retried is None
+
+
+
+def test_worker_claim_error_is_retried_by_poll_loop():
+    class BrokenQueue:
+        def claim(self, lease_seconds):
+            raise RuntimeError("temporary database outage")
+
+    worker = QueueWorker(
+        queue=BrokenQueue(),
+        orchestrator=FakeOrchestrator(),
+        memory=FakeMemory(),
+    )
+    assert asyncio.run(worker.run_once()) is False

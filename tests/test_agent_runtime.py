@@ -483,3 +483,44 @@ def test_changed_head_after_security_requires_reverification():
     ).run(make_task()))
     assert record.state == TaskState.WAITING_EXTERNAL
     assert record.stage_index == 3
+
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env.production",
+        ".github/workflows/ci.yml",
+        ".github/CODEOWNERS",
+        "CODEOWNERS",
+        "pyproject.toml",
+        "requirements-agent.txt",
+        "scripts/postgres/init-agent-db.sh",
+        "docker-compose.yml",
+        "package-lock.json",
+    ],
+)
+def test_policy_requires_approval_for_protected_files(path):
+    decision = AutonomyPolicy().evaluate(
+        "repo_write",
+        risk=RiskLevel.LOW,
+        repository=make_task().repository,
+        path=path,
+    )
+    assert decision.allowed is False
+    assert decision.requires_approval is True
+
+
+def test_worker_can_list_repository_root_without_file_path():
+    task = make_task()
+    tools = FakeTools()
+    analyst = ScriptedWorker(
+        WorkerRole.ANALYST,
+        [worker_result(WorkerRole.ANALYST, [ToolCall("list_files")])],
+    )
+    orchestrator = make_orchestrator(tools, {WorkerRole.ANALYST: analyst})
+    record = TaskRecord(task=task)
+    record.transition(TaskState.OBSERVING)
+    result = asyncio.run(orchestrator._run_worker(record, WorkerRole.ANALYST))
+    assert result.success is True
+    assert tools.calls[0].name == "list_files"

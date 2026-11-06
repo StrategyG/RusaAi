@@ -85,7 +85,11 @@ class QueueWorker:
                 await heartbeat
 
     async def run_once(self) -> bool:
-        item = await asyncio.to_thread(self.queue.claim, self.lease_seconds)
+        try:
+            item = await asyncio.to_thread(self.queue.claim, self.lease_seconds)
+        except Exception:
+            logger.exception("agent queue claim failed")
+            return False
         if item is None:
             return False
         tenant_id = item["tenant_id"]

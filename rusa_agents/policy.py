@@ -26,8 +26,18 @@ class AutonomyPolicy:
         "force_push_main", "arbitrary_shell", "unrestricted_network", "delete_repository",
     }
     PROTECTED_PATHS = (
-        ".github/workflows", ".env", "secrets", "credentials",
+        ".github/workflows", ".github/actions", ".github/codeowners",
+        "scripts/postgres", ".env", "secrets", "credentials", ".aws", ".ssh",
     )
+    PROTECTED_FILES = {
+        "codeowners", "dockerfile", "docker-compose.yml", "docker-compose.yaml",
+        "compose.yml", "compose.yaml", "pyproject.toml", "poetry.lock", "uv.lock",
+        "pipfile", "pipfile.lock", "package.json", "package-lock.json",
+        "pnpm-lock.yaml", "yarn.lock", "cargo.toml", "cargo.lock",
+        "go.mod", "go.sum", "gemfile", "gemfile.lock",
+        "composer.json", "composer.lock", ".npmrc", ".pypirc", ".netrc",
+        ".git-credentials", "credentials.json", "secrets.json",
+    }
 
     def __init__(self, allowed_actions: set[str] | None = None) -> None:
         self.allowed_actions = set(self.ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
@@ -48,10 +58,17 @@ class AutonomyPolicy:
             for protected in AutonomyPolicy.PROTECTED_PATHS
         ):
             return False
+        filename = parts[-1].lower()
+        if filename in AutonomyPolicy.PROTECTED_FILES:
+            return False
+        if filename.startswith("requirements") and filename.endswith(".txt"):
+            return False
         if lowered.endswith((".pem", ".key", ".p12", ".pfx", ".env")):
             return False
         return not any(
-            part.lower() in {"id_rsa", "id_ed25519", "secrets", "credentials", ".env"}
+            part.lower() in {
+                "id_rsa", "id_ed25519", "secrets", "credentials", ".env",
+            }
             or part.lower().startswith(".env.")
             for part in parts
         )
