@@ -9,7 +9,7 @@
 - Selects BF16/FP16 on supported CUDA devices and FP32 on CPU; uses `device_map=auto`, evaluation mode and inference mode.
 - Provides OpenAI-compatible non-streaming chat completions and Server-Sent Events streaming.
 - Adds `POST /v1/chat/completions/batch`, which tokenizes a bounded set of prompts together and performs one padded tensor-batch generation call. Batch items share sampling parameters.
-- Bounds concurrent inference with a semaphore and queue timeout; returns 429 when capacity is unavailable.
+- Bounds concurrent inference with a semaphore and queue timeout; returns 429 when capacity is unavailable. Generation has a configured deadline and CUDA out-of-memory failures return a retryable 503.
 - Adds request body limits, per-process API rate limiting, request IDs and generic client errors.
 - Makes production startup fail closed unless a strong API key and a local model path are configured.
 - Makes A2A schema validation fail closed if the schema file is missing or cannot be loaded.
@@ -45,6 +45,7 @@ Important tuning settings:
 - `RUSA_MAX_BATCH_SIZE`: maximum items accepted by the explicit batch endpoint.
 - `RUSA_MAX_CONCURRENT_REQUESTS`: start at 1 for a single GPU; increase only after measured memory and load tests.
 - `RUSA_QUEUE_TIMEOUT_SECONDS`: maximum time waiting for an inference slot.
+- `RUSA_GENERATION_TIMEOUT_SECONDS`: Transformers generation deadline, checked between decoding steps; a deadline does not guarantee an immediate interruption during a long GPU kernel.
 - `RUSA_MAX_REQUEST_BYTES` and `RUSA_RATE_LIMIT_PER_MINUTE`: API request protections.
 
 ## Run locally
