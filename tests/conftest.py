@@ -36,7 +36,7 @@ def apply_postgres_migrations_for_integration_suite():
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")
 
-    with psycopg.connect(dsn, connect_timeout=5) as connection:
+    with psycopg.connect(dsn, connect_timeout=5, autocommit=True) as connection:
         for migration in migrations:
             connection.execute(
                 migration.read_text(encoding="utf-8"),
