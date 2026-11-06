@@ -68,6 +68,13 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+            docker compose config --quiet
+            rm -f .env
+          fi
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
