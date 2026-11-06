@@ -11,6 +11,7 @@ services:
       RUSA_WORKER_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
+      RUSA_API_KEYS: "{}"
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_GITHUB_TOKEN: ""
       RUSA_SANDBOX_IMAGE: ""
@@ -51,6 +52,7 @@ services:
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
+      RUSA_API_KEYS_JSON: "{}"
       RUSA_METRICS_API_KEY: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
