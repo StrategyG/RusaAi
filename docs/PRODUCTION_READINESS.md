@@ -6,7 +6,7 @@
 - Current main commit at this ledger revision: `3c012e0a4342b8e10b974643884539618d222aee`
 - PR #50 (post-lease Git publication fencing): merged into main.
 - PR #50 exact-head CI: passed (test/lint/security, production image build/test/scan, and RAG/MCP integration).
-- Main push CI for commit `3c012e0`: was still running at the last status check; test/lint/security and RAG/MCP jobs had passed, while the production image job was still running.
+- Main push CI for commit `3c012e0`: passed all three jobs (test/lint/security, production image build/test/scan, and RAG/MCP integration).
 
 A green CI run validates only the exact commit and checks it executed. It does not certify a VPS deployment.
 
@@ -43,7 +43,7 @@ A green CI run validates only the exact commit and checks it executed. It does n
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Exact-main CI | All jobs green on commit `3c012e0` | Pending at last check |
+| Exact-main CI | All jobs green on commit `3c012e0` | Passed (all three jobs) |
 | VPS infrastructure | Provisioned Linux host, rootless Docker worker daemon, storage, DNS | Not supplied / not deployed |
 | Database | PostgreSQL 16 + pgvector, encrypted backup/PITR, TLS, separate runtime logins | Not provisioned |
 | Migrations | Apply 001–006, then 007 and 008 in order; verify RLS and role grants | Not applied |
