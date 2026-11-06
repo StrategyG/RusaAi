@@ -1,0 +1,26 @@
+profile: local_dev
+status: proposed
+purpose: CPU-only configuration and contract tests; this profile does not load or train the 96-layer target model.
+hardware:
+  device: cpu
+  gpu_count: 0
+  distributed_backend: none
+model:
+  source: blueprint_only
+  max_context_tokens: 4096
+  context_mode: smoke
+training:
+  enabled: false
+  strategy: none
+  precision: fp32
+  micro_batch_size: 1
+  gradient_accumulation_steps: 1
+inference:
+  enabled: false
+  backend: none
+  quantization: none
+  max_batch_size: 1
+notes:
+  - Use for schema validation, package imports, and small deterministic component tests.
+  - This profile does not represent a trained checkpoint or a usable chat inference service.
+  - Do not run full-model training with this profile.
