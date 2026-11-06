@@ -115,6 +115,7 @@ API settings:
 
 ```dotenv
 ENVIRONMENT=production
+RUSA_AICODE_ENABLED=false  # fail-closed; set true only after all release gates pass
 RUSA_DATABASE_URL=postgresql://rusa_runtime_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
 RUSA_API_KEYS={"LONG_RANDOM_API_KEY_AT_LEAST_32_BYTES":"tenant-acme"}
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
@@ -143,6 +144,8 @@ RUSA_DOCKER_GID=1001
 ```
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
+
+Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off; setting it back to `false` is the immediate AICode execution kill switch. Existing task status, cancellation, health, and metrics endpoints remain available.
 
 API keys and the audit HMAC key must each contain at least 32 UTF-8 bytes. Use a secret manager. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
 
