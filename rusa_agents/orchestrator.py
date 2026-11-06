@@ -1,7 +1,8 @@
 """Hierarchical orchestrator with evidence-based completion."""
 from dataclasses import asdict
 from .audit import AuditLog
-from .contracts import CodingTask,TaskRecord,TaskState,Worker,WorkerRole
+from .contracts import CodingTask,TaskRecord,TaskState,WorkerRole
+from .workers import Worker
 from .memory import SQLiteMemory
 from .policy import AutonomyPolicy
 
