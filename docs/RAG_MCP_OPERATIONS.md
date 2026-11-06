@@ -89,8 +89,11 @@ filesystem expectation.
 
 ## Autonomous worker retrieval integration
 
-To enable retrieval tools inside autonomous coding tasks, set
-`RUSA_RAG_ENABLED=true` on the worker only. Keep the default disabled unless
+Build the worker image with `docker build --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker .`
+to include the optional retrieval package and its small dependency set from
+`requirements-rag-worker.txt`. The default worker image remains lean. To enable
+retrieval tools inside autonomous coding tasks, set `RUSA_RAG_ENABLED=true`
+on the worker only. Keep the default disabled unless
 the pgvector migration and role grants have been applied. Configure:
 
 - `RUSA_KNOWLEDGE_DATABASE_URL` (optional; defaults to the worker database URL)
