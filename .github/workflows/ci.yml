@@ -113,6 +113,7 @@ jobs:
               SELECT 1 FROM pg_auth_members
               WHERE roleid = 'rusa_knowledge_worker'::regrole
                 AND member = 'rusa_agent_worker'::regrole
+                AND NOT admin_option
                 AND NOT inherit_option
                 AND set_option
             ) THEN
