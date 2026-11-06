@@ -49,9 +49,12 @@ through an idempotent schema migration and is required by queue readiness.
 The worker credential is an internal service identity and must never be exposed
 to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
 PostgreSQL same-worker-ID stale-token test before release. Tenant cancellation
-clears the active lease token; the worker must fail its next ownership check and
-stop before starting another repository tool action. Explicit API retry is
-restricted to failed tasks and does not requeue policy-blocked tasks.
+clears the active lease token. The worker rechecks ownership immediately before
+each repository tool action and fails closed when the lease is revoked or the
+database check fails. Cancellation is cooperative: an external request already
+in flight may finish, but the worker cannot start another tool or acknowledge
+success. Explicit API retry is restricted to failed tasks and does not requeue
+policy-blocked tasks.
 
 For rollout from a worker version that does not send lease tokens, drain and stop
 all old worker replicas before enabling the new queue migration and starting the
