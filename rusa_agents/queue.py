@@ -155,6 +155,22 @@ class PostgresTaskQueue:
             """, (max(0, retry_delay_seconds), error[:4000], job_id, tenant_id, worker_id))
         return cur.rowcount == 1
 
+
+    def retry(self, task_id: str, tenant_id: str) -> bool:
+        """Explicitly requeue a failed or approval-paused task for a tenant."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        with self._connect() as conn:
+            row = conn.execute("""
+                UPDATE aicode_jobs
+                SET status='queued', attempts=0, available_at=NOW(),
+                    lease_owner=NULL, lease_until=NULL, last_error=NULL, updated_at=NOW()
+                WHERE task_id=%s AND tenant_id=%s
+                  AND status IN ('awaiting_approval', 'failed')
+                RETURNING id
+            """, (task_id, tenant_id)).fetchone()
+        return row is not None
+
     def cancel(self, task_id: str, tenant_id: str) -> bool:
         with self._connect() as conn:
             cur = conn.execute("""
