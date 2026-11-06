@@ -58,19 +58,18 @@ async def _run_with_heartbeat(
             if execution.done():
                 return await execution
             try:
-            renewed = await asyncio.to_thread(
-                queue.heartbeat,
-                tenant_id,
-                task_id,
-                worker_id,
-                lease_token,
-                lease_seconds,
-                stopping,
-            )
-        except Exception as exc:
-            execution.cancel()
-            await asyncio.gather(execution, return_exceptions=True)
-            raise LeaseLostError("could not renew the worker lease") from exc
+                renewed = await asyncio.to_thread(
+                    queue.heartbeat,
+                    tenant_id,
+                    task_id,
+                    worker_id,
+                    lease_token,
+                    lease_seconds,
+                )
+            except Exception as exc:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+                raise LeaseLostError("could not renew the worker lease") from exc
             if not renewed:
                 execution.cancel()
                 await asyncio.gather(execution, return_exceptions=True)
@@ -127,6 +126,7 @@ async def run_worker() -> None:
                 worker_id,
                 lease_token,
                 lease_seconds,
+                stopping,
             )
             result: dict[str, Any] = {
                 "state": record.state.value,
