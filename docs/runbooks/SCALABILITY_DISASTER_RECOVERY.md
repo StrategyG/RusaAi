@@ -111,8 +111,17 @@ Set the public recipient in `RUSA_BACKUP_AGE_RECIPIENT`. Do not commit the ident
 Run a one-shot backup:
 
 ```bash
-docker compose --profile backup run --rm rusa-agent-db-backup
+docker compose --profile backup-once run --rm rusa-agent-db-backup
 ```
+
+Enable scheduled backups (default interval: one hour; failures retry after five minutes):
+
+```bash
+docker compose --profile backup up -d rusa-agent-db-backup-scheduler
+docker compose --profile backup logs -f rusa-agent-db-backup-scheduler
+```
+
+Set `RUSA_BACKUP_INTERVAL_SECONDS` to an interval no longer than the approved RPO. Monitor scheduler logs and alert on every failed backup cycle; a configured interval is not evidence of a successful backup.
 
 The backup script:
 - Streams `pg_dump` directly into age encryption; it does not persist a plaintext dump.
@@ -125,7 +134,7 @@ For production, the remote bucket must have versioning and immutable retention/O
 
 The dump covers the application database only. It does not include PostgreSQL cluster roles/global objects, the audit volume, model weights, or source documents stored outside PostgreSQL. Recreate database roles using the reviewed initialization procedure and restore the audit/model/document stores from their own protected backups. The bootstrap database credential is privileged; keep the backup profile disabled except during scheduled backup/restore operations.
 
-The snapshot RPO is no better than the interval between successful backups. The current scripts do not configure WAL archiving or point-in-time recovery. If the approved RPO is shorter than the tested snapshot interval, implement WAL archiving/PITR (for example, pgBackRest or WAL-G) before release.
+The snapshot RPO is no better than the time between successful backup snapshots, including backup duration and any missed/failed cycles. The current scripts do not configure WAL archiving or point-in-time recovery. If the approved RPO is shorter than the tested snapshot interval, implement WAL archiving/PITR (for example, pgBackRest or WAL-G) before release.
 
 ## 7. Restore procedure
 
