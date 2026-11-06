@@ -161,3 +161,31 @@ def test_model_name_is_not_silently_substituted_when_loaded(client):
         },
     )
     assert response.status_code == 503
+
+
+
+def test_request_id_is_sanitized(client):
+    supplied = "invalid request id with spaces"
+    response = client.get("/health", headers={"X-Request-ID": supplied})
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] != supplied
+    assert " " not in response.headers["X-Request-ID"]
+
+
+def test_rate_limit_returns_retryable_response(client, monkeypatch):
+    import app as serving_app
+
+    serving_app.rate_limiter._events.clear()
+    monkeypatch.setenv("RUSA_RATE_LIMIT_PER_MINUTE", "1")
+    payload = {"envelope": {"protocol_version": "invalid"}}
+    first = client.post("/v1/validate-task", json=payload)
+    second = client.post("/v1/validate-task", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == "60"
+
+
+def test_request_body_limit_rejects_large_content(client):
+    oversized = b"x" * (1_048_576 + 1)
+    response = client.post("/health/live", content=oversized)
+    assert response.status_code == 413
