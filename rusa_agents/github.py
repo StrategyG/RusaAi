@@ -16,10 +16,31 @@ from .policy import AutonomyPolicy
 
 
 _SECRET_PATTERNS = (
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
-    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"), "[REDACTED TOKEN]"),
-    (re.compile(r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"), r"\1\2[REDACTED]"),
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
+    (
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+        ),
+        "[REDACTED PRIVATE KEY]",
+    ),
+    (
+        re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"
+        ),
+        "[REDACTED TOKEN]",
+    ),
+    (
+        re.compile(
+            r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)"
+            r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+        ),
+        r"\1\2[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"
+        ),
+        "[REDACTED JWT]",
+    ),
 )
 
 
@@ -41,7 +62,9 @@ class GitHubToolGateway:
         max_file_bytes: int = 1_000_000,
         max_check_pages: int = 10,
         max_diff_pages: int = 3,
-        max_diff_chars: int = 200_000,
+        max_diff_files: int = 20,
+        max_diff_patch_chars: int = 5500,
+        max_diff_chars: int = 100_000,
     ) -> None:
         parsed = urlparse(api_url)
         if (
@@ -60,7 +83,8 @@ class GitHubToolGateway:
         if (
             timeout_seconds <= 0 or max_response_bytes < 1024 or max_file_bytes < 1024
             or not 1 <= max_check_pages <= 10 or not 1 <= max_diff_pages <= 3
-            or max_diff_chars < 1024
+            or not 1 <= max_diff_files <= 100 or not 1024 <= max_diff_patch_chars <= 12000
+            or max_diff_chars < max_diff_patch_chars
         ):
             raise ValueError("invalid GitHub gateway limits")
         self.api_url = api_url.rstrip("/")
@@ -71,6 +95,8 @@ class GitHubToolGateway:
         self.max_file_bytes = max_file_bytes
         self.max_check_pages = max_check_pages
         self.max_diff_pages = max_diff_pages
+        self.max_diff_files = max_diff_files
+        self.max_diff_patch_chars = max_diff_patch_chars
         self.max_diff_chars = max_diff_chars
 
     def _validate_task(self, task: CodingTask) -> None:
@@ -431,7 +457,10 @@ class GitHubToolGateway:
         page_limit = min(page_count, self.max_diff_pages)
         collected: list[dict[str, Any]] = []
         diff_chars = 0
-        diff_complete = changed_count <= self.max_diff_pages * 100
+        diff_complete = (
+            changed_count <= self.max_diff_pages * 100
+            and changed_count <= self.max_diff_files
+        )
         for page in range(1, page_limit + 1):
             payload = first if page == 1 else await self._request(
                 "GET",
@@ -446,6 +475,9 @@ class GitHubToolGateway:
                 diff_complete = False
                 break
             for item in page_files:
+                if len(collected) >= self.max_diff_files:
+                    diff_complete = False
+                    break
                 if not isinstance(item, dict):
                     diff_complete = False
                     continue
@@ -457,8 +489,14 @@ class GitHubToolGateway:
                 elif not isinstance(patch, str):
                     patch = ""
                     diff_complete = False
-                if len(patch) > 12_000 or diff_chars + len(patch) > self.max_diff_chars:
-                    patch = patch[:max(0, min(12_000, self.max_diff_chars - diff_chars))]
+                if (
+                    len(patch) > self.max_diff_patch_chars
+                    or diff_chars + len(patch) > self.max_diff_chars
+                ):
+                    patch = patch[:max(
+                        0,
+                        min(self.max_diff_patch_chars, self.max_diff_chars - diff_chars),
+                    )]
                     diff_complete = False
                 diff_chars += len(patch)
                 collected.append({
