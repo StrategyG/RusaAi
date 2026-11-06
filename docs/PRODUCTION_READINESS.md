@@ -24,15 +24,18 @@ The code changes require successful CI on the remediation pull request. The mode
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | Pending CI on remediation PR |
+| API foundation | CI, schema tests, auth tests, container smoke test | Pending latest CI |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Orchestrator, workers, queue, retries, idempotency, cancellation | Not implemented |
-| Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
-| Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
-| Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
+| Hierarchical agent runtime | Supervisor, worker pool, durable queue, retries, leases, cancellation | Implemented in feature branch; CI and load evidence pending |
+| Memory and messaging | Tenant-scoped durable memory and message trace | Implemented in feature branch; retention and operational tests pending |
+| RAG | pgvector ingestion/retrieval, source ACL, citations | Implemented in feature branch; real embedding and retrieval benchmarks pending |
+| MCP | Streamable HTTP gateway, tool allowlists, JSON Schema validation | Implemented in feature branch; external server review/configuration pending |
+| Database operations | Alembic migrations, PostgreSQL concurrency, backup/restore | Migration CI added; production drills pending |
+| Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration and security review required |
+| Reliability operations | Monitoring, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
 
 ## Deployment rules
