@@ -56,4 +56,3 @@ def test_rejects_jwt_bearer_credentials():
     jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + ("a" * 32) + "." + ("b" * 32)
     with pytest.raises(ValueError, match="JWT bearer credential"):
         reject_credential_material("Authorization: Bearer " + jwt)
-\n
