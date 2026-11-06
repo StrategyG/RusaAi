@@ -15,14 +15,14 @@ from .contracts import CodingTask
 
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
-BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore"}
 BLOCKED_WRITE_NAMES = {
     ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
     "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
     "dockerfile.agent-sandbox", "docker-compose.yml", "makefile",
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
-    "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
+    "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
 }
 BLOCKED_WRITE_PREFIXES = (
     ".github/", "migrations/", "schemas/", "llm-project/configs/",
@@ -45,6 +45,7 @@ class GitWorkspaceManager:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_TERMINAL_PROMPT": "0",
+            "GIT_LFS_SKIP_SMUDGE": "1",
         }
         return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
@@ -112,6 +113,7 @@ class GitHubPublisher:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_TERMINAL_PROMPT": "0",
+            "GIT_LFS_SKIP_SMUDGE": "1",
         }
         if env:
             base_env.update(env)
@@ -120,7 +122,7 @@ class GitHubPublisher:
     @staticmethod
     def _safe_changed_paths(workspace: Path) -> list[str]:
         result = subprocess.run(
-            ["git", "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             capture_output=True, timeout=30, check=False,
         )
         if result.returncode:
@@ -140,16 +142,20 @@ class GitHubPublisher:
                 skip_next = True
             path = Path(raw_path)
             parts = {part.lower() for part in path.parts}
-            if path.is_absolute() or ".." in path.parts or parts.intersection(BLOCKED_PATH_PARTS):
+            if (
+                path.is_absolute()
+                or ".." in path.parts
+                or parts.intersection(BLOCKED_PATH_PARTS)
+                or any(part.startswith(".env") and part != ".env.example" for part in parts)
+            ):
                 continue
             if (
                 path.suffix.lower() in BLOCKED_SUFFIXES
                 or path.name.lower() in {"id_rsa", "id_ed25519"}
                 or path.name.lower() in BLOCKED_WRITE_NAMES
+                or path.name.lower().startswith(("requirements-", "dockerfile."))
                 or any(raw_path.startswith(prefix) for prefix in BLOCKED_WRITE_PREFIXES)
             ):
-                continue
-            if raw_path.startswith(".github/workflows/"):
                 continue
             candidate = (workspace / path).resolve(strict=False)
             if candidate != workspace and workspace not in candidate.parents:
@@ -174,7 +180,7 @@ class GitHubPublisher:
 
         changed = self._safe_changed_paths(root)
         if changed:
-            added = self._run(["git", "add", "--", *changed], str(root))
+            added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
             commit = self._run([
@@ -199,7 +205,7 @@ class GitHubPublisher:
         askpass.chmod(0o700)
         try:
             pushed = self._run(
-                ["git", "push", "origin", f"HEAD:refs/heads/{branch}"],
+                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "push", "origin", f"HEAD:refs/heads/{branch}"],
                 str(root),
                 {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "RUSA_GITHUB_TOKEN": self.token},
             )
