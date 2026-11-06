@@ -145,3 +145,38 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+
+@pytest.mark.parametrize(
+    "name",
+    [".env.production", "config.env", "app.env.local", "production.env", "secrets.yaml"],
+)
+def test_gateway_blocks_env_suffix_files(tmp_path, name):
+    (tmp_path / name).write_text("SENSITIVE=value")
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.read_file(name)
+    with pytest.raises(ToolDenied):
+        gateway.write_file(name, "new value", WorkerRole.DEVELOPER)
+
+
+def test_sandbox_snapshot_excludes_non_hidden_env_files(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("print('safe')")
+    (workspace / "production.env").write_text("SECRET=do-not-copy")
+    (workspace / "config.env.local").write_text("TOKEN=do-not-copy")
+    (workspace / "secrets.yaml").write_text("password: do-not-copy")
+
+    def fake_run(command, **kwargs):
+        mount = next(item for item in command if item.startswith("type=bind,src="))
+        snapshot = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
+        assert not (snapshot / "production.env").exists()
+        assert not (snapshot / "config.env.local").exists()
+        assert not (snapshot / "secrets.yaml").exists()
+        return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
+
+    monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
+    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
+    assert DockerSandbox(image="sandbox:test").run(workspace, "pytest").ok
