@@ -29,6 +29,7 @@ COPY --from=builder /install /usr/local
 COPY llm-project/serve /app/llm-project/serve
 COPY schemas /app/schemas
 COPY rusa_agents /app/rusa_agents
+COPY rusa_knowledge /app/rusa_knowledge
 
 USER 10001:10001
 
