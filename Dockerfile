@@ -30,14 +30,14 @@ COPY --chown=appuser:appuser . /app
 RUN python -m pip uninstall -y setuptools wheel jaraco.context || true
 # Remove duplicate metadata from both site-packages and dist-packages, including
 # stale .dist-info/.egg-info directories that pip may not select for uninstall.
-RUN find /usr/local/lib /usr/lib -type d \( \
-    -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \
-    -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \
+RUN find /usr/local/lib /usr/lib \( \
+    -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' \
+    -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' \
     -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
   \) -prune -exec rm -rf '{}' + \
-  && if find /usr/local/lib /usr/lib -type d \( \
-       -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \
-       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \
+  && if find /usr/local/lib /usr/lib \( \
+       -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' \
+       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' \
        -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
      \) -print -quit | grep -q .; then \
        echo "Build-only Python packaging tools remain in the runtime image" >&2; exit 1; \
