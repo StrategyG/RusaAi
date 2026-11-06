@@ -1,7 +1,6 @@
 import os
 import sys
 import uuid
-import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")))
@@ -15,7 +14,7 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "ok"
+    assert data["status"] == "healthy"
 
 
 def test_chat_completions_endpoint():
@@ -36,16 +35,27 @@ def test_validate_task_endpoint_valid():
         "task_id": str(uuid.uuid4()),
         "message_id": str(uuid.uuid4()),
         "type": "task.create",
-        "from": "agent-a",
-        "to": "agent-b",
+        "from": {"agent_id": "agent-a", "role": "human"},
+        "to": {"agent_id": "agent-b", "role": "rusa_orchestrator"},
         "created_at": "2026-11-06T10:00:00Z",
-        "task": {"name": "Test Task"},
-        "policy": {}
+        "task": {
+            "objective": "Test A2A task validation",
+            "acceptance_criteria": ["Tests pass"],
+            "repository": "StrategyG/RusaAi",
+            "base_branch": "main",
+            "work_branch": "feature/test-a2a-task",
+        },
+        "policy": {
+            "allowed_actions": ["repo_read"],
+            "prohibited_actions": ["merge"],
+            "human_approval_required": ["merge"],
+        },
     }
     response = client.post("/v1/validate-task", json={"envelope": valid_envelope})
     assert response.status_code == 200
     data = response.json()
     assert data["valid"] is True
+    assert data["errors"] == []
 
 
 def test_validate_task_endpoint_invalid():
