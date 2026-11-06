@@ -459,6 +459,41 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
     )
 
 
+@app.post("/v1/agent/tasks", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
+def submit_agent_task(
+    request: AgentTaskSubmission,
+    http_request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=128),
+):
+    """Validate and enqueue one idempotent coding-agent task."""
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    envelope = request.envelope
+    errors = list(get_task_validator().iter_errors(envelope))
+    if errors:
+        details = [str(error.message) for error in errors]
+        raise HTTPException(status_code=422, detail=details)
+    task = envelope["task"]
+    payload = {
+        "task_id": envelope["task_id"],
+        "objective": task["objective"],
+        "context": task.get("context", ""),
+        "acceptance_criteria": task["acceptance_criteria"],
+        "repository": {
+            "full_name": task["repository"],
+            "base_branch": task["base_branch"],
+            "work_branch": task["work_branch"],
+        },
+        "tenant_id": "default",
+    }
+    try:
+        result = queue.enqueue("default", envelope["task_id"], payload, idempotency_key)
+    except Exception as exc:
+        logger.exception("Agent task enqueue failed request_id=%s", http_request.state.request_id)
+        raise HTTPException(status_code=503, detail="Agent task queue is temporarily unavailable") from exc
+    return {"task_id": result["task_id"], "state": result["state"]}
+
 @app.post(
     "/v1/validate-task",
     response_model=TaskValidationResponse,
