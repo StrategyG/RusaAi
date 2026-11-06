@@ -191,7 +191,9 @@ def verify_model_artifact(
     if not any(name in verified for name in _REQUIRED_TOKENIZER_FILES):
         raise ModelArtifactError("Model artifact does not contain a supported tokenizer file")
     if not any(name.lower().endswith(_WEIGHT_SUFFIXES) for name in verified):
-        raise ModelArtifactError("Model artifact does not contain supported model weight files")
+        raise ModelArtifactError(
+            "Model artifact must contain safetensors weights; pickle-based checkpoints are not accepted"
+        )
 
     return VerifiedModelArtifact(
         root=root,
