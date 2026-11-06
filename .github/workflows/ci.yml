@@ -44,15 +44,16 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-agent.txt
+            requirements-rag-mcp.txt
             requirements-dev.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents tests
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents tests
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -61,6 +62,7 @@ jobs:
         run: |
           pip-audit -r requirements.txt
           pip-audit -r requirements-agent.txt
+          pip-audit -r requirements-rag-mcp.txt
 
   container:
     name: Build and smoke-test containers
@@ -79,6 +81,24 @@ jobs:
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Build knowledge MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Run knowledge MCP container
+        run: |
+          docker run -d --name rusa-mcp-ci \
+            -p 127.0.0.1:8002:8002 \
+            -e RUSA_MCP_ALLOWED_HOSTS=localhost,localhost:*,127.0.0.1,127.0.0.1:*,rusa-mcp,rusa-mcp:* \
+            rusa-knowledge-mcp:${{ github.sha }}
+      - name: Verify MCP liveness
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:8002/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs rusa-mcp-ci
+          exit 1
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \
@@ -97,4 +117,4 @@ jobs:
           exit 1
       - name: Cleanup
         if: always()
-        run: docker rm -f rusa-ai-ci || true
+        run: docker rm -f rusa-ai-ci rusa-mcp-ci || true
