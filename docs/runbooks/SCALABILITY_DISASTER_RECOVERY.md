@@ -146,7 +146,9 @@ Compose sets `RUSA_BACKUP_REQUIRE_REMOTE=true` by default for both backup profil
 
 For production, configure a dedicated off-host bucket with versioning and immutable retention/Object Lock. Use a separate backup credential with write access only to the backup location. Do not store AWS credentials in Git or ordinary application configuration.
 
-The dump covers the application database only. It does not include PostgreSQL cluster roles/global objects, the audit volume, model weights, or source documents stored outside PostgreSQL. Recreate database roles using the reviewed initialization procedure and restore the audit/model/document stores from their own protected backups. The bootstrap database credential is privileged; keep the backup profile disabled except during scheduled backup/restore operations.
+The dump covers the application database only. It does not include PostgreSQL cluster roles/global objects, the audit volume, model weights, or source documents stored outside PostgreSQL. Recreate database roles using the reviewed initialization procedure and restore the audit/model/document stores from their own protected backups.
+
+Scheduled backups use the dedicated `rusa_agent_backup` role, not the database owner. It inherits `pg_read_all_data` and has `BYPASSRLS` so `pg_dump` can capture every tenant, but it is not a superuser and receives no application write privileges; its sessions default to read-only transactions. CI verifies that this identity can produce a restorable snapshot and cannot insert rows. Treat its credential as highly sensitive because it can read all tenant data. Destructive restores must use a separately supplied restore-operator credential with the required DDL privileges; never put that credential in the scheduled backup service.
 
 The snapshot RPO is no better than the time between successful backup snapshots, including backup duration and any missed/failed cycles. The current scripts do not configure WAL archiving or point-in-time recovery. If the approved RPO is shorter than the tested snapshot interval, implement WAL archiving/PITR (for example, pgBackRest or WAL-G) before release.
 
