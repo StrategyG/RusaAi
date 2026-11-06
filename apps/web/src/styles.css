@@ -156,6 +156,9 @@ td strong { color: #dce4f2; font-weight: 600; }
 .chat-heading { align-items: center; }
 .model-tag { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 20px; color: #aebbd0; background: #111a29; font-size: 9px; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #52cba0; box-shadow: 0 0 10px rgba(82,203,160,.45); }
+.status-dot.offline { background: #f17d89; box-shadow: 0 0 10px rgba(241,125,137,.3); }
+.status-dot.checking { background: #e8b768; box-shadow: 0 0 10px rgba(232,183,104,.25); }
+.chat-model-warning { margin: 14px 17px 0; }
 .chat-panel { display: flex; flex: 1; flex-direction: column; min-height: 480px; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #0e1726; }
 .chat-messages { display: flex; flex: 1; flex-direction: column; gap: 22px; overflow-y: auto; padding: 27px clamp(17px, 5vw, 60px); }
 .chat-welcome { max-width: 570px; margin: auto; padding: 25px 0; text-align: center; }
