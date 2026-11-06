@@ -1,7 +1,7 @@
 # Optional knowledge and MCP runtime; requires Python 3.11+.
 beautifulsoup4>=4.12,<5
 httpx>=0.27,<1
-httpx2>=1,<2
+httpx2>=2,<3
 mcp>=2,<3
 psycopg[binary,pool]>=3.2,<4
 pypdf>=5,<7
