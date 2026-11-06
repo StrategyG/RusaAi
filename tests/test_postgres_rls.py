@@ -244,10 +244,16 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     worker_audit.record(
         "audit-b", task_id, "worker:policy-test-worker", "task.execute", "allow"
     )
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        worker_audit.record(
-            "audit-a", task_id, "worker:policy-test-worker", "task.execute", "deny"
-        )
+    with psycopg.connect(worker_dsn) as conn:
+        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("audit-b",))
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    """INSERT INTO aicode_task_policy_events
+                       (tenant_id, task_id, actor, action, decision)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    ("audit-a", task_id, "worker:policy-test-worker", "task.execute", "deny"),
+                )
 
     with psycopg.connect(api_dsn) as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
