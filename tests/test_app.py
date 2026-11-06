@@ -305,3 +305,39 @@ def test_aicode_task_status_exposes_result_only_to_owning_tenant(monkeypatch):
         headers={"X-API-Key": "foreign-key"},
     )
     assert foreign.status_code == 401
+
+
+def test_task_rbac_denies_read_only_principal_and_audits_decision(monkeypatch, caplog):
+    key = "read-only-task-test-credential-000000000000"
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"' + digest + '":{"subject":"reader-service","tenant_id":"tenant-reader","roles":["read_only"]}}',
+    )
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+    caplog.set_level("INFO", logger="rusa-ai.task-policy")
+
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": key},
+        json={
+            "objective": "This must be denied",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["Must not enqueue"],
+        },
+    )
+
+    assert response.status_code == 403
+    events = [
+        __import__("json").loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "rusa-ai.task-policy"
+    ]
+    assert events[-1]["tenant_id"] == "tenant-reader"
+    assert events[-1]["task_id"] is None
+    assert events[-1]["actor"] == "api:reader-service"
+    assert events[-1]["action"] == "task.create"
+    assert events[-1]["decision"] == "deny"
