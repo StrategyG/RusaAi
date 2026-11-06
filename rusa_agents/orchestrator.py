@@ -239,7 +239,6 @@ class AICodeOrchestrator:
                         record.stage_index = 3
                         record.transition(TaskState.WAITING_EXTERNAL)
                         await self._persist(record, checkpoint_callback)
-                        await self._persist(record, checkpoint_callback)
                         self._event(
                             "task.waiting_external", record, "rusa-master", {"reason": "CI pending"},
                         )

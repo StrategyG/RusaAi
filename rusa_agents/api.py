@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import asyncio
 import json
 import os
 import re
@@ -22,9 +23,12 @@ MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"
 class RequestGuardMiddleware:
     """Bound and buffer every HTTP request body, including chunked bodies."""
 
-    def __init__(self, app, max_request_bytes):
+    def __init__(self, app, max_request_bytes, request_timeout_seconds: float = 15.0):
+        if request_timeout_seconds <= 0:
+            raise ValueError("request timeout must be positive")
         self.app = app
         self.max_request_bytes = max_request_bytes
+        self.request_timeout_seconds = request_timeout_seconds
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -74,8 +78,17 @@ class RequestGuardMiddleware:
 
         buffered_messages = []
         received_bytes = 0
+        deadline = asyncio.get_running_loop().time() + self.request_timeout_seconds
         while True:
-            message = await receive()
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                await send_error(408, "Request body was not received before the timeout")
+                return
+            try:
+                message = await asyncio.wait_for(receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                await send_error(408, "Request body was not received before the timeout")
+                return
             if message["type"] == "http.disconnect":
                 return
             if message["type"] != "http.request":

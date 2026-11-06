@@ -14,10 +14,10 @@ from .policy import AutonomyPolicy
 
 
 _SECRET_PATTERNS = (
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
-    (re.compile(r"\\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\\b"), "[REDACTED TOKEN]"),
-    (re.compile(r"""(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\\s*[:=]\\s*)("[^"]*"|'[^']*'|[^\\s,;]+)"""), r"\\1\\2[REDACTED]"),
-    (re.compile(r"\\beyJ[A-Za-z0-9_-]{12,}\\.[A-Za-z0-9_-]{12,}\\.[A-Za-z0-9_-]{8,}\\b"), "[REDACTED JWT]"),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"), "[REDACTED TOKEN]"),
+    (re.compile(r"""(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)"""), r"\1\2[REDACTED]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
 )
 
 
@@ -113,7 +113,7 @@ class GitHubToolGateway:
                             raise RuntimeError("GitHub API response exceeds the configured size limit")
                     except ValueError as exc:
                         raise RuntimeError("GitHub API returned an invalid content length") from exc
-                async for chunk in response.aiter_bytes():
+                async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                     if len(response_body) + len(chunk) > self.max_response_bytes:
                         raise RuntimeError("GitHub API response exceeds the configured size limit")
                     response_body.extend(chunk)

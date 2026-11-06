@@ -81,7 +81,7 @@ class OpenAICompatibleProvider:
                             )
                     except ValueError as exc:
                         raise RuntimeError("model provider returned an invalid content length") from exc
-                async for chunk in response.aiter_bytes():
+                async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                     if len(response_body) + len(chunk) > self.max_response_bytes:
                         raise RuntimeError(
                             "model provider response exceeds the configured size limit"

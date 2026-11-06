@@ -73,3 +73,6 @@ The runtime can autonomously create a branch, modify permitted files, and open a
 ## Database least-privilege boundary
 
 The API database role is granted only SELECT and INSERT on the tenant-scoped task table. It receives no UPDATE/DELETE privileges and no access to episodic memory tables or sequences. The worker role owns queue and memory operations; row-level security remains enabled and forced on tenant-scoped tables. Existing volumes must run the queue/memory initialization migration so prior default grants are revoked.
+
+
+HTTP ingress buffers request bodies only up to the configured maximum and applies a total body-read deadline, including chunked requests without Content-Length. GitHub and model-provider response bodies are streamed with bounded chunk sizes and maximum decoded response sizes.

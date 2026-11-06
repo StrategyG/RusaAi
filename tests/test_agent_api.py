@@ -213,3 +213,32 @@ def test_agent_api_assigns_unique_work_branches_per_task(monkeypatch):
         )
     assert first.status_code == 202 and second.status_code == 202
     assert first.json()["work_branch"] != second.json()["work_branch"]
+
+
+
+def test_agent_api_rejects_slow_streamed_request_body():
+    import asyncio
+
+    from rusa_agents.api import RequestGuardMiddleware
+
+    async def downstream(scope, receive, send):
+        raise AssertionError("slow request must be rejected before reaching the app")
+
+    middleware = RequestGuardMiddleware(
+        downstream,
+        max_request_bytes=1024,
+        request_timeout_seconds=0.01,
+    )
+    sent = []
+
+    async def receive():
+        await asyncio.sleep(0.05)
+        return {"type": "http.request", "body": b"x", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/test", "headers": [], "state": {}}
+    asyncio.run(middleware(scope, receive, send))
+    response_start = next(item for item in sent if item["type"] == "http.response.start")
+    assert response_start["status"] == 408
