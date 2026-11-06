@@ -29,7 +29,6 @@ class CreateAgentTaskRequest(BaseModel):
     objective: str = Field(min_length=1, max_length=4000)
     repository: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
     base_branch: str = Field(default="main", min_length=1, max_length=128)
-    # Accepted only for compatibility; the server derives and verifies the isolated branch.
     work_branch: str | None = Field(default=None, min_length=1, max_length=128)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
     context: str = Field(default="", max_length=16000)
@@ -37,11 +36,7 @@ class CreateAgentTaskRequest(BaseModel):
 
 def configured_repositories() -> set[str]:
     raw = os.getenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "")
-    repositories = {
-        item.strip().lower()
-        for item in raw.split(",")
-        if item.strip()
-    }
+    repositories = {item.strip().lower() for item in raw.split(",") if item.strip()}
     if not repositories or any(
         not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", item)
         for item in repositories
@@ -51,6 +46,62 @@ def configured_repositories() -> set[str]:
             detail="RUSA_AGENT_ALLOWED_REPOSITORIES is missing or invalid",
         )
     return repositories
+
+
+def configured_tenant_repository_map() -> dict[str, set[str]]:
+    global_repositories = configured_repositories()
+    raw = os.getenv("RUSA_AGENT_TENANT_REPOSITORIES", "")
+    try:
+        configured = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RUSA_AGENT_TENANT_REPOSITORIES is missing or invalid JSON",
+        ) from exc
+    if not isinstance(configured, dict) or not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RUSA_AGENT_TENANT_REPOSITORIES must map tenants to repositories",
+        )
+    tenant_map: dict[str, set[str]] = {}
+    for tenant_id, values in configured.items():
+        if (
+            not isinstance(tenant_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tenant_id)
+            or not isinstance(values, list)
+            or not values
+            or not all(isinstance(item, str) for item in values)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Tenant repository mapping contains an invalid tenant or repository list",
+            )
+        repositories = {item.strip().lower() for item in values}
+        if (
+            len(repositories) != len(values)
+            or any(not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", item)
+                   for item in repositories)
+            or not repositories.issubset(global_repositories)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Tenant repository mapping must use unique repositories from the global allowlist",
+            )
+        tenant_map[tenant_id] = repositories
+    raw_keys = os.getenv("RUSA_AGENT_TENANT_KEYS", "")
+    try:
+        keys = json.loads(raw_keys)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent tenant credential configuration is invalid",
+        ) from exc
+    if not isinstance(keys, dict) or not set(tenant_map).issubset(keys):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Every repository-mapped tenant must have an API credential",
+        )
+    return tenant_map
 
 
 def authenticate_tenant(
@@ -109,8 +160,7 @@ async def lifespan(application: FastAPI):
     dsn = os.getenv("RUSA_AGENT_API_DATABASE_URL", "")
     if not dsn:
         raise RuntimeError("RUSA_AGENT_API_DATABASE_URL is required")
-    if not configured_repositories():
-        raise RuntimeError("GitHub repository allowlist is required")
+    configured_tenant_repository_map()
     queue = PostgresTaskQueue(dsn)
     if not queue.check_ready():
         raise RuntimeError("Agent task schema or tenant RLS policy is not initialized")
@@ -192,8 +242,12 @@ def create_task(
         r"[A-Za-z0-9_.:-]{1,128}", idempotency_key
     ):
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
-    if body.repository.lower() not in configured_repositories():
-        raise HTTPException(status_code=403, detail="Repository is not allowed for this agent")
+    tenant_repositories = configured_tenant_repository_map().get(tenant_id)
+    if tenant_repositories is None or body.repository.lower() not in tenant_repositories:
+        raise HTTPException(
+            status_code=403,
+            detail="Repository is not assigned to the authenticated tenant",
+        )
     task_id = uuid.uuid4().hex
     expected_branch = CodingTask.expected_work_branch_for(
         tenant_id,
