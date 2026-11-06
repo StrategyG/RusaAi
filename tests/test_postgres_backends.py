@@ -94,7 +94,7 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     queue.initialize()
     task_id = str(uuid4())
     tenant_id = "tenant-fencing-" + task_id[:8]
-    assert queue.enqueue(task_id, tenant_id, {"objective": "fencing"}, max_attempts=3)
+    assert queue.enqueue(task_id, tenant_id, {"objective": "fencing"}, max_attempts=3, priority=10000)
 
     stale = queue.claim("stale-worker", lease_seconds=30)
     assert stale is not None and stale.task_id == task_id
