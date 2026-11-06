@@ -76,6 +76,8 @@ async def run_load_test(args: argparse.Namespace) -> dict[str, object]:
                                 return
                             total_bytes = 0
                             done = False
+                            stream_chars = 0
+                            finish_reason = None
                             async for line in response.aiter_lines():
                                 total_bytes += len(line.encode("utf-8"))
                                 if total_bytes > 2_000_000:
@@ -91,11 +93,17 @@ async def run_load_test(args: argparse.Namespace) -> dict[str, object]:
                                     raise RuntimeError("provider_stream_error")
                                 choices = event.get("choices") or []
                                 if choices:
-                                    delta = choices[0].get("delta") or {}
-                                    if delta.get("content") and first_token_at is None:
-                                        first_token_at = time.perf_counter()
-                            if not done:
-                                raise RuntimeError("stream_missing_done")
+                                    choice = choices[0]
+                                    delta = choice.get("delta") or {}
+                                    content = delta.get("content")
+                                    if content:
+                                        stream_chars += len(content)
+                                        if first_token_at is None:
+                                            first_token_at = time.perf_counter()
+                                    if choice.get("finish_reason") is not None:
+                                        finish_reason = choice["finish_reason"]
+                            if not done or stream_chars == 0 or finish_reason is None:
+                                raise RuntimeError("stream_incomplete")
                     else:
                         response = await client.post(
                             endpoint, headers=headers, json=payload
