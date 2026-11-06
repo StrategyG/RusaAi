@@ -18,7 +18,7 @@ from .policy import AutonomyPolicy
 _SECRET_PATTERNS = (
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"), "[REDACTED TOKEN]"),
-    (re.compile(r"""(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)"""), r"\1\2[REDACTED]"),
+    (re.compile(r"""(?i)(api[_-]?key|client[_-]?secret|secret|password|access[_-]?token|token)(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)"""), r"\1\2[REDACTED]"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
 )
 
