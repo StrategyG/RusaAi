@@ -282,8 +282,13 @@ class WorkspaceToolGateway:
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
-        if role == WorkerRole.SECURITY and profile not in {"bandit", "ruff", "compile"}:
-            raise ToolDenied("Security worker may only run static validation profiles")
+        allowed_profiles = {
+            WorkerRole.TESTER: {"pytest"},
+            WorkerRole.DEBUGGER: {"pytest", "compile", "ruff"},
+            WorkerRole.SECURITY: {"bandit", "ruff", "compile"},
+        }
+        if profile not in allowed_profiles.get(role, set()):
+            raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:
