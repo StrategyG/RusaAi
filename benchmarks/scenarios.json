@@ -1,0 +1,101 @@
+{
+  "benchmark_id": "rusa-agent-flow-v1",
+  "version": 1,
+  "description": "Small regression matrix for the hierarchical agent task lifecycle.",
+  "cases": [
+    {
+      "id": "normal-task",
+      "class": "normal",
+      "sample_size": 1,
+      "expected": "task reaches succeeded only after configured evidence gates pass"
+    },
+    {
+      "id": "policy-prohibited",
+      "class": "policy_rejection",
+      "sample_size": 1,
+      "expected": "never-allowed action is denied even when allowlisted and approved"
+    },
+    {
+      "id": "tool-failure",
+      "class": "tool_failure",
+      "sample_size": 1,
+      "expected": "tool exception is surfaced and task exhausts its bounded retry budget"
+    },
+    {
+      "id": "qa-failure",
+      "class": "qa_failure",
+      "sample_size": 1,
+      "expected": "failed latest-commit CI evidence blocks terminal task success"
+    },
+    {
+      "id": "worker-crash",
+      "class": "worker_recovery",
+      "sample_size": 1,
+      "expected": "expired lease is recovered to queued when retry budget remains"
+    }
+  ],
+  "model_benchmark": {
+    "enabled": false,
+    "repetitions_per_case": 10,
+    "requires": [
+      "RUSA_AGENT_MODEL_BASE_URL",
+      "RUSA_AGENT_MODEL_NAME",
+      "RUSA_AGENT_MODEL_REVISION"
+    ],
+    "note": "Run only against a pinned model and policy. Do not substitute missing version identifiers with guessed values."
+  },
+  "policy_cases": [
+    {
+      "id": "allow-listed-read",
+      "tool": "github.list_files",
+      "allowed_tools": [
+        "github.list_files"
+      ],
+      "approved_actions": [],
+      "expected_allowed": true,
+      "expected_requires_approval": false
+    },
+    {
+      "id": "not-allow-listed",
+      "tool": "github.write_file",
+      "allowed_tools": [],
+      "approved_actions": [],
+      "expected_allowed": false,
+      "expected_requires_approval": false
+    },
+    {
+      "id": "protected-needs-approval",
+      "tool": "github.merge_pull_request",
+      "allowed_tools": [
+        "github.merge_pull_request"
+      ],
+      "approved_actions": [],
+      "expected_allowed": false,
+      "expected_requires_approval": true
+    },
+    {
+      "id": "protected-approved",
+      "tool": "github.merge_pull_request",
+      "allowed_tools": [
+        "github.merge_pull_request"
+      ],
+      "approved_actions": [
+        "github.merge_pull_request"
+      ],
+      "expected_allowed": true,
+      "expected_requires_approval": false
+    },
+    {
+      "id": "prohibited-always-denied",
+      "tool": "audit.disable",
+      "allowed_tools": [
+        "audit.disable"
+      ],
+      "approved_actions": [
+        "audit.disable"
+      ],
+      "expected_allowed": false,
+      "expected_requires_approval": false
+    }
+  ]
+}

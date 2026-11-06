@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -16,7 +17,7 @@ from .audit import AuditLog
 from .contracts import TaskStatus, WorkerMessage, WorkerRole, validate_transition
 from .messaging import AgentMessageBus
 from .orchestrator import HierarchicalOrchestrator
-from .policy import AutonomyPolicy
+from .policy import AutonomyPolicy, POLICY_VERSION
 from .security import redact_sensitive_data
 from .providers import OpenAICompatibleProvider
 from .storage import Database, TaskRow, utcnow
@@ -400,7 +401,17 @@ class AgentRuntime:
                 raise LeaseLost(f"Worker does not own task {task_id}")
             snapshot = self._serialize(row)
         tenant_id = snapshot["tenant_id"]
-        await self.audit.record(tenant_id, task_id, self.worker_id, "task.started")
+        await self.audit.record(
+            tenant_id,
+            task_id,
+            self.worker_id,
+            "task.started",
+            {
+                "model_name": getattr(self.provider, "model", None),
+                "model_revision": os.getenv("RUSA_AGENT_MODEL_REVISION"),
+                "policy_version": POLICY_VERSION,
+            },
+        )
         await self._publish(
             tenant_id,
             task_id,
@@ -459,6 +470,19 @@ class AgentRuntime:
             step = steps[cursor]
             tool_name = step["tool"]
             decision = self.policy.evaluate(tool_name, allowed, approved)
+            await self.audit.record(
+                tenant_id,
+                task_id,
+                self.worker_id,
+                "policy.decision",
+                {
+                    "tool": tool_name,
+                    "allowed": decision.allowed,
+                    "requires_approval": decision.requires_approval,
+                    "reason": decision.reason,
+                    "policy_version": POLICY_VERSION,
+                },
+            )
             if not decision.allowed:
                 if decision.requires_approval:
                     async with self.database.session() as session:
