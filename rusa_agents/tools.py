@@ -17,6 +17,12 @@ class ToolError(RuntimeError):
     pass
 
 
+class GitHubAPIError(ToolError):
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        super().__init__(f"GitHub API returned HTTP {status_code}")
+
+
 def _safe_repo(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
         raise ToolError("Invalid repository identifier")
@@ -235,7 +241,7 @@ class GitHubTools:
                 **kwargs,
             )
             if response.status_code >= 400:
-                raise ToolError(f"GitHub API returned HTTP {response.status_code}")
+                raise GitHubAPIError(response.status_code)
             return response.json() if response.content else {}
 
     async def list_files(
@@ -295,16 +301,42 @@ class GitHubTools:
         branch = _safe_branch(work_branch)
         if branch == base:
             raise ToolError("Feature branch must differ from base branch")
+        try:
+            existing = await self._request(
+                "GET",
+                f"/repos/{repo}/git/ref/heads/{quote(branch, safe='/')}",
+            )
+            return {
+                "branch": branch,
+                "sha": existing["object"]["sha"],
+                "already_exists": True,
+            }
+        except GitHubAPIError as exc:
+            if exc.status_code != 404:
+                raise
         source = await self._request(
             "GET",
             f"/repos/{repo}/git/ref/heads/{quote(base, safe='/')}",
         )
-        data = await self._request(
-            "POST",
-            f"/repos/{repo}/git/refs",
-            json={"ref": f"refs/heads/{branch}", "sha": source["object"]["sha"]},
-        )
-        return {"branch": branch, "sha": data["object"]["sha"]}
+        try:
+            data = await self._request(
+                "POST",
+                f"/repos/{repo}/git/refs",
+                json={"ref": f"refs/heads/{branch}", "sha": source["object"]["sha"]},
+            )
+            return {"branch": branch, "sha": data["object"]["sha"], "already_exists": False}
+        except GitHubAPIError as exc:
+            if exc.status_code != 422:
+                raise
+            existing = await self._request(
+                "GET",
+                f"/repos/{repo}/git/ref/heads/{quote(branch, safe='/')}",
+            )
+            return {
+                "branch": branch,
+                "sha": existing["object"]["sha"],
+                "already_exists": True,
+            }
 
     async def write_file(
         self,
@@ -321,24 +353,60 @@ class GitHubTools:
         safe_branch = _safe_branch(branch)
         if len(content) > 100000:
             raise ToolError("File content exceeds the configured limit")
+        if expected_sha and not re.fullmatch(r"[a-f0-9]{40}", expected_sha):
+            raise ToolError("Invalid expected file SHA")
+        encoded_content = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        file_endpoint = f"/repos/{repo}/contents/{safe_path}"
+        try:
+            existing = await self._request(
+                "GET",
+                file_endpoint,
+                params={"ref": safe_branch},
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code != 404:
+                raise
+            existing = None
+
+        if existing is not None:
+            try:
+                existing_content = base64.b64decode(
+                    "".join(existing.get("content", "").split()),
+                    validate=True,
+                ).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                existing_content = None
+            if existing_content == content:
+                commits = await self._request(
+                    "GET",
+                    f"/repos/{repo}/commits",
+                    params={"path": safe_path, "sha": safe_branch, "per_page": 1},
+                )
+                if commits:
+                    return {
+                        "path": path,
+                        "commit_sha": commits[0]["sha"],
+                        "content_sha": existing["sha"],
+                        "already_applied": True,
+                    }
+            if expected_sha and existing.get("sha") != expected_sha:
+                raise ToolError("File changed concurrently; reread and replan before writing")
+            if not expected_sha:
+                raise ToolError("Existing file must be read and its expected_sha supplied before update")
+
         payload: dict[str, Any] = {
             "message": message[:200],
-            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "content": encoded_content,
             "branch": safe_branch,
         }
         if expected_sha:
-            if not re.fullmatch(r"[a-f0-9]{40}", expected_sha):
-                raise ToolError("Invalid expected file SHA")
             payload["sha"] = expected_sha
-        data = await self._request(
-            "PUT",
-            f"/repos/{repo}/contents/{safe_path}",
-            json=payload,
-        )
+        data = await self._request("PUT", file_endpoint, json=payload)
         return {
             "path": path,
             "commit_sha": data["commit"]["sha"],
             "content_sha": data["content"]["sha"],
+            "already_applied": False,
         }
 
     async def get_ci_status(
@@ -425,6 +493,26 @@ class GitHubTools:
         safe_base = _safe_branch(base)
         if safe_head == safe_base:
             raise ToolError("Pull request head and base must differ")
+        owner = repo.split("/", 1)[0]
+        existing = await self._request(
+            "GET",
+            f"/repos/{repo}/pulls",
+            params={
+                "state": "open",
+                "head": f"{owner}:{safe_head}",
+                "base": safe_base,
+                "per_page": 1,
+            },
+        )
+        if existing:
+            pull = existing[0]
+            return {
+                "number": pull["number"],
+                "url": pull["html_url"],
+                "state": pull["state"],
+                "draft": pull["draft"],
+                "already_exists": True,
+            }
         data = await self._request(
             "POST",
             f"/repos/{repo}/pulls",
@@ -441,4 +529,5 @@ class GitHubTools:
             "url": data["html_url"],
             "state": data["state"],
             "draft": data["draft"],
+            "already_exists": False,
         }
