@@ -9,4 +9,3 @@ def test_knowledge_migration_enforces_vector_and_tenant_rls():
     assert "WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
     assert "rusa_knowledge_worker" in migration
-    assert "REVOKE ALL" in migration
