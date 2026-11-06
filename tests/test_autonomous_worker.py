@@ -97,3 +97,45 @@ def test_autonomous_worker_cannot_supply_forged_test_evidence():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert not result.evidence
+
+
+
+def test_acceptance_reviewer_can_return_criterion_evidence():
+    task = make_task()
+    task.metadata["aicode_phase"] = "acceptance_review"
+    evidence = {
+        "acceptance_criteria": [{
+            "criterion": "Report files",
+            "passed": True,
+            "evidence": "src/main.py: repository file inventory",
+        }]
+    }
+    worker = AutonomousCodeWorker(
+        WorkerRole.ANALYST,
+        StubProvider(json.dumps({
+            "message": "Acceptance criteria reviewed",
+            "actions": [],
+            "done": True,
+            "evidence": evidence,
+        })),
+        StubGateway(),
+    )
+    result = asyncio.run(worker.run(task, []))
+    assert result.success
+    assert result.evidence == evidence
+
+
+def test_non_reviewer_cannot_supply_model_evidence():
+    worker = AutonomousCodeWorker(
+        WorkerRole.ANALYST,
+        StubProvider(json.dumps({
+            "message": "Unverified claim",
+            "actions": [],
+            "done": True,
+            "evidence": {"acceptance_criteria": []},
+        })),
+        StubGateway(),
+    )
+    result = asyncio.run(worker.run(make_task(), []))
+    assert not result.success
+    assert "tool results" in result.blockers[0]
