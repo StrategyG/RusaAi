@@ -310,17 +310,34 @@ The current code still requires independent verification before it can be certif
 
 ### Task authorization audit
 
-Task endpoints require a configured API key even in development. The server-side
-key mapping supplies the tenant for every task operation. The API role applies
-RLS with transaction-local tenant context. Workers claim across tenants and
-authorize execution using the claimed row's tenant, its repository policy, and
-the current lease. RLS using a custom PostgreSQL setting assumes trusted service
-code controls SQL execution under the shared database login.
+Task endpoints require a verified credential in every environment. Production
+uses `RUSA_API_KEYS_JSON`, keyed by the SHA-256 digest of each raw API key; each
+claim binds a subject, tenant ID, and roles. Raw `RUSA_API_KEYS` mappings are a
+development-only compatibility path and production startup rejects them. The
+tenant ID is never accepted from request headers or task payloads. Task routes
+enforce role permissions and tenant scope before accessing the durable queue.
 
-Collect INFO events from the `rusa-ai.task-policy` logger in the API and worker
-processes and retain them in the deployment's restricted audit log sink. These
-JSON events contain `tenant_id`, `task_id`, `actor`, `action`, and `decision`.
-API actors identify the tenant principal, and worker actors identify the worker
-instance. Failed authentication uses a null tenant and an unauthenticated actor.
-These events omit credentials, lease tokens, and task payloads. A denied task
-lookup uses the caller's tenant to avoid disclosing the resource owner.
+Migration `005_aicode_task_policy_audit.sql` creates the append-only
+`aicode_task_policy_events` table. Both API and worker runtime roles are
+non-superuser and NOBYPASSRLS. FORCE RLS limits API inserts to the authenticated
+tenant and worker inserts to the claimed task tenant; API cannot read audit
+events, and runtime roles cannot update, delete, or truncate them. API actors
+are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
+`task.execute` events. Unauthenticated attempts use a null tenant and the
+restricted `task.authenticate/deny` shape. Events contain only tenant ID,
+task ID, actor, action, decision, and database timestamp—never credentials,
+lease tokens, or task payloads. The API and worker verify the audit table,
+RLS, grants, and append-only triggers at production startup. The INFO logger is
+a secondary operational stream; PostgreSQL is the durable audit record.
+
+The worker queue role is intentionally a trusted cross-tenant consumer so it
+can claim jobs. Before opening a workspace it validates the row's tenant
+repository allowlist and current lease. Queue mutations remain fenced by
+tenant, worker ID, lease token, running status, and lease expiry. The custom
+transaction-local `rusa.tenant_id` setting is a defense against accidental
+unscoped SQL, not a cryptographic boundary against arbitrary SQL execution
+under a shared runtime login. Keep all SQL parameterized and do not expose
+arbitrary SQL; deployments requiring isolation against a compromised service
+process must move to per-tenant database identities or signed database
+assertions. Export the append-only audit stream to a restricted, immutable
+off-host retention system and test restore/retention independently.
