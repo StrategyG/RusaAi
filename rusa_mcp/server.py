@@ -47,7 +47,7 @@ def parse_tenant_key_hashes(raw: str | None) -> dict[str, str]:
 
 
 def _tenant_for_token(token: str, key_hashes: dict[str, str]) -> str | None:
-    if not token or len(token) > 512:
+    if not isinstance(token, str) or not 32 <= len(token) <= 512:
         return None
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
     for expected, tenant_id in key_hashes.items():
