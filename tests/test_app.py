@@ -78,14 +78,28 @@ def test_validate_task_endpoint_invalid():
     assert response.json()["valid"] is False
 
 
-def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
+def test_aicode_task_intake_is_tenant_scoped_and_idempotent(monkeypatch):
     class StubQueue:
         def __init__(self):
             self.items = {}
+            self.idempotency = {}
 
-        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+        def enqueue_idempotent(
+            self, task_id, tenant_id, payload, idempotency_key, request_hash, *,
+            audit_actor=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            existing = self.idempotency.get(key)
+            if existing is not None:
+                existing_task_id, existing_hash = existing
+                return SimpleNamespace(
+                    task_id=existing_task_id,
+                    created=False,
+                    conflict=existing_hash != request_hash,
+                )
+            self.idempotency[key] = (task_id, request_hash)
             self.items[(tenant_id, task_id)] = payload
-            return True
+            return SimpleNamespace(task_id=task_id, created=True, conflict=False)
 
         def get(self, task_id, tenant_id, *, audit_actor=None):
             payload = self.items.get((tenant_id, task_id))
@@ -104,24 +118,62 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}')
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     queue = StubQueue()
     monkeypatch.setattr(app.state, "queue", queue, raising=False)
 
-    response = client.post(
-        "/v1/aicode/tasks",
-        headers={"X-API-Key": "tenant-key"},
-        json={
-            "objective": "Add a health endpoint test",
-            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
-            "acceptance_criteria": ["The test passes"],
-        },
-    )
+    headers = {
+        "X-API-Key": "tenant-key",
+        "Idempotency-Key": "task-create-health-001",
+    }
+    payload = {
+        "objective": "Add a health endpoint test",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The test passes"],
+    }
+    response = client.post("/v1/aicode/tasks", headers=headers, json=payload)
     assert response.status_code == 202
     data = response.json()
     assert data["tenant_id"] == "tenant-alpha"
     assert data["work_branch_prefix"].startswith("feature/aicode/")
+    assert data["replayed"] is False
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
+
+    replay = client.post("/v1/aicode/tasks", headers=headers, json=payload)
+    assert replay.status_code == 202
+    assert replay.json()["task_id"] == data["task_id"]
+    assert replay.json()["replayed"] is True
+
+    changed_payload = {**payload, "objective": "A different task"}
+    conflict = client.post("/v1/aicode/tasks", headers=headers, json=changed_payload)
+    assert conflict.status_code == 409
+    assert "different request body" in conflict.json()["detail"]
+
+def test_aicode_task_requires_valid_idempotency_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+    payload = {
+        "objective": "A task without a request key",
+        "repository": {"full_name": "StrategyG/RusaAi"},
+        "acceptance_criteria": ["Must be rejected before enqueue"],
+    }
+
+    missing = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json=payload,
+    )
+    assert missing.status_code == 400
+
+    invalid = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "bad key"},
+        json=payload,
+    )
+    assert invalid.status_code == 400
 
 
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
