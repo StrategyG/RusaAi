@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from .contracts import WorkerRole
+from .metrics import TOOL_EXECUTIONS
 
 
 class ToolDenied(PermissionError):
@@ -299,17 +300,25 @@ class WorkspaceToolGateway:
             "git_diff": set(),
         }
         if name not in schemas:
+            TOOL_EXECUTIONS.labels(str(name)[:64], "denied").inc()
             raise ToolDenied(f"Tool '{name}' is not registered")
         if set(args) - schemas[name]:
+            TOOL_EXECUTIONS.labels(name, "denied").inc()
             raise ToolDenied(f"Unexpected arguments for tool '{name}'")
-        if name == "list_files":
-            return self.list_files(args.get("path", "."))
-        if name == "read_file":
-            return self.read_file(args.get("path", ""))
-        if name == "write_file":
-            return self.write_file(args.get("path", ""), args.get("content", ""), role)
-        if name == "run_check":
-            return self.run_check(args.get("profile", ""), role)
-        if name == "git_diff":
-            return self.git_diff()
+        try:
+            if name == "list_files":
+                result = self.list_files(args.get("path", "."))
+            elif name == "read_file":
+                result = self.read_file(args.get("path", ""))
+            elif name == "write_file":
+                result = self.write_file(args.get("path", ""), args.get("content", ""), role)
+            elif name == "run_check":
+                result = self.run_check(args.get("profile", ""), role)
+            else:
+                result = self.git_diff()
+            TOOL_EXECUTIONS.labels(name, "success" if result.ok else "failure").inc()
+            return result
+        except ToolDenied:
+            TOOL_EXECUTIONS.labels(name, "denied").inc()
+            raise
         raise ToolDenied(f"Tool '{name}' is not registered")
