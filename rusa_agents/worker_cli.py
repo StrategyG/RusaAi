@@ -47,8 +47,6 @@ async def main() -> None:
     try:
         await stop.wait()
     finally:
-        for worker in workers:
-            worker.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
         await mcp_gateway.close()
         await database.close()
