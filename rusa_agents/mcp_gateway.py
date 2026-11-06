@@ -38,6 +38,8 @@ class MCPRemoteServer:
         parsed = urlparse(endpoint)
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"}:
             raise ValueError("MCP endpoints must use HTTPS except for local development")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise ValueError("MCP endpoint URLs cannot embed credentials or fragments")
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Invalid MCP endpoint URL")
         if not allowed_tools:
@@ -245,7 +247,14 @@ class MCPGateway:
             if not isinstance(entry, dict):
                 raise RuntimeError(f"MCP server config {alias} must be an object")
             token_env = entry.get("token_env", "")
+            if token_env and (
+                not isinstance(token_env, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", token_env)
+            ):
+                raise RuntimeError(f"MCP server config {alias} has an invalid token_env")
             token = os.getenv(token_env, "") if token_env else ""
+            if token_env and not token:
+                raise RuntimeError(f"MCP server credential environment variable {token_env} is missing")
             endpoint = entry.get("url", "")
             allow_tools = entry.get("allow_tools", [])
             if not isinstance(endpoint, str) or not isinstance(allow_tools, list):
