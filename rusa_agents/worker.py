@@ -284,10 +284,19 @@ def build_worker() -> QueueWorker:
             ).split(",")
             if item.strip()
         }
+        unauthorized_tenants = set(tenant_tokens) - set(tenant_repositories)
+        if unauthorized_tenants:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS contains tenants outside the repository allowlist")
+        internal_http_hosts = {
+            item.strip().lower()
+            for item in os.getenv("RUSA_MCP_INTERNAL_HTTP_HOSTS", "").split(",")
+            if item.strip()
+        }
         mcp_gateway = MCPKnowledgeGateway(
             server_url=mcp_server_url,
             tenant_tokens=tenant_tokens,
             allowed_tools=allowed_tools,
+            allow_http_hosts=internal_http_hosts,
         )
         tools = CompositeToolGateway(github, mcp_gateway)
     elif tenant_tokens_raw:
