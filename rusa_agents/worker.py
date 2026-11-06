@@ -62,7 +62,7 @@ async def run_worker() -> None:
                     task_id,
                     worker_id,
                     "; ".join(record.errors) or f"task ended in {record.state.value}",
-                    True,
+                    record.state.value == "failed",
                 )
         except Exception as exc:
             await asyncio.to_thread(
