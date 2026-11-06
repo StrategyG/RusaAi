@@ -81,7 +81,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_runtime') THEN
         CREATE ROLE rusa_runtime NOLOGIN;
     END IF;
-END
+END;
 $$;
 
 GRANT USAGE ON SCHEMA public TO rusa_runtime;
