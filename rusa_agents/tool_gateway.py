@@ -247,7 +247,7 @@ class WorkspaceToolGateway:
         if name == "run_check":
             return self.run_check(str(args.get("profile", "")), role)
         if name == "git_diff":
-            if role not in {WorkerRole.ANALYST, WorkerRole.ARCHITECT, WorkerRole.DEBUGGER, WorkerRole.TESTER, WorkerRole.SECURITY}:
+            if role not in {WorkerRole.ANALYST, WorkerRole.ARCHITECT, WorkerRole.DEVELOPER, WorkerRole.DEBUGGER, WorkerRole.TESTER, WorkerRole.SECURITY}:
                 raise ToolDenied("Role cannot inspect Git diff")
             return self.git_diff()
         raise ToolDenied(f"Tool '{name}' is not registered")
