@@ -6,6 +6,7 @@ from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.rag_memory import CompositeMemoryReader
 from rusa_agents.tool_router import CompositeToolGateway
 from rusa_agents.workers import AgentWorker
+from rusa_agents.worker import _enabled_tool_set
 from rusa_agents.contracts import WorkerRole
 
 
@@ -112,6 +113,27 @@ def test_local_knowledge_gateway_executes_tenant_scoped_search():
     assert result.success is True
     assert result.data["results"][0]["document_id"] == "doc-1"
     assert result.evidence["source"] == "local_rag"
+
+
+def test_remote_mcp_tool_subset_is_reflected_in_worker_allowlist():
+    enabled = _enabled_tool_set({"search_knowledge"})
+    worker = AgentWorker(
+        WorkerRole.ANALYST,
+        FakeProvider(),
+        enabled_tools=enabled,
+    )
+    assert "search_knowledge" in worker.allowed_tools
+    assert "get_document" not in worker.allowed_tools
+    assert "list_collections" not in worker.allowed_tools
+
+
+def test_worker_tool_set_rejects_unapproved_knowledge_tool():
+    try:
+        _enabled_tool_set({"search_knowledge", "execute_shell"})
+    except ValueError as exc:
+        assert "unapproved" in str(exc)
+    else:
+        raise AssertionError("unapproved tool was accepted")
 
 
 def test_worker_tool_allowlist_can_disable_unconfigured_knowledge_tools():
