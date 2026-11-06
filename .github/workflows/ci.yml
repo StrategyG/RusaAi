@@ -57,19 +57,9 @@ jobs:
           psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
           psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
           psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
-          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          DO $
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_api_login') THEN
-              CREATE ROLE rusa_api_login LOGIN PASSWORD 'ci-api-password' IN ROLE rusa_api_runtime;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_worker_login') THEN
-              CREATE ROLE rusa_worker_login LOGIN PASSWORD 'ci-worker-password' IN ROLE rusa_worker_runtime;
-            END IF;
-          END
-          $;
-          GRANT CONNECT ON DATABASE rusa_test TO rusa_api_login, rusa_worker_login;
-          SQL
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE rusa_api_login LOGIN PASSWORD 'ci-api-password' IN ROLE rusa_api_runtime"
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE ROLE rusa_worker_login LOGIN PASSWORD 'ci-worker-password' IN ROLE rusa_worker_runtime"
+          psql "$RUSA_DATABASE_URL" -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE rusa_test TO rusa_api_login, rusa_worker_login"
       - name: Compile
         run: python -m compileall -q rusa_agents llm-project/serve tests
       - name: Lint
