@@ -140,12 +140,17 @@ def deterministic_cases():
     deny_worker = ScriptedWorker(developer, [worker_result(
         developer, [ToolCall("write_file", {"path": ".env", "content": "synthetic"})],
     )])
+    tester = WorkerRole.TESTER
+    failing_tester = ScriptedWorker(tester, [
+        worker_result(tester, [ToolCall("get_ci_status")]) for _ in range(3)
+    ])
     for case, gateway, overrides, expected, error, repairs in (
         ("normal", FakeTools(), {}, TaskState.SUCCEEDED, "", 0),
         ("policy_block", FakeTools(), {developer: deny_worker}, TaskState.AWAITING_APPROVAL,
          "protected or unsafe", 0),
         ("tool_failure", UnavailableTool(), {}, TaskState.BLOCKED, "unsuccessful result", 0),
-        ("qa_failure", FailingCI(), {}, TaskState.BLOCKED, "maximum repair cycles", 2),
+        ("qa_failure", FailingCI(), {tester: failing_tester}, TaskState.BLOCKED,
+         "maximum repair cycles", 2),
     ):
         start = perf_counter()
         record = asyncio.run(make_orchestrator(gateway, overrides).run(make_task()))
