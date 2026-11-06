@@ -1,13 +1,13 @@
 """RUSA-AI API. Inference fails closed until a real backend is injected."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import hmac
 import json
 import logging
 import os
-import time
-from contextlib import asynccontextmanager
 from pathlib import Path
+import time
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
