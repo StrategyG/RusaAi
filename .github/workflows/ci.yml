@@ -1,9 +1,9 @@
 name: RUSA-AI CI
 
 on:
-  # PR branches are validated by pull_request only; avoid duplicate push runs.
+  # Feature branches are validated by pull_request; integration candidates also run on push.
   push:
-    branches: [main]
+    branches: [main, "integration/**"]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
