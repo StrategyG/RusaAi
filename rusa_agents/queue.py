@@ -140,6 +140,22 @@ class PostgresTaskQueue:
 
             connection.execute("""
                 ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                REVOKE ALL ON TABLES FROM rusa_agent_api
+            """)
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                REVOKE ALL ON SEQUENCES FROM rusa_agent_api
+            """)
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC
+            """)
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+                REVOKE EXECUTE ON FUNCTIONS FROM rusa_agent_api
+            """)
+            connection.execute("""
+                ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
                 IN SCHEMA public REVOKE ALL ON TABLES FROM rusa_agent_api
             """)
             connection.execute("""
