@@ -55,7 +55,7 @@ class AICodeRuntime:
             repository=RepositoryTarget(
                 full_name=repository["full_name"],
                 base_branch=repository.get("base_branch", "main"),
-                work_branch=repository["work_branch"],
+                work_branch=repository.get("work_branch", f"feature/aicode/{job.task_id[:12]}"),
             ),
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
