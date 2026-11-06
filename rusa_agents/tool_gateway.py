@@ -132,6 +132,12 @@ class WorkspaceToolGateway:
         ".ssh", ".aws", ".azure", "secrets", "credentials",
     }
     PROTECTED_PREFIXES = (".github/workflows/",)
+    PROTECTED_NAMES = {
+        "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
+        "credentials.json", "service-account.json", ".npmrc", ".pypirc",
+        ".netrc", "secrets.json", "token.json",
+    }
+    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore"}
 
     def __init__(
         self,
@@ -153,6 +159,10 @@ class WorkspaceToolGateway:
             raise ToolDenied("Absolute paths, traversal, and backslashes are prohibited")
         if any(part.lower() in self.PROTECTED_PARTS for part in candidate.parts):
             raise ToolDenied("Access to protected paths is prohibited")
+        if any(part.lower() in self.PROTECTED_NAMES for part in candidate.parts):
+            raise ToolDenied("Access to credential-like files is prohibited")
+        if any(PurePosixPath(part).suffix.lower() in self.PROTECTED_SUFFIXES for part in candidate.parts):
+            raise ToolDenied("Access to private-key and certificate files is prohibited")
         normalized = candidate.as_posix()
         if any(normalized.startswith(prefix) for prefix in self.PROTECTED_PREFIXES):
             raise ToolDenied("CI workflow files require a separate human-reviewed change")
