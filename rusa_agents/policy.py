@@ -16,6 +16,7 @@ class PolicyDecision:
 class AutonomyPolicy:
     ALLOWED_ACTIONS = {
         "repo_read", "branch_create", "repo_write", "pull_request_create", "ci_read",
+        "knowledge_read",
     }
     APPROVAL_ACTIONS = {
         "merge", "deploy", "release", "secret_change", "permission_change",
