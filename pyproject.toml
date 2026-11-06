@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rusa-ai"
+version = "0.2.0"
+description = "RUSA-AI model serving and autonomous coding-agent platform"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.100,<1",
+  "uvicorn[standard]>=0.22,<1",
+  "pydantic>=2,<3",
+  "PyYAML>=6,<7",
+  "jsonschema>=4.17,<5",
+  "httpx>=0.24,<1",
+  "python-dotenv>=1,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.3,<10",
+  "pytest-asyncio>=0.21,<2",
+  "ruff>=0.6,<1",
+  "bandit>=1.7,<2",
+]
+postgres = ["psycopg[binary]>=3.1,<4"]
+
+[tool.setuptools.packages.find]
+include = ["rusa_agents*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
