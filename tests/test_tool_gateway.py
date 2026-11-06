@@ -79,7 +79,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
     assert result.evidence["profile"] == "pytest"
-    assert "PYTHONPYCACHEPREFIX=/tmp/pycache" in captured_command
+    assert "PYTHONPYCACHEPREFIX=/run/rusa-tmp/pycache" in captured_command
 
 
 def test_gateway_rejects_credential_like_files(tmp_path):
