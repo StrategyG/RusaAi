@@ -350,6 +350,7 @@ class RequestContextAndBodyLimitMiddleware:
             response = JSONResponse(
                 status_code=413,
                 content={"detail": "Request body exceeds the configured size limit"},
+                headers={"Connection": "close"},
             )
             await response(scope, receive, send_with_headers)
             return
@@ -357,6 +358,7 @@ class RequestContextAndBodyLimitMiddleware:
             response = JSONResponse(
                 status_code=408,
                 content={"detail": "Timed out while receiving request body"},
+                headers={"Connection": "close"},
             )
             await response(scope, receive, send_with_headers)
             return
@@ -507,6 +509,8 @@ def readiness_check(request: Request):
             "device": getattr(backend, "device", None),
             "continuous_batching": bool(getattr(backend, "supports_batching", False)),
             "model": request.app.state.model_name,
+            "model_revision": getattr(artifact, "revision", None),
+            "model_manifest_sha256": getattr(artifact, "manifest_sha256", None),
         },
     )
 
