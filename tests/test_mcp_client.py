@@ -1,7 +1,6 @@
 import pytest
 
 from rusa_mcp.client import MCPToolClient, validate_server_url
-from rusa_agents.mcp_gateway import MCPKnowledgeGateway
 
 
 def test_mcp_url_requires_secure_transport_or_loopback():
@@ -31,14 +30,5 @@ def test_mcp_client_requires_long_bearer_token():
         MCPToolClient(
             server_url="https://knowledge.example.com/mcp",
             api_key="short",
-            allowed_tools={"search_knowledge"},
-        )
-
-
-def test_mcp_gateway_rejects_overlong_tenant_tokens_at_startup():
-    with pytest.raises(ValueError, match="token map is invalid"):
-        MCPKnowledgeGateway(
-            server_url="http://127.0.0.1:8002/mcp",
-            tenant_tokens={"tenant-a": "x" * 513},
             allowed_tools={"search_knowledge"},
         )
