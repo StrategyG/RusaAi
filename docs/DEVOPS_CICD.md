@@ -4,7 +4,7 @@
 
 Every push and pull request runs the reusable CI workflow:
 
-1. **Quality:** Ruff lint, Python 3.13 compilation, deployment/rollback shell tests, the full pytest suite against PostgreSQL 16, and pip-audit for the complete development dependency set.
+1. **Quality:** Ruff lint, Python 3.13 compilation, deployment/rollback shell tests, the full pytest suite against the digest-pinned PostgreSQL 16.15 image (Alpine 3.24), and pip-audit for the complete development dependency set.
 2. **Container security:** Compose interpolation validation, production API and worker image builds, Trivy image scans, and CycloneDX SBOM generation for both images.
 3. **Release Gate:** a single aggregate check that fails unless both mandatory jobs succeed. Configure this exact check as required on protected branches.
 
