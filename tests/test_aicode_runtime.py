@@ -1,7 +1,13 @@
 import asyncio
 
 from rusa_agents.audit import AuditLog
-from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerResult, WorkerRole, TaskState
+from rusa_agents.contracts import (
+    CodingTask,
+    RepositoryTarget,
+    TaskState,
+    WorkerResult,
+    WorkerRole,
+)
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
