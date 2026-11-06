@@ -17,6 +17,8 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     queue.initialize()
     task_id = str(uuid4())
     assert queue.enqueue(task_id, "tenant-alpha", {"objective": "test"}, priority=100)
+    assert not queue.enqueue(task_id, "tenant-alpha", {"objective": "test"}, priority=100)
+    assert queue.get(task_id, "tenant-alpha")["payload"] == {"objective": "test"}
     assert not queue.enqueue(task_id, "tenant-alpha", {"objective": "duplicate"}, priority=100)
     assert queue.get(task_id, "tenant-beta") is None
 
