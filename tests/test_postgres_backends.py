@@ -267,3 +267,39 @@ def test_postgres_rls_and_service_role_separation():
             sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(worker_role))
         )
         admin.close()
+
+def test_postgres_queue_client_idempotency_is_tenant_scoped_and_payload_bound():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = "tenant-idempotency-" + uuid4().hex[:8]
+    idempotency_key = "client-retry-" + uuid4().hex
+    payload = {"objective": "retry safely", "repository": "StrategyG/RusaAi"}
+    request_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    first = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+    )
+    second = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+    )
+    assert first.created is True
+    assert second.created is False
+    assert second.conflict is False
+    assert second.task_id == first.task_id
+
+    changed_hash = hashlib.sha256(b"different request body").hexdigest()
+    conflict = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, {"objective": "different"},
+        idempotency_key, changed_hash,
+    )
+    assert conflict.created is False
+    assert conflict.conflict is True
+    assert conflict.task_id == first.task_id
+
+    other_tenant = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id + "-other", payload, idempotency_key, request_hash
+    )
+    assert other_tenant.created is True
+    assert other_tenant.task_id != first.task_id
