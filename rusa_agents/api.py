@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import TaskCreate
 from .memory import MemoryStore
+from .mcp_gateway import MCPGateway
 from .providers import OpenAICompatibleProvider
 from .storage import Database
 from .tools import GitHubTools, ToolRegistry
@@ -91,6 +92,8 @@ async def lifespan(app: FastAPI):
     app.state.database = database
     app.state.memory = MemoryStore(database)
     app.state.runtime = None
+    mcp_gateway = MCPGateway.from_env()
+    app.state.mcp_gateway = mcp_gateway
     if (
         tenant_keys()
         and os.getenv("RUSA_AGENT_MODEL_BASE_URL")
@@ -100,8 +103,10 @@ async def lifespan(app: FastAPI):
         provider = OpenAICompatibleProvider()
         tools = ToolRegistry()
         GitHubTools().register(tools)
+        await mcp_gateway.connect_and_register(tools)
         app.state.runtime = AgentRuntime(database, provider, tools)
     yield
+    await mcp_gateway.close()
     await database.close()
 
 
