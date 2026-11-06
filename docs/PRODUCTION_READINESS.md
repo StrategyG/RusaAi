@@ -73,3 +73,27 @@ workers cannot honor token fencing.
 - Do not expose the API directly to the public internet. Use a TLS gateway with distributed rate limits, timeouts, and network controls.
 - Do not commit model weights, secrets, or private datasets to Git.
 - Do not call the full product production-ready until every applicable release gate has objective evidence and human approval.
+
+## Distributed worker failure semantics
+
+- Task submission requires a tenant-scoped `Idempotency-Key`. PostgreSQL enforces uniqueness on `(tenant_id, idempotency_key)`; an identical payload returns the original task ID, while a different payload returns HTTP 409.
+- Claims use `FOR UPDATE SKIP LOCKED`. Each claim rotates a cryptographically random lease token. Heartbeat, checkpoint, retry, and acknowledgement are conditional writes that require the current worker ID, token, running state, and unexpired lease.
+- A worker crash leaves the lease to expire. A later claim rotates the token; the old worker can no longer checkpoint, retry, or acknowledge, even if it reconnects using the same worker ID.
+- Attempts are bounded by `max_attempts` (default 4, hard maximum 10). Expired work at the attempt limit becomes `failed`; explicit tenant retry resets the counter and clears the failed result.
+- Cancellation and acknowledgement serialize through PostgreSQL row updates. If cancellation wins, it clears the lease and the stale acknowledgement is rejected. If success acknowledgement wins first, the terminal task cannot be cancelled or reopened by the old worker.
+
+### External side effects and ambiguous outcomes
+
+The queue provides at-least-once task execution, not exactly-once execution across PostgreSQL and GitHub. These systems do not share a transaction and the GitHub REST operations do not provide a general idempotency-key contract.
+
+The GitHub adapter therefore reconciles uncertain outcomes before retrying:
+- Branch creation uses a deterministic tenant/task branch; after an ambiguous create response it reads the ref and reuses it if present.
+- File writes read the current work-branch file first, skip identical content, and after an ambiguous PUT response read it back. The operation is treated as successful only when the stored bytes match the requested content.
+- Draft PR creation searches for an existing open PR for the exact head/base pair before creating one, and searches again after an ambiguous POST response.
+- If the external service cannot be queried or the observed state does not match the intended operation, the tool reports failure/unknown outcome. It must not blindly repeat a non-idempotent side effect. The task is left for bounded retry/reconciliation or human review.
+
+A crash can occur after GitHub commits a side effect but before the worker persists its checkpoint. Recovery may re-execute the tool call; the adapter's read-before-write and post-timeout reconciliation make supported GitHub operations converge. This is not a distributed exactly-once guarantee. Any future tool without a safe reconciliation key/read-after-write path must be marked non-retryable after an unknown outcome and routed to manual reconciliation.
+
+### Required PostgreSQL regression coverage
+
+The PostgreSQL suite includes duplicate enqueue/payload conflict, lease expiry after simulated worker death, same-ID stale-token rejection, concurrent competing claims, retry exhaustion, cancellation racing with success acknowledgement, and terminal-state non-resurrection. These tests require the CI PostgreSQL service; a skipped local test is not evidence of a pass.
