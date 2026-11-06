@@ -102,10 +102,17 @@ class PostgresKnowledgeStore:
         embeddings: list[list[float]],
     ) -> str:
         self._validate_scope(tenant_id, collection)
-        if not source_uri or len(source_uri) > 2048:
-            raise ValueError("source_uri must contain 1 to 2048 characters")
-        if not title or len(title) > 256:
+        if (
+            not isinstance(source_uri, str)
+            or not source_uri.strip()
+            or len(source_uri) > 2048
+            or any(ord(character) < 32 for character in source_uri)
+        ):
+            raise ValueError("source_uri must be a bounded string without control characters")
+        if not isinstance(title, str) or not title.strip() or len(title) > 256:
             raise ValueError("title must contain 1 to 256 characters")
+        if not isinstance(metadata, dict):
+            raise ValueError("document metadata must be a JSON object")
         if not re.fullmatch(r"[0-9a-f]{64}", content_hash):
             raise ValueError("content_hash must be a SHA-256 hex digest")
         if not chunks or len(chunks) != len(embeddings) or len(chunks) > 10_000:
