@@ -15,7 +15,7 @@ from .contracts import CodingTask
 
 
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
-BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws"}
+BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
 
 
@@ -45,6 +45,8 @@ class GitWorkspaceManager:
         branch = task.repository.work_branch
         if not BRANCH_PATTERN.fullmatch(branch) or ".." in branch or "//" in branch:
             raise ValueError("Work branch must be a safe feature/fix/chore/docs branch")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,180}", task.repository.base_branch) or ".." in task.repository.base_branch:
+            raise ValueError("Base branch is invalid")
         if task.repository.base_branch in {"main", "master"} and branch in {"main", "master"}:
             raise ValueError("Agent may not work directly on a protected branch")
 
@@ -66,11 +68,19 @@ class GitWorkspaceManager:
                 return workspace
             raise FileExistsError("Task workspace exists but is not on the expected branch")
 
-        created = self._run([
-            "git", "-c", "core.hooksPath=/dev/null",
-            "--git-dir", str(mirror), "worktree", "add", "-b", branch,
-            str(workspace), task.repository.base_branch,
+        existing_branch = self._run([
+            "git", "--git-dir", str(mirror), "show-ref", "--verify",
+            f"refs/heads/{branch}",
         ])
+        command = [
+            "git", "-c", "core.hooksPath=/dev/null",
+            "--git-dir", str(mirror), "worktree", "add",
+        ]
+        if existing_branch.returncode == 0:
+            command.extend([str(workspace), branch])
+        else:
+            command.extend(["-b", branch, str(workspace), task.repository.base_branch])
+        created = self._run(command)
         if created.returncode:
             raise RuntimeError(f"Could not create feature worktree: {created.stderr[-3000:]}")
         return workspace
@@ -163,7 +173,9 @@ class GitHubPublisher:
         else:
             sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
 
-        askpass = Path(tempfile.mkstemp(prefix="rusa-askpass-")[1])
+        askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-askpass-")
+        os.close(askpass_fd)
+        askpass = Path(askpass_name)
         askpass.write_text(
             "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' 'x-access-token' ;; "
             "*Password*) printf '%s\\n' \"$RUSA_GITHUB_TOKEN\" ;; esac\n",
