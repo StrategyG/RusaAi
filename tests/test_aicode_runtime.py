@@ -5,7 +5,6 @@ from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerResult, Wo
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
-from rusa_agents.workers import Worker
 
 
 class StubWorker:
