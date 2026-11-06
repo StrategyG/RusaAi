@@ -98,6 +98,8 @@ jobs:
           if not result.ok:
               raise SystemExit("isolated sandbox test suite failed")
           PY
+      - name: Build isolated knowledge MCP image
+        run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
         run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
       - name: Install Trivy
@@ -112,7 +114,8 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
-            "rusa-ai-worker:${{ github.sha }}"; do
+            "rusa-ai-worker:${{ github.sha }}" \\
+            "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
             echo "::endgroup::"
