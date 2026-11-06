@@ -19,6 +19,7 @@ export type AuthSession = {
 let accessToken: string | null = null;
 let authRevision = 0;
 let refreshPromise: Promise<AuthSession | null> | null = null;
+let refreshPromiseRevision: number | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
@@ -31,9 +32,9 @@ export function setAccessToken(token: string | null) {
  * the same one-time refresh token at the same time.
  */
 export async function refreshSession(): Promise<AuthSession | null> {
-  const revisionBeforeAwait = authRevision;
   if (!refreshPromise) {
     const revisionAtStart = authRevision;
+    refreshPromiseRevision = revisionAtStart;
     refreshPromise = fetch("/v1/auth/refresh", {
       method: "POST",
       credentials: "same-origin",
@@ -50,10 +51,12 @@ export async function refreshSession(): Promise<AuthSession | null> {
       .catch(() => null)
       .finally(() => {
         refreshPromise = null;
+        refreshPromiseRevision = null;
       });
   }
+  const promiseRevision = refreshPromiseRevision ?? authRevision;
   const session = await refreshPromise;
-  if (!session && authRevision === revisionBeforeAwait) accessToken = null;
+  if (!session && authRevision === promiseRevision) accessToken = null;
   return session;
 }
 
