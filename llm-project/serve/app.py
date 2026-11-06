@@ -1,8 +1,10 @@
 import os
 import json
 import logging
+from contextlib import asynccontextmanager
+from hmac import compare_digest
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 import jsonschema
@@ -10,24 +12,32 @@ import jsonschema
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    environment = os.getenv("ENVIRONMENT", "").strip().lower() or "production"
+    if environment == "production" and not os.getenv("RUSA_API_KEY", "").strip():
+        raise RuntimeError("RUSA_API_KEY must be configured in production.")
+    yield
+
 app = FastAPI(
     title="RUSA-AI Serving Engine",
     description="Production-ready API for RUSA-AI model inference and task validation.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
-def verify_api_key(api_key: Optional[str] = Depends(api_key_header)):
-    expected_key = os.getenv("RUSA_API_KEY")
-    if expected_key:
-        if not api_key or api_key != expected_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing API Key"
-            )
-    return api_key
+def verify_api_key(api_key: Optional[str] = Depends(api_key_header)) -> None:
+    expected_key = os.getenv("RUSA_API_KEY", "")
+    if not expected_key.strip() or not api_key or not compare_digest(
+        api_key.encode("utf-8"), expected_key.encode("utf-8", errors="surrogateescape")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key"
+        )
 
 class ChatMessage(BaseModel):
     role: str = Field(..., description="Message role: system, user, or assistant")
@@ -95,7 +105,7 @@ def chat_completions(request: ChatCompletionRequest):
         logger.error(f"Inference error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Inference engine failure: {str(e)}")
 
-@app.post("/v1/validate-task", response_model=TaskValidationResponse)
+@app.post("/v1/validate-task", response_model=TaskValidationResponse, dependencies=[Depends(verify_api_key)])
 def validate_task_envelope(request: TaskValidationRequest):
     schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "a2a", "task-envelope.schema.json")
     if not os.path.exists(schema_path):

@@ -117,7 +117,7 @@ pytest llm-project/tests/ -v
 
 ## Security & Governance
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
+- **API Authorization**: Set `RUSA_API_KEY` and send it in the `X-API-Key` header for chat completions and task validation. Missing or invalid keys return HTTP 401. Production startup requires a non-blank key. Production is the default when `ENVIRONMENT` is unset. The `/health` liveness probe remains public.
 - **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
 - **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
 
