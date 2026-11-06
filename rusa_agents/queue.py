@@ -233,7 +233,8 @@ class PostgresTaskQueue:
                     UPDATE public.rusa_agent_tasks
                     SET status='queued',
                         attempts=0,
-                        result=NULL,
+                        result=CASE WHEN result ->> 'state' = 'failed'
+                            THEN NULL ELSE result END,
                         available_at=now(),
                         lease_owner=NULL,
                         lease_token=NULL,
@@ -242,7 +243,8 @@ class PostgresTaskQueue:
                         last_error=NULL,
                         updated_at=now()
                     WHERE tenant_id=p_tenant_id AND task_id=p_task_id
-                      AND status='failed';
+                      AND status='failed'
+                      AND (result ->> 'pending_external_write') IS NULL;
                     GET DIAGNOSTICS affected_rows = ROW_COUNT;
                     RETURN affected_rows = 1;
                 END;
@@ -416,29 +418,33 @@ class PostgresTaskQueue:
             with connection.transaction():
                 connection.execute("""
                     UPDATE rusa_agent_tasks
-                    SET status='failed',
+                    SET status=CASE WHEN (result ->> 'pending_external_write') IS NOT NULL
+                            THEN 'blocked' ELSE 'failed' END,
+                        result=CASE WHEN (result ->> 'pending_external_write') IS NOT NULL
+                            THEN jsonb_set(result, '{state}', '"blocked"') ELSE result END,
                         lease_owner=NULL,
                         lease_token=NULL,
                         lease_until=NULL,
-                        last_error=COALESCE(
-                            last_error, 'worker lease expired after maximum attempts'
-                        ),
+                        last_error=CASE WHEN (result ->> 'pending_external_write') IS NOT NULL
+                            THEN 'external write requires reconciliation'
+                            ELSE 'maximum task attempts reached'
+                        END,
                         updated_at=now()
-                    WHERE status='running'
-                      AND lease_until < now()
-                      AND attempts >= max_attempts
+                    WHERE attempts >= max_attempts
+                      AND (
+                          (status='running' AND lease_until <= clock_timestamp())
+                          OR (status IN ('queued', 'retry', 'waiting_external')
+                              AND available_at <= now())
+                      )
                 """)
                 row = connection.execute("""
                     WITH candidate AS (
                         SELECT tenant_id, task_id
                         FROM rusa_agent_tasks
-                        WHERE (
-                            status IN ('queued', 'retry', 'waiting_external')
-                            AND available_at <= now()
-                        ) OR (
-                            status='running'
-                            AND lease_until < now()
-                            AND attempts < max_attempts
+                        WHERE attempts < max_attempts AND (
+                            (status IN ('queued', 'retry', 'waiting_external')
+                             AND available_at <= now())
+                            OR (status='running' AND lease_until <= clock_timestamp())
                         )
                         ORDER BY available_at, created_at
                         FOR UPDATE SKIP LOCKED
@@ -449,7 +455,7 @@ class PostgresTaskQueue:
                         attempts=task.attempts + 1,
                         lease_owner=%s,
                         lease_token=%s,
-                        lease_until=now() + (%s * interval '1 second'),
+                        lease_until=clock_timestamp() + (%s * interval '1 second'),
                         lease_heartbeat_at=now(),
                         updated_at=now()
                     FROM candidate
@@ -475,6 +481,14 @@ class PostgresTaskQueue:
             "lease_until": row[8].isoformat() if row[8] else None,
         }
 
+    @staticmethod
+    def _lock_task(connection, tenant_id: str, task_id: str) -> None:
+        # Check the lease against the current clock after acquiring the row lock.
+        connection.execute(
+            "SELECT 1 FROM rusa_agent_tasks WHERE tenant_id=%s AND task_id=%s FOR UPDATE",
+            (tenant_id, task_id),
+        )
+
     def heartbeat(
         self,
         tenant_id: str,
@@ -487,14 +501,15 @@ class PostgresTaskQueue:
         self._validate_lease_token(lease_token)
         self._validate_lease(lease_seconds)
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            self._lock_task(connection, tenant_id, task_id)
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
-                SET lease_until=now() + (%s * interval '1 second'),
+                SET lease_until=clock_timestamp() + (%s * interval '1 second'),
                     lease_heartbeat_at=now(),
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
                   AND status='running' AND lease_owner=%s AND lease_token=%s
-                  AND lease_until > now()
+                  AND lease_until > clock_timestamp()
             """, (lease_seconds, tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
 
@@ -509,7 +524,7 @@ class PostgresTaskQueue:
                 SELECT EXISTS (
                     SELECT 1 FROM rusa_agent_tasks
                     WHERE tenant_id=%s AND task_id=%s AND status='running'
-                      AND lease_owner=%s AND lease_token=%s AND lease_until > now()
+                      AND lease_owner=%s AND lease_token=%s AND lease_until > clock_timestamp()
                 )
                 """,
                 (tenant_id, task_id, worker_id, lease_token),
@@ -529,12 +544,13 @@ class PostgresTaskQueue:
         if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
             raise ValueError("checkpoint identity does not match its queue envelope")
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            self._lock_task(connection, tenant_id, task_id)
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET result=%s::jsonb, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
                   AND status='running' AND lease_owner=%s AND lease_token=%s
-                  AND lease_until > now()
+                  AND lease_until > clock_timestamp()
             """, (
                 json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True),
                 tenant_id,
@@ -563,6 +579,7 @@ class PostgresTaskQueue:
         )
         delay = 30 if record.state == TaskState.WAITING_EXTERNAL else 0
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            self._lock_task(connection, tenant_id, task_id)
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=%s,
@@ -575,7 +592,7 @@ class PostgresTaskQueue:
                     last_error=NULL
                 WHERE tenant_id=%s AND task_id=%s
                   AND status='running' AND lease_owner=%s AND lease_token=%s
-                  AND lease_until > now()
+                  AND lease_until > clock_timestamp()
             """, (
                 queue_status,
                 json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True),
@@ -606,22 +623,31 @@ class PostgresTaskQueue:
             raise ValueError("delay_seconds must be an integer")
         delay = min(300, max(1, delay_seconds))
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            self._lock_task(connection, tenant_id, task_id)
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=CASE
+                        WHEN (result ->> 'pending_external_write') IS NOT NULL THEN 'blocked'
                         WHEN attempts >= max_attempts THEN 'failed'
                         ELSE 'retry'
                     END,
-                    result=NULL,
+                    result=CASE WHEN (result ->> 'pending_external_write') IS NOT NULL
+                        THEN jsonb_set(result, '{state}', '"blocked"')
+                        WHEN result ->> 'state' = 'failed' THEN NULL
+                        ELSE result
+                    END,
                     available_at=now() + (%s * interval '1 second'),
                     lease_owner=NULL,
                     lease_token=NULL,
                     lease_until=NULL,
-                    last_error=%s,
+                    last_error=CASE WHEN (result ->> 'pending_external_write') IS NOT NULL
+                        THEN 'external write requires reconciliation'
+                        ELSE %s
+                    END,
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
                   AND status='running' AND lease_owner=%s AND lease_token=%s
-                  AND lease_until > now()
+                  AND lease_until > clock_timestamp()
             """, (delay, error[:2000], tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
 

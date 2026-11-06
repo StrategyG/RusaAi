@@ -1288,3 +1288,35 @@ def test_orchestrator_fails_closed_before_repository_tool_when_lease_is_lost(gua
         ))
 
     assert tools.calls == []
+
+
+def test_orchestrator_does_not_replay_write_after_losing_its_result():
+    class UnconfirmedWrite(FakeTools):
+        async def execute(self, task, call):
+            await super().execute(task, call)
+            raise TimeoutError("provider response lost")
+
+    task = make_task()
+    tools = UnconfirmedWrite()
+    developer = ScriptedWorker(WorkerRole.DEVELOPER, [worker_result(
+        WorkerRole.DEVELOPER, [ToolCall("create_branch")]
+    )])
+    orchestrator = make_orchestrator(tools, {WorkerRole.DEVELOPER: developer})
+    checkpoints = []
+
+    async def persist(record):
+        checkpoints.append(record.to_dict())
+
+    record = asyncio.run(orchestrator.run(task, checkpoint_callback=persist))
+    assert record.state == TaskState.BLOCKED
+    assert record.pending_external_write == "create_branch"
+    intent = next(item for item in checkpoints if item.get("pending_external_write"))
+    assert intent["state"] == "executing"
+
+    recovered = asyncio.run(orchestrator.run(
+        task, TaskRecord.from_dict(intent), checkpoint_callback=persist,
+    ))
+    assert recovered.state == TaskState.BLOCKED
+    assert recovered.pending_external_write == "create_branch"
+    assert "reconcile provider state" in recovered.errors[-1]
+    assert tools.calls == [("create_branch", {})]

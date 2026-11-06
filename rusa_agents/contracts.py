@@ -243,6 +243,8 @@ class TaskRecord:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+    pending_external_write: str | None = None
+
     _TRANSITIONS = {
         TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.CANCELLED, TaskState.FAILED},
         TaskState.OBSERVING: {
@@ -282,6 +284,8 @@ class TaskRecord:
             "state": self.state.value,
             "stage_index": self.stage_index,
             "repair_cycles": self.repair_cycles,
+            **({"pending_external_write": self.pending_external_write}
+               if self.pending_external_write else {}),
             "worker_results": [
                 {
                     "role": item.role.value,
@@ -322,6 +326,7 @@ class TaskRecord:
             errors=list(value.get("errors", [])),
             stage_index=int(value.get("stage_index", 0)),
             repair_cycles=int(value.get("repair_cycles", 0)),
+            pending_external_write=value.get("pending_external_write"),
             created_at=str(value.get("created_at", datetime.now(timezone.utc).isoformat())),
             updated_at=str(value.get("updated_at", datetime.now(timezone.utc).isoformat())),
         )
