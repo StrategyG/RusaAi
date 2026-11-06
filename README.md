@@ -4,7 +4,7 @@ RUSA-AI is an AI model and agent platform under active development. This reposit
 
 ## Verified scope and status
 
-The complete RUSA-AI product is NOT production-ready yet. This repository does not currently contain trained RUSA-AI model weights, a verified training pipeline, a deployed multi-agent runtime, persistent memory/RAG, or production benchmark evidence. The serving API can load a compatible local causal language model, but the model artifact must be supplied and evaluated separately.
+The complete RUSA-AI product is NOT production-ready yet. The repository now contains an enterprise AICode runtime foundation (hierarchical workers, GitHub tool gateway, PostgreSQL task queue, tenant-scoped task memory, audit trail, and authenticated task intake). It has not yet passed complete end-to-end production validation. The repository also does not contain trained RUSA-AI model weights, a verified training pipeline, or production model benchmark evidence. The model artifact must be supplied and evaluated separately.
 
 ## Serving foundation
 
@@ -24,7 +24,7 @@ Mock model responses are intentionally not supported. Inference returns HTTP 503
 - llm-project/serve/: API and local inference adapter.
 - schemas/a2a/: A2A task envelope JSON Schema.
 - tests/: API, authentication, readiness, and schema tests.
-- docs/: architecture, integration, and production-readiness documentation.
+- rusa_agents/: hierarchical coding-agent runtime, workers, GitHub gateway, queue, memory, and audit.\n- AI_CODE.md: normative AICode operating and security contract.\n- docs/: architecture, integration, and production-readiness documentation.
 
 ## Requirements
 
@@ -59,9 +59,9 @@ The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only 
 ## API endpoints
 
 - POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
-- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
+- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.\n- POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires DATABASE_URL.
 
-## Quality gates
+## Agent worker\n\nSet DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), and RUSA_GITHUB_TOKEN in the secret-backed .env file. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.\n\nSee AI_CODE.md for the agent contract and docs/PRODUCTION_READINESS.md for release gates.\n\n## Quality gates
 
 Run ruff check llm-project/serve tests, python -m compileall -q llm-project tests, pytest -q, and pip-audit -r requirements.txt.
 
