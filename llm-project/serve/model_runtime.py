@@ -9,9 +9,9 @@ import logging
 import queue
 import threading
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import AsyncIterator
 from typing import Any, Literal, Protocol
 
 logger = logging.getLogger("rusa-ai-runtime")
