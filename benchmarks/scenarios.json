@@ -1,0 +1,18 @@
+{
+  "benchmark_id": "rusa-agent-flow-v1",
+  "version": 1,
+  "description": "Small regression matrix for the hierarchical agent task lifecycle.",
+  "cases": [
+    {"id":"normal-task","class":"normal","sample_size":1,"expected":"task reaches succeeded only after configured evidence gates pass"},
+    {"id":"policy-prohibited","class":"policy_rejection","sample_size":1,"expected":"never-allowed action is denied even when allowlisted and approved"},
+    {"id":"tool-failure","class":"tool_failure","sample_size":1,"expected":"tool exception is surfaced as ToolError and is not counted as task success"},
+    {"id":"qa-failure","class":"qa_failure","sample_size":1,"expected":"missing required branch/PR/CI evidence prevents succeeded terminal state"},
+    {"id":"worker-crash","class":"worker_recovery","sample_size":1,"expected":"expired lease is recovered to queued when retry budget remains"}
+  ],
+  "model_benchmark": {
+    "enabled": false,
+    "repetitions_per_case": 10,
+    "requires": ["RUSA_AGENT_MODEL_NAME", "RUSA_AGENT_MODEL_REVISION", "RUSA_POLICY_VERSION"],
+    "note": "Run only against a pinned model and policy. Do not substitute missing version identifiers with guessed values."
+  }
+}
