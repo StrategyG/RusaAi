@@ -1,4 +1,4 @@
-import os
+import os  # noqa: I001
 import secrets
 import uuid
 
@@ -103,6 +103,7 @@ def reader_database_identity():
 
 def test_read_only_reader_role_is_tenant_scoped_and_cannot_mutate(reader_database_identity):
     import psycopg
+
     from rusa_knowledge.store import PostgresKnowledgeStore
 
     reader_dsn, worker_dsn, tenant, _other_tenant, _reader_login, _worker_login = (
