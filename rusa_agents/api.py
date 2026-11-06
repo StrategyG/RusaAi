@@ -19,6 +19,7 @@ from .contracts import CodingTask, RepositoryTarget
 from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
+AGENT_REQUEST_TIMEOUT_SECONDS = float(os.getenv("RUSA_AGENT_REQUEST_TIMEOUT_SECONDS", "15"))
 
 class RequestGuardMiddleware:
     """Bound and buffer every HTTP request body, including chunked bodies."""
@@ -235,7 +236,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(RequestGuardMiddleware, max_request_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
+app.add_middleware(
+    RequestGuardMiddleware,
+    max_request_bytes=lambda: MAX_AGENT_REQUEST_BYTES,
+    request_timeout_seconds=AGENT_REQUEST_TIMEOUT_SECONDS,
+)
 
 
 
