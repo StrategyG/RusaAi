@@ -5,13 +5,17 @@ BEGIN;
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_api_runtime') THEN
-        CREATE ROLE rusa_api_runtime NOLOGIN;
+        CREATE ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_worker_runtime') THEN
-        CREATE ROLE rusa_worker_runtime NOLOGIN;
+        CREATE ROLE rusa_worker_runtime NOLOGIN NOBYPASSRLS;
     END IF;
 END
-$$;
+$;
+
+-- Keep privilege groups non-login and explicitly unable to bypass row security.
+ALTER ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
+ALTER ROLE rusa_worker_runtime NOLOGIN NOBYPASSRLS;
 
 -- Retire broad legacy shared-role grants from migration 001.
 REVOKE ALL ON public.aicode_jobs FROM PUBLIC, rusa_runtime;
