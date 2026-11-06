@@ -156,7 +156,7 @@ class PostgresKnowledgeStore:
             raise ValueError("document metadata exceeds 16 KiB")
 
         rows = []
-        for index, (content, embedding) in enumerate(zip(chunks, embeddings)):
+        for index, (content, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             if not content.strip() or len(content) > 20_000:
                 raise ValueError("chunk content is empty or exceeds the configured limit")
             rows.append(
