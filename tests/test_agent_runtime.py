@@ -878,3 +878,18 @@ def test_security_review_only_mode_rejects_any_tool_call():
     worker = AgentWorker(WorkerRole.SECURITY, provider)
     with pytest.raises(ValueError, match="unauthorized tool"):
         asyncio.run(worker.run(make_task(), [], review_only=True))
+
+
+def test_github_gateway_enforces_tenant_repository_assignment_before_network(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+        tenant_repositories={"tenant-b": {"strategyg/rusaai"}},
+    )
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Tenant repository policy must run before network access")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    with pytest.raises(PermissionError, match="assigned to this tenant"):
+        asyncio.run(gateway.execute(make_task(), ToolCall("list_files")))
