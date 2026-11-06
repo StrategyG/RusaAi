@@ -1,5 +1,7 @@
 -- Apply as a database/schema owner, not as the runtime service account.
--- After applying, provision a login credential for role rusa_runtime through your secret manager.
+-- rusa_runtime is a NOLOGIN privilege group. Create a separate login member after migration:
+-- CREATE ROLE rusa_runtime_login LOGIN PASSWORD 'managed-secret' IN ROLE rusa_runtime;
+-- GRANT CONNECT ON DATABASE rusa TO rusa_runtime;
 
 CREATE TABLE IF NOT EXISTS public.aicode_jobs (
     id BIGSERIAL PRIMARY KEY,
