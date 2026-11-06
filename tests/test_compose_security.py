@@ -45,6 +45,8 @@ def test_schema_and_privilege_migration_gates_api_and_worker():
     assert "queue.initialize()" in migration_command
     assert "PostgresMemoryStore(dsn).initialize()" in migration_command
     assert "queue.configure_api_permissions()" in migration_command
+    assert "RUSA_AGENT_BACKUP_DB_PASSWORD" in migration_command
+    assert "GRANT pg_read_all_data TO rusa_agent_backup" in migration_command
     worker_environment = services["rusa-agent-worker"]["environment"]
     assert worker_environment["RUSA_AGENT_PROVIDER_BASE_URL"] == "${RUSA_AGENT_PROVIDER_BASE_URL:-}"
     assert worker_environment["RUSA_AGENT_PROVIDER_API_KEY"] == "${RUSA_AGENT_PROVIDER_API_KEY:-}"
@@ -81,10 +83,20 @@ def test_user_admin_workspace_is_loopback_published_and_migration_gated():
     assert "006_user_identity.sql" in " ".join(services["rusa-agent-migrate"]["command"])
     assert services["rusa-agent-db"]["environment"]["RUSA_WEB_DB_PASSWORD"] == "${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}"
     assert services["rusa-agent-migrate"]["environment"]["RUSA_WEB_DB_PASSWORD"] == "${RUSA_WEB_DB_PASSWORD:?Set RUSA_WEB_DB_PASSWORD in .env}"
+    assert services["rusa-agent-db"]["environment"]["RUSA_AGENT_BACKUP_DB_PASSWORD"] == (
+        "${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}"
+    )
+    assert services["rusa-agent-migrate"]["environment"]["RUSA_AGENT_BACKUP_DB_PASSWORD"] == (
+        "${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}"
+    )
 
     init_script = (ROOT / "scripts/postgres/init-agent-db.sh").read_text(encoding="utf-8")
     assert "RUSA_WEB_DB_PASSWORD is required" in init_script
     assert 'case "$RUSA_WEB_DB_PASSWORD" in' in init_script
+    assert "RUSA_AGENT_BACKUP_DB_PASSWORD is required" in init_script
+    assert "CREATE ROLE rusa_agent_backup" in init_script
+    assert "BYPASSRLS" in init_script
+    assert "GRANT pg_read_all_data TO rusa_agent_backup" in init_script
 
 
 def test_worker_scaling_has_bounded_graceful_shutdown_and_queue_limit():
@@ -130,6 +142,9 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     assert backup["environment"]["BACKUP_AGE_RECIPIENT"] == (
         "${RUSA_BACKUP_AGE_RECIPIENT:?Set RUSA_BACKUP_AGE_RECIPIENT in .env}"
     )
+    assert backup["environment"]["DATABASE_URL"] == (
+        "postgresql://rusa_agent_backup:${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent"
+    )
     assert backup["environment"]["RUSA_BACKUP_REQUIRE_REMOTE"] == (
         "${RUSA_BACKUP_REQUIRE_REMOTE:-true}"
     )
@@ -154,6 +169,9 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
 
     scheduler = services["rusa-agent-db-backup-scheduler"]
     assert scheduler["profiles"] == ["backup"]
+    assert scheduler["environment"]["DATABASE_URL"] == (
+        "postgresql://rusa_agent_backup:${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent"
+    )
     assert scheduler["restart"] == "unless-stopped"
     assert scheduler["stop_grace_period"] == "${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}"
     assert scheduler["environment"]["RUSA_BACKUP_REQUIRE_REMOTE"] == (
