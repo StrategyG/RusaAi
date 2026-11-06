@@ -388,3 +388,36 @@ def test_postgres_queue_requeues_only_failed_tasks_for_the_same_tenant():
             "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
             (tenant_id,),
         )
+
+
+
+def test_postgres_queue_can_cancel_task_waiting_for_human_approval():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-approval-cancel-{uuid4().hex}"
+    task = make_task(tenant_id, f"approval-cancel-{uuid4().hex}")
+    task_id = queue.enqueue(task)
+
+    claimed = queue.claim("approval-cancel-worker", lease_seconds=60)
+    assert claimed is not None and claimed["task_id"] == task_id
+    record = TaskRecord(task=task)
+    record.transition(TaskState.OBSERVING)
+    record.transition(TaskState.AWAITING_APPROVAL)
+    queue.acknowledge(
+        tenant_id,
+        task_id,
+        record,
+        worker_id="approval-cancel-worker",
+        lease_token=claimed["lease_token"],
+    )
+
+    assert queue.get(tenant_id, task_id)["status"] == "awaiting_approval"
+    assert queue.cancel(tenant_id, task_id) is True
+    assert queue.get(tenant_id, task_id)["status"] == "cancelled"
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
