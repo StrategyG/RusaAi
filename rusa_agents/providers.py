@@ -18,6 +18,12 @@ class OpenAICompatibleProvider:
         self.base_url = (base_url or os.getenv("RUSA_AGENT_MODEL_BASE_URL", "")).rstrip("/")
         self.api_key = api_key or os.getenv("RUSA_AGENT_MODEL_API_KEY", "")
         self.model = model or os.getenv("RUSA_AGENT_MODEL_NAME", "")
+        try:
+            self.max_tokens = int(os.getenv("RUSA_AGENT_MODEL_MAX_TOKENS", "2048"))
+        except ValueError as exc:
+            raise ModelProviderError("RUSA_AGENT_MODEL_MAX_TOKENS must be an integer") from exc
+        if not 256 <= self.max_tokens <= 4096:
+            raise ModelProviderError("RUSA_AGENT_MODEL_MAX_TOKENS must be between 256 and 4096")
         if not self.base_url or not self.model:
             raise ModelProviderError("RUSA_AGENT_MODEL_BASE_URL and RUSA_AGENT_MODEL_NAME are required")
         parsed = urlparse(self.base_url)
@@ -45,6 +51,8 @@ class OpenAICompatibleProvider:
         payload = {
             "model": self.model,
             "temperature": 0.1,
+            "top_p": 0.9,
+            "max_tokens": self.max_tokens,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
