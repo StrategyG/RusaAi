@@ -119,7 +119,7 @@ def test_remote_mcp_tool_subset_is_reflected_in_worker_allowlist():
     enabled = _enabled_tool_set({"search_knowledge"})
     worker = AgentWorker(
         WorkerRole.ANALYST,
-        FakeProvider(),
+        object(),
         enabled_tools=enabled,
     )
     assert "search_knowledge" in worker.allowed_tools
