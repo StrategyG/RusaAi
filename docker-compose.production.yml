@@ -51,6 +51,7 @@ services:
 
   worker:
     image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
+    stop_grace_period: 65m
     pull_policy: always
     restart: unless-stopped
     init: true
