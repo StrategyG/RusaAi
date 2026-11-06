@@ -13,6 +13,7 @@ from rusa_agents.contracts import (
     WorkerResult,
     WorkerRole,
 )
+from rusa_agents.github_gateway import GitHubToolGateway
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
@@ -165,3 +166,18 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.BLOCKED
     assert any("evidence" in error for error in record.errors)
+
+
+
+def test_github_gateway_denies_repositories_outside_allowlist():
+    gateway = GitHubToolGateway(object(), allowed_repositories={"trusted/only"})
+    result = asyncio.run(
+        gateway.execute(
+            "repo.list_tree",
+            {},
+            make_task(),
+            WorkerRole.ANALYST,
+        )
+    )
+    assert result["ok"] is False
+    assert "allowlist" in result["error"]
