@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 from typing import Any
@@ -14,19 +15,45 @@ class IdempotencyConflictError(ValueError):
     """Raised when a tenant reuses an idempotency key for a different task."""
 
 
+class QueueCapacityExceededError(RuntimeError):
+    """Raised when a tenant reaches its configured outstanding-task limit."""
+
+
 class PostgresTaskQueue:
     MIN_LEASE_SECONDS = 10
     MAX_LEASE_SECONDS = 3600
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        max_outstanding_per_tenant: int | None = None,
+    ) -> None:
         if not dsn:
             raise ValueError("PostgreSQL DSN is required")
+        if max_outstanding_per_tenant is None:
+            try:
+                max_outstanding_per_tenant = int(
+                    os.getenv("RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT", "1000")
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT must be an integer"
+                ) from exc
+        if (
+            type(max_outstanding_per_tenant) is not int
+            or not 1 <= max_outstanding_per_tenant <= 1_000_000
+        ):
+            raise ValueError(
+                "max_outstanding_per_tenant must be an integer between 1 and 1000000"
+            )
         try:
             import psycopg
         except ImportError as exc:
             raise RuntimeError("install requirements-agent.txt to use the durable queue") from exc
         self._psycopg = psycopg
         self.dsn = dsn
+        self.max_outstanding_per_tenant = max_outstanding_per_tenant
 
     def initialize(self) -> None:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -374,6 +401,39 @@ class PostgresTaskQueue:
                 "SELECT set_config('rusa.tenant_id', %s, true)",
                 (task.tenant_id,),
             )
+            # Serialize admission for one tenant so concurrent API replicas cannot
+            # oversubscribe that tenant's outstanding-task budget.
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"rusa-agent-queue:{task.tenant_id}",),
+            )
+            existing = connection.execute("""
+                SELECT task_id, payload FROM rusa_agent_tasks
+                WHERE tenant_id=%s AND idempotency_key=%s
+            """, (task.tenant_id, key)).fetchone()
+            if existing is not None:
+                stored_payload = existing[1]
+                if isinstance(stored_payload, str):
+                    stored_payload = json.loads(stored_payload)
+                if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
+                    raise IdempotencyConflictError(
+                        "idempotency key was already used with a different task payload"
+                    )
+                return str(existing[0])
+
+            outstanding = connection.execute("""
+                SELECT COUNT(*)
+                FROM rusa_agent_tasks
+                WHERE tenant_id=%s
+                  AND status IN (
+                      'queued', 'retry', 'waiting_external', 'running', 'awaiting_approval'
+                  )
+            """, (task.tenant_id,)).fetchone()[0]
+            if int(outstanding) >= self.max_outstanding_per_tenant:
+                raise QueueCapacityExceededError(
+                    "tenant task capacity is full; retry after outstanding work drains"
+                )
+
             inserted = connection.execute("""
                 INSERT INTO rusa_agent_tasks
                     (tenant_id, task_id, idempotency_key, payload, max_attempts)
@@ -641,7 +701,7 @@ class PostgresTaskQueue:
         return bool(row and row[0])
 
     def requeue_failed(self, tenant_id: str, task_id: str) -> bool:
-        """Explicitly requeue a failed task through a tenant-checked database function."""
+        """Requeue a failed task without bypassing tenant capacity admission."""
         if not tenant_id or not task_id:
             raise ValueError("tenant_id and task_id are required")
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -649,6 +709,30 @@ class PostgresTaskQueue:
                 "SELECT set_config('rusa.tenant_id', %s, true)",
                 (tenant_id,),
             )
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"rusa-agent-queue:{tenant_id}",),
+            )
+            state = connection.execute(
+                """
+                SELECT status FROM rusa_agent_tasks
+                WHERE tenant_id=%s AND task_id=%s
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+            if state is not None and state[0] == "failed":
+                outstanding = connection.execute("""
+                    SELECT COUNT(*)
+                    FROM rusa_agent_tasks
+                    WHERE tenant_id=%s
+                      AND status IN (
+                          'queued', 'retry', 'waiting_external', 'running', 'awaiting_approval'
+                      )
+                """, (tenant_id,)).fetchone()[0]
+                if int(outstanding) >= self.max_outstanding_per_tenant:
+                    raise QueueCapacityExceededError(
+                        "tenant task capacity is full; retry after outstanding work drains"
+                    )
             row = connection.execute(
                 "SELECT public.rusa_agent_requeue_failed_task(%s, %s)",
                 (tenant_id, task_id),

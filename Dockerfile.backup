@@ -1,0 +1,18 @@
+FROM postgres:16-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends age awscli ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 rusa-backup \
+    && useradd --system --uid 10001 --gid rusa-backup --home-dir /nonexistent --shell /usr/sbin/nologin rusa-backup \
+    && mkdir -p /app/scripts/postgres /backups \
+    && chown -R 10001:10001 /backups /app
+
+WORKDIR /app
+COPY scripts/postgres /app/scripts/postgres
+RUN chmod 0755 /app/scripts/postgres/*.sh
+
+USER 10001:10001
+CMD ["bash", "/app/scripts/postgres/backup.sh"]

@@ -35,7 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from rusa_agents.audit import HMACAuditLog
 from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.identity import IdentityError, PostgresIdentityStore
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import PostgresTaskQueue, QueueCapacityExceededError
 from rusa_knowledge.service import KnowledgeService
 
 logger = logging.getLogger("rusa-ai-serve")
@@ -901,6 +901,12 @@ def submit_agent_task(
     )
     try:
         queued_task_id = queue.enqueue(coding_task)
+    except QueueCapacityExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task capacity is full; retry after outstanding work drains",
+            headers={"Retry-After": "10"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -1010,7 +1016,15 @@ def retry_agent_task(
         tenant_id,
         str(task_id),
     )
-    if not queue.retry_dead_letter(tenant_id, str(task_id)):
+    try:
+        requeued = queue.retry_dead_letter(tenant_id, str(task_id))
+    except QueueCapacityExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task capacity is full; retry after outstanding work drains",
+            headers={"Retry-After": "10"},
+        ) from exc
+    if not requeued:
         current = queue.get(tenant_id, str(task_id))
         state = current["state"] if current else "unknown"
         raise HTTPException(
@@ -1429,7 +1443,15 @@ def admin_retry_task(
     if record["state"] != "dead_letter":
         raise HTTPException(status_code=409, detail="Only dead-letter tasks can be retried")
     _record_agent_api_event(http_request, "task.admin_retry_requested", admin["tenant_id"], str(task_id))
-    if not queue.retry_dead_letter(admin["tenant_id"], str(task_id)):
+    try:
+        requeued = queue.retry_dead_letter(admin["tenant_id"], str(task_id))
+    except QueueCapacityExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task capacity is full; retry after outstanding work drains",
+            headers={"Retry-After": "10"},
+        ) from exc
+    if not requeued:
         raise HTTPException(status_code=409, detail="Task state changed before retry")
     return {"task_id": str(task_id), "state": "queued"}
 

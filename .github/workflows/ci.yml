@@ -52,13 +52,56 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp scripts/postgres tests
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp scripts/postgres tests
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
+      - name: Validate PostgreSQL backup scripts
+        run: bash -n scripts/postgres/*.sh
+      - name: Run encrypted PostgreSQL backup and restore drill
+        env:
+          SOURCE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_test
+          RESTORE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_restore_test
+          RESTORE_CONFIRM_DATABASE: rusa_restore_test
+          BACKUP_DIR: ${{ runner.temp }}/rusa-agent-backups
+          BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/rusa-backup-identity.txt
+        run: |
+          mkdir -p "$RUNNER_TEMP/rusa-agent-backups"
+          docker run --rm --network host \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume "$RUNNER_TEMP/rusa-agent-backups:/drill" \
+            --workdir /workspace \
+            --env SOURCE_DATABASE_URL="$SOURCE_DATABASE_URL" \
+            --env RESTORE_DATABASE_URL="$RESTORE_DATABASE_URL" \
+            --env RESTORE_CONFIRM_DATABASE="$RESTORE_CONFIRM_DATABASE" \
+            --env BACKUP_DIR=/drill/backups \
+            --env BACKUP_AGE_IDENTITY_FILE=/drill/identity.txt \
+            docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc \
+            sh -ec '
+              apk add --no-cache age bash
+              pg_dump --version
+              pg_restore --version
+              mkdir -p "$BACKUP_DIR"
+              age-keygen -o "$BACKUP_AGE_IDENTITY_FILE"
+              export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 <<SQL
+          CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
+              id INTEGER PRIMARY KEY,
+              value TEXT NOT NULL
+          );
+          TRUNCATE public.rusa_drill_probe;
+          INSERT INTO public.rusa_drill_probe (id, value)
+          VALUES (1, \$\$encrypted-restore-drill-ok\$\$);
+          SQL
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE rusa_restore_test"
+              bash scripts/postgres/restore_drill.sh
+              restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT value FROM public.rusa_drill_probe WHERE id=1")"
+              test "$restored_value" = "encrypted-restore-drill-ok"
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE rusa_restore_test"
+            '
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
@@ -86,6 +129,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
       - name: Build user and admin workspace image
         run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
+      - name: Build PostgreSQL backup utility image
+        run: docker build --pull -f Dockerfile.backup -t rusa-agent-db-backup:${{ github.sha }} .
       - name: Smoke-test RAG and MCP imports
         run: |
           docker run --rm rusa-knowledge-mcp:${{ github.sha }} python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
@@ -107,7 +152,7 @@ jobs:
           exit 1
       - name: Run inference API container
         run: |
-          docker run -d --name rusa-ai-ci \
+          docker run -d --restart unless-stopped --name rusa-ai-ci \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
             rusa-ai:${{ github.sha }}
@@ -119,6 +164,21 @@ jobs:
             fi
             sleep 2
           done
+          docker logs rusa-ai-ci
+          exit 1
+      - name: Verify inference process crash recovery
+        run: |
+          container_pid="$(docker inspect --format '{{.State.Pid}}' rusa-ai-ci)"
+          test "$container_pid" -gt 1
+          sudo kill -9 "$container_pid"
+          for attempt in $(seq 1 30); do
+            restart_count="$(docker inspect --format '{{.RestartCount}}' rusa-ai-ci)"
+            if [ "$restart_count" -ge 1 ] && curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker inspect rusa-ai-ci
           docker logs rusa-ai-ci
           exit 1
       - name: Run web workspace container

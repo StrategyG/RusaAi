@@ -158,3 +158,31 @@ def test_worker_heartbeat_uses_current_lease_token(monkeypatch):
     assert queue.heartbeats == [
         (task.tenant_id, task.task_id, "worker-test", queue.token)
     ]
+
+
+def test_worker_graceful_shutdown_finishes_inflight_task_without_claiming_another():
+    task = make_task()
+    queue = FakeQueue(task)
+    worker = build_worker(queue)
+    stop_event = asyncio.Event()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def in_flight_run_once():
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return True
+
+    async def scenario():
+        worker.run_once = in_flight_run_once
+        running = asyncio.create_task(worker.run_forever(stop_event))
+        await started.wait()
+        stop_event.set()
+        release.set()
+        await running
+
+    asyncio.run(scenario())
+    assert calls == 1

@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from uuid import uuid4
 
@@ -7,7 +8,7 @@ import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget, TaskRecord, TaskState
 from rusa_agents.memory import PostgresMemoryStore
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import PostgresTaskQueue, QueueCapacityExceededError
 
 
 DSN = os.getenv("RUSA_TEST_DATABASE_URL")
@@ -99,6 +100,96 @@ def test_postgres_queue_claim_checkpoint_and_acknowledgement():
         )
 
 
+
+
+
+def test_postgres_queue_enforces_outstanding_capacity_and_preserves_idempotency():
+    queue = PostgresTaskQueue(DSN, max_outstanding_per_tenant=1)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-capacity-{uuid4().hex}"
+    first = make_task(tenant_id, f"capacity-first-{uuid4().hex}")
+    second = make_task(tenant_id, f"capacity-second-{uuid4().hex}")
+
+    first_id = queue.enqueue(first)
+    assert queue.enqueue(first) == first_id
+    with pytest.raises(QueueCapacityExceededError, match="capacity is full"):
+        queue.enqueue(second)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "UPDATE rusa_agent_tasks SET status='failed' WHERE tenant_id=%s AND task_id=%s",
+            (tenant_id, first_id),
+        )
+
+    second_id = queue.enqueue(second)
+    assert second_id == second.task_id
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
+
+
+def test_postgres_queue_admission_lock_enforces_concurrent_tenant_limit():
+    queue = PostgresTaskQueue(DSN, max_outstanding_per_tenant=1)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-capacity-race-{uuid4().hex}"
+    tasks = [
+        make_task(tenant_id, f"capacity-race-{uuid4().hex}")
+        for _ in range(8)
+    ]
+
+    def submit(task):
+        try:
+            return ("accepted", queue.enqueue(task))
+        except QueueCapacityExceededError:
+            return ("rejected", None)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(submit, tasks))
+
+    assert sum(result[0] == "accepted" for result in results) == 1
+    assert sum(result[0] == "rejected" for result in results) == 7
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
+
+
+def test_postgres_queue_claims_distinct_tasks_across_horizontal_workers():
+    queue = PostgresTaskQueue(DSN, max_outstanding_per_tenant=50)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-scale-{uuid4().hex}"
+    tasks = [
+        make_task(tenant_id, f"scale-{uuid4().hex}")
+        for _ in range(24)
+    ]
+    for task in tasks:
+        queue.enqueue(task)
+
+    def claim(index):
+        return queue.claim(f"scale-worker-{index}", lease_seconds=60)
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        claimed = list(executor.map(claim, range(24)))
+
+    claimed_ids = [item["task_id"] for item in claimed if item is not None]
+    assert len(claimed_ids) == 24
+    assert len(set(claimed_ids)) == 24
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
+
+
 def test_postgres_memory_is_tenant_scoped_and_deletable():
     memory = PostgresMemoryStore(DSN)
     memory.initialize()
@@ -131,14 +222,14 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker'
                 ) THEN
-                    CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+                    EXECUTE 'CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS';
                 END IF;
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'
                 ) THEN
                     CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOBYPASSRLS;
                 END IF;
-            END
+            END;
             $rusa$
         """)
         connection.execute(
@@ -575,3 +666,51 @@ def test_workspace_task_queries_are_scoped_by_tenant_and_user():
 
     with psycopg.connect(DSN) as connection:
         connection.execute("DELETE FROM rusa_agent_tasks WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_postgres_failed_task_requeue_cannot_bypass_tenant_capacity():
+    queue = PostgresTaskQueue(DSN, max_outstanding_per_tenant=1)
+    queue.initialize()
+    PostgresMemoryStore(DSN).initialize()
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            DO $rusa$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker') THEN
+                    CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
+                    EXECUTE 'CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS';
+                END IF;
+            END;
+            $rusa$
+        """)
+        connection.execute(
+            "ALTER ROLE rusa_agent_worker NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS"
+        )
+        connection.execute(
+            "ALTER ROLE rusa_agent_api NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+        )
+
+    queue.configure_api_permissions()
+    tenant_id = f"rusa-test-requeue-capacity-{uuid4().hex}"
+    failed_task = make_task(tenant_id, f"failed-{uuid4().hex}")
+    queued_task = make_task(tenant_id, f"queued-{uuid4().hex}")
+    failed_id = queue.enqueue(failed_task)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "UPDATE rusa_agent_tasks SET status='failed' WHERE tenant_id=%s AND task_id=%s",
+            (tenant_id, failed_id),
+        )
+
+    queue.enqueue(queued_task)
+    with pytest.raises(QueueCapacityExceededError, match="capacity is full"):
+        queue.requeue_failed(tenant_id, failed_id)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )

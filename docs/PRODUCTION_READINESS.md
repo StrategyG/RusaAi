@@ -20,6 +20,9 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - The tenant-scoped agent API supports status, cancellation, and explicit retry of failed tasks; cancellation also supports approval-pending tasks and revokes the active worker lease.
 - Cancellation/retry mutations execute through tenant-checked SECURITY DEFINER database functions; the API role has SELECT/INSERT and function EXECUTE only, with no direct UPDATE/DELETE table privileges.
 - Compose runs a one-shot schema/privilege migration before the API and worker; API host ports remain loopback-bound by default.
+- PostgreSQL task admission has a tenant-scoped outstanding-task limit enforced under an advisory transaction lock; saturation returns HTTP 429 with `Retry-After`, while idempotent replays remain safe.
+- Worker replicas can scale horizontally against the PostgreSQL `SKIP LOCKED` queue; lease tokens fence stale workers, and the worker has a 180-second Compose termination grace period.
+- Encrypted PostgreSQL snapshot/restore scripts use age, checksums, optional S3-compatible off-host upload, and an exact target-database confirmation. CI includes an isolated encrypted restore drill.
 
 ## Current verification boundary
 
@@ -42,8 +45,16 @@ Latest CI on PR #15 commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both 
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Repository governance | Protected main branch, required CI checks, mandatory review | Blocked: GitHub currently reports main as unprotected; repository administrator action required |
 | PR integration | Conflict-free integration into main and merged dependency chain | Blocked: PR #8 is dirty; PR #15 and PR #19 remain stacked; no production merge performed |
-| Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
+| Reliability operations | Encrypted snapshot backup/restore scripts, CI restore drill, off-host backup configuration, audit/model artifact backup, WAL/PITR, staging failure injection | Partial: scripts and CI drill added; off-host storage and production drills remain pending |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
+
+
+
+## Scalability and disaster recovery
+
+The agent queue now enforces `RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT` with a tenant advisory lock and returns retryable HTTP 429 responses when a tenant is saturated. The PostgreSQL `SKIP LOCKED` claim path supports multiple worker replicas; integration tests exercise concurrent claims and admission races. Compose grants workers a 180-second stop window.
+
+Encrypted `pg_dump` snapshot and guarded restore scripts are available through the opt-in backup profile. CI performs an encrypted restore into a disposable database and validates a marker row. These checks do not provide WAL/PITR, prove off-host storage durability, or certify production RTO/RPO. Owner-approved targets and a staging drill using the real deployment topology are still required.
 
 ## Queue lease fencing
 
