@@ -20,7 +20,7 @@ def _stub_git(monkeypatch, push_result=None):
             return _completed(args, "https://github.com/StrategyG/RusaAi.git\n")
         if args[1:3] == ["rev-parse", "HEAD"]:
             return _completed(args, "a" * 40 + "\n")
-        if args[1] == "push":
+        if "push" in args:
             return push_result or _completed(args)
         raise AssertionError(f"Unexpected git command: {args}")
 
@@ -44,7 +44,7 @@ def test_stale_lease_blocks_git_push(tmp_path, monkeypatch):
             lease_guard=lambda: False,
         )
 
-    assert not any(args[1] == "push" for args in calls)
+    assert not any("push" in args for args in calls)
 
 
 def test_lease_loss_during_git_push_blocks_pull_request_followup(tmp_path, monkeypatch):
@@ -61,4 +61,4 @@ def test_lease_loss_during_git_push_blocks_pull_request_followup(tmp_path, monke
             lease_guard=lambda: next(states),
         )
 
-    assert any(args[1] == "push" for args in calls)
+    assert any("push" in args for args in calls)
