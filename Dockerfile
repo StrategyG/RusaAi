@@ -8,23 +8,30 @@ WORKDIR /build
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-FROM gcr.io/distroless/python3-debian13:nonroot AS runtime
+FROM python:3.13-slim-trixie AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/tmp \
     TMPDIR=/tmp \
     ENVIRONMENT=production \
-    RUSA_MAX_REQUEST_BYTES=1048576 \
-    PYTHONPATH=/usr/local/lib/python3.13/site-packages
+    RUSA_MAX_REQUEST_BYTES=1048576
 
 WORKDIR /app
 
-COPY --from=builder /install /usr/local
-COPY --chown=65532:65532 llm-project/serve /app/llm-project/serve
-COPY --chown=65532:65532 schemas /app/schemas
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
+    && groupadd --system --gid 10001 rusa \
+    && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
 
-USER 65532:65532
+COPY --from=builder /install /usr/local
+COPY --chown=10001:10001 llm-project/serve /app/llm-project/serve
+COPY --chown=10001:10001 schemas /app/schemas
+
+USER 10001:10001
 
 EXPOSE 8000
 
