@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, Plus, RefreshCw, Shield, UserRound, UserX } from "lucide-react";
 import { api, type User } from "../api";
+import { useAuth } from "../auth";
 
 type UserList = { items: User[]; counts: { total: number; active: number; admins: number } };
 
 export function AdminUsersPage() {
+  const { user: currentUser } = useAuth();
   const [data, setData] = useState<UserList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,6 +57,17 @@ export function AdminUsersPage() {
     user: User,
     patch: { role?: "user" | "admin"; is_active?: boolean },
   ) {
+    const isSelf = user.id === currentUser?.id;
+    if (isSelf && (patch.role === "user" || patch.is_active === false)) {
+      setError("Use another administrator to change your own administrator access.");
+      return;
+    }
+    const change = patch.role
+      ? "change the role for " + user.display_name
+      : patch.is_active
+        ? "enable " + user.display_name
+        : "disable " + user.display_name;
+    if (!window.confirm("Are you sure you want to " + change + "?")) return;
     try {
       await api("/v1/admin/users/" + user.id, {
         method: "PATCH",
@@ -105,10 +118,10 @@ export function AdminUsersPage() {
                 {data.items.map((user) => (
                   <tr key={user.id}>
                     <td><div className="user-cell"><div className="avatar small-avatar">{user.display_name.slice(0, 1).toUpperCase()}</div><div><strong>{user.display_name}</strong><small>{user.email}</small></div></div></td>
-                    <td><select className="inline-select" value={user.role} onChange={(e) => void updateUser(user, { role: e.target.value as "user" | "admin" })}><option value="user">User</option><option value="admin">Admin</option></select></td>
+                    <td><select className="inline-select" value={user.role} disabled={user.id === currentUser?.id} title={user.id === currentUser?.id ? "Use another administrator to change your role" : "Change user role"} onChange={(e) => void updateUser(user, { role: e.target.value as "user" | "admin" })}><option value="user">User</option><option value="admin">Admin</option></select></td>
                     <td><span className={"state-pill " + (user.is_active ? "state-succeeded" : "state-failed")}>{user.is_active ? "Active" : "Disabled"}</span></td>
                     <td>{user.last_login_at ? new Date(user.last_login_at).toLocaleString() : "Never"}</td>
-                    <td><button className={user.is_active ? "text-danger-button" : "text-action-button"} onClick={() => void updateUser(user, { is_active: !user.is_active })}>{user.is_active ? <><UserX size={14} /> Disable</> : "Enable"}</button></td>
+                    <td>{user.id === currentUser?.id ? <span className="sub-id">Current account</span> : <button className={user.is_active ? "text-danger-button" : "text-action-button"} onClick={() => void updateUser(user, { is_active: !user.is_active })}>{user.is_active ? <><UserX size={14} /> Disable</> : "Enable"}</button>}</td>
                   </tr>
                 ))}
               </tbody>

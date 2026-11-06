@@ -7,13 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { authRequest, setAccessToken, type User } from "./api";
-
-type SessionResponse = {
-  access_token: string;
-  expires_in: number;
-  user: User;
-};
+import { authRequest, refreshSession, setAccessToken, type AuthSession, type User } from "./api";
 
 type AuthContextValue = {
   user: User | null;
@@ -28,22 +22,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const acceptSession = useCallback((session: SessionResponse) => {
+  const acceptSession = useCallback((session: AuthSession) => {
     setAccessToken(session.access_token);
     setUser(session.user);
   }, []);
 
   useEffect(() => {
     let active = true;
-    fetch("/v1/auth/refresh", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return (await response.json()) as SessionResponse;
-      })
+    refreshSession()
       .then((session) => {
         if (active && session) acceptSession(session);
       })
@@ -58,9 +44,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [acceptSession]);
 
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setAccessToken(null);
+      setUser(null);
+    };
+    window.addEventListener("rusa:session-expired", onSessionExpired);
+    return () => window.removeEventListener("rusa:session-expired", onSessionExpired);
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string) => {
-      const session = await authRequest<SessionResponse>("/v1/auth/login", {
+      const session = await authRequest<AuthSession>("/v1/auth/login", {
         email,
         password,
       });

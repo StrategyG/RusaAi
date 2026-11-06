@@ -10,38 +10,59 @@ export type User = {
   last_login_at?: string | null;
 };
 
+export type AuthSession = {
+  access_token: string;
+  expires_in: number;
+  user: User;
+};
+
 let accessToken: string | null = null;
-let refreshPromise: Promise<boolean> | null = null;
+let authRevision = 0;
+let refreshPromise: Promise<AuthSession | null> | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
+  authRevision += 1;
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+/**
+ * Share one rotating-refresh request across app bootstrap and API retries.
+ * This prevents React StrictMode or concurrent 401 responses from reusing
+ * the same one-time refresh token at the same time.
+ */
+export async function refreshSession(): Promise<AuthSession | null> {
   if (!refreshPromise) {
+    const revisionAtStart = authRevision;
     refreshPromise = fetch("/v1/auth/refresh", {
       method: "POST",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
     })
       .then(async (response) => {
-        if (!response.ok) {
-          accessToken = null;
-          return false;
-        }
-        const data = (await response.json()) as { access_token: string };
-        accessToken = data.access_token;
-        return true;
+        if (!response.ok) return null;
+        const session = (await response.json()) as AuthSession;
+        if (authRevision !== revisionAtStart) return null;
+        accessToken = session.access_token;
+        authRevision += 1;
+        return session;
       })
-      .catch(() => {
-        accessToken = null;
-        return false;
-      })
+      .catch(() => null)
       .finally(() => {
         refreshPromise = null;
       });
   }
-  return refreshPromise;
+  const session = await refreshPromise;
+  if (!session) accessToken = null;
+  return session;
+}
+
+async function refreshAccessToken(): Promise<boolean> {
+  const session = await refreshSession();
+  if (session) return true;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("rusa:session-expired"));
+  }
+  return false;
 }
 
 export async function api<T>(

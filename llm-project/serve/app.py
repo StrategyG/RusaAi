@@ -1262,6 +1262,13 @@ def admin_update_user(
 ):
     if request.role is None and request.is_active is None:
         raise HTTPException(status_code=422, detail="At least one user field must be updated")
+    if str(user_id) == admin["id"] and (
+        request.role == "user" or request.is_active is False
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Use another administrator to change your own administrator access",
+        )
     identity = _identity_store(http_request)
     try:
         user = identity.update_user(

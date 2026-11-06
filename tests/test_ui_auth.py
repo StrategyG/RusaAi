@@ -373,3 +373,23 @@ def test_refresh_rejects_cross_origin_requests(client):
         cookies={"rusa_refresh": "refresh-token-for-" + USER_ID},
     )
     assert response.status_code == 403
+
+
+def test_admin_cannot_remove_own_administrator_access(client):
+    demote = client.patch(
+        "/v1/admin/users/" + ADMIN_ID,
+        headers={"Authorization": "Bearer admin-token"},
+        json={"role": "user"},
+    )
+    assert demote.status_code == 409
+
+    disable = client.patch(
+        "/v1/admin/users/" + ADMIN_ID,
+        headers={"Authorization": "Bearer admin-token"},
+        json={"is_active": False},
+    )
+    assert disable.status_code == 409
+
+    admin = app.state.identity_store.users[ADMIN_ID]
+    assert admin["role"] == "admin"
+    assert admin["is_active"] is True
