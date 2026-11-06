@@ -136,7 +136,7 @@ class DockerSandbox:
                     workspace, snapshot, symlinks=True, ignore=ignore_sensitive,
                     copy_function=bounded_copy,
                 )
-                for directory, subdirectories, filenames in os.walk(snapshot):
+                for directory, _, filenames in os.walk(snapshot):
                     os.chmod(directory, 0o555)
                     for filename in filenames:
                         path = Path(directory) / filename
