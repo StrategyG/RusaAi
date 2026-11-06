@@ -51,3 +51,9 @@ def test_rejects_metadata_over_utf8_byte_limit():
 def test_rejects_provider_api_credentials():
     with pytest.raises(ValueError, match="provider API credential"):
         reject_credential_material("embedding_api_key=sk-proj-" + ("x" * 36))
+
+def test_rejects_jwt_bearer_credentials():
+    jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + ("a" * 32) + "." + ("b" * 32)
+    with pytest.raises(ValueError, match="JWT bearer credential"):
+        reject_credential_material("Authorization: Bearer " + jwt)
+\n
