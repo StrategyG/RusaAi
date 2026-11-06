@@ -1250,3 +1250,40 @@ def test_github_write_blocks_secret_material_before_creating_branch(monkeypatch)
                 },
             ),
         ))
+
+
+@pytest.mark.parametrize("guard_mode", ["revoked", "error"])
+def test_orchestrator_fails_closed_before_repository_tool_when_lease_is_lost(guard_mode):
+    from rusa_agents.orchestrator import _LeaseLost
+
+    task = make_task()
+    tools = FakeTools()
+    developer = ScriptedWorker(
+        WorkerRole.DEVELOPER,
+        [worker_result(
+            WorkerRole.DEVELOPER,
+            [ToolCall(
+                "write_file",
+                {"path": "rusa_agents/cancelled.py", "content": "must_not_be_written"},
+            )],
+        )],
+    )
+    orchestrator = make_orchestrator(
+        tools,
+        {WorkerRole.DEVELOPER: developer},
+    )
+
+    async def revoked_guard():
+        if guard_mode == "error":
+            raise RuntimeError("database unavailable")
+        return False
+
+    with pytest.raises(_LeaseLost, match="lease is no longer valid"):
+        asyncio.run(orchestrator._run_worker(
+            TaskRecord(task=task),
+            WorkerRole.DEVELOPER,
+            None,
+            revoked_guard,
+        ))
+
+    assert tools.calls == []
