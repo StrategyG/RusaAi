@@ -4,6 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+POLICY_VERSION = "rusa-autonomy-policy-v1"
+
+
 PROTECTED_TOOLS = {
     "github.merge_pull_request",
     "github.deploy",
