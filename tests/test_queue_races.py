@@ -1,13 +1,15 @@
 """Concurrency and crash-recovery regressions for the existing aicode_jobs queue."""
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from uuid import uuid4
 
 import psycopg
 import pytest
 
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import LeaseLostError, PostgresTaskQueue
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -145,4 +147,85 @@ def test_expired_worker_attempt_limit_moves_job_to_failed():
         assert current["status"] == "failed"
         assert current["attempts"] == 2
     finally:
+        remove_task(task_id, tenant)
+
+
+def test_publication_refuses_an_expired_or_replaced_lease():
+    queue = make_queue()
+    tenant = f"queue-publish-stale-{uuid4().hex}"
+    task_id = str(uuid4())
+    called = []
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "stale publication"})
+        job = queue.claim("publish-stale-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        expire_lease(job.id, tenant)
+
+        with pytest.raises(LeaseLostError, match="active task lease"):
+            queue.publish_if_lease_owned(
+                job.id,
+                tenant,
+                "publish-stale-worker",
+                job.lease_token,
+                lambda: called.append("published"),
+            )
+        assert called == []
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_replacement_worker_cannot_reclaim_during_repository_publication():
+    queue = make_queue()
+    tenant = f"queue-publish-fence-{uuid4().hex}"
+    task_id = str(uuid4())
+    publishing = Event()
+    release_publish = Event()
+    expiry_started = Event()
+
+    def expire_while_locked(job_id: int) -> None:
+        with psycopg.connect(DSN) as connection:
+            expiry_started.set()
+            connection.execute(
+                "UPDATE aicode_jobs SET lease_until=NOW() - INTERVAL '1 second' "
+                "WHERE id=%s AND tenant_id=%s",
+                (job_id, tenant),
+            )
+
+    def bounded_publish() -> str:
+        publishing.set()
+        if not release_publish.wait(timeout=10):
+            raise TimeoutError("test publisher was not released")
+        return "a" * 40
+
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "fenced publication"})
+        job = queue.claim("publish-fence-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publication = pool.submit(
+                queue.publish_if_lease_owned,
+                job.id,
+                tenant,
+                "publish-fence-worker",
+                job.lease_token,
+                bounded_publish,
+                lease_seconds=900,
+            )
+            assert publishing.wait(timeout=5)
+
+            expiry = pool.submit(expire_while_locked, job.id)
+            assert expiry_started.wait(timeout=5)
+            time.sleep(0.1)
+            assert not expiry.done(), "lease row was not locked during publication"
+
+            release_publish.set()
+            assert publication.result(timeout=10) == "a" * 40
+            expiry.result(timeout=10)
+
+        replacement = queue.claim("replacement-worker", lease_seconds=30)
+        assert replacement and replacement.task_id == task_id
+        assert replacement.lease_token != job.lease_token
+    finally:
+        release_publish.set()
         remove_task(task_id, tenant)
