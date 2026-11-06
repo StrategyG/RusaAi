@@ -273,11 +273,29 @@ The API now defaults to a 1 MiB request-body limit and a 15-second request-body 
 
 The ASGI middleware counts received bytes rather than trusting Content-Length, so chunked requests are also bounded. Both agent and inference provider adapters stream and cap response bodies before JSON parsing.
 
+
+### Hierarchical orchestration and worker controls
+
+The root orchestrator dispatches specialists through three manager groups:
+
+- Repository manager: Analyst, then Architect.
+- Engineering manager: Developer, then Debugger.
+- Quality manager: Tester and Security run concurrently after the Developer dependency is satisfied.
+
+The deterministic DAG is Analyst → Architect → Developer → Debugger, with Developer also enabling parallel Tester and Security branches. Failed quality evidence triggers a bounded Developer/Debugger repair cycle. Missing mandatory evidence moves the task to `awaiting_approval`; it never produces a success state.
+
+Runtime controls:
+
+- `RUSA_MAX_PARALLEL_WORKERS`: integer from 1 to 32; default 4.
+- `RUSA_MAX_REPAIR_CYCLES`: integer from 0 to 5; default 2.
+
+These controls limit in-process concurrency and repair attempts; they do not autoscale Kubernetes worker replicas.
+
 ### Remaining production certification blockers
 
 The current code still requires independent verification before it can be certified production-ready:
 
 - Database row-level security and separate API/worker database identities are not yet enforced by the current runtime schema; tenant filters in application queries are not a substitute for database RLS.
-- Semantic/vector memory (pgvector), dynamic DAG planning, and manager-level orchestration are not yet fully implemented in the current runtime.
+- Semantic/vector memory (pgvector) and model-generated dynamic DAG planning remain unimplemented. The current runtime now has repository, engineering, and quality managers, a deterministic dependency DAG, parallel QA dispatch, and a bounded repair loop. It does not yet autoscale worker replicas.
 - Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
 - Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
