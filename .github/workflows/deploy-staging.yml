@@ -1,6 +1,9 @@
 name: Publish and deploy staging
 
 on:
+  push:
+    branches:
+      - staging
   workflow_dispatch:
     inputs:
       deployment_mode:
@@ -100,7 +103,7 @@ jobs:
 
   deploy:
     name: Deploy to protected staging environment
-    if: ${{ inputs.deployment_mode == 'deploy' }}
+    if: ${{ github.event_name == 'push' || inputs.deployment_mode == 'deploy' }}
     needs: publish
     runs-on: ubuntu-latest
     environment:

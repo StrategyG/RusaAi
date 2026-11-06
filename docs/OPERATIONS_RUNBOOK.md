@@ -96,15 +96,15 @@ Workers claim jobs using PostgreSQL row locks and leases. SIGTERM/SIGINT cancels
 
 ## 4. Staging image publication and deployment
 
-The repository provides a manual GitHub Actions workflow at `.github/workflows/deploy-staging.yml`. It never deploys automatically on push or merge.
+The repository provides a GitHub Actions workflow at `.github/workflows/deploy-staging.yml`. It supports two controlled entry points: a push to the dedicated `staging` branch, or manual dispatch with an explicit `deploy` choice. The workflow file must be present on the default branch for the manual Actions UI entry point to be available. The push entry point becomes active when the workflow is present on the `staging` branch.
 
-1. In GitHub, create the `staging` environment and configure required reviewers/approval rules before enabling deployment.
+1. Create the `staging` environment and configure required reviewers/approval rules before enabling deployment. Protect the `staging` branch with pull-request reviews, required CI checks, and no force pushes; do not deploy directly from a developer feature branch.
 2. Add environment variables `STAGING_APP_DIR` (absolute path on the host), `GHCR_PULL_USER`, and optionally `STAGING_URL`.
 3. Add environment secrets `STAGING_HOST`, `STAGING_USER`, `STAGING_SSH_PRIVATE_KEY`, `STAGING_KNOWN_HOSTS`, and `GHCR_PULL_TOKEN`. The registry token should be read-only (`read:packages`); the deploy SSH account should only manage this staging application's directory and Compose project.
 4. Prepare the host directory and a host-managed `.env` file. Never copy secrets from GitHub Actions into the repository. Configure PostgreSQL, a valid model artifact directory, auth/bootstrap secrets, provider allowlists, and a least-privilege GitHub token as required.
 5. Add the exact SSH host public key to `STAGING_KNOWN_HOSTS` out-of-band. Do not replace pinned host verification with `ssh-keyscan` at deployment time.
-6. Open **Actions → Publish and deploy staging**, select the intended revision, and choose `build-only` first. This publishes immutable `staging-<commit-sha>` images to GHCR without changing the host.
-7. After reviewing the image revision and staging host configuration, run the workflow again with `deploy`. GitHub environment protection must approve the deployment before SSH is used.
+6. After the workflow is available on the default branch, open **Actions → Publish and deploy staging**, select the intended revision, and choose `build-only` first. This publishes immutable `staging-<commit-sha>` images to GHCR without changing the host.
+7. For branch-based staging CD, merge an approved change into the protected `staging` branch. The publish job builds immutable images and the deploy job waits for GitHub environment approval before SSH is used. For manual deployment, run the workflow with `deploy`; GitHub environment protection must approve it before SSH is used.
 8. The deployment uploads only the Compose manifests, validates the host-managed configuration, pulls the immutable image tag, and waits for Compose health checks. The worker profile is not started automatically; enable it separately only after provider/GitHub credentials and the approved repository allowlist are configured.
 
 The workflow's `staging` tag is a convenience pointer. Deployment uses the immutable commit-specific tag for reproducibility and rollback. The workflow does not deploy to production.
