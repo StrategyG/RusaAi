@@ -29,11 +29,23 @@ The code changes require successful CI on the remediation pull request. The mode
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Orchestrator, workers, queue, retries, idempotency, cancellation | Not implemented |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented in code; PostgreSQL integration CI and staging verification pending |
 | Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
+
+## Queue lease fencing
+
+Each task claim receives a cryptographically random lease token. Heartbeat,
+checkpoint, acknowledgement and retry operations require both the worker ID
+and the current token. Reclaiming a task rotates the token, so a stale execution
+is rejected even if the same worker ID is reused. The token column is added
+through an idempotent schema migration and is required by queue readiness.
+
+The worker credential is an internal service identity and must never be exposed
+to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
+PostgreSQL same-worker-ID stale-token test before release.
 
 ## Deployment rules
 

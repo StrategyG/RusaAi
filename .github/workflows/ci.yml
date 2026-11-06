@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
       - name: Lint
         run: ruff check llm-project/serve rusa_agents tests
       - name: Compile
@@ -68,13 +68,6 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Docker Compose configuration
-        run: |
-          if [ -f .env.example ]; then
-            cp .env.example .env
-            docker compose config --quiet
-            rm -f .env
-          fi
       - name: Validate Docker Compose configuration
         run: |
           if [ -f .env.example ]; then

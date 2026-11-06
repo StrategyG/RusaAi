@@ -77,12 +77,16 @@ def test_postgres_queue_claim_checkpoint_and_acknowledgement():
     assert claimed["task_id"] == task_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
-    assert queue.checkpoint(tenant_id, task_id, "integration-worker", record)
+    lease_token = claimed["lease_token"]
+    assert queue.checkpoint(
+        tenant_id, task_id, "integration-worker", lease_token, record,
+    )
     queue.acknowledge(
         tenant_id,
         task_id,
         record,
         worker_id="integration-worker",
+        lease_token=lease_token,
     )
     fetched = queue.get(tenant_id, task_id)
     assert fetched is not None
@@ -214,9 +218,12 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
 
     first = queue.claim("worker-one", lease_seconds=60)
     assert first is not None and first["task_id"] == task_id
-    assert queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
-    assert queue.owns_lease(tenant_id, task_id, "worker-one") is True
-    assert queue.owns_lease(tenant_id, task_id, "worker-two") is False
+    first_token = first["lease_token"]
+    assert queue.heartbeat(
+        tenant_id, task_id, "worker-one", first_token, lease_seconds=60,
+    )
+    assert queue.owns_lease(tenant_id, task_id, "worker-one", first_token) is True
+    assert queue.owns_lease(tenant_id, task_id, "worker-two", first_token) is False
 
     with psycopg.connect(DSN) as connection:
         connection.execute("""
@@ -225,33 +232,47 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
             WHERE tenant_id=%s AND task_id=%s
         """, (tenant_id, task_id))
 
-    second = queue.claim("worker-two", lease_seconds=60)
+    # Reclaim with the same worker ID to prove that the lease token, not
+    # the owner string, fences the stale execution.
+    second = queue.claim("worker-one", lease_seconds=60)
     assert second is not None and second["task_id"] == task_id
-    assert second["lease_owner"] == "worker-two"
-    assert not queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
-    assert queue.owns_lease(tenant_id, task_id, "worker-one") is False
-    assert queue.owns_lease(tenant_id, task_id, "worker-two") is True
+    assert second["lease_owner"] == "worker-one"
+    second_token = second["lease_token"]
+    assert second_token != first_token
+    assert not queue.heartbeat(
+        tenant_id, task_id, "worker-one", first_token, lease_seconds=60,
+    )
+    assert queue.owns_lease(tenant_id, task_id, "worker-one", first_token) is False
+    assert queue.owns_lease(tenant_id, task_id, "worker-one", second_token) is True
     stale_record = TaskRecord(task=task)
     stale_record.transition(TaskState.OBSERVING)
-    assert not queue.checkpoint(tenant_id, task_id, "worker-one", stale_record)
+    assert not queue.checkpoint(
+        tenant_id, task_id, "worker-one", first_token, stale_record,
+    )
     with pytest.raises(RuntimeError, match="lease was lost"):
         queue.acknowledge(
             tenant_id,
             task_id,
             stale_record,
             worker_id="worker-one",
+            lease_token=first_token,
         )
     assert queue.retry(
         tenant_id,
         task_id,
         "stale worker",
         worker_id="worker-one",
+        lease_token=first_token,
     ) is False
+    assert queue.checkpoint(
+        tenant_id, task_id, "worker-one", second_token, stale_record,
+    )
     queue.acknowledge(
         tenant_id,
         task_id,
         stale_record,
-        worker_id="worker-two",
+        worker_id="worker-one",
+        lease_token=second_token,
     )
     with psycopg.connect(DSN) as connection:
         connection.execute(
@@ -267,6 +288,19 @@ def test_postgres_queue_and_memory_readiness_require_forced_tenant_rls():
     memory.initialize()
     assert queue.check_ready() is True
     assert memory.check_ready() is True
+
+
+def test_postgres_queue_readiness_requires_lease_token_column():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    with psycopg.connect(DSN) as connection:
+        connection.execute("ALTER TABLE rusa_agent_tasks DROP COLUMN lease_token")
+    try:
+        assert queue.check_ready() is False
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute("ALTER TABLE rusa_agent_tasks ADD COLUMN lease_token TEXT")
+    assert queue.check_ready() is True
 
 
 def test_postgres_memory_redacts_secrets_before_persistence():
