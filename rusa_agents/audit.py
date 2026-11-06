@@ -109,6 +109,7 @@ class PostgresAuditLog:
 
     def ensure_schema(self) -> None:
         with self._connect() as db:
+            db.execute("SELECT pg_advisory_xact_lock(%s)", (812450732,))
             db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rusa_agent_audit_events (

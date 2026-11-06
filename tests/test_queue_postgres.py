@@ -84,7 +84,7 @@ def test_retry_limit_transitions_job_to_failed(queue_and_tenant):
     second = queue.claim("worker-a", lease_seconds=60)
     assert second["attempts"] == 2
     assert queue.fail(tenant, task_id, "worker-a", "final", retryable=True)
-    assert queue.get(tenant, task_id)["state"] == "failed"
+    assert queue.get(tenant, task_id)["state"] == "dead_letter"
 
 
 def test_expired_final_attempt_is_terminalized(queue_and_tenant):
@@ -106,7 +106,7 @@ def test_expired_final_attempt_is_terminalized(queue_and_tenant):
             (tenant, task_id),
         )
     assert queue.claim("worker-b", lease_seconds=60) is None
-    assert queue.get(tenant, task_id)["state"] == "failed"
+    assert queue.get(tenant, task_id)["state"] == "dead_letter"
 
 
 def test_queue_rejects_invalid_lease_duration(queue_and_tenant):
