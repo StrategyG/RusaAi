@@ -85,8 +85,6 @@ CREATE POLICY rusa_knowledge_chunks_tenant_isolation
 
 DO $rusa$
 BEGIN
-    -- Existing database volumes do not replay docker-entrypoint-initdb.d.
-    -- Ensure the dedicated knowledge role exists before granting table access.
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_worker') THEN
         CREATE ROLE rusa_knowledge_worker
             NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
@@ -95,27 +93,25 @@ BEGIN
             NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker') THEN
-        -- The task worker bypasses RLS for queue lifecycle operations. Do not
-        -- let it inherit knowledge-table privileges; it must SET ROLE to the
-        -- restricted, NOBYPASSRLS knowledge role for RAG access.
-        ALTER ROLE rusa_agent_worker NOINHERIT;
-        GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE;
+    -- The current mainline worker login inherits rusa_worker_runtime, which is
+    -- NOBYPASSRLS. Grant the knowledge role without inheritance so the worker
+    -- must explicitly SET ROLE before querying tenant-scoped knowledge.
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_worker_runtime') THEN
+        ALTER ROLE rusa_worker_runtime NOINHERIT;
+        GRANT rusa_knowledge_worker TO rusa_worker_runtime WITH INHERIT FALSE;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api') THEN
-        GRANT USAGE ON SCHEMA public TO rusa_agent_api;
-        GRANT SELECT ON public.rusa_knowledge_documents TO rusa_agent_api;
-        GRANT SELECT ON public.rusa_knowledge_chunks TO rusa_agent_api;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_api_runtime') THEN
+        GRANT USAGE ON SCHEMA public TO rusa_api_runtime;
+        GRANT SELECT ON public.rusa_knowledge_documents TO rusa_api_runtime;
+        GRANT SELECT ON public.rusa_knowledge_chunks TO rusa_api_runtime;
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_worker') THEN
-        GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker;
-        GRANT SELECT, INSERT, UPDATE, DELETE
-            ON public.rusa_knowledge_documents TO rusa_knowledge_worker;
-        GRANT SELECT, INSERT, UPDATE, DELETE
-            ON public.rusa_knowledge_chunks TO rusa_knowledge_worker;
-    END IF;
+    GRANT USAGE ON SCHEMA public TO rusa_knowledge_worker;
+    GRANT SELECT, INSERT, UPDATE, DELETE
+        ON public.rusa_knowledge_documents TO rusa_knowledge_worker;
+    GRANT SELECT, INSERT, UPDATE, DELETE
+        ON public.rusa_knowledge_chunks TO rusa_knowledge_worker;
 END;
 $rusa$;
 
