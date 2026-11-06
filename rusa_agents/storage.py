@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint,
+    JSON, BigInteger, Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint,
     text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -64,6 +64,7 @@ class TaskRow(Base):
 class AuditRow(Base):
     __tablename__ = "agent_audit_events"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "sequence", name="uq_agent_audit_tenant_sequence"),
         Index("ix_agent_audit_tenant_task", "tenant_id", "task_id", "created_at"),
     )
 
@@ -72,10 +73,20 @@ class AuditRow(Base):
     task_id: Mapped[str] = mapped_column(String(36), nullable=False)
     actor: Mapped[str] = mapped_column(String(128), nullable=False)
     event: Mapped[str] = mapped_column(String(128), nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     event_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class AuditHeadRow(Base):
+    __tablename__ = "agent_audit_heads"
+
+    tenant_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    last_sequence: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    last_hash: Mapped[str] = mapped_column(String(64), default="0" * 64, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
 class MemoryRow(Base):
