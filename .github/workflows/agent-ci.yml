@@ -81,6 +81,7 @@ jobs:
                   expected = {
                       "agent_tasks",
                       "agent_audit_events",
+                      "agent_audit_heads",
                       "agent_memory",
                       "agent_messages",
                       "agent_documents",
