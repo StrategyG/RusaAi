@@ -39,6 +39,11 @@ def reader_database_identity():
                 ) THEN
                     CREATE ROLE rusa_worker_runtime NOLOGIN;
                 END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_roles WHERE rolname = 'rusa_api_runtime'
+                ) THEN
+                    CREATE ROLE rusa_api_runtime NOLOGIN NOBYPASSRLS;
+                END IF;
             END;
             $rusa$;
             """
@@ -139,6 +144,29 @@ def test_read_only_reader_role_is_tenant_scoped_and_cannot_mutate(reader_databas
                 (tenant,),
             )
 
+    # The API queue role must not be able to read the separately governed
+    # knowledge store. The old migration grants are explicitly revoked by 008.
+    with psycopg.connect(DSN) as admin:
+        api_access = admin.execute(
+            """
+            SELECT
+                has_table_privilege(
+                    'rusa_api_runtime', 'public.rusa_knowledge_documents', 'SELECT'
+                ),
+                has_table_privilege(
+                    'rusa_api_runtime', 'public.rusa_knowledge_chunks', 'SELECT'
+                )
+            """
+        ).fetchone()
+    assert api_access == (False, False)
+
+    # Worker logins may assume the read-only role, never the ingestion role.
+    with psycopg.connect(worker_dsn) as connection:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            connection.execute(
+                "SELECT set_config('role', 'rusa_knowledge_worker', true)"
+            )
+
 
 def test_reader_migration_grants_select_only():
     from pathlib import Path
@@ -148,6 +176,8 @@ def test_reader_migration_grants_select_only():
     ).read_text(encoding="utf-8")
     assert "CREATE ROLE rusa_knowledge_reader" in migration
     assert "GRANT SELECT" in migration
+    assert "REVOKE SELECT" in migration
+    assert "FROM rusa_api_runtime" in migration
     assert "REVOKE rusa_knowledge_worker FROM rusa_worker_runtime" in migration
     assert "GRANT rusa_knowledge_reader TO rusa_worker_runtime WITH INHERIT FALSE" in migration
     assert "FOR SELECT TO rusa_knowledge_reader" in migration
