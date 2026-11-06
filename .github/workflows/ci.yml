@@ -104,7 +104,9 @@ jobs:
           RUSA_AGENT_MODEL: ci-model
           RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
           RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose --file docker-compose.production.yml config --quiet
 
       - name: Build inference API image
         run: docker build --pull --file Dockerfile --tag rusa-ai:${{ github.sha }} .

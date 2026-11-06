@@ -254,7 +254,7 @@ jobs:
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
             "mkdir -p '$PRODUCTION_DEPLOY_PATH/scripts/postgres' '$PRODUCTION_DEPLOY_PATH/scripts/deploy'"
 
-          scp -o BatchMode=yes -o StrictHostKeyChecking=yes docker-compose.yml \
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes docker-compose.production.yml \
             "$remote:$PRODUCTION_DEPLOY_PATH/docker-compose.yml"
           scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/postgres/init-agent-db.sh \
             "$remote:$PRODUCTION_DEPLOY_PATH/scripts/postgres/init-agent-db.sh"

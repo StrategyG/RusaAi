@@ -4,13 +4,13 @@
 
 Every push and pull request runs the reusable CI workflow:
 
-1. **Quality:** Ruff lint, Python compilation, the full pytest suite against PostgreSQL 16, and pip-audit for the complete development dependency set.
+1. **Quality:** Ruff lint, Python compilation, deployment/rollback shell tests, the full pytest suite against PostgreSQL 16, and pip-audit for the complete development dependency set.
 2. **Container security:** Compose interpolation validation, production API and worker image builds, Trivy image scans, and CycloneDX SBOM generation for both images.
 3. **Release Gate:** a single aggregate check that fails unless both mandatory jobs succeed. Configure this exact check as required on protected branches.
 
 Trivy fails the pipeline for any HIGH or CRITICAL OS/library vulnerability, including findings for which no fix is currently available. Exceptions must be reviewed, documented, time-bounded, and handled through an explicit approved policy change; do not add blanket ignore rules.
 
-The CI workflow is reusable by the release workflow. A semantic-version tag is not published unless the complete CI workflow succeeds again on the exact tagged commit.
+The CI workflow validates both the build-enabled development Compose file and the build-free production Compose manifest. It is reusable by the release workflow. A semantic-version tag is not published unless the complete CI workflow succeeds again on the exact tagged commit.
 
 ## Release and image supply chain
 
@@ -51,13 +51,13 @@ Configure these environment secrets:
 | `PRODUCTION_SSH_KNOWN_HOSTS` | Pinned host key entry; do not generate trust dynamically in CI |
 | `GHCR_PULL_TOKEN` | Optional read:packages token if GHCR images are private |
 
-The production host must have Docker Engine, Docker Compose v2, `curl`, `flock`, network access to GHCR, and a pre-provisioned `.env` file. The model directory referenced by `RUSA_MODEL_DIR` must exist and be mounted read-only. Keep database volumes persistent and place the API behind a TLS reverse proxy or gateway.
+The production host must have Docker Engine, Docker Compose v2, `curl`, `flock`, network access to GHCR, and a pre-provisioned `.env` file. Runtime images use the Debian Bookworm slim base and upgrade security packages during construction. The model directory referenced by `RUSA_MODEL_DIR` must exist and be mounted read-only. Keep database volumes persistent and place the API behind a TLS reverse proxy or gateway.
 
 The production `.env` file must contain all runtime secrets and configuration from `.env.example`. Before the first automated rollout, seed `RUSA_API_IMAGE` and `RUSA_AGENT_IMAGE` with the immutable GHCR digests of the currently running, known-good images. This baseline is required so the first automated deployment has a real rollback target. Never upload the production `.env` file to GitHub or commit it to the repository.
 
 ## Deployment and rollback
 
-The release workflow copies only the Compose manifest and required initialization/deployment scripts to the host. Runtime secrets remain on the host.
+The release workflow copies `docker-compose.production.yml` as the host's `docker-compose.yml`, plus the required initialization/deployment scripts. The production manifest has no local build contexts and requires immutable GHCR image digests, so the host does not need a source checkout or Dockerfiles. Runtime secrets remain on the host.
 
 `scripts/deploy/compose-deploy.sh`:
 
