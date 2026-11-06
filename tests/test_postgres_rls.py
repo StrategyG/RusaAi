@@ -108,6 +108,8 @@ def test_worker_memory_is_tenant_scoped_and_audit_is_append_only():
 
 
 def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
+    import psycopg
+
     task_a, task_b = str(uuid4()), str(uuid4())
     with connect() as conn:
         # Seed as the migration/test owner; the worker role intentionally has no INSERT grant.
