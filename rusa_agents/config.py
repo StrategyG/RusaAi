@@ -13,6 +13,8 @@ from urllib.parse import parse_qs, urlparse
 class RuntimeConfig:
     environment: str
     database_url: str | None
+    api_database_url: str | None
+    worker_database_url: str | None
     audit_hmac_key: str | None
     api_keys: dict[str, str]
     metrics_api_key: str | None
@@ -36,8 +38,23 @@ class RuntimeConfig:
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
             "api_image_digest", "worker_image_digest", "model_host", "db_host",
+            "managed-secret",
         )
         return any(marker in lowered for marker in markers)
+
+    @staticmethod
+    def _validate_postgres_dsn(name: str, dsn: str | None, missing: list[str]) -> None:
+        if not dsn:
+            missing.append(name)
+            return
+        parsed = urlparse(dsn)
+        ssl_modes = parse_qs(parsed.query).get("sslmode", [])
+        if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
+            missing.append(f"{name} using a valid PostgreSQL DSN")
+        if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
+            missing.append(f"{name} with sslmode=require, verify-ca, or verify-full")
+        if RuntimeConfig._looks_placeholder(parsed.hostname) or RuntimeConfig._looks_placeholder(parsed.password):
+            missing.append(f"{name} must not contain example host/password placeholders")
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
@@ -51,28 +68,41 @@ class RuntimeConfig:
             aicode_enabled = False
         else:
             raise ValueError("RUSA_AICODE_ENABLED must be a boolean value")
+
         try:
-            keys = json.loads(os.getenv("RUSA_API_KEYS", "{}"))
+            keys = json.loads(os.getenv("RUSA_API_KEYS", "{}") or "{}")
         except json.JSONDecodeError as exc:
             raise ValueError("RUSA_API_KEYS must be a JSON object mapping API keys to tenant IDs") from exc
-        if not isinstance(keys, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in keys.items()):
+        if not isinstance(keys, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in keys.items()
+        ):
             raise ValueError("RUSA_API_KEYS must map string API keys to string tenant IDs")
+
         try:
             tenant_repositories = json.loads(os.getenv("RUSA_TENANT_REPOSITORIES", "{}"))
         except json.JSONDecodeError as exc:
             raise ValueError("RUSA_TENANT_REPOSITORIES must be a JSON object") from exc
         if not isinstance(tenant_repositories, dict) or any(
-            not isinstance(tenant, str) or not isinstance(repos, list)
-            or any(not isinstance(repo, str) for repo in repos)
-            for tenant, repos in tenant_repositories.items()
+            not isinstance(tenant, str)
+            or not isinstance(repositories, list)
+            or any(not isinstance(repository, str) for repository in repositories)
+            for tenant, repositories in tenant_repositories.items()
         ):
             raise ValueError("RUSA_TENANT_REPOSITORIES must map tenant IDs to repository-name arrays")
-        legacy = os.getenv("RUSA_API_KEY")
-        if legacy:
-            keys.setdefault(legacy, os.getenv("RUSA_DEFAULT_TENANT", "default"))
+
+        legacy_database_url = os.getenv("RUSA_DATABASE_URL") or None
+        api_database_url = os.getenv("RUSA_API_DATABASE_URL") or legacy_database_url
+        worker_database_url = os.getenv("RUSA_WORKER_DATABASE_URL") or legacy_database_url
+        legacy_api_key = os.getenv("RUSA_API_KEY")
+        if legacy_api_key:
+            keys.setdefault(legacy_api_key, os.getenv("RUSA_DEFAULT_TENANT", "default"))
+
         return cls(
             environment=environment,
-            database_url=os.getenv("RUSA_DATABASE_URL"),
+            database_url=legacy_database_url,
+            api_database_url=api_database_url,
+            worker_database_url=worker_database_url,
             audit_hmac_key=os.getenv("RUSA_AUDIT_HMAC_KEY"),
             api_keys=keys,
             metrics_api_key=os.getenv("RUSA_METRICS_API_KEY"),
@@ -86,61 +116,72 @@ class RuntimeConfig:
             aicode_enabled=aicode_enabled,
         )
 
+    def _validate_tenant_repositories(self, missing: list[str]) -> None:
+        if not self.tenant_repositories:
+            missing.append("RUSA_TENANT_REPOSITORIES")
+        if any(not tenant.strip() for tenant in self.tenant_repositories):
+            missing.append("non-empty tenant identifiers")
+        for tenant, repositories in self.tenant_repositories.items():
+            if not repositories:
+                missing.append(f"non-empty repository allowlist for tenant {tenant}")
+            if any(
+                not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                for repository in repositories
+            ):
+                missing.append(f"valid owner/repository allowlist entries for tenant {tenant}")
+
+    def _validate_model_endpoint(self, missing: list[str]) -> None:
+        if not self.model_base_url:
+            missing.append("RUSA_MODEL_BASE_URL")
+            return
+        model_url = urlparse(self.model_base_url)
+        if (
+            model_url.scheme != "https"
+            or not model_url.hostname
+            or model_url.username
+            or model_url.password
+        ):
+            missing.append("RUSA_MODEL_BASE_URL using credential-free HTTPS")
+        if self._looks_placeholder(model_url.hostname):
+            missing.append("RUSA_MODEL_BASE_URL must point to a real model host")
+
     def validate_api(self) -> None:
         if self.environment != "production":
             return
-        required = {
-            "RUSA_DATABASE_URL": self.database_url,
-            "RUSA_API_KEYS or RUSA_API_KEY": self.api_keys,
-            "RUSA_METRICS_API_KEY": self.metrics_api_key,
-            "RUSA_TENANT_REPOSITORIES": self.tenant_repositories,
-            "RUSA_MODEL_BASE_URL": self.model_base_url,
-        }
-        missing = [name for name, value in required.items() if not value]
+        missing: list[str] = []
+        self._validate_postgres_dsn("RUSA_API_DATABASE_URL", self.api_database_url, missing)
+        if not self.api_keys:
+            missing.append("RUSA_API_KEYS or RUSA_API_KEY")
         if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
             missing.append("API keys of at least 32 UTF-8 bytes")
         if any(self._looks_placeholder(key) for key in self.api_keys):
             missing.append("API keys must not contain example placeholders")
-        if self.metrics_api_key and len(self.metrics_api_key.encode("utf-8")) < 32:
+        if any(not tenant.strip() for tenant in self.api_keys.values()):
+            missing.append("non-empty API-key tenant mappings")
+        if not self.metrics_api_key:
+            missing.append("RUSA_METRICS_API_KEY")
+        elif len(self.metrics_api_key.encode("utf-8")) < 32:
             missing.append("RUSA_METRICS_API_KEY of at least 32 UTF-8 bytes")
         if self._looks_placeholder(self.metrics_api_key):
             missing.append("RUSA_METRICS_API_KEY must be a real operator secret, not a placeholder")
-        if any(not tenant.strip() for tenant in self.api_keys.values()):
-            missing.append("non-empty API-key tenant mappings")
-        if any(not tenant.strip() for tenant in self.tenant_repositories):
-            missing.append("non-empty tenant identifiers")
-        if self.database_url:
-            database_url = urlparse(self.database_url)
-            ssl_modes = parse_qs(database_url.query).get("sslmode", [])
-            if database_url.scheme not in {"postgres", "postgresql"}:
-                missing.append("RUSA_DATABASE_URL using PostgreSQL")
-            if self._looks_placeholder(database_url.hostname) or self._looks_placeholder(database_url.password):
-                missing.append("RUSA_DATABASE_URL must not contain example host/password placeholders")
-            if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
-                missing.append("RUSA_DATABASE_URL with sslmode=require, verify-ca, or verify-full")
-        if self.model_base_url:
-            model_url = urlparse(self.model_base_url)
-            if model_url.scheme != "https" or not model_url.hostname or model_url.username or model_url.password:
-                missing.append("RUSA_MODEL_BASE_URL using credential-free HTTPS")
-            if self._looks_placeholder(model_url.hostname):
-                missing.append("RUSA_MODEL_BASE_URL must point to a real model host")
-        for tenant, repositories in self.tenant_repositories.items():
-            if any(not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) for repository in repositories):
-                missing.append(f"valid owner/repository allowlist entries for tenant {tenant}")
+        self._validate_tenant_repositories(missing)
+        self._validate_model_endpoint(missing)
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
 
     def validate_worker(self) -> None:
-        self.validate_api()
         if self.environment != "production":
             return
+        missing: list[str] = []
+        self._validate_postgres_dsn("RUSA_WORKER_DATABASE_URL", self.worker_database_url, missing)
         required = {
             "RUSA_AUDIT_HMAC_KEY": self.audit_hmac_key,
             "RUSA_WORKSPACE_ROOT": self.workspace_root,
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
             "RUSA_GITHUB_TOKEN": self.github_token,
+            "RUSA_SANDBOX_IMAGE": self.sandbox_image,
         }
-        missing = [name for name, value in required.items() if not value]
+        missing.extend(name for name, value in required.items() if not value)
         if self.audit_hmac_key and len(self.audit_hmac_key.encode("utf-8")) < 32:
             missing.append("RUSA_AUDIT_HMAC_KEY of at least 32 UTF-8 bytes")
         if self._looks_placeholder(self.audit_hmac_key):
@@ -153,11 +194,20 @@ class RuntimeConfig:
             missing.append("RUSA_WORKSPACE_ROOT must be an absolute path")
         if self.git_mirror_root and not Path(self.git_mirror_root).is_absolute():
             missing.append("RUSA_GIT_MIRROR_ROOT must be an absolute path")
-        if not self.sandbox_image or not re.fullmatch(
+        if self.sandbox_image and not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9._/:@-]+@sha256:[0-9a-f]{64}",
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE pinned by a valid immutable sha256 digest")
+        self._validate_tenant_repositories(missing)
+        self._validate_model_endpoint(missing)
+
+        if self.api_database_url and self.worker_database_url:
+            api_user = urlparse(self.api_database_url).username
+            worker_user = urlparse(self.worker_database_url).username
+            if not api_user or not worker_user or api_user == worker_user:
+                missing.append("distinct PostgreSQL login identities for API and worker")
+
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
 
