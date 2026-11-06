@@ -28,6 +28,17 @@ class AutonomyPolicy:
     PROTECTED_PATHS = (
         ".github/workflows", ".env", "secrets", "credentials",
     )
+    APPROVAL_PATH_PREFIXES = {
+        "infra", "infrastructure", "deploy", "deployment",
+        "k8s", "kubernetes", "helm", "terraform", ".github",
+    }
+    APPROVAL_PATH_FILES = {
+        "requirements.txt", "requirements-agent.txt", "requirements-dev.txt",
+        "pyproject.toml", "poetry.lock", "uv.lock", "pipfile", "pipfile.lock",
+        "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+        "go.mod", "go.sum", "cargo.toml", "cargo.lock",
+        "dockerfile", "dockerfile.worker", "docker-compose.yml",
+    }
 
     def __init__(self, allowed_actions: set[str] | None = None) -> None:
         self.allowed_actions = set(self.ALLOWED_ACTIONS if allowed_actions is None else allowed_actions)
@@ -74,6 +85,17 @@ class AutonomyPolicy:
             return PolicyDecision(False, False, f"Action '{action}' is not allowlisted")
         if path is not None and not self.safe_repository_path(path):
             return PolicyDecision(False, True, "Repository path is protected or unsafe")
+        if action == "repo_write" and path is not None:
+            candidate = PurePosixPath(path)
+            if (
+                candidate.parts
+                and candidate.parts[0].lower() in self.APPROVAL_PATH_PREFIXES
+            ) or candidate.name.lower() in self.APPROVAL_PATH_FILES:
+                return PolicyDecision(
+                    False,
+                    True,
+                    "Changes to infrastructure, deployment, workflow, or dependency files require human approval",
+                )
         if action == "repo_write" and (
             repository is None or repository.work_branch == repository.base_branch
         ):
