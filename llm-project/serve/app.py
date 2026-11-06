@@ -1,50 +1,181 @@
-import os
+"""RUSA-AI OpenAI-compatible API with fail-closed security and real inference."""
+from __future__ import annotations
+
+import asyncio
+import hmac
 import json
 import logging
-from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+import os
+import re
+import time
+import uuid
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+from pathlib import Path
+from threading import Lock
+from typing import Any, Dict, List, Literal, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
-import jsonschema
+from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import BaseModel, ConfigDict, Field
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("rusa-ai-serve")
+from inference import InferenceCapacityError, InferenceNotReady, ModelRuntime
 
-app = FastAPI(
-    title="RUSA-AI Serving Engine",
-    description="Production-ready API for RUSA-AI model inference and task validation.",
-    version="1.0.0"
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logger = logging.getLogger("rusa-ai-serve")
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "schemas"
+    / "a2a"
+    / "task-envelope.schema.json"
+)
+MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", str(1_048_576)))
+MAX_BATCH_SIZE = int(os.getenv("RUSA_MAX_BATCH_SIZE", "4"))
+MAX_TOKENS = int(os.getenv("RUSA_MAX_TOKENS", "4096"))
+QUEUE_TIMEOUT_SECONDS = float(os.getenv("RUSA_QUEUE_TIMEOUT_SECONDS", "30"))
 
-def verify_api_key(api_key: Optional[str] = Depends(api_key_header)):
-    expected_key = os.getenv("RUSA_API_KEY")
-    if expected_key:
-        if not api_key or api_key != expected_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or missing API Key"
+
+class RequestBodyTooLarge(Exception):
+    pass
+
+
+class RequestBodyLimitMiddleware:
+    """Enforce a hard body limit, including chunked requests without Content-Length."""
+
+    def __init__(self, app: Any, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        content_length = headers.get(b"content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_bytes:
+                    response = JSONResponse(
+                        status_code=413,
+                        content={"detail": "Request body exceeds configured limit"},
+                    )
+                    await response(scope, receive, send)
+                    return
+            except ValueError:
+                response = JSONResponse(
+                    status_code=400, content={"detail": "Invalid Content-Length"}
+                )
+                await response(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive() -> Dict[str, Any]:
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise RequestBodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except RequestBodyTooLarge:
+            response = JSONResponse(
+                status_code=413,
+                content={"detail": "Request body exceeds configured limit"},
             )
-    return api_key
+            await response(scope, receive, send)
 
-class ChatMessage(BaseModel):
-    role: str = Field(..., description="Message role: system, user, or assistant")
-    content: str = Field(..., description="Content of the message")
 
-class ChatCompletionRequest(BaseModel):
-    model: str = Field(default="rusa-ai-v1", description="Model identifier")
-    messages: List[ChatMessage] = Field(..., description="List of chat messages")
+class ProcessRateLimiter:
+    """Best-effort per-process limiter; production ingress must also enforce shared limits."""
+
+    def __init__(self) -> None:
+        self._events: Dict[str, deque] = defaultdict(deque)
+        self._lock = Lock()
+
+    def allow(self, key: str, limit: int, window_seconds: int = 60) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            if key not in self._events and len(self._events) >= 10_000:
+                expired = [
+                    client
+                    for client, history in self._events.items()
+                    if not history or now - history[-1] >= window_seconds
+                ]
+                for client in expired:
+                    self._events.pop(client, None)
+                if len(self._events) >= 10_000:
+                    return False
+            events = self._events[key]
+            while events and now - events[0] >= window_seconds:
+                events.popleft()
+            if len(events) >= limit:
+                return False
+            events.append(now)
+            return True
+
+
+rate_limiter = ProcessRateLimiter()
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatMessage(StrictModel):
+    role: Literal["system", "developer", "user", "assistant", "tool"]
+    content: str = Field(max_length=200_000)
+
+
+class StreamOptions(StrictModel):
+    include_usage: bool = False
+
+
+class ChatCompletionRequest(StrictModel):
+    model: str = "rusa-ai"
+    messages: List[ChatMessage] = Field(min_length=1, max_length=256)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.9, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=1024, ge=1, le=4096)
-    stream: bool = Field(default=False)
+    top_p: float = Field(default=0.9, gt=0.0, le=1.0)
+    max_tokens: int = Field(default=1024, ge=1, le=MAX_TOKENS)
+    stream: bool = False
+    stream_options: Optional[StreamOptions] = None
+
+
+class BatchChatItem(StrictModel):
+    messages: List[ChatMessage] = Field(min_length=1, max_length=256)
+
+
+class BatchChatCompletionRequest(StrictModel):
+    model: str = "rusa-ai"
+    requests: List[BatchChatItem] = Field(min_length=1, max_length=MAX_BATCH_SIZE)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.9, gt=0.0, le=1.0)
+    max_tokens: int = Field(default=512, ge=1, le=MAX_TOKENS)
+
 
 class ChatChoice(BaseModel):
     index: int
     message: ChatMessage
-    finish_reason: str
+    finish_reason: Literal["stop", "length"]
+
+
+class Usage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
 
 class ChatCompletionResponse(BaseModel):
     id: str
@@ -52,67 +183,417 @@ class ChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: List[ChatChoice]
+    usage: Usage
 
-class TaskValidationRequest(BaseModel):
+
+class TaskValidationRequest(StrictModel):
     envelope: Dict[str, Any]
+
 
 class TaskValidationResponse(BaseModel):
     valid: bool
-    errors: Optional[List[str]] = None
+    errors: List[str] = Field(default_factory=list)
+
+
+def verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> Optional[str]:
+    expected_key = os.getenv("RUSA_API_KEY", "")
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+
+    if not expected_key:
+        if environment == "production":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="API authentication is not configured",
+            )
+        return None
+
+    if not api_key or not hmac.compare_digest(api_key, expected_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    return api_key
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    api_key = os.getenv("RUSA_API_KEY", "")
+    model_path = os.getenv("RUSA_MODEL_PATH", "").strip()
+
+    if environment == "production":
+        if len(api_key) < 32:
+            raise RuntimeError("Production requires RUSA_API_KEY with at least 32 characters")
+        if not model_path:
+            raise RuntimeError("Production requires RUSA_MODEL_PATH to a real local checkpoint")
+
+    runtime = ModelRuntime()
+    application.state.runtime = runtime
+    application.state.inference_semaphore = asyncio.Semaphore(
+        max(1, int(os.getenv("RUSA_MAX_CONCURRENT_REQUESTS", "1")))
+    )
+
+    if model_path:
+        await asyncio.to_thread(runtime.load)
+        logger.info(
+            "model_loaded model=%s device=%s backend=transformers",
+            runtime.model_name,
+            runtime.device,
+        )
+    else:
+        logger.warning("model_not_loaded; inference endpoints will return 503")
+
+    yield
+    runtime.close()
+
+
+app = FastAPI(
+    title="RUSA-AI Serving Engine",
+    description="Checkpoint-backed OpenAI-compatible inference and A2A validation API.",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+@app.middleware("http")
+async def request_controls(request: Request, call_next: Any):
+    supplied_request_id = request.headers.get("X-Request-ID", "")
+    request_id = (
+        supplied_request_id
+        if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", supplied_request_id)
+        else str(uuid.uuid4())
+    )
+    request.state.request_id = request_id
+
+    if request.url.path.startswith("/v1/"):
+        limit = max(1, int(os.getenv("RUSA_RATE_LIMIT_PER_MINUTE", "120")))
+        client_host = request.client.host if request.client else "unknown"
+        if not rate_limiter.allow(client_host, limit):
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded"},
+                headers={"Retry-After": "60"},
+            )
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
+
+
+async def acquire_capacity(request: Request) -> asyncio.Semaphore:
+    semaphore = request.app.state.inference_semaphore
+    try:
+        await asyncio.wait_for(
+            semaphore.acquire(), timeout=QUEUE_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Inference capacity is busy; retry later",
+            headers={"Retry-After": "5"},
+        ) from exc
+    return semaphore
+
+
+def check_requested_model(requested: str, runtime: ModelRuntime) -> None:
+    allowed = {runtime.model_name, "rusa-ai", "rusa-ai-v1"}
+    if requested not in allowed:
+        raise HTTPException(status_code=404, detail="Requested model is not available")
+
+
+def check_generation_limit(runtime: ModelRuntime, max_tokens: int) -> None:
+    if max_tokens >= runtime.max_context_tokens:
+        raise HTTPException(
+            status_code=422,
+            detail="max_tokens must be smaller than the checkpoint context window",
+        )
+
+
+def make_completion(
+    result: Dict[str, Any], model_name: str, request_id: str, max_tokens: int
+) -> ChatCompletionResponse:
+    completion_tokens = int(result["completion_tokens"])
+    return ChatCompletionResponse(
+        id=f"chatcmpl-{request_id.replace('-', '')}",
+        created=int(time.time()),
+        model=model_name,
+        choices=[
+            ChatChoice(
+                index=0,
+                message=ChatMessage(role="assistant", content=result["text"]),
+                finish_reason="length" if completion_tokens >= max_tokens else "stop",
+            )
+        ],
+        usage=Usage(
+            prompt_tokens=int(result["prompt_tokens"]),
+            completion_tokens=completion_tokens,
+            total_tokens=int(result["prompt_tokens"]) + completion_tokens,
+        ),
+    )
+
 
 @app.get("/health", status_code=status.HTTP_200_OK)
-def health_check():
+def health_check(request: Request) -> Dict[str, Any]:
+    runtime: ModelRuntime = request.app.state.runtime
     return {
-        "status": "healthy",
+        "status": "ok",
         "service": "rusa-ai-serve",
-        "version": "1.0.0",
-        "environment": os.getenv("ENVIRONMENT", "production")
+        "version": app.version,
+        "model_ready": runtime.ready,
+        "device": runtime.device,
     }
 
-@app.post("/v1/chat/completions", response_model=ChatCompletionResponse, dependencies=[Depends(verify_api_key)])
-def chat_completions(request: ChatCompletionRequest):
-    try:
-        if not request.messages:
-            raise HTTPException(status_code=400, detail="Messages list cannot be empty")
-        
-        last_msg = request.messages[-1].content
-        mock_response = f"[RUSA-AI Model Output]: Processed prompt: '{last_msg}' successfully."
-        
-        import time
-        return ChatCompletionResponse(
-            id=f"rusa-chatcmpl-{int(time.time())}",
-            created=int(time.time()),
-            model=request.model,
-            choices=[
-                ChatChoice(
-                    index=0,
-                    message=ChatMessage(role="assistant", content=mock_response),
-                    finish_reason="stop"
-                )
-            ]
+
+@app.get("/health/live", status_code=status.HTTP_200_OK)
+def liveness() -> Dict[str, str]:
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+def readiness(request: Request) -> Dict[str, Any]:
+    runtime: ModelRuntime = request.app.state.runtime
+    if not runtime.ready:
+        raise HTTPException(
+            status_code=503, detail="Model checkpoint is not loaded"
         )
-    except Exception as e:
-        logger.error(f"Inference error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Inference engine failure: {str(e)}")
+    return {
+        "status": "ready",
+        "model": runtime.model_name,
+        "device": runtime.device,
+    }
 
-@app.post("/v1/validate-task", response_model=TaskValidationResponse)
-def validate_task_envelope(request: TaskValidationRequest):
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "schemas", "a2a", "task-envelope.schema.json")
-    if not os.path.exists(schema_path):
-        schema_path = "schemas/a2a/task-envelope.schema.json"
-    
-    if not os.path.exists(schema_path):
-        return TaskValidationResponse(valid=True, errors=["Schema file not found on disk, skipped validation."])
+
+@app.post(
+    "/v1/chat/completions",
+    response_model=ChatCompletionResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def chat_completions(
+    payload: ChatCompletionRequest, request: Request
+):
+    runtime: ModelRuntime = request.app.state.runtime
+    if not runtime.ready:
+        raise HTTPException(status_code=503, detail="Inference model is not ready")
+    check_requested_model(payload.model, runtime)
+    check_generation_limit(runtime, payload.max_tokens)
+
+    semaphore = await acquire_capacity(request)
+    messages = [item.model_dump() for item in payload.messages]
+    request_id = request.state.request_id
+
+    if payload.stream:
+        async def event_stream():
+            created = int(time.time())
+            response_id = f"chatcmpl-{request_id.replace('-', '')}"
+            try:
+                yield "data: " + json.dumps({
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": runtime.model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                }) + "\n\n"
+                streamed_pieces = []
+                async for piece in runtime.stream(
+                    messages,
+                    payload.temperature,
+                    payload.top_p,
+                    payload.max_tokens,
+                ):
+                    streamed_pieces.append(piece)
+                    yield "data: " + json.dumps({
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": runtime.model_name,
+                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+                    }, ensure_ascii=False) + "\n\n"
+                stream_usage = runtime.count_usage(messages, "".join(streamed_pieces))
+                stream_finish_reason = (
+                    "length"
+                    if stream_usage["completion_tokens"] >= payload.max_tokens
+                    else "stop"
+                )
+                yield "data: " + json.dumps({
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": runtime.model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": stream_finish_reason}],
+                }) + "\n\n"
+                if payload.stream_options and payload.stream_options.include_usage:
+                    usage = stream_usage
+                    yield "data: " + json.dumps({
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": runtime.model_name,
+                        "choices": [],
+                        "usage": usage,
+                    }) + "\n\n"
+                yield "data: [DONE]\n\n"
+            except InferenceCapacityError:
+                yield "data: " + json.dumps({
+                    "error": {
+                        "message": "Model is temporarily at capacity",
+                        "type": "server_error",
+                        "request_id": request_id,
+                    }
+                }) + "\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception as exc:
+                logger.error(
+                    "stream_inference_failed request_id=%s error_type=%s",
+                    request_id,
+                    type(exc).__name__,
+                )
+                yield "data: " + json.dumps({
+                    "error": {
+                        "message": "Inference failed",
+                        "type": "server_error",
+                        "request_id": request_id,
+                    }
+                }) + "\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                semaphore.release()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     try:
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema = json.load(f)
-        
-        validator = jsonschema.Draft7Validator(schema)
-        errors = [err.message for err in validator.iter_errors(request.envelope)]
-        
-        if errors:
-            return TaskValidationResponse(valid=False, errors=errors)
-        return TaskValidationResponse(valid=True, errors=[])
-    except Exception as e:
-        return TaskValidationResponse(valid=False, errors=[str(e)])
+        result = await asyncio.to_thread(
+            runtime.generate,
+            messages,
+            payload.temperature,
+            payload.top_p,
+            payload.max_tokens,
+        )
+        return make_completion(result, runtime.model_name, request_id, payload.max_tokens)
+    except InferenceNotReady as exc:
+        raise HTTPException(status_code=503, detail="Inference model is not ready") from exc
+    except InferenceCapacityError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is temporarily at capacity",
+            headers={"Retry-After": "5"},
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "inference_failed request_id=%s error_type=%s",
+            request_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "Inference failed", "request_id": request_id},
+        ) from exc
+    finally:
+        semaphore.release()
+
+
+@app.post(
+    "/v1/chat/completions/batch",
+    dependencies=[Depends(verify_api_key)],
+)
+async def batch_chat_completions(
+    payload: BatchChatCompletionRequest, request: Request
+):
+    """Non-streaming tensor-batched inference; all items share sampling settings."""
+    runtime: ModelRuntime = request.app.state.runtime
+    if not runtime.ready:
+        raise HTTPException(status_code=503, detail="Inference model is not ready")
+    check_requested_model(payload.model, runtime)
+    check_generation_limit(runtime, payload.max_tokens)
+
+    semaphore = await acquire_capacity(request)
+    message_batches = [
+        [message.model_dump() for message in item.messages]
+        for item in payload.requests
+    ]
+    try:
+        results = await asyncio.to_thread(
+            runtime.generate_batch,
+            message_batches,
+            payload.temperature,
+            payload.top_p,
+            payload.max_tokens,
+        )
+        created = int(time.time())
+        data = []
+        for index, result in enumerate(results):
+            completion = make_completion(
+                result, runtime.model_name, f"{request.state.request_id}-{index}", payload.max_tokens
+            )
+            data.append(completion.model_dump())
+        return {"object": "list", "data": data, "created": created}
+    except InferenceCapacityError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Model is temporarily at capacity",
+            headers={"Retry-After": "5"},
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "batch_inference_failed request_id=%s error_type=%s",
+            request.state.request_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Batch inference failed",
+                "request_id": request.state.request_id,
+            },
+        ) from exc
+    finally:
+        semaphore.release()
+
+
+@app.post(
+    "/v1/validate-task",
+    response_model=TaskValidationResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+def validate_task_envelope(request: TaskValidationRequest):
+    if not SCHEMA_PATH.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="A2A validation schema is unavailable; validation cannot be skipped",
+        )
+
+    try:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        validator = Draft202012Validator(
+            schema, format_checker=FormatChecker()
+        )
+        errors = sorted(
+            validator.iter_errors(request.envelope),
+            key=lambda error: list(error.absolute_path),
+        )
+        return TaskValidationResponse(
+            valid=not errors,
+            errors=[
+                f"{'/'.join(str(part) for part in error.absolute_path) or '$'}: {error.message}"
+                for error in errors
+            ],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("schema_validation_failed error_type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="A2A validation is temporarily unavailable",
+        ) from exc
