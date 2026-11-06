@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: rusa
@@ -93,6 +93,11 @@ services:
       RUSA_AGENT_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
       RUSA_AGENT_MODEL_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set a least-privilege GITHUB_TOKEN in .env}
+      RUSA_MCP_SERVERS: "${RUSA_MCP_SERVERS:-{}}"
+      MCP_SERVER_TOKEN: ${MCP_SERVER_TOKEN:-}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:-}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:-}
     depends_on:
       rusa-agent-migrate:
         condition: service_completed_successfully
@@ -137,6 +142,11 @@ services:
       RUSA_AGENT_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
       RUSA_AGENT_MODEL_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
       GITHUB_TOKEN: ${GITHUB_TOKEN:?Set a least-privilege GITHUB_TOKEN in .env}
+      RUSA_MCP_SERVERS: "${RUSA_MCP_SERVERS:-{}}"
+      MCP_SERVER_TOKEN: ${MCP_SERVER_TOKEN:-}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:-}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:-}
       LOG_LEVEL: INFO
     depends_on:
       rusa-agent-migrate:
