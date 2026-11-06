@@ -16,6 +16,8 @@ from typing import Any, Literal, Protocol
 import jsonschema
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+
+from http_limits import BodyLimitMiddleware
 from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
 from pydantic import BaseModel, ConfigDict, Field
@@ -312,6 +314,8 @@ app = FastAPI(
     openapi_url="/openapi.json" if environment != "production" else None,
     lifespan=lifespan,
 )
+
+app.add_middleware(BodyLimitMiddleware, max_bytes=lambda: MAX_REQUEST_BYTES)
 
 
 @app.middleware("http")
