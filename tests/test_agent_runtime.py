@@ -1091,3 +1091,22 @@ def test_sensitive_text_redaction_covers_credentials_and_private_keys():
     assert "strong-password-value" not in redacted
     assert "secret-material" not in redacted
     assert "[REDACTED" in redacted
+
+
+def test_orchestrator_never_executes_repository_tool_without_current_lease():
+    developer = ScriptedWorker(WorkerRole.DEVELOPER, [worker_result(
+        WorkerRole.DEVELOPER, [ToolCall("create_branch")]
+    )])
+    tools = FakeTools()
+    orchestrator = make_orchestrator(
+        tools,
+        {WorkerRole.DEVELOPER: developer},
+    )
+
+    async def lease_guard():
+        return False
+
+    record = asyncio.run(orchestrator.run(make_task(), tool_guard=lease_guard))
+    assert record.state == TaskState.FAILED
+    assert tools.calls == []
+    assert "lease is no longer valid" in record.errors[-1]
