@@ -180,3 +180,120 @@ def test_orchestrator_fails_cleanly_if_memory_lookup_fails(tmp_path):
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.FAILED
     assert any("database unavailable" in error for error in record.errors)
+
+
+
+def test_quality_managers_dispatch_in_parallel(tmp_path):
+    started = set()
+    barrier = asyncio.Event()
+
+    class ParallelWorker(StubWorker):
+        async def run(self, task, prior_results):
+            started.add(self.role)
+            if started.issuperset({WorkerRole.TESTER, WorkerRole.SECURITY}):
+                barrier.set()
+            await asyncio.wait_for(barrier.wait(), timeout=1.0)
+            return await super().run(task, prior_results)
+
+    evidence_workers = []
+    for role in AICodeOrchestrator.PIPELINE:
+        if role == WorkerRole.TESTER:
+            evidence_workers.append(
+                ParallelWorker(role, {"check:pytest": {"exit_code": 0}})
+            )
+        elif role == WorkerRole.SECURITY:
+            evidence_workers.append(
+                ParallelWorker(
+                    role,
+                    {
+                        "check:bandit": {"exit_code": 0},
+                        "check:ruff": {"exit_code": 0},
+                        "check:compile": {"exit_code": 0},
+                    },
+                )
+            )
+        else:
+            evidence_workers.append(StubWorker(role))
+
+    orchestrator = AICodeOrchestrator(
+        evidence_workers,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_parallel_workers=2,
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.SUCCEEDED
+    assert started == {WorkerRole.TESTER, WorkerRole.SECURITY}
+
+
+def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
+    class CountingDeveloper(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.DEVELOPER)
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return WorkerResult(
+                role=self.role,
+                summary=f"implementation pass {self.calls}",
+                success=True,
+            )
+
+    class FlakyTester(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.TESTER)
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return WorkerResult(
+                role=self.role,
+                summary=f"test pass {self.calls}",
+                success=True,
+                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+            )
+
+    class CountingSecurity(StubWorker):
+        def __init__(self):
+            super().__init__(
+                WorkerRole.SECURITY,
+                {
+                    "check:bandit": {"exit_code": 0},
+                    "check:ruff": {"exit_code": 0},
+                    "check:compile": {"exit_code": 0},
+                },
+            )
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return await super().run(task, prior_results)
+
+    developer = CountingDeveloper()
+    tester = FlakyTester()
+    security = CountingSecurity()
+    configured = [
+        StubWorker(WorkerRole.ANALYST),
+        StubWorker(WorkerRole.ARCHITECT),
+        developer,
+        StubWorker(WorkerRole.DEBUGGER),
+        tester,
+        security,
+    ]
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=1,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.SUCCEEDED
+    assert developer.calls == 2
+    assert tester.calls == 2
+    assert security.calls == 2
+    assert len([
+        result for result in record.results if result.role == WorkerRole.TESTER
+    ]) == 2
