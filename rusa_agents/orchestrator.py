@@ -34,7 +34,7 @@ class HierarchicalOrchestrator:
             "create the draft PR after reviewer approval, then check CI on the latest write commit "
             "as the final verification step using $latest_write_commit."
         )
-        prompt = json.dumps(
+        prompt = self._bounded_json_prompt(
             {
                 "task_id": task["id"],
                 "objective": task["objective"],
@@ -47,7 +47,7 @@ class HierarchicalOrchestrator:
                 "registered_tools": self.tools.describe(),
                 "internal_tools": sorted(self.INTERNAL_TOOLS),
             },
-            ensure_ascii=False,
+            "planning",
         )
         raw = await self.provider.complete(system, prompt)
         try:
@@ -167,7 +167,7 @@ class HierarchicalOrchestrator:
             "Return JSON only with approved:boolean, summary:string, findings:string[], "
             "risk_level:low|medium|high|critical."
         )
-        prompt = json.dumps(
+        prompt = self._bounded_json_prompt(
             {
                 "objective": task["objective"],
                 "acceptance_criteria": task["acceptance_criteria"],
@@ -175,8 +175,8 @@ class HierarchicalOrchestrator:
                 "work_branch": task["work_branch"],
                 "diff": diff,
             },
-            ensure_ascii=False,
-        )[:60000]
+            "review",
+        )
         raw = await self.provider.complete(system, prompt)
         try:
             result = ReviewResult.model_validate_json(raw)
@@ -201,7 +201,7 @@ class HierarchicalOrchestrator:
             "is a model judgment, not an independent deterministic test. Return JSON only with "
             "summary, key_findings, citations, acceptance_criteria_assessment."
         )
-        prompt = json.dumps(
+        prompt = self._bounded_json_prompt(
             {
                 "objective": task["objective"],
                 "acceptance_criteria": task["acceptance_criteria"],
@@ -209,8 +209,8 @@ class HierarchicalOrchestrator:
                 "work_branch": task["work_branch"],
                 "tool_results": tool_results,
             },
-            ensure_ascii=False,
-        )[:60000]
+            "synthesis",
+        )
         raw = await self.provider.complete(system, prompt)
         try:
             result = SynthesisResult.model_validate_json(raw)
@@ -238,6 +238,15 @@ class HierarchicalOrchestrator:
         if any(citation not in known_citations for citation in result.citations):
             raise PlanRejected("Synthesis included a citation not present in tool evidence")
         return result.model_dump(mode="json")
+
+    @staticmethod
+    def _bounded_json_prompt(payload: dict[str, Any], stage: str) -> str:
+        encoded = json.dumps(payload, ensure_ascii=False)
+        if len(encoded) > 60000:
+            raise PlanRejected(
+                f"{stage.capitalize()} evidence exceeds the 60,000-character context limit; split the task"
+            )
+        return encoded
 
     @staticmethod
     def role_for_tool(tool_name: str) -> WorkerRole:
