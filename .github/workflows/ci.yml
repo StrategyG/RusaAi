@@ -1,46 +1,119 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - "**"
   pull_request:
-    branches: [ main ]
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Run Python Tests and Linting
+    name: Lint, test, and audit dependencies
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rusa_test
+          POSTGRES_USER: rusa_test
+          POSTGRES_PASSWORD: rusa_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusa_test -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSA_TEST_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
+          python-version: "3.11"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
-
-      - name: Lint and syntax check
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          else
+            python -m pip install -r requirements.txt
+            python -m pip install ruff pytest pip-audit
+          fi
+      - name: Lint
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
-
-      - name: Run tests with pytest
+          if [ -d rusa_agents ]; then
+            ruff check llm-project/serve rusa_agents tests
+          else
+            ruff check llm-project/serve tests --select E9,F63,F7,F82
+          fi
+      - name: Compile
         run: |
-          pytest
+          if [ -d rusa_agents ]; then
+            python -m compileall -q llm-project rusa_agents tests
+          else
+            python -m compileall -q llm-project tests
+          fi
+      - name: Test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
+      - name: Audit production dependencies
+        run: |
+          pip-audit -r requirements.txt
+          if [ -f requirements-agent.txt ]; then
+            pip-audit -r requirements-agent.txt
+          fi
 
-  docker-build:
-    name: Verify Docker Image Build
+  container:
+    name: Build and smoke-test containers
     runs-on: ubuntu-latest
+    needs: test
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
         run: |
-          docker build -t rusa-ai:latest .
+          if [ -f .env.example ]; then
+            cp .env.example .env
+            docker compose config --quiet
+            rm -f .env
+          fi
+      - name: Validate Docker Compose configuration
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+            docker compose config --quiet
+            rm -f .env
+          fi
+      - name: Build inference API image
+        run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Build agent runtime image when present
+        run: |
+          if [ -f Dockerfile.worker ]; then
+            docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+          fi
+      - name: Smoke-test inference API when available
+        run: |
+          if [ -f rusa_agents/api.py ]; then
+            docker run -d --name rusa-ai-ci               -p 127.0.0.1:8000:8000               -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890               rusa-ai:${{ github.sha }}
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent http://127.0.0.1:8000/health/live; then
+                exit 0
+              fi
+              sleep 2
+            done
+            docker logs rusa-ai-ci
+            exit 1
+          fi
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rusa-ai-ci || true
