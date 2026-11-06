@@ -103,6 +103,7 @@ class PostgresTaskQueue:
                     lease_owner TEXT,
                     lease_until TIMESTAMPTZ,
                     lease_token UUID,
+                    result JSONB,
                     last_error TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -110,6 +111,7 @@ class PostgresTaskQueue:
                 )
             """)
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
+            conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_claim
                 ON aicode_jobs(status, available_at, priority DESC, created_at)
@@ -261,7 +263,7 @@ class PostgresTaskQueue:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 UPDATE aicode_jobs
-                SET status='queued', attempts=0, available_at=NOW(),
+                SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
                   AND status IN ('awaiting_approval', 'failed')
@@ -283,16 +285,19 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
-                SELECT task_id::text, tenant_id, payload, status, attempts,
+                SELECT task_id::text, tenant_id, payload, result, status, attempts,
                        max_attempts, last_error, created_at, updated_at
                 FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s
             """, (task_id, tenant_id)).fetchone()
         if row is None:
             return None
         payload = row[2] if isinstance(row[2], dict) else json.loads(row[2])
+        result = row[3] if isinstance(row[3], dict) else (
+            json.loads(row[3]) if row[3] is not None else None
+        )
         return {
             "task_id": row[0], "tenant_id": row[1], "payload": payload,
-            "status": row[3], "attempts": row[4], "max_attempts": row[5],
-            "last_error": row[6], "created_at": row[7].isoformat(),
-            "updated_at": row[8].isoformat(),
+            "result": result, "status": row[4], "attempts": row[5],
+            "max_attempts": row[6], "last_error": row[7],
+            "created_at": row[8].isoformat(), "updated_at": row[9].isoformat(),
         }
