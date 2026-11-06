@@ -280,3 +280,55 @@ class GitHubPublisher:
             )
             created.raise_for_status()
             return created.json()["html_url"]
+
+
+    async def wait_for_ci(
+        self,
+        repository: str,
+        commit_sha: str,
+        timeout_seconds: int = 900,
+        poll_seconds: int = 15,
+    ) -> tuple[bool, str]:
+        """Wait for the required PR CI jobs; missing or failed evidence never passes."""
+        import asyncio
+
+        required = {"Test, lint, and security", "Build production image"}
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {self.token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            while asyncio.get_running_loop().time() < deadline:
+                try:
+                    response = await client.get(
+                        f"https://api.github.com/repos/{repository}/commits/{commit_sha}/check-runs",
+                        headers=headers,
+                        params={"per_page": 100},
+                    )
+                    response.raise_for_status()
+                    check_runs = response.json().get("check_runs", [])
+                except Exception as exc:
+                    return False, f"CI status could not be verified: {type(exc).__name__}"
+
+                relevant = {
+                    run.get("name"): run for run in check_runs
+                    if run.get("name") in required
+                }
+                failed = [
+                    name for name, run in relevant.items()
+                    if run.get("status") == "completed"
+                    and run.get("conclusion") not in {"success", "neutral", "skipped"}
+                ]
+                if failed:
+                    return False, "Required CI jobs failed: " + ", ".join(sorted(failed))
+                if required.issubset(relevant):
+                    if all(
+                        relevant[name].get("status") == "completed"
+                        and relevant[name].get("conclusion") in {"success", "neutral"}
+                        for name in required
+                    ):
+                        return True, "All required GitHub Actions checks passed"
+                await asyncio.sleep(poll_seconds)
+        return False, "Required GitHub Actions checks did not finish before the CI deadline"
