@@ -64,7 +64,7 @@ The inference API reports not-ready and returns HTTP 503 until a real local mode
 
 Cancellation and retry use tenant-checked database functions; the API role has no direct UPDATE or DELETE privilege on task tables. Cancellation clears the active lease token. The worker rechecks lease ownership immediately before each repository tool action and fails closed if the check is false or unavailable. Cancellation is cooperative: an external API request already in flight may finish, but no subsequent tool action or successful acknowledgement is permitted. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
 
-Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
+Every POST /v1/agent/tasks request must include an Idempotency-Key (1–128 URL-safe characters). Repeated submissions from the same tenant with the same key and normalized payload return the original task ID and work branch; reusing a key with a different payload returns HTTP 409. Requests without the key return HTTP 400. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
 
 Potential secrets are redacted from repository reads, memory, audit details, and durable checkpoints; secret-bearing file writes are blocked before GitHub access. The Security worker can review at most 20 changed files per task, with a bounded patch size per file. Larger or incomplete diffs are blocked for human review rather than silently truncated and treated as complete.
 
@@ -76,7 +76,7 @@ Run:
 - pytest -q
 - pip-audit -r requirements.txt -r requirements-agent.txt
 
-When RUSA_TEST_DATABASE_URL is configured, PostgreSQL integration tests exercise idempotency, lease fencing, checkpoint ownership, and row-level security. CI provisions a dedicated PostgreSQL 16 service and runs those tests. CI builds both the inference API image and the agent runtime image, then smoke-tests the inference API container. Pull-request checks run regardless of the target branch so stacked PRs receive checks.
+When RUSA_TEST_DATABASE_URL is configured, PostgreSQL integration tests exercise idempotency, lease fencing, checkpoint ownership, row-level security, worker-crash recovery, competing claims, retry exhaustion, and cancellation/acknowledgement races. CI provisions a dedicated PostgreSQL 16 service and runs those tests. CI builds both the inference API image and the agent runtime image, then smoke-tests the inference API container. Pull-request checks run regardless of the target branch so stacked PRs receive checks.
 
 ## Production acceptance
 
