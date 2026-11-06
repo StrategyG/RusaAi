@@ -1171,3 +1171,12 @@ def test_github_write_recovers_after_ambiguous_commit_response(monkeypatch):
     ))
     assert result.success is True
     assert result.data["recovered_after_ambiguous_commit"] is True
+
+
+def test_github_gateway_rejects_diff_limits_above_review_context_capacity():
+    with pytest.raises(ValueError, match="invalid GitHub gateway limits"):
+        GitHubToolGateway(
+            token="test-token",
+            allowed_repositories={"strategyg/rusaai"},
+            max_diff_files=21,
+        )
