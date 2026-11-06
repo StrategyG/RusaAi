@@ -24,7 +24,14 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_
 
 The migration creates `aicode_jobs`, `aicode_memory`, `aicode_audit_events`, `aicode_rate_limits`, audit immutability triggers, and the restricted `rusa_runtime` role.
 
-Provision a login credential for `rusa_runtime` through the DBA workflow or secret manager and grant CONNECT on the application database. Never use the schema owner or a PostgreSQL superuser in API/worker containers.
+Keep `rusa_runtime` as a NOLOGIN privilege group. Create a separate login role and grant membership, for example:
+
+```sql
+CREATE ROLE rusa_runtime_login LOGIN PASSWORD 'managed-secret' IN ROLE rusa_runtime;
+GRANT CONNECT ON DATABASE rusa TO rusa_runtime;
+```
+
+Use `rusa_runtime_login` in `RUSA_DATABASE_URL`, with `sslmode=verify-full` (or an approved TLS mode). Never use the schema owner or a PostgreSQL superuser in API/worker containers.
 
 Runtime permissions:
 - Queue: SELECT, INSERT, UPDATE, sequence usage.
@@ -58,12 +65,14 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build both images from the reviewed commit:
+Build all three images from the reviewed commit:
 
 ```bash
 docker build -t ghcr.io/ORG/rusa-ai:RELEASE .
+docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-aicode-worker:RELEASE .
 docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-aicode-sandbox:RELEASE .
 docker push ghcr.io/ORG/rusa-ai:RELEASE
+docker push ghcr.io/ORG/rusa-aicode-worker:RELEASE
 docker push ghcr.io/ORG/rusa-aicode-sandbox:RELEASE
 ```
 
@@ -106,7 +115,7 @@ API settings:
 
 ```dotenv
 ENVIRONMENT=production
-RUSA_DATABASE_URL=postgresql://rusa_runtime:REDACTED@DB_HOST:5432/rusa
+RUSA_DATABASE_URL=postgresql://rusa_runtime_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
 RUSA_API_KEYS={"LONG_RANDOM_API_KEY_AT_LEAST_32_BYTES":"tenant-acme"}
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
@@ -141,7 +150,7 @@ API keys and the audit HMAC key must each contain at least 32 UTF-8 bytes. Use a
 
 The included Compose file is a development/single-host example. It uses a local PostgreSQL service and is not a complete HA production topology. For production:
 1. Replace the Compose PostgreSQL service with managed PostgreSQL.
-2. Use `rusa_runtime`, not the migration owner.
+2. Use the login role `rusa_runtime_login`, which is a member of `rusa_runtime`, not the migration owner.
 3. Mount persistent mirror/workspace volumes at the configured paths.
 4. Mount only the dedicated rootless Docker socket into the worker.
 5. Confirm the rootless daemon sees the same workspace host paths.
