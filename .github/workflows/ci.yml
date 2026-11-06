@@ -44,6 +44,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-agent.txt
+            requirements-rag-mcp.txt
             requirements-dev.txt
       - name: Install dependencies
         run: |
@@ -61,6 +62,7 @@ jobs:
         run: |
           pip-audit -r requirements.txt
           pip-audit -r requirements-agent.txt
+          pip-audit -r requirements-rag-mcp.txt
 
   container:
     name: Build and smoke-test containers
