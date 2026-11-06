@@ -2,9 +2,9 @@ name: RUSA-AI CI
 
 on:
   push:
-    branches: [main, feature/aicode-agent-enterprise]
+    branches: [main, feature/aicode-agent-enterprise, "fix/**", "feat/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "fix/**", "feat/**"]
   workflow_dispatch:
 
 permissions:
@@ -91,7 +91,7 @@ jobs:
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
-          RUSA_API_KEYS: '{"long_random_ci_api_key_12345678901234567890":"tenant-ci"}'
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
