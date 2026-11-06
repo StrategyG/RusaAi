@@ -30,6 +30,7 @@ chmod 700 "$BACKUP_DIR" 2>/dev/null || true
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 backup_file="${BACKUP_DIR%/}/rusa-agent-${timestamp}-$$.dump.age"
 temporary_file="$(mktemp "${BACKUP_DIR%/}/.rusa-agent-backup.XXXXXX")"
+rm -f "$temporary_file"
 trap 'rm -f "$temporary_file"' EXIT
 
 # Stream pg_dump directly into age: no plaintext dump is written to disk.
