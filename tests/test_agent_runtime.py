@@ -464,7 +464,7 @@ def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, 
             return {"commit": {"sha": "a" * 40}}
         return {
             "total_count": total_count,
-            "check_runs": [{"name": "tests", "status": "completed", "conclusion": "success"}],
+            "check_runs": [{"id": 1, "name": "tests", "status": "completed", "conclusion": "success"}],
         }
 
     monkeypatch.setattr(gateway, "_request", request)
