@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections import defaultdict, deque
@@ -107,6 +108,16 @@ class ProcessRateLimiter:
     def allow(self, key: str, limit: int, window_seconds: int = 60) -> bool:
         now = time.monotonic()
         with self._lock:
+            if key not in self._events and len(self._events) >= 10_000:
+                expired = [
+                    client
+                    for client, history in self._events.items()
+                    if not history or now - history[-1] >= window_seconds
+                ]
+                for client in expired:
+                    self._events.pop(client, None)
+                if len(self._events) >= 10_000:
+                    return False
             events = self._events[key]
             while events and now - events[0] >= window_seconds:
                 events.popleft()
@@ -245,7 +256,12 @@ app = FastAPI(
 )
 @app.middleware("http")
 async def request_controls(request: Request, call_next: Any):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    supplied_request_id = request.headers.get("X-Request-ID", "")
+    request_id = (
+        supplied_request_id
+        if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", supplied_request_id)
+        else str(uuid.uuid4())
+    )
     request.state.request_id = request_id
 
     if request.url.path.startswith("/v1/"):
