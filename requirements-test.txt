@@ -1,0 +1,4 @@
+-r requirements-serve.txt
+httpx>=0.24.0
+pytest>=7.3.0
+pytest-asyncio>=0.21.0
