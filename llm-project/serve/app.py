@@ -243,9 +243,6 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
-app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
-
-
 @app.middleware("http")
 async def request_controls(request: Request, call_next: Any):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
@@ -268,6 +265,9 @@ async def request_controls(request: Request, call_next: Any):
     return response
 
 
+app.add_middleware(RequestBodyLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
+
+
 async def acquire_capacity(request: Request) -> asyncio.Semaphore:
     semaphore = request.app.state.inference_semaphore
     try:
@@ -287,6 +287,14 @@ def check_requested_model(requested: str, runtime: ModelRuntime) -> None:
     allowed = {runtime.model_name, "rusa-ai", "rusa-ai-v1"}
     if requested not in allowed:
         raise HTTPException(status_code=404, detail="Requested model is not available")
+
+
+def check_generation_limit(runtime: ModelRuntime, max_tokens: int) -> None:
+    if max_tokens >= runtime.max_context_tokens:
+        raise HTTPException(
+            status_code=422,
+            detail="max_tokens must be smaller than the checkpoint context window",
+        )
 
 
 def make_completion(
@@ -355,6 +363,7 @@ async def chat_completions(
     if not runtime.ready:
         raise HTTPException(status_code=503, detail="Inference model is not ready")
     check_requested_model(payload.model, runtime)
+    check_generation_limit(runtime, payload.max_tokens)
 
     semaphore = await acquire_capacity(request)
     messages = [item.model_dump() for item in payload.messages]
@@ -372,12 +381,14 @@ async def chat_completions(
                     "model": runtime.model_name,
                     "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                 }) + "\n\n"
+                streamed_pieces = []
                 async for piece in runtime.stream(
                     messages,
                     payload.temperature,
                     payload.top_p,
                     payload.max_tokens,
                 ):
+                    streamed_pieces.append(piece)
                     yield "data: " + json.dumps({
                         "id": response_id,
                         "object": "chat.completion.chunk",
@@ -392,6 +403,16 @@ async def chat_completions(
                     "model": runtime.model_name,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 }) + "\n\n"
+                if payload.stream_options and payload.stream_options.include_usage:
+                    usage = runtime.count_usage(messages, "".join(streamed_pieces))
+                    yield "data: " + json.dumps({
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": runtime.model_name,
+                        "choices": [],
+                        "usage": usage,
+                    }) + "\n\n"
                 yield "data: [DONE]\n\n"
             except Exception as exc:
                 logger.error(
