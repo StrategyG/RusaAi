@@ -3,7 +3,7 @@
 Status: **implementation in progress; not production-certified**.
 
 Repository: `StrategyG/RusaAi`  
-Working branch: `feat/scalability-disaster-recovery-20261106`  
+Working branch: `feat/scalability-dr-clean-20261106`  
 Parent integration branch: `integration/production-100-performance-20261106`
 
 ## 1. Current architecture and boundaries
