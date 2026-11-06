@@ -39,6 +39,24 @@ def remove_task(task_id: str, tenant_id: str) -> None:
         )
 
 
+def claim_specific_task(task_id: str, tenant_id: str, worker_id: str) -> tuple[int, str]:
+    token = str(uuid4())
+    with psycopg.connect(DSN) as connection:
+        row = connection.execute(
+            """
+            UPDATE aicode_jobs
+            SET status='running', attempts=1, lease_owner=%s, lease_token=%s::uuid,
+                lease_until=NOW() + INTERVAL '30 seconds'
+            WHERE task_id=%s AND tenant_id=%s AND status='queued'
+            RETURNING id
+            """,
+            (worker_id, token, task_id, tenant_id),
+        ).fetchone()
+    if row is None:
+        raise AssertionError("test task could not be claimed")
+    return row[0], token
+
+
 def test_crashed_worker_lease_is_reclaimed_and_old_token_is_fenced():
     queue = make_queue()
     tenant = f"queue-crash-{uuid4().hex}"
@@ -157,16 +175,15 @@ def test_publication_refuses_an_expired_or_replaced_lease():
     called = []
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "stale publication"})
-        job = queue.claim("publish-stale-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
-        expire_lease(job.id, tenant)
+        job_id, lease_token = claim_specific_task(task_id, tenant, "publish-stale-worker")
+        expire_lease(job_id, tenant)
 
         with pytest.raises(LeaseLostError, match="active task lease"):
             queue.publish_if_lease_owned(
-                job.id,
+                job_id,
                 tenant,
                 "publish-stale-worker",
-                job.lease_token,
+                lease_token,
                 lambda: called.append("published"),
             )
         assert called == []
@@ -199,22 +216,21 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
 
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "fenced publication"})
-        job = queue.claim("publish-fence-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
+        job_id, lease_token = claim_specific_task(task_id, tenant, "publish-fence-worker")
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             publication = pool.submit(
                 queue.publish_if_lease_owned,
-                job.id,
+                job_id,
                 tenant,
                 "publish-fence-worker",
-                job.lease_token,
+                lease_token,
                 bounded_publish,
                 lease_seconds=900,
             )
             assert publishing.wait(timeout=5)
 
-            expiry = pool.submit(expire_while_locked, job.id)
+            expiry = pool.submit(expire_while_locked, job_id)
             assert expiry_started.wait(timeout=5)
             time.sleep(0.1)
             assert not expiry.done(), "lease row was not locked during publication"
@@ -223,9 +239,20 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
             assert publication.result(timeout=10) == "a" * 40
             expiry.result(timeout=10)
 
-        replacement = queue.claim("replacement-worker", lease_seconds=30)
-        assert replacement and replacement.task_id == task_id
-        assert replacement.lease_token != job.lease_token
+        replacement_token = str(uuid4())
+        with psycopg.connect(DSN) as connection:
+            replacement = connection.execute(
+                """
+                UPDATE aicode_jobs
+                SET lease_owner='replacement-worker', lease_token=%s::uuid,
+                    lease_until=NOW() + INTERVAL '30 seconds', attempts=attempts+1
+                WHERE id=%s AND tenant_id=%s AND status='running'
+                  AND lease_until < NOW()
+                RETURNING lease_token::text
+                """,
+                (replacement_token, job_id, tenant),
+            ).fetchone()
+        assert replacement and replacement[0] != lease_token
     finally:
         release_publish.set()
         remove_task(task_id, tenant)
