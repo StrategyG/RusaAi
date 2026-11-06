@@ -1,7 +1,7 @@
-"""Local, checkpoint-backed inference runtime for RUSA-AI.
+"""Local checkpoint-backed inference runtime for RUSA-AI.
 
-No mock or synthetic completion path is provided. The service is ready only after
-an operator mounts a real Hugging Face-compatible checkpoint and the runtime loads it.
+No mock or synthetic completion path is provided. A real local checkpoint is
+required before the runtime can become ready.
 """
 from __future__ import annotations
 
@@ -34,11 +34,12 @@ class ModelRuntime:
     def __init__(self) -> None:
         self.model_path = os.getenv("RUSA_MODEL_PATH", "").strip()
         self.model_name = os.getenv("RUSA_MODEL_NAME", "").strip()
-        self.max_input_tokens = int(os.getenv("RUSA_MAX_INPUT_TOKENS", "8192"))
+        self.max_input_tokens = max(1, int(os.getenv("RUSA_MAX_INPUT_TOKENS", "8192")))
         self.model: Any = None
         self.tokenizer: Any = None
         self.device = "unloaded"
-        self._torch: Any = None\n        self.max_context_tokens = 0
+        self._torch: Any = None
+        self.max_context_tokens = 0
 
     @property
     def ready(self) -> bool:
@@ -61,7 +62,8 @@ class ModelRuntime:
                 "Inference dependencies are missing; install requirements.txt"
             ) from exc
 
-        self._torch = torch\n\n        if torch.cuda.is_available():
+        self._torch = torch
+        if torch.cuda.is_available():
             dtype = (
                 torch.bfloat16
                 if getattr(torch.cuda, "is_bf16_supported", lambda: False)()
@@ -95,6 +97,19 @@ class ModelRuntime:
         )
         model.eval()
 
+        configured_context = (
+            getattr(model.config, "max_position_embeddings", None)
+            or getattr(model.config, "n_positions", None)
+            or self.max_input_tokens + int(os.getenv("RUSA_MAX_TOKENS", "4096"))
+        )
+        if not isinstance(configured_context, int) or configured_context > 10_000_000:
+            configured_context = self.max_input_tokens + int(
+                os.getenv("RUSA_MAX_TOKENS", "4096")
+            )
+        if configured_context < 2:
+            raise RuntimeError("Checkpoint reports an invalid context window")
+
+        self.max_context_tokens = configured_context
         self.model = model
         self.tokenizer = tokenizer
         if not self.model_name:
@@ -106,7 +121,10 @@ class ModelRuntime:
 
     def _prompt(self, messages: Sequence[Dict[str, str]]) -> str:
         self._require_ready()
-        normalized = [{"role": item["role"], "content": item["content"]} for item in messages]
+        normalized = [
+            {"role": item["role"], "content": item["content"]}
+            for item in messages
+        ]
         if hasattr(self.tokenizer, "apply_chat_template"):
             try:
                 return self.tokenizer.apply_chat_template(
@@ -120,26 +138,39 @@ class ModelRuntime:
             f"{item['role'].upper()}: {item['content']}" for item in normalized
         ) + "\nASSISTANT:"
 
-    def _tokenize_one(self, messages: Sequence[Dict[str, str]]) -> Dict[str, Any]:
+    def _input_limit(self, max_new_tokens: int) -> int:
+        return max(
+            1,
+            min(self.max_input_tokens, self.max_context_tokens - max_new_tokens),
+        )
+
+    def _tokenize_one(
+        self, messages: Sequence[Dict[str, str]], max_new_tokens: int
+    ) -> Dict[str, Any]:
         encoded = self.tokenizer(
             self._prompt(messages),
             return_tensors="pt",
             truncation=True,
-            max_length=self.max_input_tokens,
+            max_length=self._input_limit(max_new_tokens),
         )
-        return {key: value.to(self.model.device) for key, value in encoded.items()}
+        return {
+            key: value.to(self.model.device)
+            for key, value in encoded.items()
+        }
 
-    def _generation_kwargs(self, temperature: float, top_p: float, max_tokens: int) -> Dict[str, Any]:
+    def _generation_kwargs(
+        self, temperature: float, top_p: float, max_tokens: int
+    ) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
             "max_new_tokens": max_tokens,
             "do_sample": temperature > 0,
-            "top_p": top_p,
             "pad_token_id": self.tokenizer.pad_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
             "use_cache": True,
         }
         if temperature > 0:
             kwargs["temperature"] = temperature
+            kwargs["top_p"] = top_p
         return kwargs
 
     def generate(
@@ -150,10 +181,9 @@ class ModelRuntime:
         max_tokens: int,
     ) -> Dict[str, Any]:
         self._require_ready()
-        torch = self._torch or __import__("torch")
         inputs = self._tokenize_one(messages, max_tokens)
         prompt_tokens = int(inputs["attention_mask"].sum().item())
-        with torch.inference_mode():
+        with self._torch.inference_mode():
             output = self.model.generate(
                 **inputs,
                 **self._generation_kwargs(temperature, top_p, max_tokens),
@@ -179,22 +209,26 @@ class ModelRuntime:
         self._require_ready()
         if not message_batches:
             return []
+
         prompts = [self._prompt(messages) for messages in message_batches]
         inputs = self.tokenizer(
             prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=self.max_input_tokens,
+            max_length=self._input_limit(max_tokens),
         )
         prompt_counts = inputs["attention_mask"].sum(dim=1).tolist()
-        inputs = {key: value.to(self.model.device) for key, value in inputs.items()}
-        torch = self._torch or __import__("torch")
-        with torch.inference_mode():
+        inputs = {
+            key: value.to(self.model.device)
+            for key, value in inputs.items()
+        }
+        with self._torch.inference_mode():
             output = self.model.generate(
                 **inputs,
                 **self._generation_kwargs(temperature, top_p, max_tokens),
             )
+
         prompt_width = int(inputs["input_ids"].shape[1])
         results: List[Dict[str, Any]] = []
         for index, row in enumerate(output):
@@ -220,12 +254,13 @@ class ModelRuntime:
         """Stream decoded text chunks from Transformers' generation thread."""
         self._require_ready()
         try:
-            import torch
             from transformers import TextIteratorStreamer
         except ImportError as exc:
-            raise RuntimeError("Streaming inference dependencies are unavailable") from exc
+            raise RuntimeError(
+                "Streaming inference dependencies are unavailable"
+            ) from exc
 
-        inputs = self._tokenize_one(messages)
+        inputs = self._tokenize_one(messages, max_tokens)
         streamer = TextIteratorStreamer(
             self.tokenizer,
             skip_prompt=True,
@@ -236,7 +271,7 @@ class ModelRuntime:
         kwargs["streamer"] = streamer
 
         def run_generation() -> None:
-            with torch.inference_mode():
+            with self._torch.inference_mode():
                 self.model.generate(**inputs, **kwargs)
 
         generation_task = asyncio.create_task(asyncio.to_thread(run_generation))
@@ -255,16 +290,32 @@ class ModelRuntime:
             await generation_task
         finally:
             if not generation_task.done():
-                # The Transformers streamer is not cancellable mid-kernel. Awaiting
-                # completion avoids leaving an untracked GPU generation thread.
+                # Transformers does not expose a safe per-request cancellation hook.
+                # Wait for the worker thread instead of leaking an untracked GPU job.
                 await asyncio.gather(generation_task, return_exceptions=True)
+
+    def count_usage(
+        self, messages: Sequence[Dict[str, str]], generated_text: str
+    ) -> Dict[str, int]:
+        self._require_ready()
+        prompt_text = self._prompt(messages)
+        prompt_tokens = len(
+            self.tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+        )
+        completion_tokens = len(
+            self.tokenizer(generated_text, add_special_tokens=False)["input_ids"]
+        )
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        }
 
     def close(self) -> None:
         self.model = None
         self.tokenizer = None
         if self.device == "cuda":
             try:
-                import torch
-                torch.cuda.empty_cache()
+                self._torch.cuda.empty_cache()
             except Exception:
                 pass
