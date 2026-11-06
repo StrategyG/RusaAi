@@ -54,6 +54,8 @@ async def _run_with_heartbeat(
 
 
 async def run_worker() -> None:
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise RuntimeError("RUSA_AGENT_ENABLED=true is required to start AICode workers")
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required by the agent worker")
