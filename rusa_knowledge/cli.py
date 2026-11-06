@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = commands.add_parser("ingest", help="ingest a local document into a tenant collection")
     ingest.add_argument("--file", required=True)
     ingest.add_argument("--tenant-id", required=True)
-    ingest.add_argument("--collection", default="default")
+    ingest.add_argument("--collection", default="agent")
     ingest.add_argument("--source-uri")
     ingest.add_argument("--title")
 
