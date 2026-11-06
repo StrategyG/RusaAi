@@ -22,7 +22,14 @@ class WorkspaceGateway:
         candidate=Path(relative_path)
         if candidate.is_absolute() or not relative_path or ".." in candidate.parts:
             raise ToolDenied("path must be relative and cannot traverse")
-        resolved=(self.workspace/candidate).resolve(strict=not for_write)
+        lexical=self.workspace/candidate
+        if for_write:
+            cursor=self.workspace
+            for part in candidate.parts:
+                cursor=cursor/part
+                if cursor.exists() and cursor.is_symlink():
+                    raise ToolDenied("symlink path components are prohibited")
+        resolved=lexical.resolve(strict=not for_write)
         try:
             resolved.relative_to(self.workspace)
         except ValueError as exc:
