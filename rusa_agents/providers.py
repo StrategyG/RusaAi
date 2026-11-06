@@ -1,8 +1,9 @@
-"""Provider adapter for OpenAI-compatible model endpoints."""
-
+"""Secure OpenAI-compatible provider adapter with bounded responses."""
 from __future__ import annotations
 
+import json
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -15,10 +16,17 @@ class OpenAICompatibleProvider:
         api_key: str | None = None,
         timeout_seconds: float = 120,
     ) -> None:
-        if not base_url.startswith(("https://", "http://")):
-            raise ValueError("provider base URL must use HTTP or HTTPS")
+        parsed = urlsplit(base_url)
+        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+            raise ValueError("provider base URL must be an absolute HTTP(S) URL")
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("remote model provider endpoints must use HTTPS")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("provider URL cannot contain credentials, query, or fragment")
         if not model.strip():
             raise ValueError("provider model must not be empty")
+        if not 1 <= timeout_seconds <= 300:
+            raise ValueError("provider timeout must be between 1 and 300 seconds")
         self.endpoint = base_url.rstrip("/") + "/chat/completions"
         self.model = model
         self.api_key = api_key or ""
@@ -42,10 +50,20 @@ class OpenAICompatibleProvider:
             "temperature": 0.1,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(self.endpoint, headers=headers, json=body)
-            response.raise_for_status()
-        payload = response.json()
+        async with httpx.AsyncClient(
+            timeout=self.timeout,
+            follow_redirects=False,
+        ) as client:
+            async with client.stream("POST", self.endpoint, headers=headers, json=body) as response:
+                response.raise_for_status()
+                chunks = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > 2_000_000:
+                        raise RuntimeError("model provider response exceeded size limit")
+                    chunks.append(chunk)
+        payload = json.loads(b"".join(chunks))
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("model provider returned no completion choices")
