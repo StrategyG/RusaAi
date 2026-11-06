@@ -396,6 +396,54 @@ class PostgresTaskQueue:
             """, (delay, error[:2000], tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
 
+    def cancel(self, tenant_id: str, task_id: str) -> bool:
+        """Cancel a queued or running task and revoke its active worker lease."""
+        if not tenant_id or not task_id:
+            raise ValueError("tenant_id and task_id are required")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET status='cancelled',
+                    lease_owner=NULL,
+                    lease_token=NULL,
+                    lease_until=NULL,
+                    lease_heartbeat_at=NULL,
+                    last_error='cancelled by tenant',
+                    updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s
+                  AND status IN ('queued', 'retry', 'waiting_external', 'running')
+            """, (tenant_id, task_id))
+        return cursor.rowcount == 1
+
+    def requeue_failed(self, tenant_id: str, task_id: str) -> bool:
+        """Explicitly requeue a failed task for its owning tenant."""
+        if not tenant_id or not task_id:
+            raise ValueError("tenant_id and task_id are required")
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET status='queued',
+                    attempts=0,
+                    result=NULL,
+                    available_at=now(),
+                    lease_owner=NULL,
+                    lease_token=NULL,
+                    lease_until=NULL,
+                    lease_heartbeat_at=NULL,
+                    last_error=NULL,
+                    updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s AND status='failed'
+            """, (tenant_id, task_id))
+        return cursor.rowcount == 1
+
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute(
