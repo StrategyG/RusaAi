@@ -832,3 +832,39 @@ async def test_github_file_write_detects_already_applied_content(monkeypatch):
     )
     assert result["already_applied"] is True
     assert result["commit_sha"] == "d" * 40
+
+
+@pytest.mark.asyncio
+async def test_github_file_update_uses_optimistic_current_sha(monkeypatch):
+    import base64
+    from rusa_agents.tools import GitHubTools
+
+    github = GitHubTools(token="test-token")
+    content = "updated content"
+    observed = {}
+
+    async def fake_request(method, path, **kwargs):
+        if method == "GET" and "/contents/" in path:
+            return {
+                "sha": "c" * 40,
+                "content": base64.b64encode(b"old content").decode(),
+            }
+        if method == "PUT" and "/contents/" in path:
+            observed.update(kwargs["json"])
+            return {
+                "commit": {"sha": "d" * 40},
+                "content": {"sha": "e" * 40},
+            }
+        raise AssertionError(f"Unexpected GitHub request: {method} {path}")
+
+    monkeypatch.setattr(github, "_request", fake_request)
+    result = await github.write_file(
+        "StrategyG/RusaAi",
+        "docs/update.md",
+        content,
+        "docs: update file",
+        "feature/update",
+    )
+    assert observed["sha"] == "c" * 40
+    assert result["commit_sha"] == "d" * 40
+    assert result["already_applied"] is False
