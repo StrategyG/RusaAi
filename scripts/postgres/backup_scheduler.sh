@@ -15,7 +15,7 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 while true; do
     cycle_started="$(date +%s)"
-    if "$script_dir/backup.sh"; then
+    if bash "$script_dir/backup.sh"; then
         elapsed="$(( $(date +%s) - cycle_started ))"
         delay="$(( interval_seconds - elapsed ))"
         (( delay > 0 )) || delay=1
