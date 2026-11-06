@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import quote
 
 import httpx
+import jsonschema
 
 
 class ToolError(RuntimeError):
@@ -48,19 +49,40 @@ def _safe_path(value: str) -> str:
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {}
+        self._metadata: dict[str, dict[str, Any]] = {}
 
-    def register(self, name: str, handler: Callable[..., Awaitable[dict[str, Any]]]) -> None:
+    def register(
+        self,
+        name: str,
+        handler: Callable[..., Awaitable[dict[str, Any]]],
+        description: str = "",
+        input_schema: dict[str, Any] | None = None,
+    ) -> None:
         if name in self._tools:
             raise ValueError(f"Duplicate tool: {name}")
+        schema = input_schema or {"type": "object", "additionalProperties": False}
+        jsonschema.validators.validator_for(schema).check_schema(schema)
         self._tools[name] = handler
+        self._metadata[name] = {
+            "name": name,
+            "description": description[:1000],
+            "input_schema": schema,
+        }
 
     def names(self) -> set[str]:
         return set(self._tools)
+
+    def describe(self) -> list[dict[str, Any]]:
+        return [self._metadata[name] for name in sorted(self._metadata)]
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         handler = self._tools.get(name)
         if handler is None:
             raise ToolError(f"Unknown tool: {name}")
+        try:
+            jsonschema.validate(arguments, self._metadata[name]["input_schema"])
+        except jsonschema.ValidationError as exc:
+            raise ToolError("Tool arguments do not match the registered input schema") from exc
         return await handler(**arguments)
 
 
@@ -72,12 +94,91 @@ class GitHubTools:
         self.api = "https://api.github.com"
 
     def register(self, registry: ToolRegistry) -> None:
-        registry.register("github.list_files", self.list_files)
-        registry.register("github.read_file", self.read_file)
-        registry.register("github.create_branch", self.create_branch)
-        registry.register("github.write_file", self.write_file)
-        registry.register("github.get_ci_status", self.get_ci_status)
-        registry.register("github.create_pull_request", self.create_pull_request)
+        repository = {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}
+        branch = {"type": "string", "minLength": 1, "maxLength": 255}
+        registry.register(
+            "github.list_files",
+            self.list_files,
+            "List files and directories in the task repository at an allowed branch.",
+            {
+                "type": "object",
+                "properties": {
+                    "repository": repository,
+                    "path": {"type": "string", "maxLength": 500},
+                    "ref": branch,
+                },
+                "required": ["repository", "ref"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "github.read_file",
+            self.read_file,
+            "Read a UTF-8 text file from the task repository at an allowed branch.",
+            {
+                "type": "object",
+                "properties": {"repository": repository, "path": {"type": "string", "minLength": 1, "maxLength": 500}, "ref": branch},
+                "required": ["repository", "path", "ref"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "github.create_branch",
+            self.create_branch,
+            "Create the task's isolated feature branch from its configured base branch.",
+            {
+                "type": "object",
+                "properties": {"repository": repository, "base_branch": branch, "work_branch": branch},
+                "required": ["repository", "base_branch", "work_branch"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "github.write_file",
+            self.write_file,
+            "Create or update a UTF-8 text file on the task's exact work branch.",
+            {
+                "type": "object",
+                "properties": {
+                    "repository": repository,
+                    "path": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "content": {"type": "string", "maxLength": 100000},
+                    "message": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "branch": branch,
+                    "expected_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+                },
+                "required": ["repository", "path", "content", "message", "branch"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "github.get_ci_status",
+            self.get_ci_status,
+            "Read GitHub Actions check runs for a specific commit SHA.",
+            {
+                "type": "object",
+                "properties": {"repository": repository, "commit_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"}},
+                "required": ["repository", "commit_sha"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            "github.create_pull_request",
+            self.create_pull_request,
+            "Create a draft pull request from the task work branch to its base branch.",
+            {
+                "type": "object",
+                "properties": {
+                    "repository": repository,
+                    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "body": {"type": "string", "maxLength": 60000},
+                    "head": branch,
+                    "base": branch,
+                },
+                "required": ["repository", "title", "body", "head", "base"],
+                "additionalProperties": False,
+            },
+        )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         headers = {
