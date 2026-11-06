@@ -181,10 +181,7 @@ For production, pre-provision `.env` with the API, worker, and sandbox digest re
 The host deployment script can also be run manually after verifying the signatures and release manifest:
 
 ```bash
-./scripts/deploy/compose-deploy.sh \\
-  ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST \\
-  ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST \\
-  ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
+./scripts/deploy/compose-deploy.sh ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
 ```
 
 It requires the previous API, worker, and sandbox digests to already exist in `.env` as rollback targets. It pulls API/worker images from the host Docker daemon, pulls the sandbox image through `RUSA_DOCKER_SOCKET`, updates services, waits for both health checks, and automatically restores the prior digest set if the candidate is unhealthy. Manual rollback uses:
