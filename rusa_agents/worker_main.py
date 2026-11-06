@@ -23,12 +23,15 @@ async def serve() -> None:
             addr=os.getenv("RUSA_METRICS_BIND", "127.0.0.1"),  # nosec B104 - private container network; no host-published metrics port
         )
     runtime = AICodeRuntime()
-    await asyncio.to_thread(runtime.initialize)
-    stop_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(signum, stop_event.set)
-    await runtime.run_forever(stop_event=stop_event)
+    try:
+        await asyncio.to_thread(runtime.initialize)
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(signum, stop_event.set)
+        await runtime.run_forever(stop_event=stop_event)
+    finally:
+        await asyncio.to_thread(runtime.close)
 
 
 def main() -> None:
