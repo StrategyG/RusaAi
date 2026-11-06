@@ -599,7 +599,7 @@ def retry_aicode_task(
     """Require a tenant-authorized retry after failure or human review."""
     if not RuntimeConfig.from_env().aicode_enabled:
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
-        raise HTTPException(status_code=503, detail="Task intake is disabled")
+        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
     queue = getattr(app.state, "queue", None)
     if queue is None:
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
