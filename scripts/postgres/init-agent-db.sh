@@ -23,8 +23,5 @@ GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api;
 GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker;
 GRANT USAGE ON SCHEMA public TO rusa_agent_api;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO rusa_agent_api;
-ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO rusa_agent_api;
+-- API table grants are applied explicitly by the schema migration.
 SQL
