@@ -281,6 +281,20 @@ def test_a2a_schema_invalid_fails_startup(monkeypatch, tmp_path):
     _load_task_validator.cache_clear()
 
 
+def test_a2a_schema_non_object_document_fails_startup(monkeypatch, tmp_path):
+    schema_path = tmp_path / "non-object-schema.json"
+    schema_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("TASK_ENVELOPE_SCHEMA_PATH", str(schema_path))
+    _load_task_validator.cache_clear()
+
+    with pytest.raises(RuntimeError, match="schema is missing or invalid"):
+        with TestClient(app):
+            pass
+
+    _load_task_validator.cache_clear()
+
+
 @pytest.mark.parametrize(
     ("field", "invalid_value", "expected_message"),
     [
