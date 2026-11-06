@@ -22,7 +22,7 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 
 ## Current verification boundary
 
-Latest CI on PR #15 commit d4c941e passed both required jobs: lint, compile, 123 tests (including PostgreSQL integration), dependency audit, Docker Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. The task-lifecycle and database-permission remediation then passed GitHub Actions on PR #16 code commit 6fee8d0 (run 42190607014): 134 tests passed, Ruff and compile passed, both dependency audits reported no known vulnerabilities, Compose validation passed, both images built, agent runtime imports passed, and inference API liveness passed. The current PR #16 head bf0338b also has successful required checks. This is code/container CI evidence only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+Latest CI on PR #15 commit d4c941e passed both required jobs: lint, compile, 123 tests (including PostgreSQL integration), dependency audit, Docker Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. The task-lifecycle and database-permission remediation passed GitHub Actions on PR #16 head 8dc674f (run 42192747738): 135 tests passed, Ruff and compile passed, both dependency audits reported no known vulnerabilities, Compose validation passed, both images built, agent runtime imports passed, and inference API liveness passed. This run includes the regression check that worker startup preserves the API task-lifecycle grants. The current PR #16 head bf0338b also has successful required checks. This is code/container CI evidence only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
 
 ## Release gates still open
 
@@ -33,7 +33,7 @@ Latest CI on PR #15 commit d4c941e passed both required jobs: lint, compile, 123
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | PR #16 CI passed, including PostgreSQL tenant/RLS, lease-fencing, task-lifecycle, least-privilege API DB tests, and both container builds; staging verification pending |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | PR #16 CI passed with 135 tests, including PostgreSQL tenant/RLS, lease-fencing, task-lifecycle, least-privilege API DB tests, worker-restart grant preservation, and both container builds; staging verification pending |
 | Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; CI tenant-isolation/redaction tests passed; staging retention verification pending |
 | Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
 | MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
