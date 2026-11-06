@@ -1,6 +1,8 @@
 """Least-privilege GitHub adapter. It never merges, deploys, or runs arbitrary shell."""
 
 import base64
+import json
+import re
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -14,6 +16,8 @@ class GitHubToolGateway:
     def __init__(
         self, *, token: str, api_url: str = "https://api.github.com",
         timeout_seconds: float = 20.0, max_file_bytes: int = 1_000_000,
+        max_response_bytes: int = 2_000_000,
+        allowed_repositories_by_tenant: dict[str, set[str]] | None = None,
     ) -> None:
         parsed = urlparse(api_url)
         if (
@@ -23,12 +27,30 @@ class GitHubToolGateway:
             raise ValueError("GitHub API URL must use HTTPS without credentials or query")
         if not token:
             raise ValueError("GitHub token is required")
-        if timeout_seconds <= 0 or max_file_bytes < 1024:
+        if timeout_seconds <= 0 or max_file_bytes < 1024 or max_response_bytes < 1024:
             raise ValueError("invalid GitHub gateway limits")
+        if not allowed_repositories_by_tenant:
+            raise ValueError("an explicit per-tenant repository allowlist is required")
+        for tenant_id, repositories in allowed_repositories_by_tenant.items():
+            if (
+                not tenant_id
+                or not repositories
+                or any(
+                    not isinstance(repository, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                    for repository in repositories
+                )
+            ):
+                raise ValueError("per-tenant repository allowlist is invalid")
         self.api_url = api_url.rstrip("/")
         self.token = token
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
         self.max_file_bytes = max_file_bytes
+        self.max_response_bytes = max_response_bytes
+        self.allowed_repositories_by_tenant = {
+            tenant_id: frozenset(repositories)
+            for tenant_id, repositories in allowed_repositories_by_tenant.items()
+        }
 
     def _root(self, task: CodingTask) -> str:
         owner, name = task.repository.full_name.split("/", 1)
@@ -43,19 +65,33 @@ class GitHubToolGateway:
             "Authorization": f"Bearer {self.token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        response_body = bytearray()
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
-            response = await client.request(
+            async with client.stream(
                 method, f"{self.api_url}{path}", headers=headers, json=json_body, params=params,
-            )
-        if allow_not_found and response.status_code == 404:
-            return None
-        if response.is_error:
-            raise RuntimeError(f"GitHub API operation failed with HTTP {response.status_code}")
-        if not response.content:
+            ) as response:
+                if allow_not_found and response.status_code == 404:
+                    return None
+                if response.is_error:
+                    raise RuntimeError(
+                        f"GitHub API operation failed with HTTP {response.status_code}"
+                    )
+                declared_length = response.headers.get("content-length")
+                if declared_length is not None:
+                    try:
+                        if int(declared_length) > self.max_response_bytes:
+                            raise RuntimeError("GitHub API response exceeds the configured size limit")
+                    except ValueError as exc:
+                        raise RuntimeError("GitHub API returned an invalid content length") from exc
+                async for chunk in response.aiter_bytes():
+                    if len(response_body) + len(chunk) > self.max_response_bytes:
+                        raise RuntimeError("GitHub API response exceeds the configured size limit")
+                    response_body.extend(chunk)
+        if not response_body:
             return {}
         try:
-            result = response.json()
-        except ValueError as exc:
+            result = json.loads(response_body)
+        except (ValueError, UnicodeDecodeError) as exc:
             raise RuntimeError("GitHub API returned invalid JSON") from exc
         if not isinstance(result, (dict, list)):
             raise RuntimeError("GitHub API returned an unexpected response")
@@ -201,6 +237,9 @@ class GitHubToolGateway:
         )
 
     async def execute(self, task: CodingTask, call: ToolCall) -> ToolResult:
+        allowed = self.allowed_repositories_by_tenant.get(task.tenant_id, frozenset())
+        if task.repository.full_name not in allowed:
+            raise PermissionError("repository is not allowlisted for this tenant")
         arguments = dict(call.arguments)
         root = self._root(task)
         if call.name == "create_branch":

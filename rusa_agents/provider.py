@@ -1,6 +1,7 @@
 """OpenAI-compatible provider adapter with strict transport settings."""
 
 import ipaddress
+import json
 from urllib.parse import urlparse
 
 import httpx
@@ -61,18 +62,33 @@ class OpenAICompatibleProvider:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        response_body = bytearray()
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=False) as client:
-            response = await client.post(
+            async with client.stream(
+                "POST",
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json=payload,
-            )
-        if len(response.content) > self.max_response_bytes:
-            raise RuntimeError("model provider response exceeds the configured size limit")
-        if response.is_error:
-            raise RuntimeError(f"model provider returned HTTP {response.status_code}")
+            ) as response:
+                if response.is_error:
+                    raise RuntimeError(f"model provider returned HTTP {response.status_code}")
+                declared_length = response.headers.get("content-length")
+                if declared_length is not None:
+                    try:
+                        if int(declared_length) > self.max_response_bytes:
+                            raise RuntimeError(
+                                "model provider response exceeds the configured size limit"
+                            )
+                    except ValueError as exc:
+                        raise RuntimeError("model provider returned an invalid content length") from exc
+                async for chunk in response.aiter_bytes():
+                    if len(response_body) + len(chunk) > self.max_response_bytes:
+                        raise RuntimeError(
+                            "model provider response exceeds the configured size limit"
+                        )
+                    response_body.extend(chunk)
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            content = json.loads(response_body)["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise RuntimeError("model provider returned an invalid completion envelope") from exc
         if not isinstance(content, str) or not content.strip():

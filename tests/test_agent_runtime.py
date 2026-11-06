@@ -383,7 +383,7 @@ def test_policy_blocks_nested_secrets_and_git_metadata(path):
 
 @pytest.mark.parametrize("operation", ["read_file", "write_file"])
 def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
-    gateway = GitHubToolGateway(token="test-token")
+    gateway = GitHubToolGateway(token="test-token", allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}})
 
     async def no_network(*args, **kwargs):
         pytest.fail("Protected paths must be rejected before a GitHub request")
@@ -397,7 +397,7 @@ def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
 
 @pytest.mark.parametrize("total_count,expected", [(1, True), (2, False), (None, False)])
 def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, expected):
-    gateway = GitHubToolGateway(token="test-token")
+    gateway = GitHubToolGateway(token="test-token", allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}})
 
     async def request(method, path, **kwargs):
         if "/branches/" in path:
@@ -429,6 +429,25 @@ def test_default_required_checks_match_repository_workflow():
     workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
     for name in make_orchestrator(FakeTools()).required_ci_checks:
         assert f"name: {name}\n" in workflow
+
+def test_github_gateway_rejects_repository_outside_tenant_allowlist():
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories_by_tenant={"tenant-a": {"StrategyG/RusaAi"}},
+    )
+    other_repository_task = CodingTask(
+        tenant_id="tenant-a",
+        objective="Attempt access outside the allowlist",
+        repository=RepositoryTarget(
+            full_name="another-owner/private-repo",
+            base_branch="main",
+            work_branch="feature/blocked",
+        ),
+        acceptance_criteria=("Access is denied",),
+    )
+    with pytest.raises(PermissionError, match="not allowlisted"):
+        asyncio.run(gateway.execute(other_repository_task, ToolCall("list_files")))
+
 
 
 @pytest.mark.parametrize("tamper", ["sha", "source", "failure"])

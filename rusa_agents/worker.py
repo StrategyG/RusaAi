@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import json
+import re
 import os
 import signal
 
@@ -170,6 +172,7 @@ def build_worker() -> QueueWorker:
         "RUSA_AGENT_MODEL",
         "RUSA_AGENT_GITHUB_TOKEN",
         "RUSA_AGENT_AUDIT_KEY",
+        "RUSA_AGENT_TENANT_REPOSITORIES",
     )
     missing = [name for name in required if not os.getenv(name)]
     if missing:
@@ -185,9 +188,35 @@ def build_worker() -> QueueWorker:
         model=os.environ["RUSA_AGENT_MODEL"],
         timeout_seconds=float(os.getenv("RUSA_AGENT_PROVIDER_TIMEOUT", "45")),
     )
+    try:
+        tenant_repositories = json.loads(os.environ["RUSA_AGENT_TENANT_REPOSITORIES"])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("RUSA_AGENT_TENANT_REPOSITORIES must be valid JSON") from exc
+    if (
+        not isinstance(tenant_repositories, dict)
+        or not tenant_repositories
+        or any(
+            not isinstance(tenant_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tenant_id)
+            or not isinstance(repositories, list)
+            or not repositories
+            or any(
+                not isinstance(repository, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                for repository in repositories
+            )
+            or len(set(repositories)) != len(repositories)
+            for tenant_id, repositories in tenant_repositories.items()
+        )
+    ):
+        raise RuntimeError("RUSA_AGENT_TENANT_REPOSITORIES is invalid")
     github = GitHubToolGateway(
         token=os.environ["RUSA_AGENT_GITHUB_TOKEN"],
         api_url=os.getenv("RUSA_AGENT_GITHUB_API_URL", "https://api.github.com"),
+        allowed_repositories_by_tenant={
+            tenant_id: set(repositories)
+            for tenant_id, repositories in tenant_repositories.items()
+        },
     )
     audit = HMACAuditLog(
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
