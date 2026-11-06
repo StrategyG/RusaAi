@@ -328,8 +328,12 @@ are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
 restricted `task.authenticate/deny` shape. Events contain only tenant ID,
 task ID, actor, action, decision, and database timestamp—never credentials,
 lease tokens, or task payloads. The API and worker verify the audit table,
-RLS, grants, and append-only triggers at production startup. The INFO logger is
-a secondary operational stream; PostgreSQL is the durable audit record.
+RLS, grants, and append-only triggers at production startup. Task create/read/
+retry/cancel events are inserted in the same PostgreSQL transaction as their
+queue operation; worker execution allow/deny events are committed in the same
+transaction as the live-lease check. A failed audit insert therefore rolls back
+the associated queue mutation or prevents workspace execution. The INFO logger
+is a secondary operational stream; PostgreSQL is the durable audit record.
 
 The worker queue role is intentionally a trusted cross-tenant consumer so it
 can claim jobs. Before opening a workspace it validates the row's tenant
