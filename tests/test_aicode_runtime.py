@@ -198,3 +198,57 @@ def test_provider_allows_local_http_endpoint():
 def test_provider_rejects_credentials_in_url():
     with pytest.raises(ValueError, match="credentials"):
         OpenAICompatibleProvider("https://user:pass@provider.example/v1", "model")
+
+
+
+def test_github_gateway_blocks_sensitive_files_before_reading():
+    gateway = GitHubToolGateway(
+        object(),
+        allowed_repositories={"strategyg/rusaai"},
+    )
+    result = asyncio.run(
+        gateway.execute(
+            "repo.read_file",
+            {"path": ".env"},
+            make_task(),
+            WorkerRole.ANALYST,
+        )
+    )
+    assert result["ok"] is False
+    assert "sensitive" in result["error"]
+
+
+def test_github_gateway_blocks_workflow_and_secret_file_writes():
+    gateway = GitHubToolGateway(
+        object(),
+        allowed_repositories={"StrategyG/RusaAi"},
+    )
+    for path in (".github/workflows/ci.yml", "config/service.pem"):
+        result = asyncio.run(
+            gateway.execute(
+                "repo.write_file",
+                {"path": path, "content": "untrusted"},
+                make_task(),
+                WorkerRole.DEVELOPER,
+            )
+        )
+        assert result["ok"] is False
+
+
+def test_github_gateway_redacts_common_secret_formats():
+    content = (
+        'api_key="test-secret-value" '
+        "ghp_abcdefghijklmnopqrstuvwxyz123456 "
+        "AKIA1234567890ABCDEF "
+        "Bearer abcdefghijklmnopqrstuvwxyz123456"
+    )
+    redacted = GitHubToolGateway.redact_secrets(content)
+    assert "test-secret-value" not in redacted
+    assert "ghp_abcdefghijklmnopqrstuvwxyz123456" not in redacted
+    assert "AKIA1234567890ABCDEF" not in redacted
+    assert "Bearer abcdefghijklmnopqrstuvwxyz123456" not in redacted
+
+
+def test_github_gateway_rejects_control_characters_in_paths():
+    with pytest.raises(ValueError, match="path is invalid"):
+        GitHubRepositoryGateway.validate_path("src\\x00secret.py")

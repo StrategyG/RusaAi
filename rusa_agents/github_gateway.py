@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -80,6 +81,8 @@ class GitHubRepositoryGateway:
             or path.startswith("/")
             or "\\" in path
             or len(path) > 240
+            or any(ord(character) < 32 for character in path)
+            or any(character in path for character in ("?", "#", ":"))
             or any(part in {"", ".", "..", ".git"} for part in path.split("/"))
         ):
             raise ValueError("repository path is invalid")
@@ -238,16 +241,93 @@ class GitHubToolGateway:
         "repo.create_pull_request": "repo.pull_request.create",
         "ci.wait_for_checks": "ci.status.read",
     }
-    PROTECTED_PATHS = (
-        ".github/workflows/",
-        ".github/CODEOWNERS",
+    PROTECTED_WRITE_PATHS = (
+        ".github/",
         ".env",
         "Dockerfile",
         "docker-compose.yml",
         "requirements",
         "pyproject.toml",
         "CODEOWNERS",
+        "poetry.lock",
+        "uv.lock",
+        "Pipfile.lock",
     )
+    SENSITIVE_NAMES = frozenset(
+        {
+            ".npmrc",
+            ".pypirc",
+            ".netrc",
+            "id_rsa",
+            "id_ed25519",
+            "credentials",
+            "credentials.json",
+            "secrets.json",
+        }
+    )
+    SENSITIVE_SUFFIXES = (
+        ".pem",
+        ".key",
+        ".p12",
+        ".pfx",
+        ".tfstate",
+        ".tfstate.backup",
+    )
+
+    @classmethod
+    def is_sensitive_path(cls, path: str) -> bool:
+        normalized = path.lower()
+        parts = normalized.split("/")
+        basename = parts[-1]
+        return (
+            normalized == ".env"
+            or normalized.startswith(".env.")
+            or basename in cls.SENSITIVE_NAMES
+            or any(part in {".ssh", ".aws", ".gnupg", "secrets", "secret"} for part in parts)
+            or normalized.endswith(cls.SENSITIVE_SUFFIXES)
+        )
+
+    @classmethod
+    def is_protected_write_path(cls, path: str) -> bool:
+        normalized = path.lower()
+        return (
+            normalized == ".github"
+            or any(
+                normalized == protected.lower()
+                or normalized.startswith(protected.lower())
+                for protected in cls.PROTECTED_WRITE_PATHS
+            )
+            or cls.is_sensitive_path(normalized)
+        )
+
+    @staticmethod
+    def redact_secrets(content: str) -> str:
+        patterns = (
+            (
+                re.compile(
+                    r"(?i)\\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret)\\b"
+                    r"(\\s*[:=]\\s*)(?:\"[^\"]*\"|'[^']*'|[^\\s,;]+)"
+                ),
+                r"\\1\\2[REDACTED]",
+            ),
+            (re.compile(r"\\bgh[pousr]_[A-Za-z0-9_]{20,}\\b"), "[REDACTED_GITHUB_TOKEN]"),
+            (re.compile(r"\\bAKIA[0-9A-Z]{16}\\b"), "[REDACTED_AWS_ACCESS_KEY]"),
+            (
+                re.compile(
+                    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?"
+                    r"-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+                    re.DOTALL,
+                ),
+                "[REDACTED_PRIVATE_KEY]",
+            ),
+            (
+                re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]{16,}"),
+                "Bearer [REDACTED]",
+            ),
+        )
+        for pattern, replacement in patterns:
+            content = pattern.sub(replacement, content)
+        return content
 
     def __init__(
         self,
@@ -259,7 +339,11 @@ class GitHubToolGateway:
         self.github = github
         self.policy = policy or AutonomyPolicy()
         self.max_file_bytes = max_file_bytes
-        self.allowed_repositories = frozenset(allowed_repositories or set())
+        self.allowed_repositories = frozenset(
+            item.strip().lower()
+            for item in (allowed_repositories or set())
+            if item.strip()
+        )
         if not self.allowed_repositories:
             raise ValueError("an explicit GitHub repository allowlist is required")
 
@@ -270,7 +354,7 @@ class GitHubToolGateway:
         task: CodingTask,
         role: WorkerRole,
     ) -> dict[str, Any]:
-        if task.repository.full_name not in self.allowed_repositories:
+        if task.repository.full_name.lower() not in self.allowed_repositories:
             return {"ok": False, "error": "repository is not in the configured GitHub allowlist"}
         if action not in self.ROLE_ACTIONS.get(role, set()):
             return {"ok": False, "error": f"{role.value} is not allowed to use {action}"}
@@ -299,19 +383,17 @@ class GitHubToolGateway:
                 ref = arguments.get("ref", base)
                 if ref not in {base, work}:
                     raise ValueError("only the task base and work branches may be inspected")
-                data = await self.github.read_file(repository, arguments["path"], ref)
-                return {"ok": True, "data": data}
+                path = self.github.validate_path(arguments["path"])
+                if self.is_sensitive_path(path):
+                    raise PermissionError("sensitive repository files cannot be sent to model workers")
+                data = await self.github.read_file(repository, path, ref)
+                return {"ok": True, "data": self.redact_secrets(data)}
             if action == "repo.create_branch":
                 data = await self.github.create_branch(repository, base, work)
                 return {"ok": True, "data": data}
             if action == "repo.write_file":
                 path = self.github.validate_path(arguments["path"])
-                normalized = path.lower()
-                if any(
-                    normalized == protected.lower()
-                    or normalized.startswith(protected.lower())
-                    for protected in self.PROTECTED_PATHS
-                ):
+                if self.is_protected_write_path(path):
                     raise PermissionError("this path is protected and requires human review")
                 content = arguments["content"]
                 if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
