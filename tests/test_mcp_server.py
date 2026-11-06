@@ -1,13 +1,13 @@
-import pytest
-pytest.importorskip("mcp", reason="optional MCP runtime is not installed")
-
 import asyncio
 import hashlib
 import json
+import importlib
 
-from mcp import Client
+import pytest
 
-import rusa_mcp.server as server
+mcp = pytest.importorskip("mcp", reason="optional MCP runtime is not installed")
+Client = mcp.Client
+server = importlib.import_module("rusa_mcp.server")
 
 
 class FakeKnowledgeService:
