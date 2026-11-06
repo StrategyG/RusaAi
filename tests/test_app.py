@@ -91,15 +91,18 @@ def test_aicode_task_intake_is_tenant_scoped_and_idempotent(monkeypatch):
             key = (tenant_id, idempotency_key)
             existing = self.idempotency.get(key)
             if existing is not None:
-                existing_task_id, existing_hash = existing
+                existing_task_id, existing_hash, existing_status = existing
                 return SimpleNamespace(
                     task_id=existing_task_id,
+                    status=existing_status,
                     created=False,
                     conflict=existing_hash != request_hash,
                 )
-            self.idempotency[key] = (task_id, request_hash)
+            self.idempotency[key] = (task_id, request_hash, "queued")
             self.items[(tenant_id, task_id)] = payload
-            return SimpleNamespace(task_id=task_id, created=True, conflict=False)
+            return SimpleNamespace(
+                task_id=task_id, status="queued", created=True, conflict=False
+            )
 
         def get(self, task_id, tenant_id, *, audit_actor=None):
             payload = self.items.get((tenant_id, task_id))
@@ -149,6 +152,7 @@ def test_aicode_task_intake_is_tenant_scoped_and_idempotent(monkeypatch):
     conflict = client.post("/v1/aicode/tasks", headers=headers, json=changed_payload)
     assert conflict.status_code == 409
     assert "different request body" in conflict.json()["detail"]
+
 
 def test_aicode_task_requires_valid_idempotency_key(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
