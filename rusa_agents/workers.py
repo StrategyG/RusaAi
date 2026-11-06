@@ -132,7 +132,11 @@ class AgentWorker:
             "Return one JSON object with exactly these keys: summary (string), tool_calls "
             "(array of {name, arguments}), blockers (array of strings), risk "
             "(low|medium|high|critical), criteria_results (object mapping every exact acceptance "
-            "criterion to a boolean). Mark a criterion true only when the available evidence supports it."
+            "criterion to a boolean), criteria_evidence (object mapping every exact criterion to a "
+            "bounded string that cites concrete tool evidence using tool:<tool_name> references). "
+            "Never invent evidence. Mark a criterion true only when the cited tool result supports it. "
+            "For Tester, cite tool:get_ci_status. For Security review-only, cite both "
+            "tool:get_ci_status and tool:get_branch_diff from prior results."
         )
         user_prompt = json.dumps(
             {
@@ -153,7 +157,10 @@ class AgentWorker:
             payload = json.loads(output)
         except json.JSONDecodeError as exc:
             raise ValueError(f"{self.role.value} worker returned invalid JSON") from exc
-        expected_keys = {"summary", "tool_calls", "blockers", "risk", "criteria_results"}
+        expected_keys = {
+            "summary", "tool_calls", "blockers", "risk",
+            "criteria_results", "criteria_evidence",
+        }
         if not isinstance(payload, dict) or set(payload) != expected_keys:
             raise ValueError(f"{self.role.value} worker returned an invalid result contract")
         if not isinstance(payload["summary"], str) or not payload["summary"].strip():
@@ -174,6 +181,18 @@ class AgentWorker:
         ):
             raise ValueError(
                 "worker must return a boolean result for every exact acceptance criterion"
+            )
+        criteria_evidence = payload["criteria_evidence"]
+        if (
+            not isinstance(criteria_evidence, dict)
+            or set(criteria_evidence) != set(task.acceptance_criteria)
+            or not all(
+                isinstance(value, str) and 0 < len(value.strip()) <= 2000
+                for value in criteria_evidence.values()
+            )
+        ):
+            raise ValueError(
+                "worker must provide bounded evidence text for every exact acceptance criterion"
             )
         risk = RiskLevel(payload["risk"])
         calls = []
@@ -196,4 +215,5 @@ class AgentWorker:
             blockers=tuple(payload["blockers"][:20]),
             risk=risk,
             criteria_results=criteria_results,
+            criteria_evidence=criteria_evidence,
         )
