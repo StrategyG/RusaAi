@@ -104,6 +104,7 @@ export COMPOSE_PROJECT_NAME="$PROJECT_NAME"
 # Deploy a healthy candidate through the real immutable-digest deployment path.
 "$ROOT_DIR/scripts/deploy/compose-deploy.sh" "$CANDIDATE_API_IMAGE" "$CANDIDATE_AGENT_IMAGE"
 grep -Fxq "RUSA_API_IMAGE=$CANDIDATE_API_IMAGE" "$ENV_FILE"
+grep -Fxq "RUSA_AGENT_IMAGE=$CANDIDATE_AGENT_IMAGE" "$ENV_FILE"
 
 # Store a sentinel row, then recreate the worker so its idempotent schema setup
 # runs again against an existing database with real persisted data.
