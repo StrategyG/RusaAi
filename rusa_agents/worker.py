@@ -52,6 +52,27 @@ def _load_repository_access() -> tuple[set[str], dict[str, set[str]]]:
     return global_repositories, tenant_repositories
 
 
+def _load_required_ci_checks() -> tuple[str, ...]:
+    raw = os.getenv("RUSA_AGENT_REQUIRED_CI_CHECKS", "")
+    if not raw:
+        return (
+            "Lint, test, and audit dependencies",
+            "Build and smoke-test containers",
+        )
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("RUSA_AGENT_REQUIRED_CI_CHECKS must be a JSON array") from exc
+    if (
+        not isinstance(values, list)
+        or not values
+        or not all(isinstance(item, str) and item.strip() for item in values)
+        or len({item.strip() for item in values}) != len(values)
+    ):
+        raise RuntimeError("RUSA_AGENT_REQUIRED_CI_CHECKS must contain unique non-empty strings")
+    return tuple(item.strip() for item in values)
+
+
 class QueueWorker:
     def __init__(
         self,
@@ -266,6 +287,7 @@ def build_worker() -> QueueWorker:
         audit=audit,
         worker_timeout_seconds=float(os.getenv("RUSA_AGENT_WORKER_TIMEOUT", "120")),
         max_repair_cycles=int(os.getenv("RUSA_AGENT_MAX_REPAIR_CYCLES", "2")),
+        required_ci_checks=_load_required_ci_checks(),
     )
     return QueueWorker(
         queue=queue,
