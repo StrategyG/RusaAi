@@ -220,6 +220,9 @@ class RuntimeConfig:
             len(self.github_token.encode("utf-8")) < 20 or self._looks_placeholder(self.github_token)
         ):
             missing.append("RUSA_GITHUB_TOKEN must be a real fine-grained token, not a placeholder")
+        raw_docker_gid = os.getenv("RUSA_DOCKER_GID", "")
+        if not raw_docker_gid.isdigit() or not 1 <= int(raw_docker_gid or "0") <= 65535:
+            missing.append("RUSA_DOCKER_GID must be a valid numeric rootless Docker socket group ID")
         if self.workspace_root and not Path(self.workspace_root).is_absolute():
             missing.append("RUSA_WORKSPACE_ROOT must be an absolute path")
         if self.git_mirror_root and not Path(self.git_mirror_root).is_absolute():
