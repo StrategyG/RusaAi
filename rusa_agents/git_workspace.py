@@ -47,6 +47,8 @@ class GitWorkspaceManager:
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_LFS_SKIP_SMUDGE": "1",
         }
+        if args and args[0] == "git":
+            args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
         return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
     def create(self, task: CodingTask, tenant_id: str) -> Path:
@@ -117,13 +119,24 @@ class GitHubPublisher:
         }
         if env:
             base_env.update(env)
+        if args and args[0] == "git":
+            args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
         return subprocess.run(args, cwd=cwd, env=base_env, capture_output=True, text=True, timeout=180)
 
     @staticmethod
     def _safe_changed_paths(workspace: Path) -> list[str]:
         result = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+             "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             capture_output=True, timeout=30, check=False,
+            env={
+                "PATH": os.getenv("PATH", "/usr/bin:/bin"),
+                "HOME": tempfile.gettempdir(),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_LFS_SKIP_SMUDGE": "1",
+            },
         )
         if result.returncode:
             raise RuntimeError(result.stderr.decode("utf-8", "replace"))
@@ -205,7 +218,7 @@ class GitHubPublisher:
         askpass.chmod(0o700)
         try:
             pushed = self._run(
-                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "push", "origin", f"HEAD:refs/heads/{branch}"],
+                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{branch}"],
                 str(root),
                 {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "RUSA_GITHUB_TOKEN": self.token},
             )
