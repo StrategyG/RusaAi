@@ -305,13 +305,13 @@ class GitHubToolGateway:
         patterns = (
             (
                 re.compile(
-                    r"(?i)\\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret)\\b"
-                    r"(\\s*[:=]\\s*)(?:\"[^\"]*\"|'[^']*'|[^\\s,;]+)"
+                    r"(?i)\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret)\b"
+                    r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
                 ),
-                r"\\1\\2[REDACTED]",
+                r"\1\2[REDACTED]",
             ),
-            (re.compile(r"\\bgh[pousr]_[A-Za-z0-9_]{20,}\\b"), "[REDACTED_GITHUB_TOKEN]"),
-            (re.compile(r"\\bAKIA[0-9A-Z]{16}\\b"), "[REDACTED_AWS_ACCESS_KEY]"),
+            (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
+            (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_ACCESS_KEY]"),
             (
                 re.compile(
                     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?"
@@ -321,7 +321,7 @@ class GitHubToolGateway:
                 "[REDACTED_PRIVATE_KEY]",
             ),
             (
-                re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]{16,}"),
+                re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"),
                 "Bearer [REDACTED]",
             ),
         )

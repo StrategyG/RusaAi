@@ -251,4 +251,4 @@ def test_github_gateway_redacts_common_secret_formats():
 
 def test_github_gateway_rejects_control_characters_in_paths():
     with pytest.raises(ValueError, match="path is invalid"):
-        GitHubRepositoryGateway.validate_path("src\\x00secret.py")
+        GitHubRepositoryGateway.validate_path("src\x00secret.py")
