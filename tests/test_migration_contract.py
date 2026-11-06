@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -46,6 +46,19 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "006_aicode_idempotency.sql",
     ]
 
+
+
+    
+def test_knowledge_reader_migration_is_select_only_and_separates_ingestion_role():
+    migration = Path("migrations/008_rag_read_only_reader.sql").read_text(encoding="utf-8")
+
+    assert "CREATE ROLE rusa_knowledge_reader" in migration
+    assert "NOBYPASSRLS" in migration
+    assert "REVOKE ALL PRIVILEGES" in migration
+    assert "GRANT SELECT" in migration
+    assert "REVOKE rusa_knowledge_worker FROM rusa_worker_runtime" in migration
+    assert "GRANT rusa_knowledge_reader TO rusa_worker_runtime WITH INHERIT FALSE" in migration
+    assert "FOR SELECT TO rusa_knowledge_reader" in migration
 
 def test_sql_migration_dollar_quote_delimiters_are_balanced():
     for migration in sorted(Path("migrations").glob("*.sql")):
