@@ -33,11 +33,20 @@ class AgentWorker:
     }
 
     def __init__(
-        self, role: WorkerRole, provider: CompletionProvider, memory: MemoryReader | None = None,
+        self,
+        role: WorkerRole,
+        provider: CompletionProvider,
+        memory: MemoryReader | None = None,
+        *,
+        enabled_tools: set[str] | None = None,
     ) -> None:
         self.role = role
         self.provider = provider
         self.memory = memory
+        role_tools = set(self.ROLE_TOOLS[role])
+        if enabled_tools is not None:
+            role_tools.intersection_update(enabled_tools)
+        self.allowed_tools = frozenset(role_tools)
 
     async def run(
         self, task: CodingTask, prior_results: list[WorkerResult],
@@ -91,7 +100,7 @@ class AgentWorker:
         available_knowledge_tools = {
             name: contract
             for name, contract in knowledge_tool_contracts.items()
-            if name in self.ROLE_TOOLS[self.role]
+            if name in self.allowed_tools
         }
         if available_knowledge_tools:
             system_prompt += (
@@ -112,7 +121,7 @@ class AgentWorker:
                 "task": task.to_dict(),
                 "prior_results": history,
                 "tenant_memory": memories,
-                "allowed_tools": sorted(self.ROLE_TOOLS[self.role]),
+                "allowed_tools": sorted(self.allowed_tools),
                 "tool_contracts": available_knowledge_tools,
                 "acceptance_criteria": list(task.acceptance_criteria),
             },
