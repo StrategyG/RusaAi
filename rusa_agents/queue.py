@@ -235,9 +235,21 @@ class PostgresTaskQueue:
                 ON CONFLICT (tenant_id, task_id) DO NOTHING
                 RETURNING id
             """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
+            decision = "allow" if row is not None else "deny"
+            if row is None:
+                existing = conn.execute(
+                    "SELECT payload FROM aicode_jobs WHERE tenant_id=%s AND task_id=%s",
+                    (tenant_id, task_id),
+                ).fetchone()
+                if existing is not None:
+                    existing_payload = (
+                        existing[0]
+                        if isinstance(existing[0], dict)
+                        else json.loads(existing[0])
+                    )
+                    decision = "allow" if existing_payload == payload else "deny"
             self._record_policy_event(
-                conn, tenant_id, task_id, audit_actor, "task.create",
-                "allow" if row is not None else "deny",
+                conn, tenant_id, task_id, audit_actor, "task.create", decision
             )
         return row is not None
 
