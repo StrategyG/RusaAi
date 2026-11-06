@@ -87,6 +87,24 @@ network access to approved callers and the database, and terminate TLS at a
 trusted ingress. The container runs as UID/GID 10001 with a read-only application
 filesystem expectation.
 
+## Autonomous worker retrieval integration
+
+To enable retrieval tools inside autonomous coding tasks, set
+`RUSA_RAG_ENABLED=true` on the worker only. Keep the default disabled unless
+the pgvector migration and role grants have been applied. Configure:
+
+- `RUSA_KNOWLEDGE_DATABASE_URL` (optional; defaults to the worker database URL)
+- `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker`
+- `RUSA_KNOWLEDGE_COLLECTION=agent`
+- `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_API_KEY`, and
+  `RUSA_EMBEDDING_MODEL`
+
+The task tenant is taken from the authenticated queue lease and injected into
+the read-only agent tools. The model cannot provide or override `tenant_id`.
+The worker connects using its restricted worker login, then explicitly assumes
+the non-login `rusa_knowledge_worker` role for each knowledge-store transaction.
+Do not grant the knowledge role to an API login or a general application role.
+
 ## Operational boundaries
 
 - The RAG/MCP runtime is optional and isolated from the core inference API.
