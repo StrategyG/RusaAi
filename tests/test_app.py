@@ -140,9 +140,9 @@ def test_aicode_task_idempotency_header_replays_original_task(monkeypatch):
                 old_id, old_payload = existing
                 if old_payload != normalized:
                     raise ValueError("Idempotency-Key was already used with a different task payload")
-                return old_id, False
+                return old_id, False, "queued"
             self.by_key[(tenant_id, key)] = (task_id, normalized)
-            return task_id, True
+            return task_id, True, "queued"
 
         def get(self, task_id, tenant_id, *, audit_actor=None):
             return {"task_id": task_id, "tenant_id": tenant_id, "status": "queued"}
