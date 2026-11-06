@@ -47,6 +47,7 @@ REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 REVOKE CREATE ON SCHEMA public FROM rusa_agent_api;
 GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api, rusa_web_api, rusa_agent_backup;
 GRANT pg_read_all_data TO rusa_agent_backup;
+ALTER ROLE rusa_agent_backup SET default_transaction_read_only = on;
 GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker;
 GRANT USAGE ON SCHEMA public TO rusa_agent_api;
 
