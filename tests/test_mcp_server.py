@@ -66,7 +66,8 @@ def _invoke_middleware(middleware, headers):
         "path": "/mcp",
         "headers": headers,
     }
-    asyncio.run(middleware(app)(scope, receive, send))
+    middleware.app = app
+    asyncio.run(middleware(scope, receive, send))
     return messages
 
 
