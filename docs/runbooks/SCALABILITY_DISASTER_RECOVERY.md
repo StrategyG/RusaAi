@@ -131,6 +131,8 @@ docker compose --profile backup up -d rusa-agent-db-backup-scheduler
 docker compose --profile backup logs -f rusa-agent-db-backup-scheduler
 ```
 
+Compose requires remote storage by default (`RUSA_BACKUP_REQUIRE_REMOTE=true`); set a valid `RUSA_BACKUP_S3_URI` and inject its credentials before starting the scheduler. The scheduler drains an active snapshot on SIGTERM. Set `RUSA_BACKUP_STOP_GRACE_PERIOD` (default one hour) longer than the measured maximum backup duration.
+
 Set `RUSA_BACKUP_INTERVAL_SECONDS` to an interval no longer than the approved RPO. Monitor scheduler logs and alert on every failed backup cycle; a configured interval is not evidence of a successful backup.
 
 The backup script:
