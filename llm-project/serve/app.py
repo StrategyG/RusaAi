@@ -1,6 +1,7 @@
 """RUSA-AI API. Inference fails closed until a real backend is injected."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -250,7 +251,19 @@ async def readiness_check():
     except Exception:
         logger.exception("Inference readiness probe failed")
         raise HTTPException(status_code=503, detail="Inference backend is unavailable") from None
-    return {"status": "ready", "inference": "reachable"}
+
+    config = getattr(app.state, "config", RuntimeConfig.from_env())
+    queue = getattr(app.state, "queue", None)
+    if config.environment == "production" and queue is None:
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    if queue is not None:
+        try:
+            if not await asyncio.to_thread(queue.ping):
+                raise RuntimeError("Database ping returned an unexpected result")
+        except Exception:
+            logger.exception("Database readiness probe failed")
+            raise HTTPException(status_code=503, detail="Task database is unavailable") from None
+    return {"status": "ready", "inference": "reachable", "database": "reachable" if queue else "not_configured"}
 
 
 @app.post(
