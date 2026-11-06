@@ -317,3 +317,74 @@ def test_postgres_memory_redacts_secrets_before_persistence():
     assert "raw-memory-secret-value-123456" not in results[0]["content"]
     assert "[REDACTED]" in results[0]["content"]
     memory.delete_tenant(tenant_id)
+
+
+
+def test_postgres_queue_cancel_revokes_active_lease_and_rejects_stale_worker():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-cancel-{uuid4().hex}"
+    task = make_task(tenant_id, f"cancel-{uuid4().hex}")
+    task_id = queue.enqueue(task)
+
+    claimed = queue.claim("cancel-worker", lease_seconds=60)
+    assert claimed is not None and claimed["task_id"] == task_id
+    token = claimed["lease_token"]
+    record = TaskRecord(task=task)
+    record.transition(TaskState.OBSERVING)
+
+    assert queue.cancel(tenant_id, task_id) is True
+    assert queue.get(tenant_id, task_id)["status"] == "cancelled"
+    assert queue.owns_lease(tenant_id, task_id, "cancel-worker", token) is False
+    assert queue.heartbeat(
+        tenant_id, task_id, "cancel-worker", token, lease_seconds=60
+    ) is False
+    assert queue.checkpoint(
+        tenant_id, task_id, "cancel-worker", token, record
+    ) is False
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        queue.acknowledge(
+            tenant_id, task_id, record, "cancel-worker", token
+        )
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
+
+
+def test_postgres_queue_requeues_only_failed_tasks_for_the_same_tenant():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    clean_test_rows()
+    tenant_id = f"rusa-test-requeue-{uuid4().hex}"
+    task = make_task(tenant_id, f"requeue-{uuid4().hex}")
+    task_id = queue.enqueue(task)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            """
+            UPDATE rusa_agent_tasks
+            SET status='failed', attempts=2, last_error='transient failure',
+                result='{"state":"failed"}'::jsonb
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, task_id),
+        )
+
+    assert queue.requeue_failed("wrong-tenant", task_id) is False
+    assert queue.requeue_failed(tenant_id, task_id) is True
+    restored = queue.get(tenant_id, task_id)
+    assert restored is not None
+    assert restored["status"] == "queued"
+    assert restored["attempts"] == 0
+    assert restored["result"] is None
+    assert restored["last_error"] is None
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
