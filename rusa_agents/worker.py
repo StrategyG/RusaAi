@@ -169,6 +169,52 @@ class AgentRuntime:
             tenant_id, task_id, "human", "task.action_approved", {"action": action}
         )
 
+    async def resume(self, tenant_id: str, task_id: str) -> None:
+        async with self.database.session() as session:
+            row = await session.scalar(
+                select(TaskRow).where(
+                    TaskRow.tenant_id == tenant_id,
+                    TaskRow.id == task_id,
+                )
+            )
+            if not row or row.status != TaskStatus.BLOCKED.value or not row.plan:
+                raise ValueError("Only a blocked task with a persisted plan can be resumed")
+            error = row.error or ""
+            if "CI checks" in error:
+                target_tool = "github.get_ci_status"
+            elif "pull request" in error:
+                target_tool = "github.create_pull_request"
+            else:
+                raise ValueError("This blocker requires operator review and cannot be auto-resumed")
+            indexes = [
+                index for index, step in enumerate(row.plan.get("steps", []))
+                if step.get("tool") == target_tool
+            ]
+            if not indexes:
+                raise ValueError("The persisted plan has no step for the blocked operation")
+            resume_cursor = indexes[-1]
+            row.cursor = resume_cursor
+            row.tool_results = list(row.tool_results or [])[:resume_cursor]
+            row.error = None
+            self._set_status(row, TaskStatus.QUEUED)
+            row.available_at = utcnow()
+            await session.commit()
+        await self.audit.record(
+            tenant_id,
+            task_id,
+            "human",
+            "task.resumed",
+            {"resume_from": target_tool, "cursor": resume_cursor},
+        )
+        await self._publish(
+            tenant_id,
+            task_id,
+            WorkerRole.SUPERVISOR,
+            WorkerRole.TESTER if target_tool == "github.get_ci_status" else WorkerRole.DEVELOPER,
+            "task.accepted",
+            {"resumed_from": target_tool},
+        )
+
     async def cancel(self, tenant_id: str, task_id: str) -> None:
         async with self.database.session() as session:
             row = await session.scalar(
@@ -551,6 +597,20 @@ class AgentRuntime:
                 row.result = {
                     "tool_results": results,
                     "acceptance_criteria": row.acceptance_criteria,
+                    "acceptance_criteria_evaluated": False,
+                    "verification_scope": [
+                        "feature_branch_created",
+                        *(
+                            ["draft_pull_request_created"]
+                            if has_write and row.require_pull_request
+                            else []
+                        ),
+                        *(
+                            ["latest_write_commit_ci_passed"]
+                            if has_write and row.require_ci
+                            else []
+                        ),
+                    ],
                     "verified": True,
                 }
             await session.commit()
