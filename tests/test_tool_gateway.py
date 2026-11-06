@@ -55,7 +55,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     (workspace / "linked-secret.txt").symlink_to(secret_target)
 
     def fake_run(command, **kwargs):
-        mount = next(item for item in command if item.startswith("type=bind,src="))
+            mount = next(item for item in command if item.startswith("type=bind,src="))
         snapshot = mount.split("src=", 1)[1].split(",dst=", 1)[0]
         snapshot_path = Path(snapshot)
         assert (snapshot_path / "src.py").is_file()
