@@ -102,7 +102,7 @@ services:
     expose:
       - "9100"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; data=urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3).read(); assert b'rusa_aicode_worker_ready 1.0' in data"]
       interval: 30s
       timeout: 5s
       retries: 3
