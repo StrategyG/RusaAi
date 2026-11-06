@@ -112,6 +112,14 @@ class PostgresTaskQueue:
                         "Production idempotency migration is not installed; "
                         "apply migrations/006_aicode_idempotency.sql"
                     )
+                idempotency_index = conn.execute(
+                    "SELECT to_regclass('public.idx_aicode_jobs_idempotency')"
+                ).fetchone()
+                if not idempotency_index or idempotency_index[0] is None:
+                    raise RuntimeError(
+                        "Production idempotency index is missing; "
+                        "apply migrations/006_aicode_idempotency.sql"
+                    )
                 result_column = conn.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
