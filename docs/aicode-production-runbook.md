@@ -24,9 +24,12 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–005 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+If the optional RAG knowledge plane is enabled, apply `migrations/007_rag_knowledge_pgvector.sql` separately to a pgvector-enabled knowledge database using its database owner. Do not apply migration 007 to a database that is not prepared for pgvector.
+
+Core migrations 001–006 create the durable task queue, lease fencing, task results, tenant RLS, append-only policy audit, and tenant-scoped client idempotency. Apply them in numeric order. Migration 007 is optional and installs the pgvector knowledge plane; it must be applied only where pgvector is available and the restricted knowledge role is configured. The API and worker fail closed if required core columns, idempotency index, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -69,26 +72,26 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build all three images from the reviewed commit:
+Do not publish production images from an unreviewed branch or a mutable tag. After the exact commit is merged to `main`, create an authorized semantic-version tag in the form `vMAJOR.MINOR.PATCH`. The `.github/workflows/release.yml` workflow:
 
-```bash
-docker build -t ghcr.io/ORG/rusa-ai:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-aicode-worker:RELEASE .
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-aicode-sandbox:RELEASE .
-docker push ghcr.io/ORG/rusa-ai:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-worker:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-sandbox:RELEASE
-```
+1. Rejects non-semantic tags and tags whose commit is not reachable from `main`.
+2. Re-runs the complete reusable CI workflow on the exact tagged commit, including the stable **Release Gate**.
+3. Builds and publishes the API, worker, and isolated sandbox images to GHCR.
+4. Scans the exact published digests for fixable CRITICAL/HIGH vulnerabilities.
+5. Creates keyless Cosign signatures using GitHub OIDC, build-provenance attestations, and OCI SBOM attestations.
+6. Publishes a GitHub Release with `release-manifest.txt`, which records the three immutable image digests.
 
-Resolve the sandbox digest from the registry and configure `RUSA_SANDBOX_IMAGE` as an immutable reference:
+The production image names are:
 
 ```text
-ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST
+ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST
+ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
 ```
 
-The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
+The worker uses the sandbox image through the dedicated rootless Docker daemon. Production must use the sandbox digest from the same reviewed release; never use a mutable tag such as `:latest`. The standard API image does not bundle model weights or heavyweight local-model dependencies. A local Transformers/vLLM deployment requires a separately approved model artifact, a compatible image build, and target-hardware validation.
 
-The current CI builds images but does not publish them to a registry automatically. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
+`release-manifest.txt` is the source of truth for the digest values supplied to the manual production deployment workflow. Do not copy tags into the production environment file where a digest is required.
 
 ## 6. Prepare Git mirrors and storage
 
@@ -173,17 +176,24 @@ docker compose up -d
 docker compose --profile worker up -d --build
 ```
 
-For production, set the API and worker image references to immutable registry digests in the deployment environment, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then validate and deploy the external-database stack:
+For production, pre-provision `.env` with the API, worker, and sandbox digest references from a reviewed release, separate managed TLS DSNs, rootless Docker socket, workspace/mirror paths, tenant API-key digests, and other required secrets. Keep `RUSA_AICODE_ENABLED=false` for the initial rollout. The manual `.github/workflows/deploy-production.yml` workflow requires the `production` environment approval, verifies all three Cosign signatures against the exact release workflow identity, and then transfers the Compose manifest and deployment scripts over pinned SSH.
+
+The host deployment script can also be run manually after verifying the signatures and release manifest:
 
 ```bash
-export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
-export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
-docker compose -f docker-compose.production.yml config
-docker compose -f docker-compose.production.yml pull
-docker compose -f docker-compose.production.yml up -d
-docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs --tail=200 api worker
+./scripts/deploy/compose-deploy.sh \\
+  ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST \\
+  ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST \\
+  ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
 ```
+
+It requires the previous API, worker, and sandbox digests to already exist in `.env` as rollback targets. It pulls API/worker images from the host Docker daemon, pulls the sandbox image through `RUSA_DOCKER_SOCKET`, updates services, waits for both health checks, and automatically restores the prior digest set if the candidate is unhealthy. Manual rollback uses:
+
+```bash
+./scripts/deploy/compose-rollback.sh
+```
+
+The deployment workflow requires these GitHub `production` environment variables: `PRODUCTION_SSH_HOST`, `PRODUCTION_SSH_USER`, `PRODUCTION_DEPLOY_PATH`, and `GHCR_PULL_USERNAME`. It requires these environment secrets: `PRODUCTION_SSH_PRIVATE_KEY`, `PRODUCTION_SSH_KNOWN_HOSTS`, and a read-only `GHCR_PULL_TOKEN`. Configure required reviewers and tag restrictions on the environment before using the workflow.
 
 The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 
@@ -212,7 +222,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
 
 The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
 
-A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
+A successful task creates a draft pull request and requires the stable **Release Gate** check to pass on the exact head commit. If the check is missing, pending, failed, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
 ## 10. Monitoring and recovery
 
@@ -240,14 +250,15 @@ Rollback:
 ## 11. Release gate
 
 Do not declare production certification until:
-- PR head CI passes, including PostgreSQL integration tests and both image builds.
+- The **Release Gate** check passes on the exact PR head and exact release tag, including PostgreSQL integration tests, API/worker/sandbox builds, Trivy scanning, and RAG/MCP integration tests.
 - Migration and runtime role permissions are verified.
 - Tenant isolation tests show zero cross-tenant access.
 - Sandbox adversarial and resource exhaustion tests pass.
-- GitHub token is least-privilege and branch protection is active.
+- GitHub token is least-privilege; an active `main` ruleset requires PR review and the **Release Gate** check with no routine bypass.
 - Model endpoint is reachable and passes task-quality evaluation.
-- Backup/restore and worker-restart drills pass.
+- Backup/restore, worker-restart, automated rollback, and staging disaster-recovery drills pass against owner-approved RPO/RTO targets.
 - Metrics are scraped and alerts are tested.
+- Published API, worker, and sandbox digests have verified Cosign signatures, provenance, and SBOMs; staging deployment and rollback are evidenced.
 - Security review and operator sign-off are recorded.
 
 ## Runtime hardening rollout — 2026-11-06
@@ -300,7 +311,7 @@ These controls limit in-process concurrency and repair attempts; they do not aut
 
 The current code still requires independent verification before it can be certified production-ready:
 
-- Database RLS and separate API/worker database identities are implemented through migrations 004–005 and fail-closed startup checks. Before certification, execute adversarial cross-tenant tests against the actual production login roles and verify grants, policies, audit immutability, and off-host retention on the target PostgreSQL instance.
+- Database RLS and separate API/worker database identities are implemented through migrations 004–005; migration 006 adds tenant-scoped client idempotency. Before certification, execute adversarial cross-tenant tests against the actual production login roles and verify grants, policies, idempotency constraints, audit immutability, and off-host retention on the target PostgreSQL instance.
 - The current `docker-compose.yml` uses the bootstrap PostgreSQL account `rusa` for both API and worker connections. Treat this compose profile as development-only; do not use it as a production credential model.
 - The runtime still uses the custom PostgreSQL lease queue rather than Temporal. Agent manager dispatch is currently in-process (no external A2A transport), and the workspace tool gateway is not yet exposed through an MCP server/client implementation.
 - Production rollout still requires independent verification of the least-privilege role split, tenant RLS policies, TLS-enabled database URLs, and a migration/rollback plan. The Compose syntax check does not certify these controls.
