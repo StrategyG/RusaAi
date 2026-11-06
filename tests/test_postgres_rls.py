@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -26,6 +28,7 @@ def apply_database_migrations():
             "002_aicode_lease_fencing.sql",
             "003_aicode_task_results.sql",
             "004_aicode_tenant_rls.sql",
+            "005_aicode_task_policy_audit.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -150,19 +153,37 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     from app import app
     from fastapi.testclient import TestClient
 
+    from rusa_agents.audit import PostgresTaskPolicyAudit
     from rusa_agents.queue import PostgresTaskQueue
 
     api_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_api_runtime")
     worker_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_worker_runtime")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
-    monkeypatch.setenv("RUSA_API_KEYS", '{"test-key-a":"audit-a","test-key-b":"audit-b"}')
+    key_a = "tenant-a-integration-key-000000000000000000000000"
+    key_b = "tenant-b-integration-key-000000000000000000000000"
+    registry = {
+        hashlib.sha256(key_a.encode()).hexdigest(): {
+            "subject": "service-a", "tenant_id": "audit-a", "roles": ["tenant_admin"],
+        },
+        hashlib.sha256(key_b.encode()).hexdigest(): {
+            "subject": "service-b", "tenant_id": "audit-b", "roles": ["tenant_admin"],
+        },
+    }
+    monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps(registry))
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setattr(app.state, "queue", PostgresTaskQueue(api_dsn), raising=False)
+    api_audit = PostgresTaskPolicyAudit(api_dsn)
+    worker_audit = PostgresTaskPolicyAudit(worker_dsn)
+    api_audit.verify_ready("rusa_api_runtime")
+    worker_audit.verify_ready("rusa_worker_runtime")
+    monkeypatch.setattr(app.state, "task_policy_audit", api_audit, raising=False)
     caplog.set_level("INFO", logger="rusa-ai.task-policy")
 
     client = TestClient(app)
-    api_a = {"X-API-Key": "test-key-a", "X-Tenant-ID": "audit-b"}
-    api_b = {"X-API-Key": "test-key-b"}
+    api_a = {"X-API-Key": key_a, "X-Tenant-ID": "audit-b"}
+    api_b = {"X-API-Key": key_b}
     response = client.post("/v1/aicode/tasks", headers=api_b, json={
         "objective": "sensitive objective sentinel",
         "repository": {"full_name": "StrategyG/RusaAi"},
@@ -171,6 +192,7 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert response.status_code == 202
     task_id = response.json()["task_id"]
     path = f"/v1/aicode/tasks/{task_id}"
+    assert client.get(path).status_code == 401
 
     with psycopg.connect(api_dsn) as conn:
         assert conn.execute(
@@ -206,14 +228,49 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
               if record.name == "rusa-ai.task-policy"]
     assert {(event["tenant_id"], event["actor"], event["action"], event["decision"])
             for event in events} == {
-        ("audit-a", "tenant:audit-a", "task.read", "deny"),
-        ("audit-a", "tenant:audit-a", "task.retry", "deny"),
-        ("audit-a", "tenant:audit-a", "task.cancel", "deny"),
-        ("audit-b", "tenant:audit-b", "task.create", "allow"),
-        ("audit-b", "tenant:audit-b", "task.read", "allow"),
-        ("audit-b", "tenant:audit-b", "task.retry", "allow"),
-        ("audit-b", "tenant:audit-b", "task.cancel", "allow"),
+        (None, "unauthenticated", "task.authenticate", "deny"),
+        ("audit-a", "api:service-a", "task.read", "deny"),
+        ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.cancel", "deny"),
+        ("audit-b", "api:service-b", "task.create", "allow"),
+        ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "allow"),
+        ("audit-b", "api:service-b", "task.cancel", "allow"),
     }
     assert all(event["task_id"] == task_id and event["event"] == "task.policy" for event in events)
     assert "sensitive objective sentinel" not in caplog.text
-    assert "test-key-a" not in caplog.text and "test-key-b" not in caplog.text
+    assert key_a not in caplog.text and key_b not in caplog.text
+
+    worker_audit.record(
+        "audit-b", task_id, "worker:policy-test-worker", "task.execute", "allow"
+    )
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        worker_audit.record(
+            "audit-a", task_id, "worker:policy-test-worker", "task.execute", "deny"
+        )
+
+    with psycopg.connect(api_dsn) as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("SELECT * FROM aicode_task_policy_events")
+
+    with connect() as conn:
+        persisted = conn.execute(
+            """SELECT tenant_id, task_id, actor, action, decision
+               FROM aicode_task_policy_events WHERE task_id=%s""",
+            (task_id,),
+        ).fetchall()
+    persisted_decisions = {
+        (row[0], row[2], row[3], row[4]) for row in persisted
+    }
+    assert {
+        (None, "unauthenticated", "task.authenticate", "deny"),
+        ("audit-a", "api:service-a", "task.read", "deny"),
+        ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.cancel", "deny"),
+        ("audit-b", "api:service-b", "task.create", "allow"),
+        ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "allow"),
+        ("audit-b", "api:service-b", "task.cancel", "allow"),
+        ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
+    }.issubset(persisted_decisions)
