@@ -1033,3 +1033,25 @@ def test_task_checkpoint_preserves_complete_ci_check_set():
     ci = restored.worker_results[0].tool_results[0]
     assert len(ci.data["checks"]) == 100
     assert ci.data["total_count"] == 100
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "requirements.txt",
+        "requirements-agent.txt",
+        "pyproject.toml",
+        "Dockerfile",
+        "docker-compose.yml",
+        "infra/production/main.tf",
+        "deploy/kubernetes/service.yaml",
+    ],
+)
+def test_policy_requires_human_approval_for_dependency_and_infrastructure_changes(path):
+    decision = AutonomyPolicy().evaluate(
+        "repo_write",
+        repository=make_task().repository,
+        path=path,
+    )
+    assert decision.allowed is False
+    assert decision.requires_approval is True
