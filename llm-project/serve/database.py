@@ -40,7 +40,9 @@ class TenantDatabase:
     def verify_security(self) -> None:
         with self._pool.connection() as conn:
             role = conn.execute(
-                "SELECT current_user AS name, r.rolsuper, r.rolbypassrls "
+                "SELECT current_user AS name, r.rolsuper, r.rolbypassrls, "
+                "r.rolcreatedb, r.rolcreaterole, r.rolreplication, "
+                "EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid) AS has_role_memberships "
                 "FROM pg_roles r WHERE r.rolname = current_user"
             ).fetchone()
             table = conn.execute(
@@ -53,8 +55,9 @@ class TenantDatabase:
                 "SELECT policyname, permissive, cmd, roles, qual, with_check "
                 "FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_records'"
             ).fetchall()
-        if not role or role["rolsuper"] or role["rolbypassrls"]:
-            raise DatabaseConfigurationError("Application database role must not bypass RLS")
+        if (not role or role["rolsuper"] or role["rolbypassrls"] or role["rolcreatedb"]
+                or role["rolcreaterole"] or role["rolreplication"] or role["has_role_memberships"]):
+            raise DatabaseConfigurationError("Application database role has excessive database privileges")
         if not table or not table["relrowsecurity"] or not table["relforcerowsecurity"]:
             raise DatabaseConfigurationError("tenant_records must have ENABLE and FORCE ROW LEVEL SECURITY")
         if table["owner"] == role["name"]:
