@@ -20,10 +20,6 @@ RUN python -m pip install --no-cache-dir --upgrade \
     && python -m pip uninstall -y setuptools wheel jaraco.context \
     && python -m pip uninstall -y pip \
     && rm -rf /usr/local/lib/python3.11/ensurepip \
-    && find /usr/local/lib/python3.11 -type d \\( \
-         -name 'setuptools-*.dist-info' -o -name 'wheel-*.dist-info' \
-         -o -name 'pip-*.dist-info' -o -name 'jaraco.context-*.dist-info' \
-       \\) -prune -exec rm -rf '{}' + \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
     && python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
