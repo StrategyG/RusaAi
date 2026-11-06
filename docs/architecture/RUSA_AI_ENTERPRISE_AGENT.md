@@ -224,3 +224,16 @@ Use a TLS reverse proxy/API gateway in production. Enforce distributed rate limi
 ## 10. Production status boundary
 
 This implementation is an enterprise-oriented runtime foundation, not a claim that the full RUSA-AI product is production-certified. A real provider, GitHub token with minimum repository permissions, PostgreSQL instance, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested. A green CI pipeline proves code checks for the commit; it does not prove model quality, capacity, security certification, or production SLOs.
+
+
+## 11. Runtime hardening and evidence integrity
+
+The runtime persists worker and orchestration checkpoints through the active PostgreSQL lease token. A checkpoint is accepted only while that lease is current and unexpired, preventing a stale worker from overwriting a newer owner. Readiness and health checks require forced row-level security and the expected tenant policy on both task and memory tables.
+
+The GitHub gateway binds work branches to tenant/task identity, enforces per-tenant repository allowlists, paginates check-run evidence, selects the latest rerun for each check/app pair, and fails closed when pagination or check-run identity is incomplete. Repository reads and compare diffs redact credential-like material. If a changed-file diff contains redacted credential material, automated completion is blocked for manual review.
+
+Security runs in two passes: an evidence-gathering pass obtains CI and the bounded compare diff; a separate read-only review pass evaluates the supplied diff and evidence without additional write-capable tool calls. After that review, the orchestrator re-reads the diff and CI and requires the same base and head commit SHAs, closing the review-time time-of-check/time-of-use window.
+
+The API applies a total request-body intake timeout in addition to a byte limit. The timeout and GitHub evidence limits are configurable through environment variables and passed through Docker Compose. CI validates Compose interpolation before building the containers.
+
+These controls strengthen the runtime but do not replace branch protection, external immutable audit retention, secret rotation, load/soak testing, disaster-recovery drills, staged deployment, and a versioned model-quality benchmark.
