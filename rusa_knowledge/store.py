@@ -6,7 +6,7 @@ import json
 import math
 import re
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
@@ -119,7 +119,6 @@ class PostgresKnowledgeStore:
                 raise ValueError("chunk content is empty or exceeds the configured limit")
             rows.append(
                 (
-                    tenant_id,
                     index,
                     content,
                     _vector_literal(embedding, self.dimensions),
@@ -165,9 +164,7 @@ class PostgresKnowledgeStore:
                         vector,
                         chunk_metadata,
                     )
-                    for index, content, vector, chunk_metadata in (
-                        (row[0], row[1], row[2], row[3], row[4]) for row in rows
-                    )
+                    for index, content, vector, chunk_metadata in rows
                 ],
             )
         return document_id
