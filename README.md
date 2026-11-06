@@ -125,7 +125,7 @@ or does not conform to its declared draft. The service never skips validation wh
 the schema is unavailable.
 
 A successful validation returns `{"valid": true, "errors": []}`. A rejected
-envelope returns `{"valid": false, "errors": ["$.task_id: has an invalid format"]}`
+envelope returns `{"valid": false, "errors": ["$.task_id: must use the uuid format"]}`
 with JSONPath-like field locations. Error messages describe the constraint without
 echoing submitted field values.
 
