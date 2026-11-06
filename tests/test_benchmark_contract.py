@@ -10,6 +10,7 @@ import pytest_asyncio
 from rusa_agents.contracts import TaskCreate
 from rusa_agents.storage import Database, utcnow
 from rusa_agents.worker import AgentRuntime
+from benchmarks.compare_reports import compare_reports
 
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import TaskStatus
@@ -310,3 +311,91 @@ async def test_model_provider_marks_missing_usage_without_fabricating_tokens(mon
     assert provider.request_count == 1
     assert provider.usage_calls == 0
     assert provider.usage_missing_calls == 1
+
+
+
+def _comparison_report(**overrides):
+    report = {
+        "benchmark_id": "rusa-agent-flow-v1",
+        "dataset_version": "rusa-agent-flow-v1:1",
+        "candidate_sha": "a" * 40,
+        "model_name": "model-x",
+        "model_revision": "revision-2026-01",
+        "policy_version": "rusa-autonomy-policy-v1",
+        "scenario_counts": {
+            "normal": 30,
+            "policy_rejection": 30,
+            "tool_failure": 30,
+            "qa_failure": 30,
+            "worker_recovery": 30,
+        },
+        "false_allow_count": 0,
+        "policy_decision_sample_size": 5,
+        "task_success_rate": 0.80,
+        "first_attempt_success_rate": 0.70,
+        "policy_decision_accuracy": 1.0,
+        "latency_p95_ms": 100.0,
+        "retry_rate": 0.10,
+        "cost_per_task": 0.01,
+    }
+    report.update(overrides)
+    return report
+
+
+def test_model_report_comparison_passes_with_matching_baseline():
+    baseline = _comparison_report()
+    candidate = _comparison_report(candidate_sha="b" * 40)
+    result = compare_reports(baseline, candidate)
+    assert result["status"] == "PASS"
+    assert result["regressions"] == []
+
+
+def test_model_report_comparison_detects_success_and_policy_regressions():
+    baseline = _comparison_report()
+    candidate = _comparison_report(
+        candidate_sha="b" * 40,
+        task_success_rate=0.70,
+        false_allow_count=1,
+    )
+    result = compare_reports(baseline, candidate)
+    assert result["status"] == "FAIL"
+    assert {item["metric"] for item in result["regressions"]} >= {
+        "task_success_rate",
+        "false_allow_count",
+    }
+
+
+def test_model_report_comparison_rejects_mismatched_model_revision():
+    baseline = _comparison_report()
+    candidate = _comparison_report(
+        candidate_sha="b" * 40,
+        model_revision="different-revision",
+    )
+    result = compare_reports(baseline, candidate)
+    assert result["status"] == "INVALID_COMPARISON"
+    assert "model_revision" in result["identity_mismatches"]
+
+
+def test_model_report_comparison_requires_minimum_sample_per_scenario():
+    baseline = _comparison_report()
+    candidate = _comparison_report(
+        candidate_sha="b" * 40,
+        scenario_counts={
+            "normal": 10,
+            "policy_rejection": 30,
+            "tool_failure": 30,
+            "qa_failure": 30,
+            "worker_recovery": 30,
+        },
+    )
+    result = compare_reports(baseline, candidate)
+    assert result["status"] == "INSUFFICIENT_SAMPLE"
+    assert result["insufficient_scenarios"]["normal"]["candidate"] == 10
+
+
+def test_model_report_comparison_skips_cost_only_when_not_measured():
+    baseline = _comparison_report(cost_per_task=None)
+    candidate = _comparison_report(candidate_sha="b" * 40, cost_per_task=None)
+    result = compare_reports(baseline, candidate)
+    assert result["status"] == "PASS"
+    assert any(item["metric"] == "cost_per_task" for item in result["skipped_metrics"])
