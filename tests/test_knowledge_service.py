@@ -153,3 +153,22 @@ def test_ingestion_blocks_source_uri_userinfo_before_embedding():
         raise AssertionError("credential-bearing source URI was ingested")
     assert embeddings.inputs == []
     assert store.ingested is None
+
+
+def test_search_blocks_credentials_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    secret = "ghp_" + ("e" * 36)
+    try:
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query=secret,
+        )
+    except ValueError as exc:
+        assert "GitHub credential" in str(exc)
+    else:
+        raise AssertionError("credential-bearing search query was embedded")
+    assert embeddings.inputs == []
+    assert store.search_args is None
