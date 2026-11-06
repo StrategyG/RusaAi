@@ -111,10 +111,11 @@ class OpenAICompatibleEmbeddingProvider:
                 values = [float(value) for value in vector]
             except (TypeError, ValueError) as exc:
                 raise RuntimeError("embedding vector contains a non-numeric value") from exc
-            if not all(math.isfinite(value) for value in values):
-                raise RuntimeError("embedding vector contains a non-finite value")
-            if sum(value * value for value in values) <= 0:
-                raise RuntimeError("embedding vector must not be a zero vector")
+            if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in values):
+                raise RuntimeError("embedding vector contains an invalid or out-of-range value")
+            norm_squared = sum(value * value for value in values)
+            if not math.isfinite(norm_squared) or norm_squared <= 0:
+                raise RuntimeError("embedding vector must have a finite, non-zero norm")
             ordered[index] = values
 
         if any(vector is None for vector in ordered):
