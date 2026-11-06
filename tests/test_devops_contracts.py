@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from uuid import uuid4
 
 import pytest
