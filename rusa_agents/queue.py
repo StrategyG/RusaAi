@@ -694,7 +694,7 @@ class PostgresTaskQueue:
                        last_error, created_at, updated_at
                 FROM public.rusa_agent_tasks
                 WHERE tenant_id=%s
-                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                  AND (%s::text IS NULL OR payload->'metadata'->>'user_id'=%s)
                 ORDER BY created_at DESC, task_id
                 LIMIT %s OFFSET %s
                 """,
