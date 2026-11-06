@@ -30,8 +30,10 @@ The migrations create the durable task queue, tenant memory, rate limits, immuta
 Create two independent login roles using a secret manager for passwords:
 
 ```sql
-CREATE ROLE rusa_api_login LOGIN PASSWORD 'api-managed-secret' IN ROLE rusa_api_runtime;
-CREATE ROLE rusa_worker_login LOGIN PASSWORD 'worker-managed-secret' IN ROLE rusa_worker_runtime;
+CREATE ROLE rusa_api_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  PASSWORD 'api-managed-secret' IN ROLE rusa_api_runtime;
+CREATE ROLE rusa_worker_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  PASSWORD 'worker-managed-secret' IN ROLE rusa_worker_runtime;
 GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login;
 ```
 
@@ -43,7 +45,7 @@ Runtime permissions:
 - Neither role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
-The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py` and `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
+The database policies use transaction-local `rusa.tenant_id` context set by the trusted API/worker process. This is defense-in-depth against missing tenant predicates and accidental cross-tenant queries; a custom PostgreSQL setting is not a cryptographic tenant identity and can be changed by any code already executing SQL under that login. Keep database credentials private to the services, parameterize every query, and never expose direct database access to tenants. If the threat model includes a compromised API process or arbitrary SQL execution, use separate database identities (or databases/schemas) per tenant rather than relying on a shared login plus a session setting. The worker is a privileged internal queue consumer and can read the global audit chain, but its task memory is tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py` and `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
