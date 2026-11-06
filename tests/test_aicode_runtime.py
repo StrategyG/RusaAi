@@ -17,6 +17,7 @@ from rusa_agents.github_gateway import GitHubToolGateway
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
+from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents.workers import AgentWorker
 
 
@@ -181,3 +182,19 @@ def test_github_gateway_denies_repositories_outside_allowlist():
     )
     assert result["ok"] is False
     assert "allowlist" in result["error"]
+
+
+
+def test_provider_rejects_remote_plain_http():
+    with pytest.raises(ValueError, match="HTTPS"):
+        OpenAICompatibleProvider("http://provider.example/v1", "model")
+
+
+def test_provider_allows_local_http_endpoint():
+    provider = OpenAICompatibleProvider("http://127.0.0.1:8001/v1", "model")
+    assert provider.endpoint.endswith("/chat/completions")
+
+
+def test_provider_rejects_credentials_in_url():
+    with pytest.raises(ValueError, match="credentials"):
+        OpenAICompatibleProvider("https://user:pass@provider.example/v1", "model")
