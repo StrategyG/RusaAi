@@ -279,12 +279,37 @@ def get_task_validator() -> jsonschema.protocols.Validator:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task validation is unavailable because its schema is not installed",
         ) from exc
-    except (json.JSONDecodeError, jsonschema.SchemaError, OSError) as exc:
-        logger.exception("A2A schema could not be loaded")
+    except (json.JSONDecodeError, jsonschema.SchemaError, OSError, ValueError) as exc:
+        logger.error("A2A schema could not be loaded: %s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task validation is unavailable because its schema is invalid",
         ) from exc
+
+
+def _client_validation_message(error: jsonschema.ValidationError) -> str:
+    """Return actionable schema feedback without echoing submitted values."""
+    if error.validator == "format":
+        return f"must be a valid {error.validator_value} value"
+    if error.validator == "required":
+        missing = error.message.split(" ")[0].strip("'")
+        return f"missing required field '{missing}'"
+    if error.validator == "additionalProperties":
+        return "contains unsupported field(s)"
+    if error.validator == "type":
+        expected = error.validator_value
+        return f"must be of type {expected}"
+    if error.validator == "enum":
+        return "must use one of the allowed values"
+    if error.validator == "const":
+        return "does not match the required value"
+    if error.validator == "pattern":
+        return "does not match the required pattern"
+    if error.validator in {"minLength", "minItems"}:
+        return f"must contain at least {error.validator_value} item(s)"
+    if error.validator in {"maxLength", "maxItems"}:
+        return f"must contain no more than {error.validator_value} item(s)"
+    return "does not satisfy the schema constraints"
 
 
 def _load_api_key_tenants() -> dict[str, str] | None:
@@ -432,6 +457,15 @@ def verify_api_key(
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Validate the protocol contract before the process can become ready.
+    try:
+        application.state.task_validator = get_task_validator()
+    except HTTPException as exc:
+        logger.error("A2A task schema validation failed during startup")
+        raise RuntimeError(
+            "A2A task schema is missing or invalid; refusing to start"
+        ) from exc
+
     application.state.backend = None
     application.state.backend_error = "RUSA_MODEL_PATH is not configured"
     model_path = os.getenv("RUSA_MODEL_PATH")
@@ -1068,7 +1102,7 @@ def validate_task_envelope(request: TaskValidationRequest):
     errors = []
     for error in validation_errors:
         path = ".".join(str(part) for part in error.absolute_path) or "$"
-        errors.append(f"{path}: {error.message}")
+        errors.append(f"{path}: {_client_validation_message(error)}")
 
     return TaskValidationResponse(valid=not errors, errors=errors)
 
