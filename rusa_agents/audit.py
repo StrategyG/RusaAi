@@ -13,17 +13,144 @@ from typing import Any
 
 
 def record_task_policy(
-    tenant_id: str | None, task_id: str | None, actor: str, action: str, allowed: bool,
+    tenant_id: str | None,
+    task_id: str | None,
+    actor: str,
+    action: str,
+    allowed: bool,
+    *,
+    sink: "PostgresTaskPolicyAudit | None" = None,
+    required: bool = False,
 ) -> None:
-    """Emit task authorization decisions to the service's structured audit stream."""
-    logging.getLogger("rusa-ai.task-policy").info("%s", json.dumps({
+    """Persist and emit a redacted task authorization decision."""
+    event = {
         "event": "task.policy",
         "tenant_id": tenant_id,
         "task_id": task_id,
         "actor": actor,
         "action": action,
         "decision": "allow" if allowed else "deny",
-    }))
+    }
+    if sink is not None:
+        try:
+            sink.record(tenant_id, task_id, actor, action, event["decision"])
+        except Exception:
+            logging.getLogger("rusa-ai.task-policy").error(
+                "Task policy audit persistence failed"
+            )
+            if required:
+                raise RuntimeError("Task policy audit store is unavailable") from None
+    elif required:
+        raise RuntimeError("Task policy audit store is not configured")
+    logging.getLogger("rusa-ai.task-policy").info(
+        "%s", json.dumps(event, separators=(",", ":"), sort_keys=True)
+    )
+
+
+class PostgresTaskPolicyAudit:
+    """Append-only PostgreSQL task authorization event store protected by RLS."""
+
+    def __init__(self, dsn: str):
+        if not dsn:
+            raise ValueError("PostgreSQL audit DSN is required")
+        self.dsn = dsn
+
+    def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Install psycopg to use the task policy audit store") from exc
+        return psycopg.connect(self.dsn, connect_timeout=5)
+
+    def verify_ready(self, runtime_role: str) -> None:
+        if runtime_role not in {"rusa_api_runtime", "rusa_worker_runtime"}:
+            raise ValueError("Unexpected task policy audit runtime role")
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT current_user,
+                       role.rolsuper,
+                       role.rolbypassrls,
+                       pg_has_role(current_user, %s, 'member'),
+                       table_info.relrowsecurity,
+                       table_info.relforcerowsecurity,
+                       pg_get_userbyid(table_info.relowner),
+                       row_security_active('public.aicode_task_policy_events'),
+                       has_table_privilege(current_user, 'public.aicode_task_policy_events', 'INSERT'),
+                       has_table_privilege(current_user, 'public.aicode_task_policy_events', 'UPDATE'),
+                       has_table_privilege(current_user, 'public.aicode_task_policy_events', 'DELETE'),
+                       EXISTS (
+                           SELECT 1 FROM pg_trigger
+                           WHERE tgrelid='public.aicode_task_policy_events'::regclass
+                             AND NOT tgisinternal
+                             AND tgname='trg_aicode_task_policy_events_immutable'
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM pg_trigger
+                           WHERE tgrelid='public.aicode_task_policy_events'::regclass
+                             AND NOT tgisinternal
+                             AND tgname='trg_aicode_task_policy_events_no_truncate'
+                       )
+                FROM pg_roles AS role
+                CROSS JOIN pg_class AS table_info
+                JOIN pg_namespace AS namespace ON namespace.oid=table_info.relnamespace
+                WHERE role.rolname=current_user
+                  AND namespace.nspname='public'
+                  AND table_info.relname='aicode_task_policy_events'
+                  AND table_info.relkind='r'
+                """,
+                (runtime_role,),
+            ).fetchone()
+        if (
+            not row
+            or row[1]
+            or row[2]
+            or not row[3]
+            or not row[4]
+            or not row[5]
+            or row[6] == row[0]
+            or not row[7]
+            or not row[8]
+            or row[9]
+            or row[10]
+            or not row[11]
+            or not row[12]
+        ):
+            raise RuntimeError(
+                "Task policy audit table, RLS, append-only triggers, or runtime privileges are not ready"
+            )
+
+    def ping(self) -> bool:
+        with self._connect() as conn:
+            return conn.execute("SELECT 1").fetchone() == (1,)
+
+    def record(
+        self,
+        tenant_id: str | None,
+        task_id: str | None,
+        actor: str,
+        action: str,
+        decision: str,
+    ) -> None:
+        if decision not in {"allow", "deny"}:
+            raise ValueError("Task policy decision must be allow or deny")
+        if not isinstance(actor, str) or not actor.strip() or len(actor) > 128:
+            raise ValueError("Task policy actor is invalid")
+        if not isinstance(action, str) or not action.strip() or len(action) > 64:
+            raise ValueError("Task policy action is invalid")
+        with self._connect() as conn:
+            conn.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id or "",),
+            )
+            conn.execute(
+                """
+                INSERT INTO public.aicode_task_policy_events
+                    (tenant_id, task_id, actor, action, decision)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (tenant_id, task_id, actor, action, decision),
+            )
 
 
 class AuditLog:
