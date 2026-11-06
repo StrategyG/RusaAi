@@ -2,6 +2,8 @@ import os
 import sys
 import uuid
 
+import jsonschema
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(
@@ -77,6 +79,19 @@ def test_validate_task_rejects_invalid_uuid():
     assert response.json()["valid"] is False
 
 
-def test_schema_validator_is_loaded_and_has_format_checker():
-    assert isinstance(load_task_validator(), type(load_task_validator()))
-    assert load_task_validator().FORMAT_CHECKER is not None
+def test_schema_validator_uses_draft_2020_12_and_format_checker():
+    validator = load_task_validator()
+    assert isinstance(validator, jsonschema.Draft202012Validator)
+    assert validator.FORMAT_CHECKER is not None
+
+
+def test_missing_schema_fails_closed(tmp_path):
+    with pytest.raises(RuntimeError, match="schema is missing or invalid"):
+        load_task_validator(tmp_path / "missing.json")
+
+
+def test_invalid_schema_fails_closed(tmp_path):
+    schema_path = tmp_path / "invalid.json"
+    schema_path.write_text('{"type": "not-a-json-schema-type"}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="schema is missing or invalid"):
+        load_task_validator(schema_path)
