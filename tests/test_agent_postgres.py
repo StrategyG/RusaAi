@@ -683,7 +683,7 @@ def test_postgres_failed_task_requeue_cannot_bypass_tenant_capacity():
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
                     CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
                 END IF;
-            END
+            END;
             $rusa$
         """)
         connection.execute(
