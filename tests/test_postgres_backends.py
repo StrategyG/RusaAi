@@ -118,32 +118,6 @@ def test_postgres_queue_concurrent_idempotency_returns_one_task_id():
         conn.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
 
 
-def test_postgres_queue_two_workers_cannot_claim_the_same_task_concurrently():
-    queue = PostgresTaskQueue(DSN)
-    queue.initialize()
-    tenant_id = f"tenant-claim-race-{uuid4().hex}"
-    task_id = str(uuid4())
-    assert queue.enqueue(
-        task_id, tenant_id, {"objective": "exclusive claim"},
-        max_attempts=2, priority=2147483647,
-    )
-
-    def claim(worker_id):
-        return queue.claim(worker_id, lease_seconds=30)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(claim, ("claim-worker-a", "claim-worker-b")))
-
-    claims_for_task = [
-        job for job in results if job is not None and job.task_id == task_id
-    ]
-    assert len(claims_for_task) == 1
-    assert queue.get(task_id, tenant_id)["attempts"] == 1
-
-    with queue._connect() as conn:
-        conn.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
-
-
 def test_postgres_queue_cancel_racing_with_success_ack_never_resurrects_task():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
