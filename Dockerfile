@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.12.16-slim-trixie AS builder
 
 WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
@@ -12,7 +12,7 @@ COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
 RUN python -m pip install --prefix=/install --no-deps .
 
-FROM python:3.12-slim AS runner
+FROM python:3.12.16-slim-trixie AS runner
 
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
