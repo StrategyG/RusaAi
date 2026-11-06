@@ -46,3 +46,8 @@ def test_rejects_non_json_metadata():
 def test_rejects_metadata_over_utf8_byte_limit():
     with pytest.raises(ValueError, match="16 KiB"):
         validate_document_metadata("file:///guide.txt", "Guide", {"text": "é" * 9000})
+
+
+def test_rejects_provider_api_credentials():
+    with pytest.raises(ValueError, match="provider API credential"):
+        reject_credential_material("embedding_api_key=sk-proj-" + ("x" * 36))
