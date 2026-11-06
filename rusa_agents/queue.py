@@ -1,6 +1,7 @@
 """PostgreSQL durable queue with tenant-scoped idempotency, RLS, and worker leases."""
 
 import json
+import secrets
 from typing import Any
 
 from .contracts import CodingTask, TaskRecord, TaskState
@@ -25,12 +26,13 @@ class PostgresTaskQueue:
                     tenant_id TEXT NOT NULL, task_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'queued', payload JSONB NOT NULL, result JSONB,
                     attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 4,
-                    available_at TIMESTAMPTZ NOT NULL DEFAULT now(), lease_until TIMESTAMPTZ,
+                    available_at TIMESTAMPTZ NOT NULL DEFAULT now(), lease_until TIMESTAMPTZ, lease_token TEXT,
                     last_error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (tenant_id, task_id), UNIQUE (tenant_id, idempotency_key)
                 )
             """)
+            connection.execute("ALTER TABLE rusa_agent_tasks ADD COLUMN IF NOT EXISTS lease_token TEXT")
             connection.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rusa_agent_queue
                 ON rusa_agent_tasks(status, available_at, created_at)
@@ -72,11 +74,12 @@ class PostgresTaskQueue:
     def claim(self, lease_seconds: int = 300) -> dict[str, Any] | None:
         if not 10 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be between 10 and 3600")
+        lease_token = secrets.token_urlsafe(32)
         with self._psycopg.connect(self.dsn) as connection:
             connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status='failed', last_error='worker lease expired after maximum attempts',
-                    lease_until=NULL, updated_at=now()
+                    lease_until=NULL, lease_token=NULL, updated_at=now()
                 WHERE status='running' AND lease_until < now() AND attempts >= max_attempts
             """)
             row = connection.execute("""
@@ -94,21 +97,39 @@ class PostgresTaskQueue:
                 )
                 UPDATE rusa_agent_tasks AS task
                 SET status='running', attempts=task.attempts + 1,
-                    lease_until=now() + (%s * interval '1 second'), updated_at=now()
+                    lease_until=now() + (%s * interval '1 second'),
+                    lease_token=%s, updated_at=now()
                 FROM candidate
                 WHERE task.tenant_id=candidate.tenant_id AND task.task_id=candidate.task_id
-                RETURNING task.tenant_id, task.task_id, task.payload, task.result, task.attempts
-            """, (lease_seconds,)).fetchone()
+                RETURNING task.tenant_id, task.task_id, task.payload, task.result,
+                          task.attempts, task.lease_token
+            """, (lease_seconds, lease_token)).fetchone()
         if row is None:
             return None
         payload = json.loads(row[2]) if isinstance(row[2], str) else row[2]
         result = json.loads(row[3]) if isinstance(row[3], str) else row[3]
         return {
             "tenant_id": row[0], "task_id": row[1], "payload": payload,
-            "result": result, "attempts": row[4],
+            "result": result, "attempts": row[4], "lease_token": row[5],
         }
 
-    def acknowledge(self, tenant_id: str, task_id: str, record: TaskRecord) -> None:
+    def renew_lease(
+        self, tenant_id: str, task_id: str, lease_token: str, lease_seconds: int = 300,
+    ) -> bool:
+        if not 10 <= lease_seconds <= 3600 or not lease_token:
+            raise ValueError("a valid lease token and lease duration are required")
+        with self._psycopg.connect(self.dsn) as connection:
+            cursor = connection.execute("""
+                UPDATE rusa_agent_tasks
+                SET lease_until=now() + (%s * interval '1 second'), updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s AND status='running'
+                  AND lease_token=%s AND lease_until > now()
+            """, (lease_seconds, tenant_id, task_id, lease_token))
+        return cursor.rowcount == 1
+
+    def acknowledge(
+        self, tenant_id: str, task_id: str, record: TaskRecord, lease_token: str,
+    ) -> None:
         queue_status = (
             "waiting_external" if record.state == TaskState.WAITING_EXTERNAL else record.state.value
         )
@@ -116,23 +137,30 @@ class PostgresTaskQueue:
         with self._psycopg.connect(self.dsn) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
-                SET status=%s, result=%s::jsonb, lease_until=NULL,
+                SET status=%s, result=%s::jsonb, lease_until=NULL, lease_token=NULL,
                     available_at=now() + (%s * interval '1 second'),
                     updated_at=now(), last_error=NULL
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
-            """, (queue_status, json.dumps(record.to_dict()), delay, tenant_id, task_id))
+                  AND lease_token=%s AND lease_until > now()
+            """, (queue_status, json.dumps(record.to_dict()), delay, tenant_id, task_id, lease_token))
             if cursor.rowcount != 1:
                 raise RuntimeError("task lease was lost before acknowledgement")
 
-    def retry(self, tenant_id: str, task_id: str, error: str, *, delay_seconds: int = 10) -> None:
+    def retry(
+        self, tenant_id: str, task_id: str, error: str, lease_token: str, *,
+        delay_seconds: int = 10,
+    ) -> None:
         with self._psycopg.connect(self.dsn) as connection:
-            connection.execute("""
+            cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry' END,
                     available_at=now() + (%s * interval '1 second'),
-                    lease_until=NULL, last_error=%s, updated_at=now()
+                    lease_until=NULL, lease_token=NULL, last_error=%s, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
-            """, (max(1, delay_seconds), error[:2000], tenant_id, task_id))
+                  AND lease_token=%s AND lease_until > now()
+            """, (max(1, delay_seconds), error[:2000], tenant_id, task_id, lease_token))
+            if cursor.rowcount != 1:
+                raise RuntimeError("task lease was lost before retry")
 
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._psycopg.connect(self.dsn) as connection:

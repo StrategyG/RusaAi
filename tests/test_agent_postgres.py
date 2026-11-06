@@ -43,7 +43,7 @@ def test_postgres_queue_idempotency_claim_and_checkpoint():
     assert claimed["task_id"] == first_id
     record = TaskRecord(task=task)
     record.transition(TaskState.OBSERVING)
-    queue.acknowledge(task.tenant_id, first_id, record)
+    queue.acknowledge(task.tenant_id, first_id, record, claimed["lease_token"])
     fetched = queue.get(task.tenant_id, first_id)
     assert fetched is not None
     assert fetched["status"] == "observing"
@@ -123,4 +123,49 @@ def test_postgres_row_level_security_filters_and_rejects_other_tenants():
                 VALUES (%s, %s, %s, '{}'::jsonb)
                 """,
                 ("tenant-rls-b", f"forbidden-{marker}", f"forbidden-{marker}"),
+            )
+
+
+
+def test_postgres_queue_fences_expired_lease_owners():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    marker = uuid4().hex
+    task = make_task("tenant-lease-test", f"lease-{marker}")
+    task_id = queue.enqueue(task)
+    try:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "UPDATE rusa_agent_tasks SET created_at=now()-interval '100 years' "
+                "WHERE tenant_id=%s AND task_id=%s",
+                (task.tenant_id, task_id),
+            )
+        first = queue.claim(lease_seconds=10)
+        assert first is not None and first["task_id"] == task_id
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "UPDATE rusa_agent_tasks SET lease_until=now()-interval '1 second' "
+                "WHERE tenant_id=%s AND task_id=%s",
+                (task.tenant_id, task_id),
+            )
+        second = queue.claim(lease_seconds=10)
+        assert second is not None and second["task_id"] == task_id
+        assert second["lease_token"] != first["lease_token"]
+
+        record = TaskRecord(task=task)
+        record.transition(TaskState.OBSERVING)
+        with pytest.raises(RuntimeError, match="lease was lost"):
+            queue.acknowledge(task.tenant_id, task_id, record, first["lease_token"])
+        assert not queue.renew_lease(
+            task.tenant_id, task_id, first["lease_token"], lease_seconds=10,
+        )
+        assert queue.renew_lease(
+            task.tenant_id, task_id, second["lease_token"], lease_seconds=10,
+        )
+        queue.acknowledge(task.tenant_id, task_id, record, second["lease_token"])
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s AND task_id=%s",
+                (task.tenant_id, task_id),
             )

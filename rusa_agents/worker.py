@@ -26,32 +26,100 @@ class QueueWorker:
         memory: PostgresMemoryStore,
         poll_interval_seconds: float = 1.0,
         maintenance_interval_seconds: float = 3600.0,
+        lease_seconds: int = 300,
+        heartbeat_interval_seconds: float = 60.0,
     ) -> None:
-        if poll_interval_seconds <= 0 or maintenance_interval_seconds <= 0:
-            raise ValueError("worker intervals must be positive")
+        if (
+            poll_interval_seconds <= 0 or maintenance_interval_seconds <= 0
+            or not 10 <= lease_seconds <= 3600
+            or not 0 < heartbeat_interval_seconds < lease_seconds
+        ):
+            raise ValueError("worker intervals or lease settings are invalid")
         self.queue = queue
         self.orchestrator = orchestrator
         self.memory = memory
         self.poll_interval_seconds = poll_interval_seconds
         self.maintenance_interval_seconds = maintenance_interval_seconds
+        self.lease_seconds = lease_seconds
+        self.heartbeat_interval_seconds = heartbeat_interval_seconds
+
+    async def _run_with_lease(self, task, checkpoint, tenant_id, task_id, lease_token):
+        stop_event = asyncio.Event()
+
+        async def maintain_lease():
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=self.heartbeat_interval_seconds,
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    renewed = await asyncio.to_thread(
+                        self.queue.renew_lease,
+                        tenant_id,
+                        task_id,
+                        lease_token,
+                        self.lease_seconds,
+                    )
+                    if not renewed:
+                        raise RuntimeError("worker lease was lost; execution must stop")
+
+        process = asyncio.create_task(self.orchestrator.run(task, checkpoint))
+        heartbeat = asyncio.create_task(maintain_lease())
+        try:
+            done, _ = await asyncio.wait(
+                {process, heartbeat}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat in done:
+                error = heartbeat.exception()
+                if error is not None:
+                    process.cancel()
+                    await asyncio.gather(process, return_exceptions=True)
+                    raise RuntimeError("worker lease was lost; task execution was cancelled") from error
+            return await process
+        finally:
+            stop_event.set()
+            if not heartbeat.done():
+                await heartbeat
 
     async def run_once(self) -> bool:
-        item = self.queue.claim()
+        item = await asyncio.to_thread(self.queue.claim, self.lease_seconds)
         if item is None:
             return False
         tenant_id = item["tenant_id"]
         task_id = item["task_id"]
+        lease_token = item["lease_token"]
+        task = None
         try:
             from .contracts import CodingTask, TaskRecord
 
             task = CodingTask.from_dict(item["payload"])
+            if task.tenant_id != tenant_id or task.task_id != task_id:
+                raise ValueError("queued task identity does not match its tenant-scoped row")
             checkpoint = TaskRecord.from_dict(item["result"]) if item.get("result") else None
-            record = await self.orchestrator.run(task, checkpoint)
+            record = await self._run_with_lease(
+                task, checkpoint, tenant_id, task_id, lease_token,
+            )
             if record.state == TaskState.FAILED:
-                self.queue.retry(tenant_id, task_id, "; ".join(record.errors))
+                await asyncio.to_thread(
+                    self.queue.retry, tenant_id, task_id, "; ".join(record.errors), lease_token,
+                )
             else:
-                self.queue.acknowledge(tenant_id, task_id, record)
-            if record.state == TaskState.SUCCEEDED:
+                await asyncio.to_thread(
+                    self.queue.acknowledge, tenant_id, task_id, record, lease_token,
+                )
+        except Exception:
+            logger.exception("agent task processing failed task_id=%s", task_id)
+            try:
+                await asyncio.to_thread(
+                    self.queue.retry, tenant_id, task_id, "worker processing failed", lease_token,
+                )
+            except Exception:
+                logger.exception("task could not be rescheduled because its lease is no longer owned")
+            return True
+
+        if record.state == TaskState.SUCCEEDED:
+            try:
                 summary = "\n".join(
                     f"{result.role.value}: {result.summary}"
                     for result in record.worker_results
@@ -62,9 +130,8 @@ class QueueWorker:
                     source=f"task:{task_id}",
                     metadata={"task_id": task_id, "repository": task.repository.full_name},
                 )
-        except Exception:
-            logger.exception("agent task processing failed task_id=%s", task_id)
-            self.queue.retry(tenant_id, task_id, "worker processing failed")
+            except Exception:
+                logger.exception("task succeeded but episodic memory persistence failed task_id=%s", task_id)
         return True
 
     async def run_forever(self, stop_event: asyncio.Event) -> None:
@@ -139,6 +206,8 @@ def build_worker() -> QueueWorker:
         orchestrator=orchestrator,
         memory=memory,
         poll_interval_seconds=float(os.getenv("RUSA_AGENT_POLL_INTERVAL", "1")),
+        lease_seconds=int(os.getenv("RUSA_AGENT_QUEUE_LEASE_SECONDS", "300")),
+        heartbeat_interval_seconds=float(os.getenv("RUSA_AGENT_QUEUE_HEARTBEAT_SECONDS", "60")),
     )
 
 
