@@ -73,3 +73,21 @@ def test_production_config_rejects_invalid_sandbox_digest(monkeypatch):
 
     with pytest.raises(RuntimeError, match="sha256"):
         RuntimeConfig.from_env().validate()
+
+
+def test_aicode_kill_switch_defaults_to_disabled_in_production(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("RUSA_AICODE_ENABLED", raising=False)
+    assert RuntimeConfig.from_env().aicode_enabled is False
+
+
+def test_aicode_kill_switch_defaults_to_enabled_in_development(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_AICODE_ENABLED", raising=False)
+    assert RuntimeConfig.from_env().aicode_enabled is True
+
+
+def test_aicode_kill_switch_rejects_ambiguous_values(monkeypatch):
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "sometimes")
+    with pytest.raises(ValueError, match="RUSA_AICODE_ENABLED"):
+        RuntimeConfig.from_env()
