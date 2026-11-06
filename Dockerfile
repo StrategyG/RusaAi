@@ -7,8 +7,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /build
 COPY requirements.txt requirements-vllm.txt .
 ARG RUSA_INSTALL_VLLM=0
-RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt \
-    && if [ "$RUSA_INSTALL_VLLM" = "1" ]; then python -m pip install --no-cache-dir --prefix=/install -r requirements-vllm.txt; fi
+RUN if [ "$RUSA_INSTALL_VLLM" = "1" ]; then \
+      python -m pip install --no-cache-dir --prefix=/install -r requirements-vllm.txt; \
+    else \
+      python -m pip install --no-cache-dir --prefix=/install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple "torch==2.13.0" \
+      && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt; \
+    fi
 
 FROM python:3.11-slim AS runtime
 
