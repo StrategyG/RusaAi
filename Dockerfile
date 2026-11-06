@@ -18,15 +18,16 @@ RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# The base Python image may ship vulnerable packaging tools even when the app
-# requirements do not depend on them. Keep the runtime toolchain above known fixes.
+COPY --from=builder /install /usr/local
+COPY . .
+
+# Upgrade after copying app dependencies so older build-tool versions cannot
+# overwrite patched packages in the final runtime image.
 RUN python -m pip install --no-cache-dir --upgrade \
-      pip setuptools "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+      pip "setuptools>=78.1.1" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
     && python -m pip check
 
 RUN useradd -m -u 10001 appuser
-COPY --from=builder /install /usr/local
-COPY . .
 USER appuser
 
 EXPOSE 8000
