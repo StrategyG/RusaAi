@@ -205,8 +205,8 @@ class AICodeRuntime:
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
-            if not 60 <= task_timeout <= 86400:
-                raise ValueError("RUSA_TASK_TIMEOUT_SECONDS must be between 60 and 86400")
+            if not 60 <= task_timeout <= 3600:
+                raise ValueError("RUSA_TASK_TIMEOUT_SECONDS must be between 60 and 3600")
             record = await self._await_with_lease(
                 asyncio.wait_for(orchestrator.run(task), timeout=task_timeout),
                 lost_lease,
