@@ -12,6 +12,7 @@ export function ChatPage() {
   const [copied, setCopied] = useState("");
   const [modelName, setModelName] = useState("rusa-ai-v1");
   const [modelReady, setModelReady] = useState<boolean | null>(null);
+  const [modelStatusError, setModelStatusError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -20,9 +21,15 @@ export function ChatPage() {
         if (active) {
           if (overview.model?.name) setModelName(overview.model.name);
           setModelReady(Boolean(overview.model?.loaded));
+          setModelStatusError("");
         }
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        if (active) {
+          setModelReady(false);
+          setModelStatusError(err instanceof Error ? err.message : "Unable to verify model readiness");
+        }
+      });
     return () => {
       active = false;
     };
@@ -31,7 +38,7 @@ export function ChatPage() {
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
     const content = prompt.trim();
-    if (!content || busy || modelReady === false) return;
+    if (!content || busy || modelReady !== true) return;
     const nextMessages = [...messages, { role: "user" as const, content, id: crypto.randomUUID() }];
     setMessages(nextMessages);
     setPrompt("");
@@ -75,14 +82,14 @@ export function ChatPage() {
     <div className="chat-layout">
       <div className="page-heading chat-heading"><div><div className="eyebrow muted">AI WORKSPACE</div><h1>Ask RUSA-AI</h1><p>Work through questions, ideas, and complex tasks with your AI assistant.</p></div><span className="model-tag"><span className={"status-dot" + (modelReady === false ? " offline" : modelReady === null ? " checking" : "")} /> {modelName} · {modelReady === true ? "Online" : modelReady === false ? "Offline" : "Checking"}</span></div>
       <section className="chat-panel">
-        {modelReady === false && <div className="notice-card warning chat-model-warning"><AlertCircle size={18} /><div><strong>Inference model is unavailable</strong><p>The API is reachable, but the configured model is not loaded. Chat is paused until the administrator restores model readiness.</p></div></div>}
+        {modelReady !== true && <div className="notice-card warning chat-model-warning"><AlertCircle size={18} /><div><strong>{modelReady === null ? "Checking inference availability" : "Inference model is unavailable"}</strong><p>{modelStatusError || (modelReady === null ? "Checking the API and model status. Chat will be enabled when the model is ready." : "The API is reachable, but the configured model is not loaded. Chat is paused until the administrator restores model readiness.")}</p></div></div>}
         <div className="chat-messages">
           {!messages.length && <div className="chat-welcome"><div className="welcome-orb"><Sparkles size={27} /></div><h2>What would you like to work on?</h2><p>Start with a question, paste context, or ask RUSA-AI to help you think through a problem.</p><div className="prompt-suggestions"><button onClick={() => setPrompt("Help me break down a complex project into clear milestones.")}>Plan a project <ArrowUp size={14} /></button><button onClick={() => setPrompt("Review this idea and identify its risks and opportunities.")}>Review an idea <ArrowUp size={14} /></button><button onClick={() => setPrompt("Explain this technical concept in simple terms.")}>Explain a concept <ArrowUp size={14} /></button></div></div>}
           {messages.map((message) => <div className={"message-row " + message.role} key={message.id}><div className="message-avatar">{message.role === "assistant" ? <Bot size={17} /> : <UserRound size={17} />}</div><div className="message-content"><div className="message-label">{message.role === "assistant" ? "RUSA-AI" : "You"}</div><div className="message-bubble">{message.content}</div>{message.role === "assistant" && <button className="copy-button" onClick={() => void copyMessage(message)}>{copied === message.id ? <Check size={13} /> : <Copy size={13} />}{copied === message.id ? "Copied" : "Copy"}</button>}</div></div>)}
           {busy && <div className="message-row assistant"><div className="message-avatar"><Bot size={17} /></div><div className="message-content"><div className="message-label">RUSA-AI</div><div className="typing-indicator"><i /><i /><i /></div></div></div>}
         </div>
         {error && <div className="chat-error">{error}</div>}
-        <form className="composer" onSubmit={(event) => void sendMessage(event)}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onKeyDown} placeholder={modelReady === false ? "Chat is unavailable until the model is online…" : "Message RUSA-AI…"} rows={2} maxLength={32768} disabled={busy || modelReady === false} /><div className="composer-footer"><span>Enter to send · Shift + Enter for a new line</span><button className="send-button" disabled={!prompt.trim() || busy || modelReady === false} aria-label="Send message"><ArrowUp size={19} /></button></div></form>
+        <form className="composer" onSubmit={(event) => void sendMessage(event)}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={onKeyDown} placeholder={modelReady === true ? "Message RUSA-AI…" : modelReady === null ? "Checking model availability…" : "Chat is unavailable until the model is online…"} rows={2} maxLength={32768} disabled={busy || modelReady !== true} /><div className="composer-footer"><span>Enter to send · Shift + Enter for a new line</span><button className="send-button" disabled={!prompt.trim() || busy || modelReady !== true} aria-label="Send message"><ArrowUp size={19} /></button></div></form>
       </section>
       <div className="chat-disclaimer"><MessageSquareText size={14} /> Responses are generated by the configured RUSA-AI inference model. Verify important information.</div>
     </div>

@@ -35,6 +35,8 @@ export function AdminTasksPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function action(task: Task, operation: "retry" | "cancel") {
+    const actionLabel = operation === "retry" ? "retry" : "cancel";
+    if (!window.confirm("Are you sure you want to " + actionLabel + " this task?")) return;
     try {
       await api("/v1/admin/tasks/" + task.task_id + "/" + operation, { method: "POST" });
       await load();
