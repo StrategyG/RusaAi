@@ -1,6 +1,4 @@
 import subprocess
-from pathlib import Path
-
 import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
@@ -68,16 +66,29 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path):
     assert workspace.is_dir()
     assert git("branch", "--show-current", cwd=workspace).stdout.strip() == task.repository.work_branch
 
-    other_tenant = manager.create(task, "tenant-b")
+    other_task = CodingTask(
+        objective="test second tenant worktree",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi", "main", "feature/aicode/test-task-2"
+        ),
+        acceptance_criteria=["worktree is tenant-isolated"],
+    )
+    other_tenant = manager.create(other_task, "tenant-b")
     assert other_tenant != workspace
     assert other_tenant.is_dir()
 
     manager.cleanup(task, "tenant-a")
     assert not workspace.exists()
-    assert git(
-        "--git-dir", str(mirror), "show-ref", "--verify",
-        "refs/heads/feature/aicode/test-task-1",
-    ).returncode == 0
+    branch_check = subprocess.run(
+        [
+            "git", "--git-dir", str(mirror), "show-ref", "--verify",
+            "refs/heads/feature/aicode/test-task-1",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert branch_check.returncode != 0
 
 
 def test_workspace_manager_rejects_unsafe_branch_before_checkout(tmp_path):
