@@ -604,7 +604,7 @@ def test_worker_can_list_repository_root_without_file_path():
     result = asyncio.run(orchestrator._run_worker(record, WorkerRole.ANALYST))
     assert result.blockers == ()
     assert [item.name for item in result.tool_results] == ["list_files"]
-    assert tools.calls[0].name == "list_files"
+    assert tools.calls[0][0] == "list_files"
 
 
 

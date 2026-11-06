@@ -151,6 +151,42 @@ jobs:
           upload-artifact: true
           upload-release-assets: false
 
+      - name: Smoke-test production Compose stack
+        env:
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_API_IMAGE: rusa-ai:${{ github.sha }}
+          RUSA_AGENT_IMAGE: rusa-agent-runtime:${{ github.sha }}
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+
+          docker compose up --detach --no-build --wait --wait-timeout 180
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_PORT:-8000}/health/live >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/live >/dev/null
+
+          auth_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"health probe"}]}' \
+            http://127.0.0.1:${RUSA_PORT:-8000}/v1/chat/completions)"
+          test "$auth_status" = "401"
+
   release-gate:
     name: Release Gate
     if: always()
