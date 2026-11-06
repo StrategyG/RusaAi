@@ -125,7 +125,7 @@ class StrictModel(BaseModel):
 
 class ChatMessage(StrictModel):
     role: Literal["system", "developer", "user", "assistant", "tool"]
-    content: str = Field(min_length=1, max_length=200_000)
+    content: str = Field(max_length=200_000)
 
 
 class StreamOptions(StrictModel):
@@ -300,8 +300,8 @@ def make_completion(
         choices=[
             ChatChoice(
                 index=0,
-                message=ChatMessage(role="assistant", content=result["text"] or " "),
-                finish_reason="length" if completion_tokens >= MAX_TOKENS else "stop",
+                message=ChatMessage(role="assistant", content=result["text"]),
+                finish_reason="length" if completion_tokens >= max_tokens else "stop",
             )
         ],
         usage=Usage(
@@ -428,7 +428,7 @@ async def chat_completions(
             payload.top_p,
             payload.max_tokens,
         )
-        return make_completion(result, runtime.model_name, request_id)
+        return make_completion(result, runtime.model_name, request_id, payload.max_tokens)
     except InferenceNotReady as exc:
         raise HTTPException(status_code=503, detail="Inference model is not ready") from exc
     except Exception as exc:
