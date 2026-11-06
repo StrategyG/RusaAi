@@ -61,7 +61,7 @@ The inference API reports not-ready and returns HTTP 503 until a real local mode
 | POST | /v1/agent/tasks | Submit an idempotent coding task |
 | GET | /v1/agent/tasks/{task_id} | Read task status and checkpoint summary within the tenant |
 | POST | /v1/agent/tasks/{task_id}/retry | Explicitly requeue a failed task |
-| DELETE | /v1/agent/tasks/{task_id} | Cancel a queued, waiting, or running task and revoke its worker lease |
+| DELETE | /v1/agent/tasks/{task_id} | Cancel a queued, waiting, running, or approval-pending task and revoke its worker lease |
 
 Cancellation clears the active lease token. The worker rechecks lease ownership immediately before each repository tool action and fails closed if the check is false or unavailable. Cancellation is cooperative: an external API request already in flight may finish, but no subsequent tool action or successful acknowledgement is permitted. Only failed tasks can be explicitly retried; policy-blocked tasks require a revised task or human review.
 
