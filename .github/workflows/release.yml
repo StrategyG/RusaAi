@@ -193,7 +193,26 @@ jobs:
           trap cleanup EXIT
 
           docker compose --project-name "$project" --file docker-compose.production.yml config --quiet
-          docker compose --project-name "$project" --file docker-compose.production.yml up --detach --no-build --wait --wait-timeout 180
+          docker compose --project-name "$project" --file docker-compose.production.yml up --detach --no-build
+
+          migration_id=""
+          migration_exit_code=""
+          for attempt in {1..180}; do
+            migration_id="$(docker compose --project-name "$project" --file docker-compose.production.yml ps --all --quiet rusa-agent-migrate)"
+            if [[ -n "$migration_id" ]]; then
+              migration_status="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+              if [[ "$migration_status" == "exited" ]]; then
+                migration_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")"
+                break
+              fi
+            fi
+            sleep 1
+          done
+          if [[ "$migration_exit_code" != "0" ]]; then
+            docker compose --project-name "$project" --file docker-compose.production.yml logs --tail 100 rusa-agent-migrate || true
+            echo "Published PostgreSQL schema migration did not complete successfully." >&2
+            exit 1
+          fi
           curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
             "http://127.0.0.1:$RUSA_PORT/health/live" >/dev/null
           curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
