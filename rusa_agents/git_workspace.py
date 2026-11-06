@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 
 from .contracts import CodingTask
 
-
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk"}
@@ -353,6 +352,7 @@ class GitHubPublisher:
     ) -> tuple[bool, str]:
         """Wait for the required PR CI jobs; missing or failed evidence never passes."""
         import asyncio
+
         import httpx
 
         required = {"Test, lint, and security", "Build production image"}
