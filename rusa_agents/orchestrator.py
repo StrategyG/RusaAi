@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any, Awaitable, Callable, Protocol
 
 from .contracts import (
-    CodingTask, RiskLevel, TaskRecord, TaskState, ToolResult, WorkerResult, WorkerRole,
+    CodingTask, RiskLevel, TaskRecord, TaskState, ToolCall, ToolResult, WorkerResult, WorkerRole,
 )
 from .policy import AutonomyPolicy
 from .workers import AgentWorker
