@@ -1,6 +1,6 @@
 import pytest
 
-from rusa_knowledge.safety import reject_credential_material
+from rusa_knowledge.safety import reject_credential_material, validate_document_metadata
 
 
 def test_rejects_private_key_material_without_echoing_secret():
@@ -19,3 +19,25 @@ def test_rejects_github_and_aws_credentials():
 
 def test_allows_non_secret_technical_documentation():
     reject_credential_material("Use an API key stored in the deployment secret manager.")
+
+
+def test_rejects_credentials_in_document_metadata():
+    token = "ghp_" + ("b" * 36)
+    with pytest.raises(ValueError, match="GitHub credential"):
+        validate_document_metadata("file:///guide.txt", "Guide", {"owner_token": token})
+
+
+def test_rejects_credentials_embedded_in_source_uri():
+    with pytest.raises(ValueError, match="embedded credentials"):
+        validate_document_metadata("https://user:password@example.com/private", "Guide", {})
+
+
+def test_rejects_credentials_in_document_title():
+    token = "ghp_" + ("c" * 36)
+    with pytest.raises(ValueError, match="GitHub credential"):
+        validate_document_metadata("file:///guide.txt", token, {})
+
+
+def test_rejects_non_json_metadata():
+    with pytest.raises(ValueError, match="JSON-serializable"):
+        validate_document_metadata("file:///guide.txt", "Guide", {"bad": object()})
