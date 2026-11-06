@@ -18,6 +18,7 @@ class RuntimeConfig:
     github_token: str | None
     model_base_url: str | None
     model_name: str
+    tenant_repositories: dict[str, list[str]]
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -27,6 +28,16 @@ class RuntimeConfig:
             raise ValueError("RUSA_API_KEYS must be a JSON object mapping API keys to tenant IDs") from exc
         if not isinstance(keys, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in keys.items()):
             raise ValueError("RUSA_API_KEYS must map string API keys to string tenant IDs")
+        try:
+            tenant_repositories = json.loads(os.getenv("RUSA_TENANT_REPOSITORIES", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("RUSA_TENANT_REPOSITORIES must be a JSON object") from exc
+        if not isinstance(tenant_repositories, dict) or any(
+            not isinstance(tenant, str) or not isinstance(repos, list)
+            or any(not isinstance(repo, str) for repo in repos)
+            for tenant, repos in tenant_repositories.items()
+        ):
+            raise ValueError("RUSA_TENANT_REPOSITORIES must map tenant IDs to repository-name arrays")
         legacy = os.getenv("RUSA_API_KEY")
         if legacy:
             keys.setdefault(legacy, os.getenv("RUSA_DEFAULT_TENANT", "default"))
@@ -41,6 +52,7 @@ class RuntimeConfig:
             github_token=os.getenv("RUSA_GITHUB_TOKEN"),
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
+            tenant_repositories=tenant_repositories,
         )
 
     def validate(self) -> None:
@@ -54,6 +66,7 @@ class RuntimeConfig:
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
             "RUSA_GITHUB_TOKEN": self.github_token,
             "RUSA_MODEL_BASE_URL": self.model_base_url,
+            "RUSA_TENANT_REPOSITORIES": self.tenant_repositories,
         }
         missing = [name for name, value in required.items() if not value]
         if not self.sandbox_image or "@sha256:" not in self.sandbox_image:
