@@ -3,19 +3,32 @@ import json
 from fastapi.testclient import TestClient
 
 from rusa_agents import api
+from rusa_agents.queue import IdempotencyConflictError
 
 
 class FakeQueue:
     def __init__(self, dsn):
         self.tasks = {}
         self.idempotency = {}
+        self.idempotency_payloads = {}
 
     def check_ready(self):
         return True
 
     def enqueue(self, task):
         key = (task.tenant_id, task.idempotency_key or task.task_id)
+        payload = task.to_dict()
         if key in self.idempotency:
+            existing = dict(self.idempotency_payloads[key])
+            existing.pop("task_id", None)
+            existing.pop("created_at", None)
+            candidate = dict(payload)
+            candidate.pop("task_id", None)
+            candidate.pop("created_at", None)
+            if existing != candidate:
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
             return self.idempotency[key]
         self.tasks[task.task_id] = {
             "tenant_id": task.tenant_id,
@@ -25,6 +38,7 @@ class FakeQueue:
             "last_error": None,
         }
         self.idempotency[key] = task.task_id
+        self.idempotency_payloads[key] = payload
         return task.task_id
 
     def get(self, tenant_id, task_id):
@@ -135,6 +149,28 @@ def test_agent_api_idempotency_reuses_task_id(monkeypatch):
     assert first.status_code == 202
     assert second.status_code == 202
     assert first.json()["task_id"] == second.json()["task_id"]
+    assert first.json()["work_branch"] == second.json()["work_branch"]
+
+
+def test_agent_api_rejects_idempotency_key_reuse_with_changed_payload(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {
+        "X-API-Key": "a" * 48,
+        "X-Tenant-ID": "tenant-a",
+        "Idempotency-Key": "same-request-key",
+    }
+    body = {
+        "objective": "Add regression tests",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["Tests pass"],
+    }
+    changed_body = dict(body, objective="Different task objective")
+    with TestClient(api.app) as client:
+        first = client.post("/v1/agent/tasks", headers=headers, json=body)
+        second = client.post("/v1/agent/tasks", headers=headers, json=changed_body)
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert "different task payload" in second.json()["detail"]
 
 
 def test_agent_api_rejects_unmapped_tenant_key(monkeypatch):

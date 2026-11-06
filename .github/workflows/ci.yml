@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
       - name: Lint
         run: ruff check llm-project/serve rusa_agents tests
       - name: Compile
@@ -75,17 +75,14 @@ jobs:
             docker compose config --quiet
             rm -f .env
           fi
-      - name: Validate Docker Compose configuration
-        run: |
-          if [ -f .env.example ]; then
-            cp .env.example .env
-            docker compose config --quiet
-            rm -f .env
-          fi
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Smoke-test agent runtime imports
+        run: |
+          docker run --rm rusa-agent-runtime:${{ github.sha }} \
+            python -c "import rusa_agents.api, rusa_agents.worker; print('agent runtime imports ok')"
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \

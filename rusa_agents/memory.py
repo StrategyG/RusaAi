@@ -54,6 +54,19 @@ class PostgresMemoryStore:
                 USING (tenant_id = current_setting('rusa.tenant_id', true))
                 WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))
             """)
+            # The API has no memory endpoint and receives no memory-table or sequence access.
+            connection.execute("""
+                DO $rusa$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
+                    ) THEN
+                        EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE rusa_agent_memory FROM rusa_agent_api';
+                        EXECUTE 'REVOKE ALL PRIVILEGES ON SEQUENCE rusa_agent_memory_memory_id_seq FROM rusa_agent_api';
+                    END IF;
+                END
+                $rusa$
+            """)
 
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:

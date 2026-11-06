@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 from typing import Any
 
 from .contracts import CodingTask, TaskRecord, TaskState
+
+
+class IdempotencyConflictError(ValueError):
+    """Raised when a tenant reuses an idempotency key for a different task."""
 
 
 class PostgresTaskQueue:
@@ -38,6 +43,7 @@ class PostgresTaskQueue:
                     max_attempts INTEGER NOT NULL DEFAULT 4 CHECK (max_attempts BETWEEN 1 AND 10),
                     available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     lease_owner TEXT,
+                    lease_token TEXT,
                     lease_until TIMESTAMPTZ,
                     lease_heartbeat_at TIMESTAMPTZ,
                     last_error TEXT,
@@ -49,6 +55,9 @@ class PostgresTaskQueue:
             """)
             connection.execute(
                 "ALTER TABLE rusa_agent_tasks ADD COLUMN IF NOT EXISTS lease_owner TEXT"
+            )
+            connection.execute(
+                "ALTER TABLE rusa_agent_tasks ADD COLUMN IF NOT EXISTS lease_token TEXT"
             )
             connection.execute(
                 "ALTER TABLE rusa_agent_tasks ADD COLUMN IF NOT EXISTS lease_heartbeat_at TIMESTAMPTZ"
@@ -69,6 +78,27 @@ class PostgresTaskQueue:
                 USING (tenant_id = current_setting('rusa.tenant_id', true))
                 WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))
             """)
+            # The API only enqueues and reads tasks. It must not mutate or delete them.
+            connection.execute("""
+                DO $rusa$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
+                    ) THEN
+                        EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE rusa_agent_tasks FROM rusa_agent_api';
+                        EXECUTE 'GRANT SELECT, INSERT ON TABLE rusa_agent_tasks TO rusa_agent_api';
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker'
+                    ) AND EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
+                    ) THEN
+                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM rusa_agent_api';
+                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE USAGE, SELECT ON SEQUENCES FROM rusa_agent_api';
+                    END IF;
+                END
+                $rusa$
+            """)
 
     def check_ready(self) -> bool:
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -79,20 +109,45 @@ class PostgresTaskQueue:
                            WHERE schemaname='public'
                              AND tablename='rusa_agent_tasks'
                              AND policyname='rusa_agent_tenant_isolation'
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM information_schema.columns
+                           WHERE table_schema='public'
+                             AND table_name='rusa_agent_tasks'
+                             AND column_name='lease_token'
                        )
                 FROM pg_class AS c
                 JOIN pg_namespace AS n ON n.oid=c.relnamespace
                 WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
             """).fetchone()
-        return bool(row and row[0] and row[1] and row[2])
+        return bool(row and row[0] and row[1] and row[2] and row[3])
+
+    @staticmethod
+    def _validate_worker_id(worker_id: str) -> None:
+        if not isinstance(worker_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.:-]{1,128}", worker_id,
+        ):
+            raise ValueError("worker_id must be a valid identifier of at most 128 characters")
 
     @staticmethod
     def _validate_lease(lease_seconds: int) -> None:
-        if not PostgresTaskQueue.MIN_LEASE_SECONDS <= lease_seconds <= PostgresTaskQueue.MAX_LEASE_SECONDS:
+        if (
+            type(lease_seconds) is not int
+            or not PostgresTaskQueue.MIN_LEASE_SECONDS
+            <= lease_seconds
+            <= PostgresTaskQueue.MAX_LEASE_SECONDS
+        ):
             raise ValueError(
-                "lease_seconds must be between "
+                "lease_seconds must be an integer between "
                 f"{PostgresTaskQueue.MIN_LEASE_SECONDS} and {PostgresTaskQueue.MAX_LEASE_SECONDS}"
             )
+
+    @staticmethod
+    def _validate_lease_token(lease_token: str) -> None:
+        if not isinstance(lease_token, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{32,128}", lease_token,
+        ):
+            raise ValueError("lease_token is invalid")
 
     @staticmethod
     def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -102,8 +157,8 @@ class PostgresTaskQueue:
         return normalized
 
     def enqueue(self, task: CodingTask, max_attempts: int = 4) -> str:
-        if not 1 <= max_attempts <= 10:
-            raise ValueError("max_attempts must be between 1 and 10")
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 10:
+            raise ValueError("max_attempts must be an integer between 1 and 10")
         key = task.idempotency_key or task.task_id
         payload = task.to_dict()
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -136,7 +191,9 @@ class PostgresTaskQueue:
             if isinstance(stored_payload, str):
                 stored_payload = json.loads(stored_payload)
             if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
-                raise ValueError("idempotency key was already used with a different task payload")
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
             return str(existing[0])
 
     def claim(
@@ -144,15 +201,16 @@ class PostgresTaskQueue:
         worker_id: str = "worker-default",
         lease_seconds: int = 300,
     ) -> dict[str, Any] | None:
-        if not worker_id or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", worker_id):
-            raise ValueError("worker_id must be a valid identifier of at most 128 characters")
+        self._validate_worker_id(worker_id)
         self._validate_lease(lease_seconds)
+        lease_token = secrets.token_urlsafe(32)
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             with connection.transaction():
                 connection.execute("""
                     UPDATE rusa_agent_tasks
                     SET status='failed',
                         lease_owner=NULL,
+                        lease_token=NULL,
                         lease_until=NULL,
                         last_error=COALESCE(
                             last_error, 'worker lease expired after maximum attempts'
@@ -182,6 +240,7 @@ class PostgresTaskQueue:
                     SET status='running',
                         attempts=task.attempts + 1,
                         lease_owner=%s,
+                        lease_token=%s,
                         lease_until=now() + (%s * interval '1 second'),
                         lease_heartbeat_at=now(),
                         updated_at=now()
@@ -190,8 +249,8 @@ class PostgresTaskQueue:
                       AND task.task_id=candidate.task_id
                     RETURNING task.tenant_id, task.task_id, task.payload, task.result,
                               task.attempts, task.max_attempts, task.lease_owner,
-                              task.lease_until
-                """, (worker_id, lease_seconds)).fetchone()
+                              task.lease_token, task.lease_until
+                """, (worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = json.loads(row[2]) if isinstance(row[2], str) else row[2]
@@ -204,7 +263,8 @@ class PostgresTaskQueue:
             "attempts": row[4],
             "max_attempts": row[5],
             "lease_owner": row[6],
-            "lease_until": row[7].isoformat() if row[7] else None,
+            "lease_token": row[7],
+            "lease_until": row[8].isoformat() if row[8] else None,
         }
 
     def heartbeat(
@@ -212,8 +272,11 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         worker_id: str,
+        lease_token: str,
         lease_seconds: int = 300,
     ) -> bool:
+        self._validate_worker_id(worker_id)
+        self._validate_lease_token(lease_token)
         self._validate_lease(lease_seconds)
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
@@ -222,24 +285,26 @@ class PostgresTaskQueue:
                     lease_heartbeat_at=now(),
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
-                  AND status='running' AND lease_owner=%s
+                  AND status='running' AND lease_owner=%s AND lease_token=%s
                   AND lease_until > now()
-            """, (lease_seconds, tenant_id, task_id, worker_id))
+            """, (lease_seconds, tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
 
-    def owns_lease(self, tenant_id: str, task_id: str, worker_id: str) -> bool:
-        if not worker_id:
-            return False
+    def owns_lease(
+        self, tenant_id: str, task_id: str, worker_id: str, lease_token: str,
+    ) -> bool:
+        self._validate_worker_id(worker_id)
+        self._validate_lease_token(lease_token)
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute(
                 """
                 SELECT EXISTS (
                     SELECT 1 FROM rusa_agent_tasks
                     WHERE tenant_id=%s AND task_id=%s AND status='running'
-                      AND lease_owner=%s AND lease_until > now()
+                      AND lease_owner=%s AND lease_token=%s AND lease_until > now()
                 )
                 """,
-                (tenant_id, task_id, worker_id),
+                (tenant_id, task_id, worker_id, lease_token),
             ).fetchone()
         return bool(row and row[0])
 
@@ -248,8 +313,11 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         worker_id: str,
+        lease_token: str,
         record: TaskRecord,
     ) -> bool:
+        self._validate_worker_id(worker_id)
+        self._validate_lease_token(lease_token)
         if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
             raise ValueError("checkpoint identity does not match its queue envelope")
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -257,13 +325,14 @@ class PostgresTaskQueue:
                 UPDATE rusa_agent_tasks
                 SET result=%s::jsonb, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
-                  AND status='running' AND lease_owner=%s
+                  AND status='running' AND lease_owner=%s AND lease_token=%s
                   AND lease_until > now()
             """, (
                 json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True),
                 tenant_id,
                 task_id,
                 worker_id,
+                lease_token,
             ))
         return cursor.rowcount == 1
 
@@ -272,8 +341,11 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         record: TaskRecord,
-        worker_id: str = "worker-default",
+        worker_id: str,
+        lease_token: str,
     ) -> None:
+        self._validate_worker_id(worker_id)
+        self._validate_lease_token(lease_token)
         if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
             raise ValueError("acknowledgement identity does not match its queue envelope")
         queue_status = (
@@ -288,12 +360,13 @@ class PostgresTaskQueue:
                 SET status=%s,
                     result=%s::jsonb,
                     lease_owner=NULL,
+                    lease_token=NULL,
                     lease_until=NULL,
                     available_at=now() + (%s * interval '1 second'),
                     updated_at=now(),
                     last_error=NULL
                 WHERE tenant_id=%s AND task_id=%s
-                  AND status='running' AND lease_owner=%s
+                  AND status='running' AND lease_owner=%s AND lease_token=%s
                   AND lease_until > now()
             """, (
                 queue_status,
@@ -302,6 +375,7 @@ class PostgresTaskQueue:
                 tenant_id,
                 task_id,
                 worker_id,
+                lease_token,
             ))
         if cursor.rowcount != 1:
             raise RuntimeError("task lease was lost before acknowledgement")
@@ -311,10 +385,17 @@ class PostgresTaskQueue:
         tenant_id: str,
         task_id: str,
         error: str,
-        worker_id: str = "worker-default",
+        worker_id: str,
+        lease_token: str,
         *,
         delay_seconds: int = 10,
     ) -> bool:
+        self._validate_worker_id(worker_id)
+        self._validate_lease_token(lease_token)
+        if not isinstance(error, str):
+            raise ValueError("retry error must be a string")
+        if type(delay_seconds) is not int:
+            raise ValueError("delay_seconds must be an integer")
         delay = min(300, max(1, delay_seconds))
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
@@ -326,13 +407,14 @@ class PostgresTaskQueue:
                     result=NULL,
                     available_at=now() + (%s * interval '1 second'),
                     lease_owner=NULL,
+                    lease_token=NULL,
                     lease_until=NULL,
                     last_error=%s,
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
-                  AND status='running' AND lease_owner=%s
+                  AND status='running' AND lease_owner=%s AND lease_token=%s
                   AND lease_until > now()
-            """, (delay, error[:2000], tenant_id, task_id, worker_id))
+            """, (delay, error[:2000], tenant_id, task_id, worker_id, lease_token))
         return cursor.rowcount == 1
 
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
