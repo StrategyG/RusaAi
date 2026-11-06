@@ -19,6 +19,7 @@ from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents.workers import AgentWorker
+from rusa_agents.worker import run_worker
 
 
 def make_task():
@@ -558,3 +559,10 @@ def test_github_gateway_protects_dependency_and_deployment_manifests():
     )
     for path in protected_paths:
         assert GitHubToolGateway.is_protected_write_path(path), path
+
+
+
+def test_worker_requires_explicit_agent_enablement(monkeypatch):
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "false")
+    with pytest.raises(RuntimeError, match="RUSA_AGENT_ENABLED=true"):
+        asyncio.run(run_worker())
