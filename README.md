@@ -1,127 +1,81 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI is a model-serving and agent-task validation repository. The repository includes an architecture blueprint and a checkpoint-backed FastAPI inference implementation. **The blueprint is not a trained model checkpoint.**
 
----
+## Current status
 
-## Key Features & Architecture
+- **Inference implementation:** local Hugging Face-compatible checkpoint loading, OpenAI-compatible chat completions, SSE streaming, bounded tensor batching, GPU/CPU dtype selection, concurrency limits and readiness probes.
+- **Security:** fail-closed production startup, API-key authentication, request-size limits, per-process rate limiting, request IDs and fail-closed A2A schema validation.
+- **Model artifact:** not included in this repository. A real, compatible RUSA-AI checkpoint and tokenizer must be supplied at deployment.
+- **Production acceptance:** not complete until real-checkpoint inference, streaming, batch, load, security and deployment tests pass on the target hardware.
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+See [Production Readiness](docs/PRODUCTION_READINESS.md) for configuration, deployment, API examples and the complete acceptance checklist.
 
----
+## Repository structure
 
-## Repository Structure
-
-```
+```text
 RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
+├── .github/workflows/ci.yml
+├── docs/PRODUCTION_READINESS.md
 ├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
+│   ├── configs/                 # Design and training configuration
+│   ├── model/blueprint.py       # Architecture blueprint, not trained weights
+│   └── serve/
+│       ├── app.py               # FastAPI API, auth, validation and controls
+│       └── inference.py         # Real local checkpoint runtime
+├── schemas/a2a/task-envelope.schema.json
+├── tests/test_app.py
+├── .env.example
+├── Dockerfile
+├── requirements.txt
+└── requirements-test.txt
 ```
 
----
+## Quick start
 
-## Quick Start & Local Setup
+Install the inference dependencies:
 
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
-
-### 2. Environment Setup
 ```bash
-# Clone the repository
-git clone StrategyG/RusaAi
-cd RusaAi
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
+Mount or prepare a local Hugging Face-compatible causal-LM checkpoint, then configure:
+
 ```bash
-cp .env.example .env
+export ENVIRONMENT=development
+export RUSA_MODEL_PATH=/absolute/path/to/checkpoint
+export RUSA_MODEL_NAME=rusa-ai
+export RUSA_API_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
 ```
 
----
+The loader uses local checkpoint files only and disables remote model code. If no model is configured, inference endpoints return HTTP 503; there is no mock response path.
 
-## Running the Application
+## API surface
 
-### Running Locally with Uvicorn
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health/live` | Liveness probe |
+| `GET /health/ready` | Readiness probe; requires a loaded checkpoint |
+| `POST /v1/chat/completions` | OpenAI-compatible completion and SSE streaming |
+| `POST /v1/chat/completions/batch` | Bounded tensor-batched inference |
+| `POST /v1/validate-task` | A2A envelope validation against the checked-in schema |
+
+Protected routes accept `X-API-Key`. Production mode requires a key of at least 32 characters and a real local checkpoint path.
+
+## Architecture blueprint
+
+The YAML and Python model specifications describe a proposed decoder-only MoE architecture. They are not evidence of training completion, supported context length, actual weights, benchmark performance, or production deployment. Record checkpoint provenance, configuration and SHA-256 hashes before making model capability claims.
+
+## Tests
+
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+python -m pip install -r requirements-test.txt
+pytest -q
+python -m compileall -q llm-project tests
 ```
 
-### Running with Docker & Docker Compose
-```bash
-# Build and start container
-docker-compose up --build -d
-
-# Verify server status
-curl localhost:8000/health
-```
-
----
-
-## Running Tests
-
-Execute the automated test suite using pytest:
-```bash
-pytest llm-project/tests/ -v
-```
-
----
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
-
----
-
-## Security & Governance
-
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
-
----
-
-## License
-This project is licensed under the MIT License.
+These tests do not replace real-model and target-hardware acceptance. See [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
