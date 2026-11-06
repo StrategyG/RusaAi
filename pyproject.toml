@@ -30,10 +30,10 @@ dev = [
   "bandit>=1.7,<2",
 ]
 model = [
-  "torch>=2.0,<3",
-  "transformers>=4.45,<6",
-  "accelerate>=1,<2",
-  "safetensors>=0.4,<1",
+  "torch>=2.2,<3",
+  "transformers>=5.10.0,<6",
+  "accelerate>=1.0,<2",
+  "safetensors>=0.4.5,<1",
 ]
 vllm = ["vllm>=0.32,<0.33"]
 
