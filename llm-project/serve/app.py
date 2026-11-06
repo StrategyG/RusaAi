@@ -11,13 +11,14 @@ import time
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.providers import OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.rate_limit import PostgresRateLimiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -45,6 +46,7 @@ async def lifespan(application: FastAPI):
     config.validate_api()
     application.state.config = config
     application.state.queue = None
+    application.state.rate_limiter = None
     if config.model_base_url:
         set_inference_provider(
             OpenAIChatInferenceProvider(
@@ -59,6 +61,9 @@ async def lifespan(application: FastAPI):
         queue = PostgresTaskQueue(config.database_url)
         queue.initialize()
         application.state.queue = queue
+        limiter = PostgresRateLimiter(config.database_url)
+        limiter.initialize()
+        application.state.rate_limiter = limiter
     yield
     set_inference_provider(None)
 
@@ -160,7 +165,7 @@ class AICodeTaskResponse(BaseModel):
     work_branch: str
 
 
-def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
+def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
     config = RuntimeConfig.from_env()
     if not config.api_keys:
         if config.environment == "production":
@@ -174,6 +179,28 @@ def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
             tenant_id = mapped_tenant
     if tenant_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    limiter = getattr(request.app.state, "rate_limiter", None)
+    if limiter is not None:
+        if request.url.path == "/v1/chat/completions":
+            limit = int(os.getenv("RUSA_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
+        elif request.method == "POST" and request.url.path == "/v1/aicode/tasks":
+            limit = int(os.getenv("RUSA_RATE_LIMIT_TASKS_PER_MINUTE", "10"))
+        else:
+            limit = int(os.getenv("RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
+        try:
+            allowed, retry_after = limiter.hit(
+                tenant_id, f"{request.method}:{request.url.path}", limit, 60
+            )
+        except Exception:
+            logger.exception("Tenant rate limiter is unavailable")
+            raise HTTPException(status_code=503, detail="API rate limiter is unavailable") from None
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Tenant request rate limit exceeded",
+                headers={"Retry-After": str(retry_after)},
+            )
     return tenant_id
 
 
