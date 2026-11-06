@@ -49,16 +49,22 @@ jobs:
             requirements-agent.txt
             requirements-dev.txt
 
-      - name: Install development dependencies
+      - name: Install CPU-only PyTorch for CI
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple "torch>=2.2,<3"
+
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
 
       - name: Lint
         run: ruff check llm-project/serve rusa_agents tests
 
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents tests
+
+      - name: Validate deployment shell scripts
+        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh
 
       - name: Test
         env:
