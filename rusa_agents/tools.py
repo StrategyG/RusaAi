@@ -392,7 +392,7 @@ class GitHubTools:
             if expected_sha and existing.get("sha") != expected_sha:
                 raise ToolError("File changed concurrently; reread and replan before writing")
             if not expected_sha:
-                raise ToolError("Existing file must be read and its expected_sha supplied before update")
+                expected_sha = existing.get("sha")
 
         payload: dict[str, Any] = {
             "message": message[:200],
