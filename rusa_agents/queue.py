@@ -461,7 +461,7 @@ class PostgresTaskQueue:
         return cursor.rowcount == 1
 
     def cancel(self, tenant_id: str, task_id: str) -> bool:
-        """Cancel a queued or running task and revoke its active worker lease."""
+        """Cancel a task that has not reached a terminal state, revoking its lease."""
         if not tenant_id or not task_id:
             raise ValueError("tenant_id and task_id are required")
         with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
@@ -479,7 +479,9 @@ class PostgresTaskQueue:
                     last_error='cancelled by tenant',
                     updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s
-                  AND status IN ('queued', 'retry', 'waiting_external', 'running')
+                  AND status IN (
+                      'queued', 'retry', 'waiting_external', 'running', 'awaiting_approval'
+                  )
             """, (tenant_id, task_id))
         return cursor.rowcount == 1
 
