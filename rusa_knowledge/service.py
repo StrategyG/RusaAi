@@ -122,6 +122,7 @@ class KnowledgeService:
     ) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
+        reject_credential_material(query)
         vector = self.embeddings.embed([query])[0]
         return self.store.search(
             tenant_id=tenant_id,
