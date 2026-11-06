@@ -275,7 +275,7 @@ def get_task_validator() -> jsonschema.protocols.Validator:
 
 def _load_api_key_tenants() -> dict[str, str] | None:
     raw = os.getenv("RUSA_API_KEY_TENANTS_JSON")
-    if raw is None:
+    if raw is None or not raw.strip():
         return None
     try:
         mapping = json.loads(raw)

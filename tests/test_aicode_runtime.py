@@ -763,3 +763,27 @@ def test_github_gateway_rejects_overlong_task_branch():
     )
     with pytest.raises(ValueError, match="ref length"):
         GitHubToolGateway.task_work_branch(task)
+
+
+
+def test_agent_worker_does_not_send_tenant_id_to_model_provider():
+    captured = {}
+
+    class CapturingProvider:
+        async def complete(self, *, system_prompt, user_prompt):
+            captured["prompt"] = user_prompt
+            return json.dumps({
+                "summary": "analysis complete",
+                "final": True,
+                "success": True,
+                "tool_calls": [],
+                "blockers": [],
+            })
+
+    task = make_task()
+    task.tenant_id = "tenant-private-marker"
+    result = asyncio.run(
+        AgentWorker(WorkerRole.ANALYST, CapturingProvider(), FakeTools()).run(task, [])
+    )
+    assert result.success is True
+    assert "tenant-private-marker" not in captured["prompt"]

@@ -66,9 +66,12 @@ class AgentWorker:
             }
             for result in prior_results
         ]
+        model_task = task.to_dict()
+        # Tenant identifiers are authorization metadata, not model context.
+        model_task.pop("tenant_id", None)
         prompt = json.dumps(
             {
-                "task": task.to_dict(),
+                "task": model_task,
                 "task_work_branch": (
                     f"{task.repository.work_branch}-{task.task_id[:8]}"
                 ),
