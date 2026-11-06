@@ -65,6 +65,10 @@ class RuntimeConfig:
             "RUSA_MODEL_BASE_URL": self.model_base_url,
         }
         missing = [name for name, value in required.items() if not value]
+        if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
+            missing.append("API keys of at least 32 UTF-8 bytes")
+        if any(not tenant.strip() for tenant in self.tenant_repositories):
+            missing.append("non-empty tenant identifiers")
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
 
@@ -79,6 +83,8 @@ class RuntimeConfig:
             "RUSA_GITHUB_TOKEN": self.github_token,
         }
         missing = [name for name, value in required.items() if not value]
+        if self.audit_hmac_key and len(self.audit_hmac_key.encode("utf-8")) < 32:
+            missing.append("RUSA_AUDIT_HMAC_KEY of at least 32 UTF-8 bytes")
         if not self.sandbox_image or "@sha256:" not in self.sandbox_image:
             missing.append("RUSA_SANDBOX_IMAGE pinned by immutable sha256 digest")
         if missing:
