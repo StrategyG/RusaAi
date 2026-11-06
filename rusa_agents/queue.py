@@ -153,7 +153,7 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='succeeded', lease_owner=NULL,
-                    lease_until=NULL, updated_at=NOW()
+                    lease_token=NULL, lease_until=NULL, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s AND lease_token=%s
                   AND status='running' AND lease_until > NOW()
             """, (job_id, tenant_id, worker_id, lease_token))
