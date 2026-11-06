@@ -136,11 +136,13 @@ Set `RUSA_BACKUP_INTERVAL_SECONDS` to an interval no longer than the approved RP
 The backup script:
 - Streams `pg_dump` directly into age encryption; it does not persist a plaintext dump.
 - Produces a custom-format PostgreSQL archive encrypted as `.dump.age`.
-- Writes a SHA-256 sidecar.
+- Writes a SHA-256 sidecar and requires it during restore.
 - Applies local backup retention (default 30 days).
-- Optionally uploads the encrypted archive and checksum to `RUSA_BACKUP_S3_URI`.
+- Uploads the encrypted archive and checksum to `RUSA_BACKUP_S3_URI` when configured.
 
-For production, the remote bucket must have versioning and immutable retention/Object Lock configured independently. Use a separate backup credential with write access only to the backup location. Do not store AWS credentials in Git or ordinary application configuration.
+Compose sets `RUSA_BACKUP_REQUIRE_REMOTE=true` by default for both backup profiles. The scripts fail closed if remote storage is required but no S3-compatible URI is configured. Set it to `false` only for local development; local-volume-only backups do not protect against host or volume loss.
+
+For production, configure a dedicated off-host bucket with versioning and immutable retention/Object Lock. Use a separate backup credential with write access only to the backup location. Do not store AWS credentials in Git or ordinary application configuration.
 
 The dump covers the application database only. It does not include PostgreSQL cluster roles/global objects, the audit volume, model weights, or source documents stored outside PostgreSQL. Recreate database roles using the reviewed initialization procedure and restore the audit/model/document stores from their own protected backups. The bootstrap database credential is privileged; keep the backup profile disabled except during scheduled backup/restore operations.
 
