@@ -237,6 +237,8 @@ class GitHubToolGateway:
             raise PermissionError("repository path is protected or unsafe")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
             raise ValueError("file content must be text within the configured size limit")
+        if redact_sensitive_text(content) != content:
+            raise PermissionError("file write blocked because potential secret material was detected")
         await self._ensure_branch(task)
         endpoint = f"{self._root(task)}/contents/{quote(path, safe='/')}"
         current = await self._request(
