@@ -142,7 +142,12 @@ def test_queue_rejects_unsafe_tenant_identifiers(queue_and_tenant):
 def test_queue_cancels_queued_task_idempotently(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant, task_id, {"objective": "cancel me"}, "cancel-queued-key")
+    queue.enqueue(
+        tenant,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant, "objective": "cancel me"},
+        "cancel-queued-key",
+    )
     assert queue.cancel(tenant, task_id)
     assert queue.cancel(tenant, task_id)
     assert queue.get(tenant, task_id)["state"] == "cancelled"
@@ -152,7 +157,12 @@ def test_queue_cancels_queued_task_idempotently(queue_and_tenant):
 def test_queue_cancellation_fences_running_worker(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant, task_id, {"objective": "cancel active"}, "cancel-running-key")
+    queue.enqueue(
+        tenant,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant, "objective": "cancel active"},
+        "cancel-running-key",
+    )
     assert queue.claim("worker-a", lease_seconds=60) is not None
     assert queue.cancel(tenant, task_id)
     assert not queue.heartbeat(tenant, task_id, "worker-a", lease_seconds=60)
@@ -163,8 +173,40 @@ def test_queue_cancellation_fences_running_worker(queue_and_tenant):
 def test_queue_does_not_cancel_completed_task(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant, task_id, {"objective": "complete"}, "cancel-completed-key")
+    queue.enqueue(
+        tenant,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant, "objective": "complete"},
+        "cancel-completed-key",
+    )
     assert queue.claim("worker-a", lease_seconds=60) is not None
     assert queue.complete(tenant, task_id, "worker-a", {"state": "succeeded"})
     assert not queue.cancel(tenant, task_id)
     assert queue.get(tenant, task_id)["state"] == "succeeded"
+
+
+
+def test_queue_rejects_payload_tenant_mismatch(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    with pytest.raises(ValueError, match="tenant_id must match"):
+        queue.enqueue(
+            tenant,
+            str(uuid.uuid4()),
+            {
+                "task_id": str(uuid.uuid4()),
+                "tenant_id": "another-tenant",
+                "objective": "cross-tenant payload",
+            },
+            "payload-tenant-mismatch",
+        )
+
+
+def test_queue_requires_payload_task_id(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    with pytest.raises(ValueError, match="include task_id"):
+        queue.enqueue(
+            tenant,
+            str(uuid.uuid4()),
+            {"tenant_id": tenant, "objective": "missing id"},
+            "missing-payload-task-id",
+        )

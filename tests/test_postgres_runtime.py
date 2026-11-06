@@ -31,11 +31,15 @@ def postgres_runtime():
 def test_queue_idempotency_replays_only_identical_payload(postgres_runtime):
     _, tenant_id, queue = postgres_runtime
     first_id = str(uuid.uuid4())
-    replay_id = str(uuid.uuid4())
-    payload = {"objective": "review", "repository": "owner/repo"}
+    payload = {
+        "task_id": first_id,
+        "tenant_id": tenant_id,
+        "objective": "review",
+        "repository": "owner/repo",
+    }
 
     first = queue.enqueue(tenant_id, first_id, payload, "same-idempotency-key")
-    replay = queue.enqueue(tenant_id, replay_id, payload, "same-idempotency-key")
+    replay = queue.enqueue(tenant_id, first_id, payload, "same-idempotency-key")
 
     assert first["task_id"] == first_id
     assert replay["task_id"] == first_id
@@ -51,7 +55,12 @@ def test_queue_idempotency_replays_only_identical_payload(postgres_runtime):
 def test_queue_heartbeat_and_lease_owner_fencing(postgres_runtime):
     _, tenant_id, queue = postgres_runtime
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant_id, task_id, {"objective": "test"}, "lease-key-001")
+    queue.enqueue(
+        tenant_id,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant_id, "objective": "test"},
+        "lease-key-001",
+    )
     first = queue.claim("worker-a", lease_seconds=30)
     assert first is not None
     assert queue.heartbeat(tenant_id, task_id, "worker-a", lease_seconds=30)
@@ -78,7 +87,12 @@ def test_queue_heartbeat_and_lease_owner_fencing(postgres_runtime):
 def test_expired_job_at_retry_limit_moves_to_dead_letter(postgres_runtime):
     _, tenant_id, queue = postgres_runtime
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant_id, task_id, {"objective": "retry"}, "dead-letter-key")
+    queue.enqueue(
+        tenant_id,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant_id, "objective": "retry"},
+        "dead-letter-key",
+    )
     claimed = queue.claim("worker-a", lease_seconds=30)
     assert claimed is not None
 
@@ -100,7 +114,12 @@ def test_expired_job_at_retry_limit_moves_to_dead_letter(postgres_runtime):
 def test_non_retryable_failure_is_terminal(postgres_runtime):
     _, tenant_id, queue = postgres_runtime
     task_id = str(uuid.uuid4())
-    queue.enqueue(tenant_id, task_id, {"objective": "blocked"}, "blocked-key")
+    queue.enqueue(
+        tenant_id,
+        task_id,
+        {"task_id": task_id, "tenant_id": tenant_id, "objective": "blocked"},
+        "blocked-key",
+    )
     claimed = queue.claim("worker-a", lease_seconds=30)
     assert claimed is not None
     assert queue.fail(

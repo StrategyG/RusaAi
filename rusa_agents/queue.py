@@ -133,13 +133,17 @@ class PostgresTaskQueue:
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValueError("task_id must be a UUID") from exc
         payload_task_id = payload.get("task_id")
-        if payload_task_id is not None:
-            try:
-                normalized_payload_task_id = str(UUID(payload_task_id))
-            except (ValueError, TypeError, AttributeError) as exc:
-                raise ValueError("payload task_id must be a UUID") from exc
-            if normalized_payload_task_id != normalized_task_id:
-                raise ValueError("payload task_id must match the queue task_id")
+        if payload_task_id is None:
+            raise ValueError("task payload must include task_id")
+        try:
+            normalized_payload_task_id = str(UUID(payload_task_id))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("payload task_id must be a UUID") from exc
+        if normalized_payload_task_id != normalized_task_id:
+            raise ValueError("payload task_id must match the queue task_id")
+        payload_tenant_id = payload.get("tenant_id")
+        if payload_tenant_id != tenant_id:
+            raise ValueError("payload tenant_id must match the queue tenant_id")
 
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self._connect() as db:
