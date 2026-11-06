@@ -1,127 +1,94 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI is an AI model and agent platform under active development. The repository separates the model-serving foundation from the autonomous agent control plane.
 
----
+## Verified implementation boundary
 
-## Key Features & Architecture
+The enterprise agent runtime includes a hierarchical supervisor, durable task workers, a reviewer/approval gate, evidence-grounded final synthesis with citation validation, tenant-scoped memory and messages, a JSON Schema-validated tool registry, GitHub tools, an MCP Streamable HTTP gateway, and a pgvector RAG pipeline. The system is still NOT production-certified until the release gates in docs/PRODUCTION_READINESS.md and docs/PRODUCTION_READINESS_AGENT.md have objective evidence.
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+No trained RUSA-AI foundation-model weights are included. Model inference requires a compatible local model artifact. Agent planning requires the local RUSA model-serving endpoint or another OpenAI-compatible chat endpoint. Semantic RAG requires an OpenAI-compatible embeddings endpoint that returns exactly 384-dimensional vectors.
 
----
+## Architecture
 
-## Repository Structure
+- Model platform: local Transformers inference adapter and model blueprint.
+- Agent platform: hierarchical supervisor, task contracts, PostgreSQL task store, independent worker process, policy engine, approval workflow, tool registry, and audit events.
+- Memory: tenant-scoped working/episodic state, key/value memory, and persisted inter-agent messages.
+- RAG: document chunking, embeddings, pgvector cosine search, source ACL filtering, and citations.
+- MCP: allowlisted Streamable HTTP servers with remote JSON Schema validation.
 
-```
-RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
-├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
-```
+See docs/enterprise-agent-architecture.md for the topology, worker communication, memory, tools, orchestration, RAG/MCP, and evaluation design.
 
----
+## Quick start with Docker Compose
 
-## Quick Start & Local Setup
+1. Copy .env.example to .env.
+2. Generate separate random secrets for RUSA_API_KEY, RUSA_DB_PASSWORD, RUSA_TENANT_API_KEYS, and RUSA_TENANT_APPROVER_KEYS. Keep tenant and approver credentials separate.
+3. Put a compatible local model artifact in the directory configured by RUSA_MODEL_DIR.
+4. Configure GITHUB_TOKEN with least-privilege access to the target repository.
+5. Start the stack with docker compose up --build.
 
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
+Compose starts PostgreSQL with pgvector, the local model API, the Alembic migration job, the agent API, and a separate agent worker. The model API is bound to 127.0.0.1:8000 and the agent API to 127.0.0.1:8010 by default. Put a TLS reverse proxy and distributed rate limiter in front before exposing either API outside the host.
 
-### 2. Environment Setup
-```bash
-# Clone the repository
-git clone StrategyG/RusaAi
-cd RusaAi
+The agent API and worker use PostgreSQL and set RUSA_DB_AUTO_CREATE=false. The migration job must complete before the agent services start.
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+## Agent runtime without Docker
 
-# Install dependencies
-pip install -r requirements.txt
-```
+Install lightweight agent dependencies:
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
-```bash
-cp .env.example .env
-```
+    python -m pip install -r requirements-agent.txt
 
----
+Configure:
+- RUSA_DATABASE_URL — PostgreSQL recommended; SQLite is local single-process development only.
+- RUSA_TENANT_API_KEYS — JSON map of tenant IDs to independent secrets of at least 32 characters.
+- RUSA_TENANT_APPROVER_KEYS — separate JSON map for human approver credentials.
+- RUSA_AGENT_MODEL_BASE_URL and RUSA_AGENT_MODEL_NAME — OpenAI-compatible chat endpoint.
+- RUSA_AGENT_MODEL_API_KEY — key accepted by the model endpoint.
+- GITHUB_TOKEN — least-privilege repository access.
 
-## Running the Application
+Run database migrations:
 
-### Running Locally with Uvicorn
-```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
-```
+    alembic upgrade head
 
-### Running with Docker & Docker Compose
-```bash
-# Build and start container
-docker-compose up --build -d
+Run the API:
 
-# Verify server status
-curl localhost:8000/health
-```
+    uvicorn rusa_agents.api:app --host 127.0.0.1 --port 8010
 
----
+Run the worker in a separate process:
 
-## Running Tests
+    python -m rusa_agents.worker_cli
 
-Execute the automated test suite using pytest:
-```bash
-pytest llm-project/tests/ -v
-```
+Inspect registered tools and their schemas at GET /v1/agent/tools, operational metrics at GET /v1/agent/evaluation/metrics, and tenant audit-chain integrity at GET /v1/agent/audit/verify. Submit tasks with X-API-Key and Idempotency-Key headers at POST /v1/agent/tasks. Use GET /v1/agent/tasks/{task_id} for task state and evidence, and GET /v1/agent/tasks/{task_id}/messages for the communication trace. Reviewer rejection pauses the task; a human approver can approve that review override at POST /v1/agent/tasks/{task_id}/approve. Supported CI/PR blockers can be resumed at POST /v1/agent/tasks/{task_id}/resume. Both approval and resume require the separate X-RUSA-Approver-Key credential. Cancellation is available at POST /v1/agent/tasks/{task_id}/cancel. Tenant IDs are resolved server-side from credentials; clients cannot select a tenant through request data.
 
----
+## Memory and RAG
 
-## API Endpoints
+Tenant-scoped key/value memory is available under /v1/agent/memory. Semantic RAG endpoints are:
+- POST /v1/agent/rag/documents — ingest and embed a source document.
+- GET /v1/agent/rag/search — retrieve chunks with citations.
+- DELETE /v1/agent/rag/documents/{source_id} — delete a source and its chunks.
 
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
+Configure RUSA_EMBEDDING_BASE_URL, RUSA_EMBEDDING_MODEL, and RUSA_EMBEDDING_API_KEY. The initial pgvector schema is fixed at 384 dimensions. The embedding model must return exactly 384 values.
 
----
+## MCP configuration
 
-## Security & Governance
+RUSA_MCP_SERVERS is an optional JSON object. Each server entry has a URL, a token_env name, and an explicit allow_tools list. Example:
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
+    {"docs":{"url":"https://mcp.example.com/mcp","token_env":"MCP_SERVER_TOKEN","allow_tools":["search_docs","fetch_doc"]}}
 
----
+Only listed tools are exposed to the agent. Remote servers must use HTTPS except localhost development. Configure the referenced token environment variables in both API and worker deployments. The current gateway supports Streamable HTTP, not stdio.
 
-## License
-This project is licensed under the MIT License.
+## Quality gates
+
+Install development dependencies and run:
+
+    ruff check rusa_agents tests
+    python -m compileall -q rusa_agents tests
+    pytest -q
+
+GitHub Actions runs the model/API checks and the agent runtime checks. A green unit-test run does not establish model quality, tenant-isolation certification, RAG retrieval quality, or production SLO compliance.
+
+## Security
+
+- Never commit credentials, model weights, or private datasets.
+- Do not expose arbitrary shell execution to model output.
+- Keep merge, deploy, release, secret/permission changes, and destructive actions under human approval.
+- Treat repository content, MCP responses, and tool output as untrusted data.
+- Use PostgreSQL migrations, immutable audit export, TLS, rate limiting, secret rotation, monitoring, backup/restore, and security testing before production rollout.

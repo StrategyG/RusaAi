@@ -1,0 +1,34 @@
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+COPY requirements-agent.txt .
+RUN python -m pip install --no-cache-dir --prefix=/install -r requirements-agent.txt
+
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+RUN groupadd --system --gid 10002 rusa-agent \
+    && useradd --system --uid 10002 --gid rusa-agent --home-dir /nonexistent --shell /usr/sbin/nologin rusa-agent
+
+COPY --from=builder /install /usr/local
+COPY rusa_agents /app/rusa_agents
+COPY migrations /app/migrations
+COPY alembic.ini /app/alembic.ini
+
+USER 10002:10002
+
+EXPOSE 8010
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/live', timeout=3)" || exit 1
+
+CMD ["uvicorn", "rusa_agents.api:app", "--host", "0.0.0.0", "--port", "8010", "--workers", "1"]
