@@ -94,7 +94,7 @@ jobs:
           );
           TRUNCATE public.rusa_drill_probe;
           INSERT INTO public.rusa_drill_probe (id, value)
-          VALUES (1, "encrypted-restore-drill-ok");
+          VALUES (1, \$\$encrypted-restore-drill-ok\$\$);
           SQL
               psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE rusa_restore_test"
               bash scripts/postgres/restore_drill.sh
