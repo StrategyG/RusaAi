@@ -285,6 +285,7 @@ class AICodeOrchestrator:
                 semaphore,
             )
             await self._record_result(record, result)
+            completed_roles.add(role)
             if not result.success or result.blockers:
                 record.errors.extend(
                     result.blockers or [role.value + " worker failed"]
