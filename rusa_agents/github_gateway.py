@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import re
 from typing import Any
 from urllib.parse import quote
 
