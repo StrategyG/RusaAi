@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 from uuid import uuid4
 
@@ -72,7 +74,6 @@ def test_postgres_memory_and_audit_integrity():
     assert not PostgresAuditLog(DSN, "wrong-key-" + "x" * 32).verify()
 
 
-
 def test_postgres_rate_limiter_is_tenant_scoped():
     limiter = PostgresRateLimiter(DSN)
     limiter.initialize()
@@ -80,7 +81,6 @@ def test_postgres_rate_limiter_is_tenant_scoped():
     assert limiter.hit("tenant-rate-a", route, 1)[0] is True
     assert limiter.hit("tenant-rate-a", route, 1)[0] is False
     assert limiter.hit("tenant-rate-b", route, 1)[0] is True
-
 
 
 def test_postgres_queue_requires_explicit_retry_after_approval():
@@ -103,7 +103,6 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     retried = queue.get(task_id, "tenant-approval")
     assert retried["status"] == "queued"
     assert retried["result"] is None
-
 
 
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
@@ -139,54 +138,168 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     )
 
 
-
 def test_postgres_rls_and_service_role_separation():
+    import secrets
+
     import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
 
+    suffix = uuid4().hex[:12]
+    api_role = f"rusa_api_test_{suffix}"
+    worker_role = f"rusa_worker_test_{suffix}"
+    api_password = secrets.token_urlsafe(32)
+    worker_password = secrets.token_urlsafe(32)
     task_id = str(uuid4())
-    with psycopg.connect(DSN) as conn:
-        conn.execute("SET LOCAL ROLE rusa_api_runtime")
-        conn.execute(
-            "SELECT set_config('rusa.tenant_id', %s, true)",
-            ("tenant-rls-alpha",),
-        )
-        conn.execute(
-            """
-            INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
-            VALUES (%s, %s, '{}'::jsonb)
-            """,
-            (task_id, "tenant-rls-alpha"),
-        )
-        visible = conn.execute(
-            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
-            (task_id,),
-        ).fetchone()
-        assert visible == ("tenant-rls-alpha",)
+    tenant_id = "tenant-rls-alpha-" + suffix
+    admin = psycopg.connect(DSN, autocommit=True)
 
-        conn.execute(
-            "SELECT set_config('rusa.tenant_id', %s, true)",
-            ("tenant-rls-beta",),
+    try:
+        admin.execute(
+            sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} IN ROLE rusa_api_runtime").format(
+                sql.Identifier(api_role), sql.Literal(api_password)
+            )
         )
-        hidden = conn.execute(
-            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
-            (task_id,),
-        ).fetchone()
-        assert hidden is None
+        admin.execute(
+            sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} IN ROLE rusa_worker_runtime").format(
+                sql.Identifier(worker_role), sql.Literal(worker_password)
+            )
+        )
 
-        conn.execute("SET LOCAL ROLE rusa_worker_runtime")
-        worker_visible = conn.execute(
-            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
-            (task_id,),
-        ).fetchone()
-        assert worker_visible == ("tenant-rls-alpha",)
+        api_dsn = make_conninfo(DSN, user=api_role, password=api_password)
+        worker_dsn = make_conninfo(DSN, user=worker_role, password=worker_password)
 
-        privileges = conn.execute(
-            """
-            SELECT
-                has_table_privilege('rusa_api_runtime', 'public.aicode_memory', 'SELECT'),
-                has_table_privilege('rusa_api_runtime', 'public.aicode_audit_events', 'SELECT'),
-                has_table_privilege('rusa_worker_runtime', 'public.aicode_rate_limits', 'SELECT'),
-                has_table_privilege('rusa_worker_runtime', 'public.aicode_jobs', 'INSERT')
-            """
-        ).fetchone()
-        assert privileges == (False, False, False, False)
+        with psycopg.connect(api_dsn) as conn:
+            with conn.transaction():
+                identity = conn.execute(
+                    """
+                    SELECT current_user, r.rolsuper, r.rolbypassrls
+                    FROM pg_roles AS r WHERE r.rolname=current_user
+                    """
+                ).fetchone()
+                assert identity == (api_role, False, False)
+                conn.execute(
+                    "SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,)
+                )
+                conn.execute(
+                    """
+                    INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
+                    VALUES (%s, %s, '{}'::jsonb)
+                    """,
+                    (task_id, tenant_id),
+                )
+                visible = conn.execute(
+                    "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+                    (task_id,),
+                ).fetchone()
+                assert visible == (tenant_id,)
+
+                conn.execute(
+                    "SELECT set_config('rusa.tenant_id', %s, true)",
+                    (tenant_id + "-other",),
+                )
+                hidden = conn.execute(
+                    "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+                    (task_id,),
+                ).fetchone()
+                assert hidden is None
+
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    with conn.transaction():
+                        conn.execute(
+                            """
+                            INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
+                            VALUES (%s, %s, '{}'::jsonb)
+                            """,
+                            (str(uuid4()), tenant_id),
+                        )
+
+            api_privileges = conn.execute(
+                """
+                SELECT
+                    has_table_privilege(current_user, 'public.aicode_memory', 'SELECT'),
+                    has_table_privilege(current_user, 'public.aicode_audit_events', 'SELECT')
+                """
+            ).fetchone()
+            assert api_privileges == (False, False)
+
+        with psycopg.connect(worker_dsn) as conn:
+            with conn.transaction():
+                identity = conn.execute(
+                    """
+                    SELECT current_user, r.rolsuper, r.rolbypassrls
+                    FROM pg_roles AS r WHERE r.rolname=current_user
+                    """
+                ).fetchone()
+                assert identity == (worker_role, False, False)
+                conn.execute(
+                    "SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,)
+                )
+                worker_visible = conn.execute(
+                    "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+                    (task_id,),
+                ).fetchone()
+                assert worker_visible == (tenant_id,)
+
+                worker_privileges = conn.execute(
+                    """
+                    SELECT
+                        has_table_privilege(current_user, 'public.aicode_rate_limits', 'SELECT'),
+                        has_table_privilege(current_user, 'public.aicode_jobs', 'INSERT')
+                    """
+                ).fetchone()
+                assert worker_privileges == (False, False)
+
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    with conn.transaction():
+                        conn.execute(
+                            """
+                            INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
+                            VALUES (%s, %s, '{}'::jsonb)
+                            """,
+                            (str(uuid4()), tenant_id),
+                        )
+    finally:
+        admin.execute(
+            sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(api_role))
+        )
+        admin.execute(
+            sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(worker_role))
+        )
+        admin.close()
+
+def test_postgres_queue_client_idempotency_is_tenant_scoped_and_payload_bound():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = "tenant-idempotency-" + uuid4().hex[:8]
+    idempotency_key = "client-retry-" + uuid4().hex
+    payload = {"objective": "retry safely", "repository": "StrategyG/RusaAi"}
+    request_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    first = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+    )
+    second = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, payload, idempotency_key, request_hash
+    )
+    assert first.created is True
+    assert second.created is False
+    assert second.conflict is False
+    assert second.task_id == first.task_id
+
+    changed_hash = hashlib.sha256(b"different request body").hexdigest()
+    conflict = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id, {"objective": "different"},
+        idempotency_key, changed_hash,
+    )
+    assert conflict.created is False
+    assert conflict.conflict is True
+    assert conflict.task_id == first.task_id
+
+    other_tenant = queue.enqueue_idempotent(
+        str(uuid4()), tenant_id + "-other", payload, idempotency_key, request_hash
+    )
+    assert other_tenant.created is True
+    assert other_tenant.task_id != first.task_id

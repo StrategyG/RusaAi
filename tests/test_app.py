@@ -464,3 +464,86 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
 
     assert response.status_code == 404
 
+
+def test_aicode_task_intake_is_idempotent_for_client_retries(monkeypatch):
+    class IdempotentQueue:
+        def __init__(self):
+            self.items = {}
+
+        def enqueue_idempotent(
+            self, task_id, tenant_id, payload, *, idempotency_key,
+            request_hash, audit_actor=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            existing = self.items.get(key)
+            if existing is not None:
+                return SimpleNamespace(
+                    task_id=existing["task_id"],
+                    status=existing["status"],
+                    created=False,
+                    conflict=existing["request_hash"] != request_hash,
+                )
+            self.items[key] = {
+                "task_id": task_id,
+                "status": "queued",
+                "request_hash": request_hash,
+                "payload": payload,
+            }
+            return SimpleNamespace(
+                task_id=task_id, status="queued", created=True, conflict=False
+            )
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv(
+        "RUSA_TENANT_REPOSITORIES",
+        '{"tenant-alpha":["StrategyG/RusaAi"]}',
+    )
+    queue = IdempotentQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    headers = {
+        "X-API-Key": "tenant-key",
+        "Idempotency-Key": "client-request-2026-11-07-001",
+    }
+    payload = {
+        "objective": "Add a health endpoint test",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The test passes"],
+    }
+
+    first = client.post("/v1/aicode/tasks", headers=headers, json=payload)
+    second = client.post("/v1/aicode/tasks", headers=headers, json=payload)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["task_id"] == second.json()["task_id"]
+    assert len(queue.items) == 1
+
+    changed_payload = {
+        **payload,
+        "objective": "Use the same key for a different task",
+    }
+    conflict = client.post(
+        "/v1/aicode/tasks", headers=headers, json=changed_payload
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == (
+        "Idempotency-Key was already used with a different request"
+    )
+
+
+def test_aicode_task_intake_rejects_invalid_idempotency_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", object(), raising=False)
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": ""},
+        json={
+            "objective": "Invalid key test",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["Reject empty idempotency keys"],
+        },
+    )
+    assert response.status_code == 422

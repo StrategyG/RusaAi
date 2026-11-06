@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -18,6 +19,14 @@ class Job:
     max_attempts: int
     lease_owner: str
     lease_token: str
+
+
+@dataclass(frozen=True)
+class IdempotentEnqueueResult:
+    task_id: str
+    status: str
+    created: bool
+    conflict: bool = False
 
 
 class PostgresTaskQueue:
@@ -108,6 +117,38 @@ class PostgresTaskQueue:
                         "Production task result storage is not installed; "
                         "apply migrations/003_aicode_task_results.sql"
                     )
+                idempotency_columns = conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='aicode_jobs'
+                      AND column_name IN ('idempotency_key', 'request_hash')
+                """).fetchone()
+                if not idempotency_columns or idempotency_columns[0] != 2:
+                    raise RuntimeError(
+                        "Production client idempotency is not installed; "
+                        "apply migrations/006_aicode_client_idempotency.sql"
+                    )
+                idempotency_index = conn.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_indexes
+                        WHERE schemaname='public' AND tablename='aicode_jobs'
+                          AND indexname='uq_aicode_jobs_tenant_idempotency'
+                    )
+                """).fetchone()
+                if not idempotency_index or not idempotency_index[0]:
+                    raise RuntimeError(
+                        "Production idempotency uniqueness is not installed; "
+                        "apply migrations/006_aicode_client_idempotency.sql"
+                    )
+                idempotency_constraint = conn.execute("""
+                    SELECT convalidated FROM pg_constraint
+                    WHERE conname='aicode_jobs_idempotency_pair_check'
+                      AND conrelid='public.aicode_jobs'::regclass
+                """).fetchone()
+                if not idempotency_constraint or not idempotency_constraint[0]:
+                    raise RuntimeError(
+                        "Production idempotency validation constraint is missing or unvalidated; "
+                        "apply migrations/006_aicode_client_idempotency.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
@@ -191,6 +232,8 @@ class PostgresTaskQueue:
                     lease_until TIMESTAMPTZ,
                     lease_token UUID,
                     result JSONB,
+                    idempotency_key TEXT,
+                    request_hash TEXT,
                     last_error TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -199,6 +242,8 @@ class PostgresTaskQueue:
             """)
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
+            conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT")
+            conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS request_hash TEXT")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_claim
                 ON aicode_jobs(status, available_at, priority DESC, created_at)
@@ -206,6 +251,11 @@ class PostgresTaskQueue:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_tenant
                 ON aicode_jobs(tenant_id, created_at DESC)
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_aicode_jobs_tenant_idempotency
+                ON aicode_jobs(tenant_id, idempotency_key)
+                WHERE idempotency_key IS NOT NULL
             """)
 
     def ping(self) -> bool:
@@ -240,6 +290,74 @@ class PostgresTaskQueue:
                 "allow" if row is not None else "deny",
             )
         return row is not None
+
+    def enqueue_idempotent(
+        self,
+        task_id: str,
+        tenant_id: str,
+        payload: dict[str, Any],
+        idempotency_key: str,
+        request_hash: str,
+        max_attempts: int = 3,
+        priority: int = 0,
+        *,
+        audit_actor: str | None = None,
+    ) -> IdempotentEnqueueResult:
+        """Enqueue once per tenant/client key and reject key reuse with a different body."""
+        if not tenant_id or not task_id or max_attempts < 1:
+            raise ValueError("tenant_id, task_id, and positive max_attempts are required")
+        if (
+            not isinstance(idempotency_key, str)
+            or not 1 <= len(idempotency_key) <= 128
+            or any(ord(char) < 33 or ord(char) > 126 for char in idempotency_key)
+        ):
+            raise ValueError("Idempotency-Key must contain 1-128 printable non-space ASCII characters")
+        if not isinstance(request_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", request_hash):
+            raise ValueError("request_hash must be a lowercase SHA-256 digest")
+        self._require_policy_audit_actor(audit_actor)
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                INSERT INTO aicode_jobs(
+                    task_id, tenant_id, payload, max_attempts, priority,
+                    idempotency_key, request_hash
+                )
+                VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING task_id::text, status
+                """,
+                (
+                    task_id, tenant_id, json.dumps(payload), max_attempts, priority,
+                    idempotency_key, request_hash,
+                ),
+            ).fetchone()
+            if row is not None:
+                result = IdempotentEnqueueResult(row[0], row[1], True, False)
+            else:
+                existing = conn.execute(
+                    """
+                    SELECT task_id::text, status, request_hash
+                    FROM aicode_jobs
+                    WHERE tenant_id=%s AND idempotency_key=%s
+                    """,
+                    (tenant_id, idempotency_key),
+                ).fetchone()
+                if existing is None:
+                    raise RuntimeError("Idempotency conflict could not be resolved")
+                mismatch = existing[2] != request_hash
+                result = IdempotentEnqueueResult(
+                    existing[0], existing[1], False, mismatch
+                )
+            self._record_policy_event(
+                conn,
+                tenant_id,
+                result.task_id,
+                audit_actor,
+                "task.create",
+                "deny" if result.conflict else "allow",
+            )
+        return result
 
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:

@@ -755,10 +755,19 @@ def validate_task_envelope(request: TaskValidationRequest):
 def create_aicode_task(
     request: AICodeTaskRequest,
     http_request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     tenant_id: str = Depends(require_task_permission("task:create")),
 ):
     config = RuntimeConfig.from_env()
     task_id = str(uuid4())
+    if idempotency_key is not None and (
+        not 1 <= len(idempotency_key) <= 128
+        or any(ord(char) < 33 or ord(char) > 126 for char in idempotency_key)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key must contain 1-128 printable non-space ASCII characters",
+        )
     allowed_repositories = config.tenant_repositories.get(tenant_id)
     if config.environment == "production" and not allowed_repositories:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
@@ -773,6 +782,7 @@ def create_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+
     work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     payload = {
         "objective": request.objective,
@@ -783,22 +793,60 @@ def create_aicode_task(
         },
         "acceptance_criteria": request.acceptance_criteria,
     }
+    task_status = "queued"
     try:
-        created = queue.enqueue(
-        task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
-    )
+        if idempotency_key is not None:
+            canonical_request = json.dumps(
+                request.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+            enqueued = queue.enqueue_idempotent(
+                task_id,
+                tenant_id,
+                payload,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                audit_actor=_api_task_actor(http_request),
+            )
+            task_id = enqueued.task_id
+            task_status = enqueued.status
+            if enqueued.conflict:
+                audit_api_task(
+                    http_request, tenant_id, task_id, "task.create", False, persist=False
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used with a different request",
+                )
+        else:
+            created = queue.enqueue(
+                task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
+            )
+            if not created:
+                audit_api_task(
+                    http_request, tenant_id, task_id, "task.create", False, persist=False
+                )
+                raise HTTPException(status_code=409, detail="Task identifier conflict")
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.warning("Invalid AICode task enqueue request: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid task enqueue metadata") from None
     except Exception:
         logger.exception("Could not enqueue AICode task")
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
     audit_api_task(
-        http_request, tenant_id, task_id, "task.create", created, persist=False
+        http_request, tenant_id, task_id, "task.create", True, persist=False
     )
-    if not created:
-        raise HTTPException(status_code=409, detail="Task identifier conflict")
+    work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     return AICodeTaskResponse(
         task_id=task_id,
-        status="queued",
+        status=task_status,
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
     )
