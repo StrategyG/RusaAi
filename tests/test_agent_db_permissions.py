@@ -99,7 +99,7 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
                     )
                 """
             ).fetchone()
-            assert privileges == (True, True, True, True, True, False, False)
+            assert privileges == (True, True, True, True, False, False, False)
 
             connection.execute("SET ROLE rusa_agent_worker")
             connection.execute(
@@ -179,6 +179,18 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
                 "SELECT status FROM rusa_agent_tasks WHERE tenant_id=%s AND task_id=%s",
                 (tenant_id, task_id),
             ).fetchone()[0] == "queued"
+
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with psycopg.connect(DSN) as connection:
+                connection.execute("SET ROLE rusa_agent_api")
+                connection.execute(
+                    "SELECT set_config('rusa.tenant_id', %s, true)",
+                    (tenant_id,),
+                )
+                connection.execute(
+                    "UPDATE rusa_agent_tasks SET status='cancelled' WHERE tenant_id=%s AND task_id=%s",
+                    (tenant_id, task_id),
+                )
 
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             with psycopg.connect(DSN) as connection:
