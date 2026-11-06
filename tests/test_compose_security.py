@@ -57,3 +57,18 @@ def test_knowledge_service_is_optional_and_loopback_bound():
     assert "ports" not in services["rusa-agent-worker"]
     migration_command = " ".join(services["rusa-agent-migrate"]["command"])
     assert "005_rag_knowledge_pgvector.sql" in migration_command
+
+
+def test_user_admin_workspace_is_loopback_published_and_migration_gated():
+    services = load_compose()["services"]
+
+    assert services["rusa-web"]["ports"] == ["127.0.0.1:${RUSA_WEB_PORT:-3000}:8080"]
+    assert services["rusa-web"]["depends_on"] == {
+        "rusa-api": {"condition": "service_healthy"}
+    }
+    assert services["rusa-api"]["depends_on"] == {
+        "rusa-agent-migrate": {"condition": "service_completed_successfully"}
+    }
+    assert "rusa-agent-audit-data:/var/lib/rusa-agent" in services["rusa-api"]["volumes"]
+    assert "RUSA_AUTH_SCHEMA_MANAGED_EXTERNALLY" in services["rusa-api"]["environment"]
+    assert "006_user_identity.sql" in " ".join(services["rusa-agent-migrate"]["command"])
