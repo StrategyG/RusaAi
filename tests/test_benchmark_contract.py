@@ -217,3 +217,89 @@ async def test_policy_metrics_remain_unmeasured_without_labeled_cases(database):
     assert metrics["policy_decision_sample_size"] == 0
     assert metrics["false_allow_count"] is None
     assert metrics["false_deny_count"] is None
+
+
+
+@pytest.mark.asyncio
+async def test_model_provider_captures_usage_when_reported(monkeypatch):
+    from rusa_agents.providers import OpenAICompatibleProvider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "valid response"}}],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 7,
+                    "total_tokens": 18,
+                },
+            }
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("rusa_agents.providers.httpx.AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider(
+        base_url="https://model.example.test/v1",
+        model="fixture-model",
+    )
+    assert await provider.complete("system", "user") == "valid response"
+    assert provider.last_usage == {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+    }
+    assert provider.usage_totals["total_tokens"] == 18
+    assert provider.request_count == 1
+    assert provider.usage_calls == 1
+    assert provider.usage_missing_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_model_provider_marks_missing_usage_without_fabricating_tokens(monkeypatch):
+    from rusa_agents.providers import OpenAICompatibleProvider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "valid response"}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("rusa_agents.providers.httpx.AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider(
+        base_url="https://model.example.test/v1",
+        model="fixture-model",
+    )
+    assert await provider.complete("system", "user") == "valid response"
+    assert provider.last_usage is None
+    assert provider.usage_totals["total_tokens"] == 0
+    assert provider.request_count == 1
+    assert provider.usage_calls == 0
+    assert provider.usage_missing_calls == 1
