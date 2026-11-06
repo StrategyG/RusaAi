@@ -86,11 +86,27 @@ class PostgresTaskQueue:
                 VALUES (%s::uuid, %s, %s, %s::jsonb)
                 ON CONFLICT (tenant_id, idempotency_key)
                 DO UPDATE SET updated_at=now()
+                WHERE rusa_agent_jobs.payload = EXCLUDED.payload
                 RETURNING task_id, state
                 """,
                 (task_id, tenant_id, idempotency_key, json.dumps(payload, ensure_ascii=False)),
             ).fetchone()
+        if row is None:
+            raise ValueError("idempotency key was already used with a different task payload")
         return {"task_id": str(row["task_id"]), "state": row["state"]}
+
+    def heartbeat(self, tenant_id: str, task_id: str, worker_id: str, lease_seconds: int = 1800) -> bool:
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE rusa_agent_jobs
+                SET lease_until=now() + make_interval(secs => %s), updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s::uuid
+                    AND state='running' AND lease_owner=%s
+                """,
+                (lease_seconds, tenant_id, task_id, worker_id),
+            )
+        return cursor.rowcount == 1
 
     def claim(self, worker_id: str, lease_seconds: int = 1800) -> dict[str, Any] | None:
         with self._connect() as db:
