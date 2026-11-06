@@ -93,7 +93,7 @@ class QueueWorker:
         self.memory = memory
         self.poll_interval_seconds = poll_interval_seconds
         self.maintenance_interval_seconds = maintenance_interval_seconds
-        self.worker_id = worker_id or f"{socket.gethostname()}-{uuid.uuid4().hex[:12]}"
+        self.worker_id = worker_id or f"{socket.gethostname()[:80]}-{uuid.uuid4().hex[:12]}"
         self.lease_seconds = lease_seconds
 
     async def _run_with_heartbeat(
