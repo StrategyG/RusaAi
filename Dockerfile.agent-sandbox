@@ -13,6 +13,12 @@ RUN python -m pip install --no-cache-dir -r requirements-agent-sandbox.txt \
     && python -m pip check \
     && python -m pip uninstall -y setuptools wheel jaraco.context \
     && python -m pip uninstall -y pip \
+    && rm -rf /usr/local/lib/python3.12/site-packages/setuptools \
+              /usr/local/lib/python3.12/site-packages/setuptools-*.dist-info \
+              /usr/local/lib/python3.12/site-packages/wheel \
+              /usr/local/lib/python3.12/site-packages/wheel-*.dist-info \
+              /usr/local/lib/python3.12/site-packages/jaraco \
+              /usr/local/lib/python3.12/site-packages/jaraco.* \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
 # A fresh Debian stage avoids retaining setuptools 70.3.0 from the official
