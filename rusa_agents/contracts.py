@@ -151,19 +151,31 @@ class TaskRecord:
 
     _TRANSITIONS = {
         TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.CANCELLED},
-        TaskState.OBSERVING: {TaskState.PLANNING, TaskState.BLOCKED, TaskState.FAILED},
-        TaskState.PLANNING: {TaskState.EXECUTING, TaskState.BLOCKED, TaskState.FAILED},
+        TaskState.OBSERVING: {
+            TaskState.PLANNING,
+            TaskState.BLOCKED,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        },
+        TaskState.PLANNING: {
+            TaskState.EXECUTING,
+            TaskState.BLOCKED,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        },
         TaskState.EXECUTING: {
             TaskState.VERIFYING,
             TaskState.BLOCKED,
             TaskState.AWAITING_APPROVAL,
             TaskState.FAILED,
+            TaskState.CANCELLED,
         },
         TaskState.VERIFYING: {
             TaskState.SUCCEEDED,
             TaskState.BLOCKED,
             TaskState.AWAITING_APPROVAL,
             TaskState.FAILED,
+            TaskState.CANCELLED,
         },
         TaskState.AWAITING_APPROVAL: {TaskState.SUCCEEDED, TaskState.BLOCKED, TaskState.CANCELLED},
         TaskState.SUCCEEDED: set(),

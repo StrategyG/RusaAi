@@ -500,3 +500,46 @@ def test_orchestrator_rejects_ci_evidence_with_nonstandard_github_port(tmp_path)
     )
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.BLOCKED
+
+
+
+def test_orchestrator_persists_cancelled_state_and_audit(tmp_path):
+    class BlockingWorker:
+        role = WorkerRole.ANALYST
+
+        async def run(self, task, prior_results):
+            await asyncio.Event().wait()
+
+    class UnusedWorker:
+        def __init__(self, role):
+            self.role = role
+
+        async def run(self, task, prior_results):
+            return WorkerResult(role=self.role, summary="unused", success=True)
+
+    memory = SQLiteMemory(str(tmp_path / "cancel-memory.sqlite3"))
+    audit = AuditLog(str(tmp_path / "cancel-audit.jsonl"))
+    orchestrator = AICodeOrchestrator(
+        [BlockingWorker()]
+        + [UnusedWorker(role) for role in AICodeOrchestrator.PIPELINE[1:]],
+        memory=memory,
+        audit=audit,
+    )
+    task = make_task()
+
+    async def cancel_task():
+        running = asyncio.create_task(orchestrator.run(task))
+        await asyncio.sleep(0)
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+    asyncio.run(cancel_task())
+    stored = memory.get(task.task_id, tenant_id=task.tenant_id)
+    assert stored["state"] == TaskState.CANCELLED.value
+    assert audit.verify()
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / "cancel-audit.jsonl").read_text().splitlines()
+    ]
+    assert any(entry["event"] == "task.cancelled" for entry in entries)

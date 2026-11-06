@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 from urllib.parse import urlsplit
@@ -214,6 +215,17 @@ class AICodeOrchestrator:
                 else:
                     record.errors.extend(evidence_errors)
                     record.transition(TaskState.BLOCKED)
+        except asyncio.CancelledError:
+            record.errors.append("task execution was cancelled or its worker lease was lost")
+            if record.state not in {
+                TaskState.SUCCEEDED,
+                TaskState.FAILED,
+                TaskState.BLOCKED,
+                TaskState.CANCELLED,
+            }:
+                record.transition(TaskState.CANCELLED)
+            self._record("task.cancelled", record, {"state": record.state.value})
+            raise
         except Exception as exc:
             record.errors.append(f"{type(exc).__name__}: {str(exc)[:1000]}")
             if record.state not in {
