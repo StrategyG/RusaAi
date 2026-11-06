@@ -86,7 +86,12 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
             payload = self.items.get((tenant_id, task_id))
             if payload is None:
                 return None
-            return {"task_id": task_id, "tenant_id": tenant_id, "payload": payload}
+            return {
+                "task_id": task_id,
+                "tenant_id": tenant_id,
+                "payload": payload,
+                "result": None,
+            }
 
         def retry(self, task_id, tenant_id):
             return (tenant_id, task_id) in self.items
@@ -109,7 +114,7 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert response.status_code == 202
     data = response.json()
     assert data["tenant_id"] == "tenant-alpha"
-    assert data["work_branch"].startswith("feature/aicode/")
+    assert data["work_branch_prefix"].startswith("feature/aicode/")
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
 
@@ -249,3 +254,41 @@ def test_aicode_retry_respects_kill_switch(monkeypatch):
     )
     assert response.status_code == 503
     assert response.json()["detail"] == "AICode task intake is disabled"
+
+
+
+def test_aicode_task_status_exposes_result_only_to_owning_tenant(monkeypatch):
+    task_id = "00000000-0000-4000-8000-000000000001"
+
+    class ResultQueue:
+        def get(self, requested_id, tenant_id):
+            if requested_id != task_id or tenant_id != "tenant-alpha":
+                return None
+            return {
+                "task_id": task_id,
+                "tenant_id": tenant_id,
+                "status": "succeeded",
+                "result": {
+                    "pull_request_url": "https://github.com/StrategyG/RusaAi/pull/99",
+                    "commit_sha": "a" * 40,
+                    "branch": "feature/aicode/000000000001-deadbeef",
+                },
+            }
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", ResultQueue(), raising=False)
+
+    own = client.get(
+        f"/v1/aicode/tasks/{task_id}",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert own.status_code == 200
+    assert own.json()["result"]["pull_request_url"].endswith("/pull/99")
+    assert own.json()["result"]["commit_sha"] == "a" * 40
+
+    foreign = client.get(
+        f"/v1/aicode/tasks/{task_id}",
+        headers={"X-API-Key": "foreign-key"},
+    )
+    assert foreign.status_code == 401
