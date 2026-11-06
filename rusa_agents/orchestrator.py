@@ -291,6 +291,7 @@ class AICodeOrchestrator:
                 )
                 record.transition(TaskState.BLOCKED)
                 return
+            completed_roles.add(role)
 
     async def run(self, task: CodingTask) -> TaskRecord:
         record = TaskRecord(task=task)
