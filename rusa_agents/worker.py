@@ -170,7 +170,18 @@ class AgentRuntime:
                     return
                 raise ToolError(decision.reason)
 
-            result = await self.tools.execute(tool_name, step["arguments"])
+            arguments = dict(step["arguments"])
+            if tool_name.startswith("github."):
+                if arguments.get("repository") != snapshot["repository"]:
+                    raise ToolError("Tool repository must match the task repository")
+                if tool_name == "github.create_branch":
+                    if arguments.get("base_branch") != snapshot["base_branch"] or arguments.get("work_branch") != snapshot["work_branch"]:
+                        raise ToolError("Branch creation must use the task's exact base and work branches")
+                if tool_name == "github.write_file" and arguments.get("branch") != snapshot["work_branch"]:
+                    raise ToolError("Writes are restricted to the task's exact work branch")
+                if tool_name == "github.create_pull_request" and (arguments.get("head") != snapshot["work_branch"] or arguments.get("base") != snapshot["base_branch"]):
+                    raise ToolError("Pull request branches must match the task scope")
+            result = await self.tools.execute(tool_name, arguments)
             previous.append({"tool": tool_name, "purpose": step["purpose"], "result": result})
             async with self.database.session() as session:
                 row = await session.scalar(select(TaskRow).where(TaskRow.id == task_id, TaskRow.tenant_id == tenant_id))
