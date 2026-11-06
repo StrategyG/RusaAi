@@ -125,7 +125,7 @@ class DockerSandbox:
         max_output_bytes: int,
     ) -> tuple[int | None, str, str, int]:
         """Stream Docker output with a hard memory/output budget."""
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # nosec B603 - fixed Docker profile argv, shell=False
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -192,7 +192,7 @@ class DockerSandbox:
         if not DOCKER_BIN:
             return
         try:
-            subprocess.run(
+            subprocess.run(  # nosec B603 - fixed Docker cleanup argv, shell=False
                 [DOCKER_BIN, "rm", "-f", container_name],
                 check=False,
                 capture_output=True,
