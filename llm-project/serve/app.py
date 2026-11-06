@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal, Protocol
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
@@ -755,10 +755,29 @@ def validate_task_envelope(request: TaskValidationRequest):
 def create_aicode_task(
     request: AICodeTaskRequest,
     http_request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     tenant_id: str = Depends(require_task_permission("task:create")),
 ):
     config = RuntimeConfig.from_env()
-    task_id = str(uuid4())
+    if (
+        not idempotency_key
+        or len(idempotency_key) > 128
+        or any(not 33 <= ord(char) <= 126 for char in idempotency_key)
+    ):
+        audit_api_task(http_request, tenant_id, None, "task.create", False)
+        raise HTTPException(
+            status_code=400,
+            detail="A valid Idempotency-Key header (1-128 visible ASCII characters) is required",
+        )
+
+    # Stable per tenant and logical submission. The database's existing
+    # (tenant_id, task_id) uniqueness constraint makes concurrent retries safe.
+    idempotency_identity = json.dumps(
+        ["rusa-ai:aicode", tenant_id, idempotency_key],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    task_id = str(uuid5(NAMESPACE_URL, idempotency_identity))
     allowed_repositories = config.tenant_repositories.get(tenant_id)
     if config.environment == "production" and not allowed_repositories:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
@@ -773,6 +792,7 @@ def create_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+
     work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     payload = {
         "objective": request.objective,
@@ -783,26 +803,49 @@ def create_aicode_task(
         },
         "acceptance_criteria": request.acceptance_criteria,
     }
+    actor = _api_task_actor(http_request)
     try:
         created = queue.enqueue(
-        task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
-    )
+            task_id,
+            tenant_id,
+            payload,
+            audit_actor=actor,
+        )
+        if not created:
+            existing = queue.get(task_id, tenant_id, audit_actor=actor)
+            if existing is None or existing.get("payload") != payload:
+                audit_api_task(
+                    http_request, tenant_id, task_id, "task.create", False, persist=False
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used with a different request",
+                )
+            audit_api_task(
+                http_request, tenant_id, task_id, "task.create", True, persist=False
+            )
+            return AICodeTaskResponse(
+                task_id=task_id,
+                status=existing.get("status", "queued"),
+                tenant_id=tenant_id,
+                work_branch_prefix=work_branch_prefix,
+            )
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Could not enqueue AICode task")
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
     audit_api_task(
-        http_request, tenant_id, task_id, "task.create", created, persist=False
+        http_request, tenant_id, task_id, "task.create", True, persist=False
     )
-    if not created:
-        raise HTTPException(status_code=409, detail="Task identifier conflict")
     return AICodeTaskResponse(
         task_id=task_id,
         status="queued",
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
     )
-
 
 @app.get("/v1/aicode/tasks/{task_id}")
 def get_aicode_task(
