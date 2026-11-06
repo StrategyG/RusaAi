@@ -162,7 +162,7 @@ docker compose --profile backup run --rm \
   rusa-agent-db-backup /app/scripts/postgres/restore.sh
 ```
 
-The restore script refuses PostgreSQL system databases, requires an exact target database-name confirmation, verifies the checksum when available, decrypts to a temporary file, validates the archive, and restores in one transaction. The `--clean` operation replaces objects in the confirmed target database. Never point it at production unless the incident commander has approved that exact target.
+The restore script refuses PostgreSQL system databases, requires an exact target database-name confirmation, requires and verifies the SHA-256 checksum sidecar for both local and S3 backups, decrypts to a temporary file, validates the archive, and restores in one transaction. The `--clean` operation replaces objects in the confirmed target database. Never point it at production unless the incident commander has approved that exact target.
 
 Run a repeatable backup-and-restore drill with distinct source and target databases:
 
