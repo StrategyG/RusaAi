@@ -253,7 +253,7 @@ class AICodeRuntime:
                 tenant_id=job.tenant_id,
             )
             completed = await asyncio.to_thread(
-                self.queue.complete, job.id, job.tenant_id, self.worker_id
+                self.queue.complete, job.id, job.tenant_id, self.worker_id, job.lease_token
             )
             if not completed:
                 raise RuntimeError("Queue rejected completion because the lease is no longer owned")
