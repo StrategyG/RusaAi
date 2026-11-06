@@ -10,13 +10,14 @@ The complete RUSA-AI product is not production-certified until a real model arti
 
 The agent control plane is a separate service from model inference. It uses a hierarchical master orchestrator and six specialist workers: Analyst, Architect, Developer, Debugger, Tester, and Security.
 
-Capabilities within the configured allowlist:
-- Read and list regular text files in an explicitly allowlisted repository.
+Capabilities within the configured access policy:
+- Read and list regular text files in an explicitly allowlisted repository assigned to the authenticated tenant.
 - Create or reuse a deterministic tenant/task-scoped work branch.
 - Write approved repository files on that isolated branch.
 - Open or reuse a draft pull request.
 - Read complete, bounded GitHub Actions check-runs and perform at most two repair cycles by default.
-- Review the complete GitHub compare diff and re-check CI against the same commit SHA.
+- Review a complete, bounded GitHub compare diff and re-check CI against the same commit SHA.
+- Run a second, read-only Security review after the diff and CI evidence have been retrieved.
 - Persist tenant-scoped task state, fenced worker leases, episodic memory, and audit evidence.
 
 The agent does not expose arbitrary shell execution, unrestricted network access, secret retrieval, force push, merge, deployment, release, permission changes, or workflow changes. GitHub Actions provides the isolated test/build execution environment. Human review and protected-branch controls govern merge and release.
@@ -47,13 +48,16 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 2. Install dependencies: python -m pip install -r requirements-dev.txt.
 3. Copy .env.example to .env and generate unique secrets. Do not commit .env.
 4. Configure RUSA_MODEL_PATH and RUSA_MODEL_DIR for the inference API.
-5. Configure separate PostgreSQL owner/worker/API passwords, per-tenant API keys, provider credentials, GitHub credentials, audit HMAC key, and RUSA_AGENT_ALLOWED_REPOSITORIES.
-6. Restrict the GitHub App or fine-grained token to the same repository allowlist. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
-7. Start the services with docker compose up --build -d.
+5. Configure separate PostgreSQL owner/worker/API passwords, per-tenant API keys, provider credentials, GitHub credentials, audit HMAC key, and the global repository allowlist.
+6. Configure RUSA_AGENT_TENANT_REPOSITORIES as a JSON map assigning each tenant only its permitted repositories. Every tenant in this map must have a unique API key and every assigned repository must also appear in the global allowlist.
+7. Restrict the GitHub App or fine-grained token to the same global repository set. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
+8. Start the services with docker compose up --build -d.
 
 The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
 
-Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated, exact owner/name allowlist enforced by both the API and GitHub gateway.
+Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment.
+
+The Security worker can review at most 20 changed files per task, with a bounded patch size per file. Larger or incomplete diffs are blocked for human review rather than silently truncated and treated as complete.
 
 ## Quality gates
 
