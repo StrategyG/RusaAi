@@ -47,6 +47,25 @@ class AICodeRuntime:
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
         self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
+        if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
+        self.knowledge_service = None
+        if rag_flag in {"1", "true", "yes", "on"}:
+            from rusa_knowledge.service import KnowledgeService
+
+            knowledge_dsn = os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or self.config.worker_database_url
+            self.knowledge_service = KnowledgeService.from_env(
+                check_ready=True,
+                database_url=knowledge_dsn,
+            )
+
+
+    def close(self) -> None:
+        """Release optional retrieval resources during worker shutdown."""
+        if self.knowledge_service is not None:
+            self.knowledge_service.close()
+            self.knowledge_service = None
 
     def initialize(self) -> None:
         self.queue.initialize()
@@ -88,6 +107,9 @@ class AICodeRuntime:
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=self.sandbox,
+            knowledge_service=self.knowledge_service,
+            knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
+            knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
         )
         workers = [
             AutonomousCodeWorker(role, self.provider, gateway)
