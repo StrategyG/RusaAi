@@ -203,9 +203,12 @@ curl -fsS -H "X-API-Key: $RUSA_METRICS_API_KEY" http://127.0.0.1:8000/metrics
 Submit a bounded task:
 
 ```bash
+# Generate once per logical submission; reuse this exact value for client retries.
+export RUSA_TASK_REQUEST_ID="$(python -c 'import uuid; print(uuid.uuid4())')"
 curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $RUSA_API_KEY" \
+  -H "Idempotency-Key: $RUSA_TASK_REQUEST_ID" \
   -d '{
     "objective": "Add a small unit test for the health endpoint",
     "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
