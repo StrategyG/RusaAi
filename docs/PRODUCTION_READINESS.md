@@ -17,6 +17,9 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
 - The API database role is restricted to SELECT/INSERT on the task queue; it has no task mutation/deletion or memory-table/sequence privileges, and remains subject to forced RLS.
 - Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
+- The tenant-scoped agent API supports status, cancellation, and explicit retry of failed tasks; cancellation also supports approval-pending tasks and revokes the active worker lease.
+- Cancellation/retry mutations execute through tenant-checked SECURITY DEFINER database functions; the API role has SELECT/INSERT and function EXECUTE only, with no direct UPDATE/DELETE table privileges.
+- Compose runs a one-shot schema/privilege migration before the API and worker; API host ports remain loopback-bound by default.
 
 ## Current verification boundary
 
@@ -32,6 +35,7 @@ Latest CI on commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both require
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
 | Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented; PostgreSQL integration CI passed; staging soak and live multi-worker verification pending |
+| Task lifecycle API | Tenant-scoped submit/status/cancel/retry, lease revocation, DB privilege boundary | Implemented in branch; PostgreSQL function/privilege regression CI pending |
 | Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; CI tenant-isolation/redaction tests passed; staging retention verification pending |
 | Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
 | MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
@@ -51,7 +55,11 @@ through an idempotent schema migration and is required by queue readiness.
 
 The worker credential is an internal service identity and must never be exposed
 to tenant clients. API database credentials remain NOBYPASSRLS. CI must pass the
-PostgreSQL same-worker-ID stale-token test before release.
+PostgreSQL same-worker-ID stale-token test before release. The API role has no
+direct UPDATE or DELETE access to queue tables. Tenant cancellation and failed-task
+requeue are exposed only through SECURITY DEFINER functions that verify the
+transaction-local tenant context and restrict eligible task states. Function
+execution is revoked from PUBLIC and granted only to the tenant API role.
 
 For rollout from a worker version that does not send lease tokens, drain and stop
 all old worker replicas before enabling the new queue migration and starting the
