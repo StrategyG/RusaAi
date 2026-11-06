@@ -300,6 +300,7 @@ class AICodeTaskResponse(BaseModel):
     status: str
     tenant_id: str
     work_branch_prefix: str
+    replayed: bool = False
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
@@ -756,6 +757,7 @@ def create_aicode_task(
     request: AICodeTaskRequest,
     http_request: Request,
     tenant_id: str = Depends(require_task_permission("task:create")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     config = RuntimeConfig.from_env()
     task_id = str(uuid4())
@@ -773,6 +775,25 @@ def create_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    if (
+        not isinstance(idempotency_key, str)
+        or not 1 <= len(idempotency_key) <= 128
+        or any(ord(char) < 33 or ord(char) > 126 for char in idempotency_key)
+    ):
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(
+            status_code=400,
+            detail="A valid Idempotency-Key header (1–128 visible ASCII characters) is required",
+        )
+
+    request_hash = hashlib.sha256(
+        json.dumps(
+            request.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
     work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     payload = {
         "objective": request.objective,
@@ -784,25 +805,37 @@ def create_aicode_task(
         "acceptance_criteria": request.acceptance_criteria,
     }
     try:
-        created = queue.enqueue(
-        task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
-    )
+        submission = queue.enqueue_idempotent(
+            task_id,
+            tenant_id,
+            payload,
+            idempotency_key,
+            request_hash,
+            audit_actor=_api_task_actor(http_request),
+        )
     except Exception:
         logger.exception("Could not enqueue AICode task")
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
+    task_id = submission.task_id
+    work_branch_prefix = f"feature/aicode/{task_id[:12]}"
     audit_api_task(
-        http_request, tenant_id, task_id, "task.create", created, persist=False
+        http_request, tenant_id, task_id, "task.create",
+        not submission.conflict, persist=False,
     )
-    if not created:
-        raise HTTPException(status_code=409, detail="Task identifier conflict")
+    if submission.conflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key was already used with a different request body",
+        )
     return AICodeTaskResponse(
         task_id=task_id,
         status="queued",
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
+        replayed=not submission.created,
     )
-
 
 @app.get("/v1/aicode/tasks/{task_id}")
 def get_aicode_task(
