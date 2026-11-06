@@ -20,6 +20,8 @@ def postgres_runtime():
         pytest.skip("TEST_DATABASE_URL is not configured")
     tenant_id = f"pytest-{uuid.uuid4().hex}"
     queue = PostgresTaskQueue(dsn)
+    # Create the shared memory table before fixture cleanup runs.
+    PostgresMemory(dsn)
     yield dsn, tenant_id, queue
     with queue._connect() as db:
         db.execute("DELETE FROM rusa_agent_jobs WHERE tenant_id=%s", (tenant_id,))
