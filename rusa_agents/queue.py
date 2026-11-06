@@ -41,6 +41,32 @@ class PostgresTaskQueue:
             raise ValueError("tenant_id is required for tenant-scoped database access")
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
+    @staticmethod
+    def _record_policy_event(
+        conn,
+        tenant_id: str,
+        task_id: str,
+        actor: str | None,
+        action: str,
+        decision: str,
+    ) -> None:
+        if actor is None:
+            return
+        if not actor.startswith("api:") or len(actor) > 128:
+            raise ValueError("API audit actor is invalid")
+        if action not in {"task.create", "task.read", "task.retry", "task.cancel"}:
+            raise ValueError("Task policy audit action is invalid")
+        if decision not in {"allow", "deny"}:
+            raise ValueError("Task policy audit decision is invalid")
+        conn.execute(
+            """
+            INSERT INTO public.aicode_task_policy_events
+                (tenant_id, task_id, actor, action, decision)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (tenant_id, task_id, actor, action, decision),
+        )
+
     def initialize(self) -> None:
         with self._connect() as conn:
             if os.getenv("ENVIRONMENT", "development").lower() == "production":
@@ -177,8 +203,16 @@ class PostgresTaskQueue:
             row = conn.execute("SELECT 1").fetchone()
         return row is not None and row[0] == 1
 
-    def enqueue(self, task_id: str, tenant_id: str, payload: dict[str, Any],
-                max_attempts: int = 3, priority: int = 0) -> bool:
+    def enqueue(
+        self,
+        task_id: str,
+        tenant_id: str,
+        payload: dict[str, Any],
+        max_attempts: int = 3,
+        priority: int = 0,
+        *,
+        audit_actor: str | None = None,
+    ) -> bool:
         if not tenant_id or not task_id or max_attempts < 1:
             raise ValueError("tenant_id, task_id, and positive max_attempts are required")
         with self._connect() as conn:
@@ -189,6 +223,10 @@ class PostgresTaskQueue:
                 ON CONFLICT (tenant_id, task_id) DO NOTHING
                 RETURNING id
             """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.create",
+                "allow" if row is not None else "deny",
+            )
         return row is not None
 
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
@@ -322,7 +360,9 @@ class PostgresTaskQueue:
             """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
         return bool(row and row[0])
 
-    def retry(self, task_id: str, tenant_id: str) -> bool:
+    def retry(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> bool:
         """Explicitly requeue a failed or approval-paused task for a tenant."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
@@ -336,9 +376,15 @@ class PostgresTaskQueue:
                   AND status IN ('awaiting_approval', 'failed')
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.retry",
+                "allow" if row is not None else "deny",
+            )
         return row is not None
 
-    def cancel(self, task_id: str, tenant_id: str) -> bool:
+    def cancel(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
@@ -346,9 +392,15 @@ class PostgresTaskQueue:
                     lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
             """, (task_id, tenant_id))
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.cancel",
+                "allow" if cur.rowcount == 1 else "deny",
+            )
         return cur.rowcount == 1
 
-    def get(self, task_id: str, tenant_id: str) -> dict[str, Any] | None:
+    def get(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> dict[str, Any] | None:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
@@ -356,6 +408,10 @@ class PostgresTaskQueue:
                        max_attempts, last_error, created_at, updated_at
                 FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s
             """, (task_id, tenant_id)).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.read",
+                "allow" if row is not None else "deny",
+            )
         if row is None:
             return None
         payload = row[2] if isinstance(row[2], dict) else json.loads(row[2])
