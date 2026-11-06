@@ -7,7 +7,7 @@ Status: IMPLEMENTATION ADVANCED — NOT PRODUCTION CERTIFIED.
 - Async SQLAlchemy persistence for tasks, tenant-scoped memory, agent messages, and audit events.
 - Tenant-scoped idempotent task submission, worker leases, heartbeat renewal, expired-lease recovery, retries, cancellation, approver-controlled resume for supported blockers, and persisted step cursors.
 - OpenAI-compatible planner adapter; no fabricated model completions.
-- Hierarchical supervisor, logical specialist-role routing, persisted message bus, plan validation, branch diff review, reviewer risk assessment, and approver-controlled human override.
+- Hierarchical supervisor, logical specialist-role routing, persisted message bus, plan validation, branch diff review, reviewer risk assessment, approver-controlled human override, and evidence-grounded final synthesis with citation validation.
 - JSON Schema-validated tool registry with GitHub branch-scoped operations.
 - Separate tenant and approver API credentials; recursive credential redaction for tool results, task context, memory, and RAG documents.
 - MCP Streamable HTTP gateway with administrator-defined server/tool allowlists and schema validation.
