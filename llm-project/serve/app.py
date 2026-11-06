@@ -33,9 +33,10 @@ MAX_VALIDATION_ERRORS = 10
 
 
 def load_task_validator(
-    schema_path: Path = TASK_SCHEMA_PATH,
+    schema_path: Path | None = None,
 ) -> Draft202012Validator:
     """Load and validate the repository's Draft 2020-12 task schema."""
+    schema_path = schema_path or TASK_SCHEMA_PATH
     try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
