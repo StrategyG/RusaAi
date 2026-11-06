@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import socket
+import time
 from typing import Any, Coroutine
 
 from .audit import PostgresAuditLog
@@ -13,6 +14,7 @@ from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
+from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, PostgresTaskQueue
@@ -144,6 +146,8 @@ class AICodeRuntime:
         job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
         if job is None:
             return False
+        started = time.perf_counter()
+        outcome = "failed"
         lost_lease = asyncio.Event()
         heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
         try:
@@ -168,12 +172,14 @@ class AICodeRuntime:
                 await self._await_human_review(
                     job, task, "; ".join(record.errors) or "Human intervention required"
                 )
+                outcome = "awaiting_approval"
                 return True
             if record.state != TaskState.SUCCEEDED:
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
                 )
+                outcome = "failed"
                 return True
 
             commit_sha = await self._await_with_lease(
@@ -225,6 +231,7 @@ class AICodeRuntime:
             )
             if not ci_ok:
                 await self._await_human_review(job, task, ci_reason)
+                outcome = "awaiting_approval"
                 return True
 
             await asyncio.to_thread(
@@ -245,8 +252,10 @@ class AICodeRuntime:
             except Exception:
                 logger.exception("Could not clean successful task workspace %s", task.task_id)
             logger.info("AICode task %s completed: %s", task.task_id, pr_url)
+            outcome = "success"
         except Exception as exc:
             logger.exception("AICode task %s failed", job.task_id)
+            outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id,
@@ -258,6 +267,8 @@ class AICodeRuntime:
                 await heartbeat
             except asyncio.CancelledError:
                 pass
+            AICODE_TASKS.labels(outcome).inc()
+            AICODE_TASK_DURATION.labels(outcome).observe(time.perf_counter() - started)
         return True
 
     async def run_forever(
