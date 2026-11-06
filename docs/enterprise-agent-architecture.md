@@ -75,6 +75,7 @@ Approver credentials are separate from tenant API credentials. Merge, deploy, re
 
 ## API surface
 
+- GET /v1/agent/tools — inspect the registered tool inventory and JSON Schemas.
 - POST /v1/agent/tasks — submit an idempotent task.
 - GET /v1/agent/tasks/{task_id} — tenant-scoped task state and evidence.
 - GET /v1/agent/tasks/{task_id}/messages — agent communication trace.
