@@ -47,7 +47,7 @@ def valid_envelope():
 def test_health_endpoint_returns_liveness_contract(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    assert response.json()["status"] == "healthy"
     assert response.json()["inference"] == "not_configured"
 
 
@@ -118,8 +118,11 @@ def test_validate_task_rejects_invalid_uuid_and_date_time(client):
     )
     assert response.status_code == 200
     assert response.json()["valid"] is False
-    assert any("task_id" in error for error in response.json()["errors"])
-    assert any("created_at" in error for error in response.json()["errors"])
+    errors = response.json()["errors"]
+    assert any("task_id" in error and "uuid" in error for error in errors)
+    assert any("created_at" in error and "date-time" in error for error in errors)
+    assert all("not-a-uuid" not in error for error in errors)
+    assert all("not-a-date-time" not in error for error in errors)
 
 
 def test_validate_task_rejects_missing_required_fields(client):
