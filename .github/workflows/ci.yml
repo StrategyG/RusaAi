@@ -27,7 +27,7 @@ jobs:
 
       - name: Lint and syntax check
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           python -m py_compile llm-project/serve/app.py tests/test_app.py
 
       - name: Run tests with pytest
