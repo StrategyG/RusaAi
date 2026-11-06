@@ -118,6 +118,7 @@ class DockerSandbox:
                     or lowered in sensitive_parts
                     or lowered in sensitive_names
                     or (lowered.startswith(".env") and lowered != ".env.example")
+                    or lowered.endswith((".tfstate", ".tfstate.backup"))
                     or candidate.suffix.lower() in sensitive_suffixes
                     or lowered in {"__pycache__", ".pytest_cache", ".ruff_cache"}
                 ):
