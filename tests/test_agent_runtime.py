@@ -151,6 +151,10 @@ def worker_result(role, calls=(), risk=RiskLevel.LOW, blockers=()):
         risk=risk,
         blockers=tuple(blockers),
         criteria_results={"Tests pass": True, "Security review passes": True},
+        criteria_evidence={
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     )
 
 
@@ -268,6 +272,10 @@ def test_worker_contract_rejects_tool_outside_role_allowlist():
         "blockers": [],
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
+        "criteria_evidence": {
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     }))
     worker = AgentWorker(WorkerRole.ANALYST, provider)
     with pytest.raises(ValueError):
@@ -281,6 +289,10 @@ def test_worker_contract_accepts_structured_read_tool():
         "blockers": [],
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
+        "criteria_evidence": {
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     }))
     worker = AgentWorker(WorkerRole.ANALYST, provider)
     result = asyncio.run(worker.run(make_task(), []))
@@ -296,6 +308,7 @@ def test_worker_contract_requires_exact_acceptance_criteria():
         "blockers": [],
         "risk": "low",
         "criteria_results": {"Tests pass": True},
+        "criteria_evidence": {"Tests pass": "tool:read_file:inspected"},
     }))
     worker = AgentWorker(WorkerRole.ANALYST, provider)
     with pytest.raises(ValueError):
@@ -312,6 +325,10 @@ def test_security_worker_is_instructed_to_review_diff_and_ci():
         "blockers": [],
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
+        "criteria_evidence": {
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     }))
     worker = AgentWorker(WorkerRole.SECURITY, provider)
     result = asyncio.run(worker.run(make_task(), []))
@@ -409,6 +426,10 @@ def test_orchestrator_blocks_when_acceptance_criteria_are_not_verified():
         summary="CI passed but acceptance criteria are not verified",
         tool_calls=(ToolCall("get_ci_status"),),
         criteria_results={"Tests pass": True, "Security review passes": False},
+        criteria_evidence={
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:checks failed",
+        },
     )])
     orchestrator = make_orchestrator(FakeTools(["passed"]), {WorkerRole.TESTER: tester})
     record = asyncio.run(orchestrator.run(make_task()))
@@ -853,6 +874,10 @@ def test_security_review_only_mode_sees_prior_diff_and_rejects_tools():
         summary="Fetched security evidence",
         tool_results=(ci_result, diff_result),
         criteria_results={"Tests pass": True, "Security review passes": True},
+        criteria_evidence={
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     )]
     provider = FakeProvider(json.dumps({
         "summary": "The diff contains unsafe dynamic evaluation.",
@@ -876,6 +901,10 @@ def test_security_review_only_mode_rejects_any_tool_call():
         "blockers": [],
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
+        "criteria_evidence": {
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     }))
     worker = AgentWorker(WorkerRole.SECURITY, provider)
     with pytest.raises(ValueError, match="unauthorized tool"):
@@ -985,6 +1014,10 @@ def test_task_checkpoint_omits_raw_file_write_content_and_bounds_file_reads():
             data={"path": "src/generated.py", "content": "y" * 10000},
         ),),
         criteria_results={"Tests pass": True, "Security review passes": True},
+        criteria_evidence={
+            "Tests pass": "tool:get_ci_status:checks passed",
+            "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
+        },
     ))
     checkpoint = record.to_dict()
     call_args = checkpoint["worker_results"][0]["tool_calls"][0]["arguments"]
