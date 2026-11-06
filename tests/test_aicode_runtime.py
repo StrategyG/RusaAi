@@ -827,3 +827,18 @@ def test_worker_shutdown_cancels_orchestration_before_lease_expiry():
             await running
 
     asyncio.run(scenario())
+
+
+
+def test_github_gateway_blocks_common_credential_store_paths():
+    sensitive_paths = (
+        ".docker/config.json",
+        ".config/gcloud/application_default_credentials.json",
+        ".config/gh/hosts.yml",
+        "config/master.key",
+        "keys/id_ecdsa",
+        "terraform/production.tfvars",
+    )
+    for path in sensitive_paths:
+        assert GitHubToolGateway.is_sensitive_path(path), path
+        assert GitHubToolGateway.is_protected_write_path(path), path

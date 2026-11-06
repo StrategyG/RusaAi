@@ -294,7 +294,7 @@ class GitHubRepositoryGateway:
                     "head": head,
                     "base": base,
                     "draft": True,
-                    "maintainer_can_modify": True,
+                    "maintainer_can_modify": False,
                 },
             )
         except GitHubAPIError as exc:
