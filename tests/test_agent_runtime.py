@@ -304,7 +304,13 @@ def test_orchestrator_persists_stage_checkpoints_and_propagates_failures():
         checkpoints.append((record.state, record.stage_index))
 
     task = make_task()
-    orchestrator = make_orchestrator(FakeTools(["passed", "passed"]))
+    tester = ScriptedWorker(WorkerRole.TESTER, [
+        worker_result(WorkerRole.TESTER, [ToolCall("get_ci_status")]),
+    ])
+    orchestrator = make_orchestrator(
+        FakeTools(["passed", "passed"]),
+        {WorkerRole.TESTER: tester},
+    )
     record = asyncio.run(
         orchestrator.run(task, checkpoint_callback=persist)
     )

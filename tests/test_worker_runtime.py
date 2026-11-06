@@ -32,13 +32,13 @@ class FakeQueue:
             "task_id": self.task.task_id,
             "payload": self.task.to_dict(),
             "result": None,
-            "lease_token": "lease-token-for-test",
+            "lease_token": "lease-token-for-test-000000000000000000000000",
         }
 
     def renew_lease(self, tenant_id, task_id, lease_token, lease_seconds):
         assert tenant_id == self.task.tenant_id
         assert task_id == self.task.task_id
-        assert lease_token == "lease-token-for-test"
+        assert lease_token == "lease-token-for-test-000000000000000000000000"
         self.renewals += 1
         return True
 
@@ -85,9 +85,9 @@ def test_worker_renews_lease_during_long_task():
     assert asyncio.run(worker.run_once()) is True
     assert queue.renewals >= 1
     assert queue.checkpoints
-    assert queue.checkpoints[0][3] == "lease-token-for-test"
+    assert queue.checkpoints[0][3] == "lease-token-for-test-000000000000000000000000"
     assert queue.acknowledged == (
-        task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test",
+        task.tenant_id, task.task_id, TaskState.BLOCKED, "lease-token-for-test-000000000000000000000000",
     )
     assert queue.retried is None
 
@@ -106,4 +106,4 @@ def test_worker_does_not_acknowledge_when_checkpoint_lease_is_lost():
     assert asyncio.run(worker.run_once()) is True
     assert queue.acknowledged is None
     assert queue.retried is not None
-    assert queue.retried[3] == "lease-token-for-test"
+    assert queue.retried[3] == "lease-token-for-test-000000000000000000000000"
