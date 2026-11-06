@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -17,7 +17,6 @@ from uuid import uuid4
 
 from .contracts import WorkerRole
 from .metrics import TOOL_EXECUTIONS
-
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
