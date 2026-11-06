@@ -317,20 +317,29 @@ def audit_api_task(
     task_id: str | None,
     action: str,
     allowed: bool,
+    *,
+    persist: bool = True,
 ) -> None:
     principal = getattr(request.state, "principal", None)
     actor = f"api:{principal.subject}" if principal is not None else "unauthenticated"
     config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
-    sink = getattr(request.app.state, "task_policy_audit", None)
+    sink = getattr(request.app.state, "task_policy_audit", None) if persist else None
     try:
         record_task_policy(
             tenant_id, task_id, actor, action, allowed,
-            sink=sink, required=config.environment == "production",
+            sink=sink, required=persist and config.environment == "production",
         )
     except RuntimeError:
         raise HTTPException(
             status_code=503, detail="Task policy audit is unavailable"
         ) from None
+
+
+def _api_task_actor(request: Request) -> str:
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        raise RuntimeError("Task API principal is missing after authentication")
+    return f"api:{principal.subject}"
 
 
 def require_task_permission(permission: str):
@@ -533,12 +542,16 @@ def create_aicode_task(
         "acceptance_criteria": request.acceptance_criteria,
     }
     try:
-        created = queue.enqueue(task_id, tenant_id, payload)
+        created = queue.enqueue(
+        task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
+    )
     except Exception:
         logger.exception("Could not enqueue AICode task")
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(http_request, tenant_id, task_id, "task.create", created)
+    audit_api_task(
+        http_request, tenant_id, task_id, "task.create", created, persist=False
+    )
     if not created:
         raise HTTPException(status_code=409, detail="Task identifier conflict")
     return AICodeTaskResponse(
@@ -560,12 +573,17 @@ def get_aicode_task(
         audit_api_task(http_request, tenant_id, str(task_id), "task.read", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
-        result = queue.get(str(task_id), tenant_id)
+        result = queue.get(
+            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+        )
     except Exception:
         logger.exception("Could not read AICode task")
         audit_api_task(http_request, tenant_id, str(task_id), "task.read", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(http_request, tenant_id, str(task_id), "task.read", result is not None)
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.read", result is not None,
+        persist=False,
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
@@ -587,12 +605,16 @@ def retry_aicode_task(
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
-        retried = queue.retry(str(task_id), tenant_id)
+        retried = queue.retry(
+            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+        )
     except Exception:
         logger.exception("Could not retry AICode task")
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(http_request, tenant_id, str(task_id), "task.retry", retried)
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.retry", retried, persist=False
+    )
     if not retried:
         raise HTTPException(status_code=409, detail="Task is unavailable or not in a retryable state")
     return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
@@ -609,12 +631,16 @@ def cancel_aicode_task(
         audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
-        cancelled = queue.cancel(str(task_id), tenant_id)
+        cancelled = queue.cancel(
+            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+        )
     except Exception:
         logger.exception("Could not cancel AICode task")
         audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
-    audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", cancelled)
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.cancel", cancelled, persist=False
+    )
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
     return {"task_id": str(task_id), "status": "cancelled"}
