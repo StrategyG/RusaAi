@@ -137,6 +137,10 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     backup = services["rusa-agent-db-backup"]
 
     assert backup["profiles"] == ["backup-once"]
+    assert backup["depends_on"] == {
+        "rusa-agent-db": {"condition": "service_healthy"},
+        "rusa-agent-migrate": {"condition": "service_completed_successfully"},
+    }
     assert backup["restart"] == "no"
     assert backup["stop_grace_period"] == "${RUSA_BACKUP_STOP_GRACE_PERIOD:-1h}"
     assert "ports" not in backup
@@ -171,6 +175,10 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
 
     scheduler = services["rusa-agent-db-backup-scheduler"]
     assert scheduler["profiles"] == ["backup"]
+    assert scheduler["depends_on"] == {
+        "rusa-agent-db": {"condition": "service_healthy"},
+        "rusa-agent-migrate": {"condition": "service_completed_successfully"},
+    }
     assert scheduler["environment"]["DATABASE_URL"] == (
         "postgresql://rusa_agent_backup:${RUSA_AGENT_BACKUP_DB_PASSWORD:?Set RUSA_AGENT_BACKUP_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent"
     )
