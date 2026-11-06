@@ -17,7 +17,7 @@ BEGIN
             ADD CONSTRAINT aicode_jobs_idempotency_key_check
             CHECK (
                 idempotency_key IS NULL
-                OR idempotency_key ~ '^[A-Za-z0-9._:-]{1,128}$'
+                OR idempotency_key ~ '^[!-~]{1,128}$'
             );
     END IF;
 
