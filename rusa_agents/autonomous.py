@@ -102,6 +102,15 @@ class AutonomousCodeWorker:
                 )
             last_message = response["message"]
             actions = response.get("actions", [])
+            if response.get("blocked", False):
+                return WorkerResult(
+                    role=self.role,
+                    summary=last_message,
+                    success=False,
+                    artifacts=artifacts,
+                    evidence={**evidence, **response.get("evidence", {})},
+                    blockers=response.get("blockers", []) or [last_message or "Worker reported a blocker"],
+                )
             if len(actions) > self.max_actions_per_step:
                 return WorkerResult(
                     role=self.role, summary="Action batch exceeded configured limit.",
@@ -146,15 +155,6 @@ class AutonomousCodeWorker:
                     transcript.append(
                         f"TOOL {action['name']} (ok={result.ok}): {result.output[:4000]}"
                     )
-            if response.get("blocked", False):
-                return WorkerResult(
-                    role=self.role,
-                    summary=last_message,
-                    success=False,
-                    artifacts=artifacts,
-                    evidence={**evidence, **response.get("evidence", {})},
-                    blockers=response.get("blockers", []) or [last_message or "Worker reported a blocker"],
-                )
             if response["done"]:
                 return WorkerResult(
                     role=self.role, summary=last_message, success=True,
