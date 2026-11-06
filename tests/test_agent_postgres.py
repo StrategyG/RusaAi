@@ -457,6 +457,9 @@ def test_postgres_queue_cancel_revokes_active_lease_and_rejects_stale_worker():
 
     assert queue.cancel(tenant_id, task_id) is True
     assert queue.get(tenant_id, task_id)["status"] == "cancelled"
+    # Repeated cancellation is idempotent and cannot reactivate a terminal task.
+    assert queue.cancel(tenant_id, task_id) is False
+    assert queue.get(tenant_id, task_id)["status"] == "cancelled"
     assert queue.owns_lease(tenant_id, task_id, "cancel-worker", token) is False
     assert queue.heartbeat(
         tenant_id, task_id, "cancel-worker", token, lease_seconds=60
