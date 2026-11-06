@@ -3,68 +3,67 @@
 ## Baseline and safety
 
 - Integration branch: `integration/ci-unification-pr40-pr24-pr33`
-- Baseline: `main` at `67e7cf7c0dbe0459ad126a8da2257ec6d867a9e3`
-- Do not force-push or modify `main` as part of conflict resolution.
-- Do not merge any of the three source PRs until the combined tree passes CI and review.
+- Base: current `main` (at branch creation: `67e7cf7c0dbe0459ad126a8da2257ec6d867a9e3`)
+- Do not force-push, modify `main`, or merge source PR histories.
+- Source PRs are substantially behind current main; port features by contract and test.
 
-## Required merge order
+## Port status
 
-1. PR #40: tenant-scoped idempotency and PostgreSQL worker/lease race regressions.
-2. PR #24: local model artifact manifest verification, Transformers/vLLM runtime, and SSE streaming.
-3. PR #33: deterministic runtime regression evaluation, RAG/MCP, and web workspace.
+| Source | Feature | Status |
+|---|---|---|
+| PR #40 | Tenant-scoped idempotency keys | Ported to current API/queue; migration 006 |
+| PR #40 | Lease fencing, worker crash recovery, cancellation and retry race regressions | Adapted tests added for current `aicode_jobs` |
+| PR #24 | Model manifest schema and SHA-256 verification | Ported |
+| PR #24 | Transformers/vLLM runtime and streaming adapter | Ported; requires optional model dependencies and an externally supplied model |
+| PR #24 | Model benchmark and artifact manifest utilities | Ported |
+| PR #33 | RAG chunking, parsers, embeddings, pgvector store and ingestion service | Ported; migration 007 |
+| PR #33 | Retrieval Recall@K, MRR and NDCG evaluation | Ported |
+| PR #33 | Read-only tenant-authenticated MCP server/client | Ported as an isolated optional service |
+| PR #33 | RAG/MCP tests, image and operations documentation | Ported; dedicated CI job added |
+| PR #33 | Identity/JWT subsystem and web workspace | Deferred; incompatible auth/API model requires separate design |
 
-The PRs are not cleanly stackable: all three change shared files including
-`.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml`,
-`llm-project/serve/app.py`, `pyproject.toml`, `requirements.txt`,
-`.env.example`, `.dockerignore`, and `README.md`. PR #33 additionally
-changes many of the same agent modules and tests as PR #40.
+## CI reconciliation
 
-## CI reconciliation requirements
+The current main workflow is preserved and extended:
+- Python 3.10 compile, Ruff, pytest, and Bandit remain in the core job.
+- Existing API, worker and sandbox image builds, Trivy reporting/blocking,
+  isolated sandbox suite, and production Compose validation remain.
+- Separate Python 3.11 + pgvector job tests optional RAG/MCP modules.
+- The isolated RAG/MCP image is built and included in Trivy checks.
 
-Keep the current main-branch controls; do not replace them with a PR workflow
-that drops security gates. The unified workflow must retain:
+## Migrations
 
-- Ruff, compile, and pytest checks.
-- Bandit static analysis.
-- Production image Trivy reporting and blocking of fixable CRITICAL/HIGH issues.
-- Isolated agent sandbox test execution.
-- Production Docker Compose validation.
-- PostgreSQL 16 service; use pgvector image/extension only for tests that
-  actually require vector operations.
-- Dependency audits for each shipped dependency set (base, agent, RAG/MCP,
-  and optional vLLM) where those manifests exist in the integrated tree.
-- Deterministic runtime benchmark and artifact upload.
-- Build and smoke-test inference API, worker, RAG/MCP, and web workspace images.
+Apply the current core migrations in order:
+1. `001_aicode_core.sql`
+2. `002_aicode_lease_fencing.sql`
+3. `003_aicode_task_results.sql`
+4. `004_aicode_tenant_rls.sql`
+5. `005_aicode_task_policy_audit.sql`
+6. `006_aicode_idempotency.sql`
 
-## Shared-file conflict policy
-
-- `ci.yml`: preserve all main security gates and add feature-specific checks.
-- `app.py` and agent modules: reconcile behavior, not whole-file replacement;
-  retain API compatibility and tenant/authentication boundaries.
-- `Dockerfile` and Compose: preserve non-root execution, isolated sandbox,
-  production secret handling, health checks, and existing production topology.
-- Dependency manifests: combine compatible dependencies and pin/constraint
-  conflicting major versions explicitly; audit the final resolved sets.
-- Migrations: preserve ordering and verify clean-install plus upgrade paths.
-- README and operations docs: describe only behavior verified by tests.
+Apply `007_rag_knowledge_pgvector.sql` only to a PostgreSQL database with
+pgvector enabled and the dedicated restricted knowledge role. Do not confuse
+the RAG migration with the existing core migration 005.
 
 ## Acceptance gates before merge to main
 
-1. All three feature sets are present in the same integration commit.
-2. Full unit/integration suite passes against PostgreSQL 16 and pgvector where
-   required.
-3. All image builds and runtime smoke tests pass.
-4. Security scans pass; no existing main security gate is removed or weakened.
-5. CI is green on the exact integration head SHA.
-6. Human review approves the combined diff.
-7. Only then open/retarget a reviewed PR to main and enable required status
-   checks plus at least one approving review.
+1. All included feature ports are present on one integration head.
+2. Core CI and the RAG/MCP CI job pass on the exact final PR head.
+3. All Docker builds, Trivy checks, and production Compose validation pass.
+4. PostgreSQL tests cover tenant isolation, idempotency replay/conflict,
+   expired-lease recovery, stale-token fencing, cancellation/completion races,
+   and retry limits.
+5. Local model smoke tests pass with an approved artifact on target hardware.
+6. Human review approves the combined diff and confirms branch protection
+   requires the applicable checks and an approving review.
+7. Only then convert PR #49 from draft and merge through normal repository
+   review/branch-protection controls.
 
-## Current limitation
+## Remaining release work
 
-The GitHub connector can create branches and commit file changes, but the
-current source PRs contain overlapping, substantial application changes.
-A workflow-only edit cannot safely resolve those code conflicts. The full PR
-patches must be applied and reconciled against the integration branch, followed
-by actual CI execution. This plan intentionally does not claim that the source
-PR code has already been integrated or tested together.
+- Complete the identity/JWT and web workspace integration separately.
+- Run real-model latency, throughput, cancellation, and soak tests.
+- Apply migrations and test restore/rollback on a staging database.
+- Perform independent tenant-isolation and deployment security review.
+
+This plan records integration status; it is not a production certification.
