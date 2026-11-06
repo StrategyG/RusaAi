@@ -16,6 +16,17 @@ from .contracts import CodingTask
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+BLOCKED_WRITE_NAMES = {
+    ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
+    "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
+    "dockerfile.agent-sandbox", "docker-compose.yml", "makefile",
+    "setup.py", "setup.cfg", "package.json", "package-lock.json",
+    "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
+    "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
+}
+BLOCKED_WRITE_PREFIXES = (
+    ".github/", "migrations/", "schemas/", "llm-project/configs/",
+)
 
 
 class GitWorkspaceManager:
@@ -131,7 +142,12 @@ class GitHubPublisher:
             parts = {part.lower() for part in path.parts}
             if path.is_absolute() or ".." in path.parts or parts.intersection(BLOCKED_PATH_PARTS):
                 continue
-            if path.suffix.lower() in BLOCKED_SUFFIXES or path.name.lower() in {"id_rsa", "id_ed25519"}:
+            if (
+                path.suffix.lower() in BLOCKED_SUFFIXES
+                or path.name.lower() in {"id_rsa", "id_ed25519"}
+                or path.name.lower() in BLOCKED_WRITE_NAMES
+                or any(raw_path.startswith(prefix) for prefix in BLOCKED_WRITE_PREFIXES)
+            ):
                 continue
             if raw_path.startswith(".github/workflows/"):
                 continue
