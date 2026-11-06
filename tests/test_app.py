@@ -285,7 +285,7 @@ def test_chat_completion_uses_tenant_scoped_rag_evidence(client, monkeypatch):
         "What review is required before release?",
         5,
     )]
-    system_context = "\\n".join(
+    system_context = "\n".join(
         message.content for message in backend.messages if message.role == "system"
     )
     assert "untrusted evidence" in system_context
