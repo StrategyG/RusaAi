@@ -1,4 +1,4 @@
-import pytest
+import pytest  # noqa: I001
 
 from rusa_agents.devops.contracts import (
     ContractValidationError,
