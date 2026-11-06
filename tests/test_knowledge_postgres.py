@@ -136,6 +136,13 @@ def test_pgvector_hybrid_retrieval_and_tenant_rls(knowledge_store):
         ).fetchall()
     assert visible == [("tenant-a",)]
 
+    # A missing transaction-local tenant context must fail closed.
+    with psycopg.connect(restricted_dsn) as connection:
+        hidden = connection.execute(
+            "SELECT tenant_id FROM public.rusa_knowledge_documents ORDER BY tenant_id"
+        ).fetchall()
+    assert hidden == []
+
 
 
 def test_knowledge_store_readiness_rejects_bypassrls_database_identity():
