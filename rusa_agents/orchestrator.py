@@ -6,6 +6,7 @@ from typing import Any
 
 from .contracts import AgentPlan, ReviewResult, SynthesisResult, WorkerRole
 from .providers import OpenAICompatibleProvider
+from .security import redact_sensitive_data
 from .tools import ToolRegistry
 
 
@@ -184,7 +185,7 @@ class HierarchicalOrchestrator:
             raise PlanRejected("Reviewer returned an invalid review result") from exc
         if result.risk_level in {"medium", "high", "critical"}:
             result.approved = False
-        return result.model_dump(mode="json")
+        return redact_sensitive_data(result.model_dump(mode="json"))
 
     async def synthesize(
         self,
