@@ -1,0 +1,59 @@
+FROM python:3.12.16-slim-trixie AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /build
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+      "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0"
+COPY requirements-agent-sandbox.txt .
+RUN python -m pip install --no-cache-dir -r requirements-agent-sandbox.txt \
+    && python -m pip install --no-cache-dir "ruff>=0.6,<1" "bandit>=1.7,<2" \
+    && python -m pip install --no-cache-dir --upgrade \
+         "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip check \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
+    && python -m pip uninstall -y pip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
+
+# A fresh Debian stage avoids retaining setuptools 70.3.0 from the official
+# Python image's lower OCI layers. Only the final, patched /usr/local tree moves.
+FROM debian:trixie-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    PYTEST_ADDOPTS="-p no:cacheprovider" HOME=/tmp XDG_CACHE_HOME=/tmp/.cache \
+    RUFF_CACHE_DIR=/tmp/.cache/ruff LD_LIBRARY_PATH=/usr/local/lib
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates libexpat1 libffi8 libssl3t64 libbz2-1.0 liblzma5 libsqlite3-0 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
+    && ldconfig \
+    && useradd --create-home --uid 10001 sandbox
+
+COPY --from=builder /usr/local /usr/local
+
+RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+    && ! grep -q "not found" /tmp/python-ldd \
+    && pytest --version \
+    && ruff --version \
+    && bandit --version \
+    && python - <<'PY'
+from importlib import import_module, metadata
+
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        metadata.version(package)
+    except metadata.PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package} remains in the sandbox runtime")
+
+for module in ("pytest", "bandit"):
+    import_module(module)
+print("Sandbox test tools verified; build tooling is absent.")
+PY
+
+USER sandbox
+ENTRYPOINT []
+CMD ["python", "-m", "pytest", "-q"]

@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rusa
+      POSTGRES_USER: rusa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - rusa-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rusa -d rusa"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [rusa-internal]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      RUSA_API_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_DATABASE_URL: ""
+      RUSA_WORKER_DATABASE_URL: ""
+    ports:
+      - "127.0.0.1:8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
+
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: ["python", "-m", "rusa_agents.worker_main"]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    environment:
+      RUSA_WORKER_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_API_DATABASE_URL: ""
+      RUSA_DATABASE_URL: ""
+      DOCKER_HOST: unix:///run/docker.sock
+      RUSA_METRICS_BIND: 0.0.0.0
+    volumes:
+      - ${RUSA_DOCKER_SOCKET:?Set RUSA_DOCKER_SOCKET to a dedicated rootless Docker socket}:/run/docker.sock
+      - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
+      - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
+    group_add:
+      - "${RUSA_DOCKER_GID:-1001}"
+    expose:
+      - "9100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [rusa-internal, rusa-egress]
+
+volumes:
+  rusa-postgres:
+
+networks:
+  rusa-internal:
+    driver: bridge
+    internal: true
+  rusa-egress:
+    driver: bridge

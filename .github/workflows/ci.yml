@@ -1,46 +1,183 @@
-name: CI/CD Pipeline
+name: RUSA-AI CI
 
 on:
+  # PR branches are validated by pull_request only; avoid duplicate push runs.
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Run Python Tests and Linting
+    name: Test, lint, and security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: rusa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rusa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: development
+      RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
+      RUSA_AUDIT_HMAC_KEY: ci-only-test-audit-key-change-me
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+          python-version: "3.10"
+          cache: pip
+      - name: Install package and development tools
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8 pytest
-
-      - name: Lint and syntax check
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          python -m py_compile llm-project/serve/app.py tests/test_app.py
-
-      - name: Run tests with pytest
-        run: |
-          pytest
+          python -m pip install -e ".[dev]"
+      - name: Compile
+        run: python -m compileall -q rusa_agents llm-project/serve tests
+      - name: Lint
+        run: ruff check rusa_agents tests llm-project/serve
+      - name: Security static analysis
+        run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
+      - name: Tests
+        run: python -m pytest -q
 
   docker-build:
-    name: Verify Docker Image Build
+    name: Build, test, and scan production images
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Build isolated agent sandbox image
+        run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
+      - name: Inspect sandbox Python package origins
+        shell: bash
         run: |
-          docker build -t rusa-ai:latest .
+          set -euo pipefail
+          docker run --rm --entrypoint python "rusa-ai-agent-sandbox:${{ github.sha }}" -c '
+          import importlib.metadata as metadata
+          import sys
+          print("sys.path:", *sys.path, sep="\\n  ")
+          for dist in metadata.distributions():
+              if (dist.metadata.get("Name") or "").lower() == "setuptools":
+                  print("setuptools distribution:", dist.version, "metadata:", dist._path)
+          '
+          docker run --rm --entrypoint sh "rusa-ai-agent-sandbox:${{ github.sha }}" -c \
+            "find /usr/local /usr/lib /usr/share /opt /root -iname '*setuptools*' -print 2>/dev/null || true"
+      - name: Install sandbox launcher
+        run: python -m pip install -e .
+      - name: Run full test suite in isolated sandbox
+        env:
+          RUSA_SANDBOX_IMAGE: rusa-ai-agent-sandbox:${{ github.sha }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from rusa_agents.tool_gateway import DockerSandbox
+
+          sandbox = DockerSandbox(timeout_seconds=900)
+          sandbox.verify_ready(require_image=True)
+          result = sandbox.run(Path.cwd(), "pytest")
+          print(result.output)
+          if not result.ok:
+              raise SystemExit("isolated sandbox test suite failed")
+          PY
+      - name: Build autonomous worker image
+        run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
+        with:
+          version: v0.70.0
+          cache: true
+      - name: Report all CRITICAL and HIGH image vulnerabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          for image in \
+            "rusa-ai:${{ github.sha }}" \
+            "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-worker:${{ github.sha }}"; do
+            echo "::group::Vulnerability report: ${image}"
+            trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
+            echo "::endgroup::"
+          done
+      - name: Diagnose setuptools package location in sandbox image
+        shell: bash
+        run: |
+          set -euo pipefail
+          trivy image --scanners vuln --pkg-types library --format json \
+            --output /tmp/rusa-sandbox-trivy.json \
+            "rusa-ai-agent-sandbox:${{ github.sha }}"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/rusa-sandbox-trivy.json").read_text())
+          found = False
+          for result in report.get("Results", []):
+              for package in result.get("Packages", []):
+                  if package.get("Name", "").lower() == "setuptools":
+                      print(json.dumps({"target": result.get("Target"), "package": package}, indent=2))
+                      found = True
+              for vulnerability in result.get("Vulnerabilities", []):
+                  if vulnerability.get("PkgName", "").lower() == "setuptools":
+                      print(json.dumps({"target": result.get("Target"), "vulnerability": vulnerability}, indent=2))
+                      found = True
+          if not found:
+              print("No setuptools package entry found in the sandbox image JSON report.")
+          PY
+      - name: Block on fixable CRITICAL and HIGH image vulnerabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          for image in \
+            "rusa-ai:${{ github.sha }}" \
+            "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-worker:${{ github.sha }}"; do
+            trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
+              --severity CRITICAL,HIGH --pkg-types os,library "${image}"
+          done
+      - name: Validate production Compose configuration
+        env:
+          RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
+          RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
+          RUSA_MODEL_BASE_URL: https://model.internal/v1
+          RUSA_MODEL_NAME: rusa-ai
+          RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
+          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
+          RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+          RUSA_TASK_TIMEOUT_SECONDS: "3600"
+          RUSA_CI_TIMEOUT_SECONDS: "900"
+          RUSA_CI_POLL_SECONDS: "15"
+          RUSA_MAX_PARALLEL_WORKERS: "4"
+          RUSA_MAX_REPAIR_CYCLES: "2"
+          RUSA_METRICS_PORT: "9100"
+        run: |
+          touch .env
+          docker compose -f docker-compose.production.yml config --quiet
