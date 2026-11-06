@@ -85,3 +85,16 @@ jobs:
           PY
       - name: Build autonomous worker image
         run: docker build --pull -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Validate production Compose configuration
+        env:
+          RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:${{ '0'.repeat(64) }}
+          RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:${{ '0'.repeat(64) }}
+          RUSA_DATABASE_URL: postgresql://runtime:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.production.yml config --quiet
+          rm -f .env
