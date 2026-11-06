@@ -460,10 +460,17 @@ class VLLMBackend:
     device = "cuda"
     supports_batching = True
 
-    def __init__(self, engine: Any, tokenizer: Any, sampling_params_cls: Any):
+    def __init__(
+        self,
+        engine: Any,
+        tokenizer: Any,
+        sampling_params_cls: Any,
+        max_model_len: int,
+    ):
         self.engine = engine
         self.tokenizer = tokenizer
         self.sampling_params_cls = sampling_params_cls
+        self.max_model_len = max_model_len
 
     @classmethod
     def from_pretrained(
@@ -477,6 +484,7 @@ class VLLMBackend:
         gpu_memory_utilization: float,
     ) -> "VLLMBackend":
         try:
+            from transformers import AutoTokenizer
             from vllm import SamplingParams
             from vllm.engine.arg_utils import AsyncEngineArgs
             from vllm.engine.async_llm_engine import AsyncLLMEngine
@@ -499,10 +507,14 @@ class VLLMBackend:
             disable_log_stats=True,
         )
         engine = AsyncLLMEngine.from_engine_args(engine_args)
-        tokenizer = engine.get_tokenizer()
+        tokenizer = AutoTokenizer.from_pretrained(
+            path,
+            local_files_only=True,
+            trust_remote_code=False,
+        )
         if not getattr(tokenizer, "chat_template", None):
             raise ModelArtifactError("The vLLM tokenizer must provide a chat_template")
-        return cls(engine, tokenizer, SamplingParams)
+        return cls(engine, tokenizer, SamplingParams, max_model_len)
 
     async def generate(
         self,
@@ -546,6 +558,10 @@ class VLLMBackend:
             tokenize=True,
             add_generation_prompt=True,
         )
+        if len(prompt_ids) + max_new_tokens > self.max_model_len:
+            raise ValueError(
+                f"Prompt plus requested output exceeds the configured context limit ({self.max_model_len} tokens)"
+            )
         sampling = self.sampling_params_cls(
             max_tokens=max_new_tokens,
             temperature=temperature,
