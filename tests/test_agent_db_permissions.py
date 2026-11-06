@@ -61,6 +61,9 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
 
     queue.configure_api_permissions()
 
+    # Worker startup calls initialize() again; it must preserve the migration grants.
+    queue.initialize()
+
     tenant_id = f"rusa-test-api-role-{uuid4().hex}"
     task_id = uuid4().hex
     idempotency_key = uuid4().hex
