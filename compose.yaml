@@ -1,0 +1,90 @@
+name: rusa-ai
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rusa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rusa"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >
+      umask 077;
+      printf 'appendonly yes\nrequirepass %s\nmaxmemory 256mb\nmaxmemory-policy noeviction\n' "$$REDIS_PASSWORD" > /tmp/redis.conf;
+      exec redis-server /tmp/redis.conf
+    volumes:
+      - redis_data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+  db-migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in .env}
+      RUSA_APP_DB_PASSWORD: ${RUSA_APP_DB_PASSWORD:?Set RUSA_APP_DB_PASSWORD in .env}
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >
+      until pg_isready -h postgres -U postgres -d rusa; do sleep 1; done;
+      psql -h postgres -U postgres -d rusa -f /migrations/bootstrap.sql
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set RUSA_API_KEYS_JSON in .env}
+      RUSA_DATABASE_URL: postgresql://rusa_app:${RUSA_APP_DB_PASSWORD}@postgres:5432/rusa
+      RUSA_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      RUSA_DB_POOL_MAX: ${RUSA_DB_POOL_MAX:-10}
+      RUSA_RATE_LIMIT_MAX_REQUESTS: ${RUSA_RATE_LIMIT_MAX_REQUESTS:-60}
+      RUSA_RATE_LIMIT_WINDOW_SECONDS: ${RUSA_RATE_LIMIT_WINDOW_SECONDS:-60}
+      RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [private]
+networks:
+  private:
+    internal: true
+volumes:
+  postgres_data:
+  redis_data:

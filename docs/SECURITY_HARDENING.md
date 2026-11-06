@@ -60,3 +60,20 @@ This repository does not currently expose an MCP server. MCP authentication must
 ## Tests
 
 CI provisions PostgreSQL 16 and Redis 7, applies the RLS migration as an administrator, then runs authentication-negative, RBAC, A2A-schema, request-size, rate-limit, tenant-isolation and SQL-injection tests. PostgreSQL integration tests are skipped locally without RUSA_DATABASE_URL; CI always sets it.
+
+
+## Docker Compose deployment
+
+The Compose stack starts PostgreSQL, Redis, a one-shot database migration job and the API. PostgreSQL and Redis have no published host ports; the API is bound to host loopback only. The app container is read-only, non-root, drops Linux capabilities and uses an internal network.
+
+1. Copy .env.example to .env and replace all password placeholders with distinct random hexadecimal values. Do not commit .env.
+2. Generate an API key using a cryptographically secure generator, calculate its SHA-256 digest, and configure RUSA_API_KEYS_JSON with that digest plus subject, tenant_id and roles. Give the raw key only to its intended client through a secret manager.
+3. Validate the Compose configuration with docker compose config -q.
+4. Start the stack with docker compose up -d --build.
+5. Check docker compose ps and GET http://127.0.0.1:8000/health.
+
+The database migration service runs the migration as the database administrator, then assigns the application role's password from the local environment. The API itself connects only as rusa_app. Persistent data lives in named PostgreSQL and Redis volumes.
+
+The network is internal and the API port is loopback-bound. Put a separately managed HTTPS reverse proxy in front if remote access is required. The current IP rate limiter uses the ASGI peer address and deliberately does not trust arbitrary X-Forwarded-For headers; behind a reverse proxy, configure a trusted-proxy strategy before exposing the service to multiple clients.
+
+The Compose stack can bring up the security/API foundation, but the API readiness endpoint remains HTTP 503 until real model inference is integrated. Do not treat a healthy container or /health response as proof that chat inference is production-ready.

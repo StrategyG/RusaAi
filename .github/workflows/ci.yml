@@ -69,6 +69,13 @@ jobs:
           pip-audit -r requirements.txt --strict
           pip-audit -r requirements-dev.txt --strict
           pip-audit -r requirements-model.txt --strict
+      - name: Validate production Compose configuration
+        env:
+          POSTGRES_ADMIN_PASSWORD: ci-postgres-admin
+          RUSA_APP_DB_PASSWORD: ci-app-db
+          REDIS_PASSWORD: ci-redis
+          RUSA_API_KEYS_JSON: '{}'
+        run: docker compose config -q
       - name: Run regression and security tests
         run: pytest -q --strict-config --strict-markers
 
