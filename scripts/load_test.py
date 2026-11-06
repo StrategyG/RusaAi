@@ -50,6 +50,8 @@ async def run_request(
             "max_tokens": max_tokens,
             "stream": streaming,
         }
+        if streaming:
+            payload["stream_options"] = {"include_usage": True}
         try:
             if streaming:
                 async with client.stream(
