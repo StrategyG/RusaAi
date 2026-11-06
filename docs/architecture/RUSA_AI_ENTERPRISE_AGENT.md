@@ -154,9 +154,19 @@ PostgreSQL is the source of truth for task and episodic memory. Queue and memory
 
 Every retrieval is filtered by tenant_id and namespace. Memory stores outcome summaries, not secrets or raw credentials. Expired records can be purged; tenant deletion is supported. Production deployments must enable encrypted database volumes, backups, access logging, and a documented deletion/retention policy.
 
-The initial implementation uses PostgreSQL full-text search. Vector retrieval/pgvector is an optional future adapter and must pass tenant-isolation and retrieval-quality tests before activation.
+The knowledge plane now provides PostgreSQL/pgvector semantic retrieval, PostgreSQL full-text search, weighted hybrid reciprocal-rank fusion, source provenance, and a tenant-scoped MCP interface. The migration fixes vector dimensions at 1,536. RAG activation still requires a configured embedding provider, migration verification, tenant-isolation tests, and domain-specific retrieval evaluation.
 
-## 7. Tools and permissions
+## 7. RAG and MCP knowledge plane
+
+The knowledge service is a separate data plane used by both the agent memory adapter and MCP hosts. Local document ingestion performs bounded parsing, normalization, overlap-aware chunking, embedding generation, and transactional writes to PostgreSQL/pgvector. Retrieval combines vector cosine candidates and PostgreSQL full-text candidates using weighted reciprocal-rank fusion. Every result includes a document ID and source URI for grounding.
+
+The MCP server uses the official MCP Python SDK v2 and Streamable HTTP. It exposes only read-only search, document-read, and collection-list tools. A bearer token is hashed and mapped to a tenant ID before the request reaches a tool handler. The tenant ID is placed in request-local context and applied transaction-locally to PostgreSQL RLS. The MCP caller cannot choose or override its tenant ID.
+
+The worker can consume RAG evidence together with episodic memory through CompositeMemoryReader. When configured with an MCP endpoint, the worker's composite tool gateway routes only search_knowledge, get_document, and list_collections through the tenant-specific MCP client. These read-only operations are policy-allowlisted as knowledge_read. Document writes remain an operator-only CLI workflow; MCP does not expose SQL, filesystem, shell, or arbitrary network operations.
+
+See [RAG and MCP Enterprise Architecture](RAG_MCP_ENTERPRISE.md) for the data model, migration, transport, environment configuration, threat controls, and evaluation gates.
+
+## 8. Tools and permissions
 
 | Tool | Capability | Boundary |
 |---|---|---|
@@ -166,7 +176,8 @@ The initial implementation uses PostgreSQL full-text search. Vector retrieval/pg
 | GitHub CI | Read branch check-runs | Evidence only; never mark checks successful |
 | Model provider | JSON completion | HTTPS endpoint, bounded timeout, no redirects |
 | PostgreSQL queue | Enqueue/claim/ack/retry | Tenant-scoped API access; worker lease and idempotency |
-| Memory | Search/store summaries | Tenant-scoped, TTL-limited, RLS-enabled |
+| Memory | Search/store summaries and RAG context | Tenant-scoped, TTL-limited, RLS-enabled |
+| MCP knowledge | Search documents, read a document, list collections | Streamable HTTP, bearer token, per-tenant RLS, fixed read-only allowlist |
 | Audit | HMAC-chained event record | No raw secrets or file contents |
 
 No arbitrary shell, unrestricted network, local filesystem access, secret retrieval, force push, merge, deployment, release, or permission-management tool is registered. GitHub Actions is the isolated execution environment for tests and build validation. The agent does not execute repository code on the worker host.
