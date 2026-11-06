@@ -343,7 +343,6 @@ class GitHubToolGateway:
             ".travis.yml",
             "appveyor.yml",
             "bitbucket-pipelines.yml",
-            "jenkinsfile",
         }
     )
     SENSITIVE_NAMES = frozenset(
