@@ -22,27 +22,28 @@ Apply the migration as a schema owner/admin, not as the application runtime user
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_core.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 ```
 
-The migrations create `aicode_jobs`, `aicode_memory`, `aicode_audit_events`, `aicode_rate_limits`, audit immutability triggers, lease-fencing tokens, durable task-result storage, and the restricted `rusa_runtime` role. Apply all three migrations in order; the API and worker fail closed if the required lease-token or result columns are missing.
+The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, and forced row-level security (RLS). Apply migrations 001, 002, 003 task-results, and 004 tenant-RLS in that order. The API and worker fail closed if the expected columns, RLS flags, or required policies are missing.
 
-Keep `rusa_runtime` as a NOLOGIN privilege group. Create a separate login role and grant membership, for example:
+Create two independent login roles using a secret manager for passwords:
 
 ```sql
-CREATE ROLE rusa_runtime_login LOGIN PASSWORD 'managed-secret' IN ROLE rusa_runtime;
-GRANT CONNECT ON DATABASE rusa TO rusa_runtime;
+CREATE ROLE rusa_api_login LOGIN PASSWORD 'api-managed-secret' IN ROLE rusa_api_runtime;
+CREATE ROLE rusa_worker_login LOGIN PASSWORD 'worker-managed-secret' IN ROLE rusa_worker_runtime;
+GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login;
 ```
 
-Use `rusa_runtime_login` in `RUSA_DATABASE_URL`, with `sslmode=verify-full` (or an approved TLS mode). Never use the schema owner or a PostgreSQL superuser in API/worker containers.
+Use `rusa_api_login` only in `RUSA_API_DATABASE_URL` and `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, both with `sslmode=verify-full`. The API container must not receive the worker DSN or worker-only secrets; the worker container must not receive the API DSN or tenant API keys. Never use the schema owner or a PostgreSQL superuser in application containers.
 
 Runtime permissions:
-- Queue: SELECT, INSERT, UPDATE, sequence usage.
-- Memory: SELECT, INSERT, UPDATE.
-- Rate limits: SELECT, INSERT, UPDATE, DELETE.
-- Audit: SELECT, INSERT only.
-- No schema ownership, DDL, UPDATE, DELETE, or TRUNCATE on the audit table.
+- API role: tenant-scoped SELECT, INSERT, UPDATE on jobs; tenant-scoped rate-limit maintenance.
+- Worker role: cross-tenant SELECT/UPDATE on the durable queue; tenant-scoped memory; append/read audit ledger.
+- Neither role can perform DDL, grant privileges, or mutate existing audit records.
+- The API role cannot read memory or audit tables.
 
-Verify the runtime role can connect and audit UPDATE, DELETE, and TRUNCATE operations are rejected.
+The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_rls.py`; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
@@ -118,7 +119,7 @@ API settings:
 ```dotenv
 ENVIRONMENT=production
 RUSA_AICODE_ENABLED=false  # fail-closed; set true only after all release gates pass
-RUSA_DATABASE_URL=postgresql://rusa_runtime_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
+RUSA_API_DATABASE_URL=postgresql://rusa_api_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
 RUSA_API_KEYS={"LONG_RANDOM_API_KEY_AT_LEAST_32_BYTES":"tenant-acme"}
 RUSA_METRICS_API_KEY=LONG_RANDOM_OPERATOR_ONLY_KEY_AT_LEAST_32_BYTES
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
@@ -132,6 +133,7 @@ RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE=120
 Worker settings:
 
 ```dotenv
+RUSA_WORKER_DATABASE_URL=postgresql://rusa_worker_login:REDACTED@DB_HOST:5432/rusa?sslmode=verify-full
 RUSA_AUDIT_HMAC_KEY=AT_LEAST_32_RANDOM_UTF8_BYTES
 RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
@@ -156,7 +158,7 @@ API keys and the audit HMAC key must each contain at least 32 UTF-8 bytes. Use a
 
 The included Compose file is a development/single-host example. It uses a local PostgreSQL service and is not a complete HA production topology. For production:
 1. Replace the Compose PostgreSQL service with managed PostgreSQL.
-2. Use the login role `rusa_runtime_login`, which is a member of `rusa_runtime`, not the migration owner.
+2. Use separate `rusa_api_login` and `rusa_worker_login` database users; never reuse the migration owner or a shared runtime login.
 3. Mount persistent mirror/workspace volumes at the configured paths.
 4. Mount only the dedicated rootless Docker socket into the worker.
 5. Confirm the rootless daemon sees the same workspace host paths.
@@ -182,7 +184,7 @@ docker compose -f docker-compose.production.yml ps
 docker compose -f docker-compose.production.yml logs --tail=200 api worker
 ```
 
-The production Compose file has no local PostgreSQL service. It uses the managed TLS DSN from `.env`, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
+The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 
 API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 
