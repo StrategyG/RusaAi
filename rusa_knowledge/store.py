@@ -34,6 +34,7 @@ class PostgresKnowledgeStore:
         dimensions: int = 1536,
         min_pool_size: int = 1,
         max_pool_size: int = 10,
+        db_role: str | None = None,
     ) -> None:
         if not dsn:
             raise ValueError("knowledge database DSN is required")
@@ -41,6 +42,9 @@ class PostgresKnowledgeStore:
             raise ValueError("the current migration fixes embedding dimensions at 1536")
         if not 1 <= min_pool_size <= max_pool_size <= 50:
             raise ValueError("database pool limits are invalid")
+        if db_role is not None and not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", db_role):
+            raise ValueError("knowledge database role name is invalid")
+        self.db_role = db_role
         try:
             from psycopg_pool import ConnectionPool
         except ImportError as exc:
@@ -61,12 +65,17 @@ class PostgresKnowledgeStore:
         if not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection):
             raise ValueError("collection is invalid")
 
-    @staticmethod
-    def _set_tenant(connection: Any, tenant_id: str) -> None:
+    def _set_db_role(self, connection: Any) -> None:
+        if self.db_role:
+            connection.execute("SELECT set_config('role', %s, true)", (self.db_role,))
+
+    def _set_tenant(self, connection: Any, tenant_id: str) -> None:
+        self._set_db_role(connection)
         connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     def check_ready(self) -> bool:
         with self._pool.connection() as connection:
+            self._set_db_role(connection)
             row = connection.execute(
                 """
                 SELECT
