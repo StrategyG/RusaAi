@@ -138,7 +138,7 @@ jobs:
           exit 1
       - name: Run inference API container
         run: |
-          docker run -d --name rusa-ai-ci \
+          docker run -d --restart unless-stopped --name rusa-ai-ci \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
             rusa-ai:${{ github.sha }}
@@ -150,6 +150,19 @@ jobs:
             fi
             sleep 2
           done
+          docker logs rusa-ai-ci
+          exit 1
+      - name: Verify inference process crash recovery
+        run: |
+          docker exec rusa-ai-ci sh -c 'kill -9 1' || true
+          for attempt in $(seq 1 30); do
+            restart_count="$(docker inspect --format '{{.RestartCount}}' rusa-ai-ci)"
+            if [ "$restart_count" -ge 1 ] && curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker inspect rusa-ai-ci
           docker logs rusa-ai-ci
           exit 1
       - name: Run web workspace container
