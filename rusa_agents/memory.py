@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
+from .security import redact_sensitive_data
 from .storage import Database, MemoryRow
 
 
