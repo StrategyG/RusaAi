@@ -44,6 +44,8 @@ class TaskCreate(BaseModel):
             "github.read_file",
             "github.create_branch",
             "github.write_file",
+            "github.compare_branches",
+            "agent.review_diff",
             "github.get_ci_status",
             "github.create_pull_request",
             "rag.search",
