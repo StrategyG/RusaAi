@@ -98,7 +98,7 @@ async def test_tool_failure_is_not_silently_accepted():
 
     registry = ToolRegistry()
     registry.register("benchmark.flaky", broken_tool)
-    with pytest.raises(ToolError):
+    with pytest.raises(RuntimeError, match="simulated upstream timeout"):
         await registry.execute("benchmark.flaky", {})
 
 
