@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint, test, and dependency audit
+    name: Lint, test, and audit dependencies
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     services:
@@ -75,7 +75,7 @@ jobs:
         run: pip-audit -r requirements-dev.txt
 
   container-security:
-    name: Build, scan, and inventory containers
+    name: Build and smoke-test containers
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: quality

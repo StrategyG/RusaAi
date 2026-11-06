@@ -164,7 +164,7 @@ class AICodeOrchestrator:
         self,
         record: TaskRecord,
         role: WorkerRole,
-        checkpoint_callback: CheckpointCallback | None,
+        checkpoint_callback: CheckpointCallback | None = None,
     ) -> WorkerResult:
         result = await asyncio.wait_for(
             self.workers[role].run(record.task, list(record.worker_results)),
