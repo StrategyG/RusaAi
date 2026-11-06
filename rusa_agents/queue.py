@@ -79,6 +79,18 @@ class PostgresTaskQueue:
         payload: dict[str, Any],
         idempotency_key: str,
     ) -> dict[str, Any]:
+        if not tenant_id or len(tenant_id) > 128:
+            raise ValueError("tenant_id must contain 1 to 128 characters")
+        if not idempotency_key or not 8 <= len(idempotency_key) <= 128:
+            raise ValueError("idempotency_key must contain 8 to 128 characters")
+        if not isinstance(payload, dict):
+            raise ValueError("task payload must be a JSON object")
+        try:
+            from uuid import UUID
+            UUID(task_id)
+        except ValueError as exc:
+            raise ValueError("task_id must be a UUID") from exc
+
         with self._connect() as db:
             row = db.execute(
                 """
@@ -96,6 +108,10 @@ class PostgresTaskQueue:
         return {"task_id": str(row["task_id"]), "state": row["state"]}
 
     def heartbeat(self, tenant_id: str, task_id: str, worker_id: str, lease_seconds: int = 1800) -> bool:
+        if not worker_id or len(worker_id) > 128:
+            raise ValueError("worker_id must contain 1 to 128 characters")
+        if not 30 <= lease_seconds <= 86400:
+            raise ValueError("lease_seconds must be between 30 and 86400")
         with self._connect() as db:
             cursor = db.execute(
                 """
@@ -103,14 +119,32 @@ class PostgresTaskQueue:
                 SET lease_until=now() + make_interval(secs => %s), updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                     AND state='running' AND lease_owner=%s
+                    AND lease_until > now()
                 """,
                 (lease_seconds, tenant_id, task_id, worker_id),
             )
         return cursor.rowcount == 1
 
     def claim(self, worker_id: str, lease_seconds: int = 1800) -> dict[str, Any] | None:
+        if not worker_id or len(worker_id) > 128:
+            raise ValueError("worker_id must contain 1 to 128 characters")
+        if not 30 <= lease_seconds <= 86400:
+            raise ValueError("lease_seconds must be between 30 and 86400")
         with self._connect() as db:
             with db.transaction():
+                db.execute(
+                    """
+                    UPDATE rusa_agent_jobs
+                    SET state='failed',
+                        lease_owner=NULL,
+                        lease_until=NULL,
+                        last_error=COALESCE(last_error, 'worker lease expired after maximum attempts'),
+                        updated_at=now()
+                    WHERE state='running'
+                        AND lease_until < now()
+                        AND attempts >= max_attempts
+                    """
+                )
                 row = db.execute(
                     """
                     SELECT task_id, tenant_id, payload, attempts, max_attempts
@@ -157,6 +191,7 @@ class PostgresTaskQueue:
                     lease_until=NULL, last_error=NULL, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                     AND state='running' AND lease_owner=%s
+                    AND lease_until > now()
                 """,
                 (json.dumps(result, ensure_ascii=False), tenant_id, task_id, worker_id),
             )
@@ -182,6 +217,7 @@ class PostgresTaskQueue:
                     last_error=%s, updated_at=now()
                 WHERE tenant_id=%s AND task_id=%s::uuid
                     AND state='running' AND lease_owner=%s
+                    AND lease_until > now()
                 """,
                 (retryable, error[:4000], tenant_id, task_id, worker_id),
             )

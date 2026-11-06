@@ -307,8 +307,23 @@ async def lifespan(application: FastAPI):
             application.state.backend_error = "Model initialization failed"
             logger.exception("Local inference model initialization failed")
 
-    database_url = os.getenv("DATABASE_URL", "")
-    application.state.task_queue = PostgresTaskQueue(database_url) if database_url else None
+    application.state.task_queue = None
+    application.state.task_queue_error = None
+    agent_enabled = os.getenv("RUSA_AGENT_ENABLED", "false").lower() == "true"
+    if agent_enabled:
+        database_url = os.getenv("DATABASE_URL", "")
+        tenant_id = os.getenv("RUSA_TENANT_ID", "default")
+        if not database_url:
+            application.state.task_queue_error = "DATABASE_URL is not configured"
+        elif not tenant_id or len(tenant_id) > 128:
+            application.state.task_queue_error = "RUSA_TENANT_ID is invalid"
+        else:
+            try:
+                application.state.task_queue = PostgresTaskQueue(database_url)
+            except Exception as exc:
+                application.state.task_queue_error = type(exc).__name__
+                logger.exception("Agent queue initialization failed")
+
     yield
 
 
@@ -389,10 +404,16 @@ def readiness_check(request: Request):
     except HTTPException:
         schema_loaded = False
 
+    agent_enabled = os.getenv("RUSA_AGENT_ENABLED", "false").lower() == "true"
+    agent_queue_loaded = (
+        not agent_enabled
+        or getattr(request.app.state, "task_queue", None) is not None
+    )
     checks = {
         "model_loaded": model_loaded,
         "authentication_configured": authentication_is_configured(),
         "task_schema_loaded": schema_loaded,
+        "agent_queue_loaded": agent_queue_loaded,
     }
     ready = all(checks.values())
     return JSONResponse(
@@ -476,6 +497,8 @@ def submit_agent_task(
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=128),
 ):
     """Validate and enqueue one idempotent coding-agent task."""
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Agent task queue is not configured")
@@ -497,14 +520,40 @@ def submit_agent_task(
             "base_branch": task["base_branch"],
             "work_branch": task["work_branch"],
         },
-        "tenant_id": "default",
+        "tenant_id": os.getenv("RUSA_TENANT_ID", "default"),
     }
+    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
     try:
-        result = queue.enqueue("default", envelope["task_id"], payload, idempotency_key)
+        result = queue.enqueue(tenant_id, envelope["task_id"], payload, idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Agent task enqueue failed request_id=%s", http_request.state.request_id)
         raise HTTPException(status_code=503, detail="Agent task queue is temporarily unavailable") from exc
     return {"task_id": result["task_id"], "state": result["state"]}
+
+
+@app.get("/v1/agent/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
+def get_agent_task(task_id: uuid.UUID, http_request: Request):
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
+    record = queue.get(tenant_id, str(task_id))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Agent task was not found")
+    return {
+        "task_id": record["task_id"],
+        "state": record["state"],
+        "attempts": record["attempts"],
+        "max_attempts": record["max_attempts"],
+        "result": record["result"],
+        "created_at": record["created_at"],
+        "updated_at": record["updated_at"],
+    }
+
 
 @app.post(
     "/v1/validate-task",

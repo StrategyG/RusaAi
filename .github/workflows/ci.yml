@@ -19,6 +19,22 @@ jobs:
   test:
     name: Lint, test, and audit dependencies
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rusa
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: rusa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rusa -d rusa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://rusa:ci-postgres-password@localhost:5432/rusa_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

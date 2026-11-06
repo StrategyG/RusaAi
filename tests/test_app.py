@@ -37,6 +37,9 @@ class FakeBackend:
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "false")
+    monkeypatch.setenv("RUSA_TENANT_ID", "default")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-ai-v1")
     monkeypatch.delenv("TASK_ENVELOPE_SCHEMA_PATH", raising=False)
@@ -227,7 +230,8 @@ def test_a2a_validation_requires_api_key(client):
     assert response.status_code == 401
 
 
-def test_agent_task_submission_is_authenticated_and_idempotent(client):
+def test_agent_task_submission_is_authenticated_and_idempotent(client, monkeypatch):
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
     class FakeQueue:
         def __init__(self):
             self.calls = []
@@ -235,6 +239,17 @@ def test_agent_task_submission_is_authenticated_and_idempotent(client):
         def enqueue(self, tenant_id, task_id, payload, idempotency_key):
             self.calls.append((tenant_id, task_id, payload, idempotency_key))
             return {"task_id": task_id, "state": "queued"}
+
+        def get(self, tenant_id, task_id):
+            return {
+                "task_id": task_id,
+                "state": "succeeded",
+                "attempts": 1,
+                "max_attempts": 3,
+                "result": {"state": "succeeded"},
+                "created_at": "2026-11-06T00:00:00Z",
+                "updated_at": "2026-11-06T00:01:00Z",
+            }
 
     queue = FakeQueue()
     app.state.task_queue = queue
@@ -259,8 +274,9 @@ def test_agent_task_submission_requires_authentication(client):
     assert response.status_code == 401
 
 
-def test_agent_task_submission_fails_closed_without_queue(client):
+def test_agent_task_submission_fails_closed_without_queue(client, monkeypatch):
     app.state.task_queue = None
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
     response = client.post(
         "/v1/agent/tasks",
         headers={**auth_headers(), "Idempotency-Key": "task-key-0003"},
@@ -269,7 +285,8 @@ def test_agent_task_submission_fails_closed_without_queue(client):
     assert response.status_code == 503
 
 
-def test_agent_task_submission_rejects_non_create_envelope(client):
+def test_agent_task_submission_rejects_non_create_envelope(client, monkeypatch):
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
     class FakeQueue:
         def enqueue(self, *args):
             raise AssertionError("queue must not receive non-create events")
@@ -283,3 +300,43 @@ def test_agent_task_submission_rejects_non_create_envelope(client):
         json={"envelope": envelope},
     )
     assert response.status_code == 422
+
+
+
+def test_agent_task_status_is_authenticated_and_tenant_scoped(client, monkeypatch):
+    class FakeQueue:
+        def get(self, tenant_id, task_id):
+            assert tenant_id == "tenant-one"
+            return {
+                "task_id": task_id,
+                "state": "succeeded",
+                "attempts": 1,
+                "max_attempts": 3,
+                "result": {"state": "succeeded"},
+                "created_at": "2026-11-06T00:00:00Z",
+                "updated_at": "2026-11-06T00:01:00Z",
+            }
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-one")
+    response = client.get(
+        f"/v1/agent/tasks/{uuid.uuid4()}",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "succeeded"
+
+
+def test_agent_task_status_returns_404_for_unknown_task(client, monkeypatch):
+    class FakeQueue:
+        def get(self, tenant_id, task_id):
+            return None
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.get(
+        f"/v1/agent/tasks/{uuid.uuid4()}",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 404

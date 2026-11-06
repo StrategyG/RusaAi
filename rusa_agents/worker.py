@@ -26,6 +26,8 @@ async def run_worker() -> None:
         loop.add_signal_handler(sig, stopping.set)
 
     lease_seconds = int(os.getenv("RUSA_WORKER_LEASE_SECONDS", "1800"))
+    if not 30 <= lease_seconds <= 86400:
+        raise RuntimeError("RUSA_WORKER_LEASE_SECONDS must be between 30 and 86400")
 
     async def run_with_lease(task, tenant_id, task_id):
         async def renew_lease():
@@ -78,15 +80,17 @@ async def run_worker() -> None:
                 ],
             }
             if record.state.value == "succeeded":
-                await asyncio.to_thread(
+                completed = await asyncio.to_thread(
                     queue.complete,
                     tenant_id,
                     task_id,
                     worker_id,
                     result,
                 )
+                if not completed:
+                    raise RuntimeError("worker lease expired before task completion was committed")
             else:
-                await asyncio.to_thread(
+                failed = await asyncio.to_thread(
                     queue.fail,
                     tenant_id,
                     task_id,
@@ -94,6 +98,8 @@ async def run_worker() -> None:
                     "; ".join(record.errors) or f"task ended in {record.state.value}",
                     record.state.value == "failed",
                 )
+                if not failed:
+                    raise RuntimeError("worker lease expired before task failure was committed")
         except Exception as exc:
             await asyncio.to_thread(
                 queue.fail,

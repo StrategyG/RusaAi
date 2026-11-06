@@ -27,7 +27,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 | Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Pending current branch CI |
 | Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
-| Queue reliability | Lease heartbeat, cancellation, dead-letter queue, replay controls, queue-age alerts | Open |
+| Queue reliability | Lease heartbeat and current-owner completion/failure guards; cancellation, dead-letter inspection, replay controls, queue-age alerts | Partially implemented; operational gates open |
 | Tenant security | Authenticated tenant identity mapping; cross-tenant authorization tests for API, queue, memory, audit | Open; current API task intake is single-tenant default |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
@@ -47,3 +47,8 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 - Keep task worker egress restricted to the approved model provider and GitHub API.
 - Do not treat SQLite memory or local JSONL audit as multi-replica production storage.
 - Do not mark the complete RUSA-AI product production-ready until all applicable release gates have objective evidence and owner approval.
+
+
+## Queue reliability implementation
+
+The worker renews active PostgreSQL leases, and queue completion/failure writes require a current unexpired lease. Expired final-attempt jobs are terminalized rather than stranded. PostgreSQL integration tests and operational validation remain required. Cancellation, dead-letter inspection, operator replay, queue-age monitoring, and backup/restore remain open.

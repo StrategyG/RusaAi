@@ -81,7 +81,7 @@ Missing, pending, stale, or failed checks must not be interpreted as success. A 
 
 PostgreSQL is the multi-worker queue of record. Use SKIP LOCKED claims, unique (tenant_id, idempotency_key), lease ownership, bounded attempts, and exponential retry delay. Queue operations must be idempotent. Workers must complete/fail only jobs for which they still own the lease.
 
-For production, add lease heartbeats for long-running tasks, dead-letter inspection, queue-age metrics, cancellation, and operator replay controls before enabling sustained workloads.
+The worker renews leases during long-running tasks; queue completion/failure operations must require an unexpired lease. Dead-letter inspection, queue-age metrics, cancellation, and operator replay controls remain release gates before sustained workloads.
 
 ## 8. Memory and audit
 
