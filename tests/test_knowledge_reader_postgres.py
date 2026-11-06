@@ -22,23 +22,43 @@ def reader_database_identity():
     migration_008 = open(
         "migrations/008_rag_read_only_reader.sql", encoding="utf-8"
     ).read()
-    login = "rusa_reader_test_" + uuid.uuid4().hex[:12]
-    password = secrets.token_urlsafe(32)
+    reader_login = "rusa_reader_test_" + uuid.uuid4().hex[:12]
+    worker_login = "rusa_worker_reader_test_" + uuid.uuid4().hex[:12]
+    reader_password = secrets.token_urlsafe(32)
+    worker_password = secrets.token_urlsafe(32)
     tenant = "tenant-reader-" + uuid.uuid4().hex[:10]
     other_tenant = "tenant-other-" + uuid.uuid4().hex[:10]
 
     with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(
+            """
+            DO $rusa$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_roles WHERE rolname = 'rusa_worker_runtime'
+                ) THEN
+                    CREATE ROLE rusa_worker_runtime NOLOGIN;
+                END IF;
+            END;
+            $rusa$;
+            """
+        )
         admin.execute(migration_007)
         admin.execute(migration_008)
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOBYPASSRLS PASSWORD {}").format(
-                sql.Identifier(login), sql.Literal(password)
+                sql.Identifier(reader_login), sql.Literal(reader_password)
             )
         )
         admin.execute(
             sql.SQL("GRANT rusa_knowledge_reader TO {} WITH INHERIT FALSE").format(
-                sql.Identifier(login)
+                sql.Identifier(reader_login)
             )
+        )
+        admin.execute(
+            sql.SQL(
+                "CREATE ROLE {} LOGIN PASSWORD {} IN ROLE rusa_worker_runtime"
+            ).format(sql.Identifier(worker_login), sql.Literal(worker_password))
         )
         admin.execute(
             """
@@ -53,11 +73,14 @@ def reader_database_identity():
         )
 
     options = conninfo_to_dict(DSN)
-    options["user"] = login
-    options["password"] = password
-    restricted_dsn = make_conninfo(**options)
+    options["user"] = reader_login
+    options["password"] = reader_password
+    reader_dsn = make_conninfo(**options)
+    options["user"] = worker_login
+    options["password"] = worker_password
+    worker_dsn = make_conninfo(**options)
 
-    yield restricted_dsn, tenant, other_tenant, login
+    yield reader_dsn, worker_dsn, tenant, other_tenant, reader_login, worker_login
 
     with psycopg.connect(DSN, autocommit=True) as admin:
         admin.execute(
@@ -65,27 +88,38 @@ def reader_database_identity():
             (tenant, other_tenant),
         )
         admin.execute(
-            sql.SQL("REVOKE rusa_knowledge_reader FROM {}").format(sql.Identifier(login))
+            sql.SQL("REVOKE rusa_knowledge_reader FROM {}").format(
+                sql.Identifier(reader_login)
+            )
         )
-        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(login)))
+        admin.execute(
+            sql.SQL("REVOKE rusa_worker_runtime FROM {}").format(
+                sql.Identifier(worker_login)
+            )
+        )
+        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(reader_login)))
+        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(worker_login)))
 
 
 def test_read_only_reader_role_is_tenant_scoped_and_cannot_mutate(reader_database_identity):
     import psycopg
-
-    restricted_dsn, tenant, _other_tenant, _login = reader_database_identity
     from rusa_knowledge.store import PostgresKnowledgeStore
 
-    store = PostgresKnowledgeStore(
-        restricted_dsn, min_pool_size=1, max_pool_size=1,
-        db_role="rusa_knowledge_reader",
+    reader_dsn, worker_dsn, tenant, _other_tenant, _reader_login, _worker_login = (
+        reader_database_identity
     )
-    try:
-        assert store.check_ready() is True
-    finally:
-        store.close()
 
-    with psycopg.connect(restricted_dsn) as connection:
+    for dsn in (reader_dsn, worker_dsn):
+        store = PostgresKnowledgeStore(
+            dsn, min_pool_size=1, max_pool_size=1,
+            db_role="rusa_knowledge_reader",
+        )
+        try:
+            assert store.check_ready() is True
+        finally:
+            store.close()
+
+    with psycopg.connect(reader_dsn) as connection:
         connection.execute(
             "SELECT set_config('role', 'rusa_knowledge_reader', true)"
         )
