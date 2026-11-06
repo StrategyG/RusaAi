@@ -103,24 +103,25 @@ The database must enforce TLS with certificate verification. Prefer a private da
 
 ## 5. Build and publish immutable images
 
-The current CI builds and scans images but does not publish them to a registry automatically. Build from the reviewed `main` commit, authenticate to the registry on the VPS or a trusted build host, and push versioned images:
+Do not build or push production images manually from a workstation or unreviewed branch. After review and merge to `main`, create an authorized semantic tag `vMAJOR.MINOR.PATCH`. The `.github/workflows/release.yml` workflow:
 
-```bash
-docker build -t ghcr.io/OWNER/rusa-ai:RELEASE .
-docker build --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker \
-  -t ghcr.io/OWNER/rusa-aicode-worker:RELEASE .
-docker build -f Dockerfile.agent-sandbox \
-  -t ghcr.io/OWNER/rusa-aicode-sandbox:RELEASE .
-docker build -f Dockerfile.rag-mcp \
-  -t ghcr.io/OWNER/rusa-ai-rag-mcp:RELEASE .
+1. Confirms the tag is semantic and points to a commit reachable from `main`.
+2. Re-runs the complete CI workflow and stable **Release Gate** on that exact tag.
+3. Builds and publishes API, worker, sandbox, and RAG/MCP images to GHCR.
+4. Scans the published digests for fixable CRITICAL/HIGH vulnerabilities.
+5. Keylessly signs each digest with Cosign/GitHub OIDC and attaches provenance/SBOM attestations.
+6. Publishes a GitHub Release containing `release-manifest.txt` with all four digests.
 
-docker push ghcr.io/OWNER/rusa-ai:RELEASE
-docker push ghcr.io/OWNER/rusa-aicode-worker:RELEASE
-docker push ghcr.io/OWNER/rusa-aicode-sandbox:RELEASE
-docker push ghcr.io/OWNER/rusa-ai-rag-mcp:RELEASE
+The four image references must be immutable:
+
+```text
+ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST
+ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST
+ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
+ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:MCP_DIGEST
 ```
 
-Resolve and record the registry SHA-256 digest for all four images. Set `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, `RUSA_SANDBOX_IMAGE`, and `RUSA_MCP_IMAGE` to immutable `@sha256:` references. Do not deploy mutable tags. The worker image must include the optional RAG dependencies, and the sandbox image must be available to the same rootless daemon used by the worker.
+Configure required reviewers and tag restrictions on the GitHub `release` environment before creating a production release. Do not use mutable tags such as `:latest`. The sandbox image must be pulled through the dedicated rootless Docker daemon; the MCP image is activated only when `RUSA_RAG_ENABLED=true`.
 
 ## 6. Secret-managed environment
 
@@ -140,24 +141,24 @@ The MCP token map must contain hashes, never raw bearer tokens. Generate each ra
 
 ## 7. Validate and start the full stack
 
-From the repository directory on the VPS, with the protected `.env` present:
+The production deployment is a separate manual GitHub Actions workflow, `.github/workflows/deploy-production.yml`. It requires approval in the GitHub `production` environment, verifies all four image signatures against the exact release workflow identity, then transfers the Compose manifests and deployment scripts using SSH with pinned host keys.
+
+Before each deployment or rollback:
+
+1. Set `RUSA_AICODE_ENABLED=false`.
+2. Wait for active AICode tasks to reach a safe terminal/checkpoint state and confirm no worker is executing a task.
+3. Ensure `.env` contains digest-pinned API, worker, sandbox, and MCP images plus the previous known-good digest set in `.env.previous` (the deployment script maintains this snapshot).
+4. Set `RUSA_RAG_ENABLED=true` only after migrations 007–008, the restricted reader role, worker knowledge DSN, MCP login, tenant tokens, embedding endpoint, and RAG/MCP overlay settings have been verified. Otherwise leave it `false`.
+
+The script refuses deployment if AICode intake is enabled. It includes `docker-compose.production.rag-mcp.yml` only when `RUSA_RAG_ENABLED=true`, health-checks the MCP service in that mode, and automatically restores the previous four-image set if a required health check fails.
+
+For an approved release, obtain all four digests from `release-manifest.txt` and run the workflow with the release tag and four digest values. For a controlled manual host operation after signature verification:
 
 ```bash
-docker compose -f docker-compose.production.yml \
-  -f docker-compose.production.rag-mcp.yml config --quiet
-docker compose -f docker-compose.production.yml \
-  -f docker-compose.production.rag-mcp.yml pull
-docker compose -f docker-compose.production.yml \
-  -f docker-compose.production.rag-mcp.yml up -d
-docker compose -f docker-compose.production.yml \
-  -f docker-compose.production.rag-mcp.yml ps
-docker compose -f docker-compose.production.yml \
-  -f docker-compose.production.rag-mcp.yml logs --tail=200 api worker rusa-mcp
+./scripts/deploy/compose-deploy.sh ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:MCP_DIGEST
 ```
 
-The MCP listener binds only to VPS loopback port 8002. Configure the TLS reverse proxy to route the chosen MCP hostname to `127.0.0.1:8002`; include that hostname in `RUSA_MCP_ALLOWED_HOSTS`. Route the API hostname to `127.0.0.1:8000`. Do not proxy worker metrics or database ports publicly.
-
-The overlay deliberately injects only MCP's dedicated database login and tenant token hashes into the MCP container. It blanks MCP credentials from API/worker environments and does not give the MCP container the GitHub token or API-key registry.
+Do not run `docker compose up` directly for production releases; use the guarded script so the lock, immutable digest validation, task-intake guard, health checks, and automatic rollback are applied.
 
 ## 8. Smoke tests and staged activation
 
@@ -190,12 +191,12 @@ Local Transformers/vLLM serving requires an approved checkpoint, tokenizer/chat 
 
 ## 10. Rollback and operations
 
-- Disable AICode intake first; stop or safely drain workers.
-- Restore the previous reviewed immutable image digests.
-- Do not roll back or delete audit ledger data.
-- Apply only forward migrations; database schema rollback is not part of the deployment procedure.
-- Verify API/MCP readiness, queue state, audit integrity, tenant isolation, and GitHub branch/PR state before resuming.
-- Maintain encrypted database backups/PITR, off-host copy, disk alerts, queue-age alerts, worker lease alerts, API error/latency alerts, MCP readiness alerts, and incident/restore runbooks.
+- Set `RUSA_AICODE_ENABLED=false` and safely drain active tasks before rollback.
+- Run `./scripts/deploy/compose-rollback.sh`; it restores the previous four immutable image digests under the same deployment lock and uses the RAG/MCP overlay only when `RUSA_RAG_ENABLED=true`.
+- If automatic rollback reports exit code 2, keep intake disabled, preserve logs and the previous snapshot, and perform operator-led recovery. Do not delete or rewrite audit ledger data.
+- Apply database migrations only forward. Schema rollback is not part of the image rollback procedure.
+- Verify API, worker, and (when enabled) MCP readiness, queue state, audit integrity, tenant isolation, and GitHub branch/PR state before resuming.
+- Maintain encrypted database backups/PITR, off-host copies, disk alerts, queue-age alerts, worker lease alerts, API error/latency alerts, MCP readiness alerts, and tested incident/restore runbooks.
 
 ## 11. Remaining release gates
 
