@@ -145,6 +145,29 @@ jobs:
           if not found:
               print("No setuptools package entry found in the sandbox image JSON report.")
           PY
+      - name: Diagnose setuptools package origin in RAG/MCP image
+        run: |
+          trivy image --scanners vuln --pkg-types library --format json \
+            --output /tmp/rusa-rag-mcp-trivy.json \
+            "rusa-ai-rag-mcp:${{ github.sha }}"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/rusa-rag-mcp-trivy.json").read_text())
+          found = False
+          for result in report.get("Results", []):
+              for vulnerability in result.get("Vulnerabilities", []):
+                  if vulnerability.get("PkgName", "").lower() == "setuptools":
+                      print(json.dumps({
+                          "target": result.get("Target"),
+                          "type": result.get("Type"),
+                          "vulnerability": vulnerability,
+                      }, indent=2))
+                      found = True
+          if not found:
+              print("No setuptools vulnerability entry found in RAG/MCP image.")
+          PY
       - name: Block on fixable CRITICAL and HIGH image vulnerabilities
         shell: bash
         run: |
