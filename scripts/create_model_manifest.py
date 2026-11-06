@@ -46,8 +46,8 @@ def main() -> int:
         parser.error("Model directory must contain config.json")
     if not any(name in files for name in ("tokenizer.json", "tokenizer.model", "tokenizer_config.json", "spiece.model", "vocab.json")):
         parser.error("Model directory must contain tokenizer files")
-    if not any(name.lower().endswith((".safetensors", ".bin", ".pt", ".pth")) for name in files):
-        parser.error("Model directory must contain model weights")
+    if not any(name.lower().endswith(".safetensors") for name in files):
+        parser.error("Model directory must contain safetensors weights; pickle-based checkpoints are not accepted")
 
     manifest = {
         "schema_version": 1,
