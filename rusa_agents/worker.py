@@ -9,8 +9,8 @@ import socket
 from typing import Any
 
 from .contracts import CodingTask
-from .runtime import build_orchestrator
 from .queue import PostgresTaskQueue
+from .runtime import build_orchestrator
 
 
 async def run_worker() -> None:
