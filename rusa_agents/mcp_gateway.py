@@ -234,7 +234,7 @@ class MCPGateway:
 
     @classmethod
     def from_env(cls) -> "MCPGateway":
-        raw = os.getenv("RUSA_MCP_SERVERS", "{}")
+        raw = os.getenv("RUSA_MCP_SERVERS") or "{}"
         try:
             config = json.loads(raw)
         except json.JSONDecodeError as exc:
