@@ -209,7 +209,7 @@ class AICodeRuntime:
             record_task_policy(
                 job.tenant_id,
                 job.task_id,
-                self.worker_id,
+                f"worker:{self.worker_id}",
                 "task.execute",
                 True,
                 sink=self.task_policy_audit,
@@ -340,7 +340,7 @@ class AICodeRuntime:
                     record_task_policy(
                         job.tenant_id,
                         job.task_id,
-                        self.worker_id,
+                        f"worker:{self.worker_id}",
                         "task.execute",
                         False,
                         sink=self.task_policy_audit,
