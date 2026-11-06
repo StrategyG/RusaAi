@@ -229,7 +229,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
                 ) THEN
                     CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOBYPASSRLS;
                 END IF;
-            END
+            END;
             $rusa$
         """)
         connection.execute(
