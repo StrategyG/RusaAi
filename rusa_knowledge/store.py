@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 import re
 from typing import Any
+from uuid import UUID
 
 from .safety import validate_document_metadata
-from uuid import UUID
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
