@@ -1032,3 +1032,38 @@ async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database,
     assert metrics["reviewer_rejection_count"] == 1
     assert metrics["citation_validation_rate"] == 1.0
     assert metrics["latency_ms_p50"] is not None
+
+
+@pytest.mark.asyncio
+async def test_non_draft_pull_request_blocks_task_success(database, registry):
+    runtime = AgentRuntime(database, FakeProvider(), registry)
+    task_id = await runtime.submit(
+        "tenant-pr",
+        "request-pr-001",
+        make_task(work_branch="feature/pr-draft-check").model_dump(),
+    )
+    results = [
+        {"tool": "github.list_files", "result": {"entries": []}},
+        {"tool": "github.create_branch", "result": {"sha": "a" * 40}},
+        {"tool": "github.write_file", "result": {"commit_sha": "b" * 40}},
+        {"tool": "github.compare_branches", "result": {"files": []}},
+        {"tool": "agent.review_diff", "result": {"approved": True, "risk_level": "low"}},
+        {"tool": "github.create_pull_request", "result": {"number": 7, "draft": False}},
+        {"tool": "github.get_ci_status", "result": {"commit_sha": "b" * 40, "all_passed": True}},
+    ]
+    async with database.session() as session:
+        row = await session.scalar(select(TaskRow).where(TaskRow.id == task_id))
+        row.status = TaskStatus.RUNNING.value
+        row.plan = valid_plan().model_dump(mode="json")
+        row.cursor = len(results)
+        row.tool_results = results
+        await session.commit()
+
+    await runtime._verify_and_finish(
+        "tenant-pr",
+        task_id,
+        {"summary": "Changes reviewed", "citations": []},
+    )
+    task = await runtime.get_task("tenant-pr", task_id)
+    assert task["status"] == TaskStatus.BLOCKED.value
+    assert "not draft" in task["error"]
