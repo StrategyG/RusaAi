@@ -30,7 +30,7 @@ class PostgresTaskQueue:
         try:
             import psycopg
         except ImportError as exc:
-            raise RuntimeError("Install the 'postgres' extra to use PostgresTaskQueue") from exc
+            raise RuntimeError("Install the PostgreSQL runtime dependencies to use PostgresTaskQueue") from exc
         return psycopg.connect(self.dsn)
 
     def initialize(self) -> None:
