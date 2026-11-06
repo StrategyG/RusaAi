@@ -557,6 +557,8 @@ class VLLMBackend:
                         completion_tokens=len(output.token_ids),
                     )
                     finished = True
+        except (ConnectionError, OSError) as exc:
+            raise TransientInferenceError("vLLM engine transport failed") from exc
         finally:
             if not finished:
                 try:
