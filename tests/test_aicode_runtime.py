@@ -107,3 +107,51 @@ def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.BLOCKED
     assert any("check:pytest" in error for error in record.errors)
+
+
+
+def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
+    class HistoryWorker(StubWorker):
+        def __init__(self, role):
+            super().__init__(role)
+            self.seen_prior = []
+
+        async def run(self, task, prior_results):
+            self.seen_prior = list(prior_results)
+            return await super().run(task, prior_results)
+
+    memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
+    memory.save(
+        "task-history",
+        "StrategyG/RusaAi",
+        "blocked",
+        {
+            "results": [{
+                "role": "developer",
+                "summary": "Changed parser but tests failed",
+                "success": True,
+                "artifacts": ["src/parser.py"],
+                "evidence": {},
+                "blockers": [],
+            }],
+            "errors": ["check:pytest returned exit code 1"],
+        },
+        tenant_id="tenant-history",
+    )
+    task_with_history = CodingTask(
+        objective="Fix parser tests",
+        repository=RepositoryTarget("StrategyG/RusaAi", "main", "feature/history"),
+        acceptance_criteria=["Parser tests pass"],
+        task_id="task-history",
+        metadata={"tenant_id": "tenant-history"},
+    )
+    history_workers = [HistoryWorker(role) for role in AICodeOrchestrator.PIPELINE]
+    orchestrator = AICodeOrchestrator(
+        history_workers,
+        memory=memory,
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(task_with_history))
+    assert history_workers[0].seen_prior
+    assert any("Changed parser" in item.summary for item in history_workers[0].seen_prior)
+    assert record.state == TaskState.SUCCEEDED
