@@ -60,6 +60,24 @@ jobs:
         run: ruff check rusa_agents tests llm-project/serve
       - name: Security static analysis
         run: bandit -q -r rusa_agents --severity-level medium --confidence-level medium
+      - name: Apply PostgreSQL migrations for RLS integration tests
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+
+          dsn = os.environ["RUSA_DATABASE_URL"]
+          migrations = [
+              "migrations/001_aicode_core.sql",
+              "migrations/002_aicode_lease_fencing.sql",
+              "migrations/003_aicode_task_results.sql",
+              "migrations/004_aicode_tenant_rls.sql",
+          ]
+          with psycopg.connect(dsn, autocommit=True) as conn:
+              for name in migrations:
+                  conn.execute(Path(name).read_text(encoding="utf-8"), prepare=False)
+          PY
       - name: Tests
         run: python -m pytest -q
 
