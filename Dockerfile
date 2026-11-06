@@ -1,39 +1,37 @@
-FROM python:3.11-slim-bookworm AS builder
+FROM cgr.dev/chainguard/python:3.11-dev AS builder
 
+USER root
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /build
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN python -m venv /venv \
+    && /venv/bin/pip install --no-cache-dir -r requirements.txt \
+    && /venv/bin/pip uninstall -y pip setuptools wheel jaraco.context \
+    && rm -f /venv/bin/pip /venv/bin/pip3 /venv/bin/pip3.11
 
-FROM python:3.11-slim-bookworm AS runtime
+FROM cgr.dev/chainguard/python:3.11 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
-    RUSA_MAX_REQUEST_BYTES=1048576
+    RUSA_MAX_REQUEST_BYTES=1048576 \
+    PATH="/venv/bin:$PATH"
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && python -m pip uninstall -y setuptools wheel jaraco.context \
-    && groupadd --system --gid 10001 rusa \
-    && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
+COPY --from=builder /venv /venv
+COPY --chown=65532:65532 llm-project/serve /app/llm-project/serve
+COPY --chown=65532:65532 schemas /app/schemas
 
-COPY --from=builder /install /usr/local
-COPY llm-project/serve /app/llm-project/serve
-COPY schemas /app/schemas
-
-USER 10001:10001
+USER 65532:65532
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)" || exit 1
+    CMD ["/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
 
-CMD ["uvicorn", "app:app", "--app-dir", "/app/llm-project/serve", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+ENTRYPOINT ["/venv/bin/python"]
+CMD ["-m", "uvicorn", "app:app", "--app-dir", "/app/llm-project/serve", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
