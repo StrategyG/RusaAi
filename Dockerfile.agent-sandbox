@@ -1,36 +1,48 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTEST_ADDOPTS="-p no:cacheprovider" HOME=/tmp XDG_CACHE_HOME=/tmp/.cache RUFF_CACHE_DIR=/tmp/.cache/ruff
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /build
+
+RUN python -m pip install --upgrade pip \
+    && python -m pip install --prefix=/opt/sandbox -r /tmp/requirements-agent-sandbox.txt \
+    && python -m pip install --prefix=/opt/sandbox "ruff>=0.6,<1" "bandit>=1.7,<2"
+
+# Remove packaging/build tools from the builder snapshot before copying the
+# environment into the final image. A same-stage uninstall leaves vulnerable
+# files in lower OCI layers, where image scanners can still detect them.
+RUN find /opt/sandbox \( \
+    -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' -o -name 'setuptools-*.whl' \
+    -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' -o -name 'wheel-*.whl' \
+    -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
+  \) -prune -exec rm -rf '{}' + \
+  && if find /opt/sandbox \( \
+       -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' -o -name 'setuptools-*.whl' \
+       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' -o -name 'wheel-*.whl' \
+       -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
+     \) -print -quit | grep -q .; then \
+       echo "Build-only Python packaging tools remain in sandbox dependency prefix" >&2; exit 1; \
+     fi
+
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    PYTEST_ADDOPTS="-p no:cacheprovider" HOME=/tmp XDG_CACHE_HOME=/tmp/.cache \
+    RUFF_CACHE_DIR=/tmp/.cache/ruff
 WORKDIR /workspace
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-COPY requirements-agent-sandbox.txt /tmp/requirements-agent-sandbox.txt
-RUN python -m pip install --upgrade pip \
-    && python -m pip install -r /tmp/requirements-agent-sandbox.txt \
-    && python -m pip install "ruff>=0.6,<1" "bandit>=1.7,<2" \
+    && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 sandbox
 
-# Build tooling is not required after the test tools have been installed.
-RUN python -m pip uninstall -y setuptools wheel jaraco.context || true
-# Remove duplicate metadata from both site-packages and dist-packages, including
-# stale .dist-info/.egg-info directories that pip may not select for uninstall.
-RUN find /usr/local/lib /usr/lib /usr/share /tmp /root \( \
-    -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' -o -name 'setuptools-*.whl' \
-    -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' -o -name 'wheel-*.whl' \
-    -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
-  \) -prune -exec rm -rf '{}' + \
-  && if find /usr/local/lib /usr/lib /usr/share /tmp /root \( \
-       -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' -o -name 'setuptools-*.egg' -o -name 'setuptools-*.whl' \
-       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' -o -name 'wheel-*.egg' -o -name 'wheel-*.whl' \
-       -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
-     \) -print -quit | grep -q .; then \
-       echo "Build-only Python packaging tools remain in the runtime image" >&2; exit 1; \
-     fi \
-  && python -m pip check \
-  && python - <<'PY'
+# Only copy the cleaned dependency prefix into a fresh runtime stage. This
+# prevents removed builder packages from surviving in earlier image layers.
+COPY --from=builder /opt/sandbox/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /opt/sandbox/bin /usr/local/bin
+
+RUN python -m pip check \
+    && python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
 for package in ("setuptools", "wheel", "jaraco.context"):
@@ -38,7 +50,7 @@ for package in ("setuptools", "wheel", "jaraco.context"):
         installed = version(package)
     except PackageNotFoundError:
         continue
-    raise SystemExit(f"Build-only package {package} ({installed}) must not ship in runtime")
+    raise SystemExit(f"Build-only package {package} ({installed}) must not ship in sandbox: {version}")
 PY
 
 USER sandbox
