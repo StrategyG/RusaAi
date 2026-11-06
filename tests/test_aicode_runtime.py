@@ -26,8 +26,12 @@ def task():
 
 
 def workers(with_evidence=True):
-    evidence = {"test_run": "pytest"} if with_evidence else {}
-    security = {"review": "passed"} if with_evidence else {}
+    evidence = {"check:pytest": {"exit_code": 0}} if with_evidence else {}
+    security = {
+        "check:bandit": {"exit_code": 0},
+        "check:ruff": {"exit_code": 0},
+        "check:compile": {"exit_code": 0},
+    } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
         StubWorker(WorkerRole.ARCHITECT),
@@ -48,9 +52,13 @@ def test_policy_protects_production_actions():
 
 def test_memory_persists_task(tmp_path):
     memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
-    memory.save("task-1", "StrategyG/RusaAi", "executing", {"attempt": 2})
-    restored = SQLiteMemory(str(tmp_path / "memory.sqlite3")).get("task-1")
+    memory.save("task-1", "StrategyG/RusaAi", "executing", {"attempt": 2}, tenant_id="tenant-a")
+    memory.save("task-1", "Other/Repo", "planning", {"attempt": 9}, tenant_id="tenant-b")
+    restored = SQLiteMemory(str(tmp_path / "memory.sqlite3")).get("task-1", tenant_id="tenant-a")
+    isolated = SQLiteMemory(str(tmp_path / "memory.sqlite3")).get("task-1", tenant_id="tenant-b")
     assert restored["payload"]["attempt"] == 2
+    assert isolated["payload"]["attempt"] == 9
+    assert SQLiteMemory(str(tmp_path / "memory.sqlite3")).get("task-1", tenant_id="tenant-c") is None
     assert restored["state"] == "executing"
 
 
@@ -59,6 +67,10 @@ def test_audit_appends_events(tmp_path):
     audit.record("started", "task-1", "master")
     audit.record("finished", "task-1", "master")
     assert len((tmp_path / "audit.jsonl").read_text().splitlines()) == 2
+    assert audit.verify()
+    with (tmp_path / "audit.jsonl").open("a") as stream:
+        stream.write('{"tampered": true}\\n')
+    assert not audit.verify()
 
 
 def test_orchestrator_requires_evidence_before_success(tmp_path):
