@@ -37,14 +37,45 @@ deploy() {
   export RUSA_API_IMAGE="rusa-ai:$revision"
   export RUSA_AGENT_IMAGE="rusa-agent-runtime:$revision"
   echo "Starting production Compose stack for revision $revision"
-  compose up --detach --no-build --pull never --wait --wait-timeout 180
+  compose up --detach --no-build --pull never
+
+  # The one-shot migration must complete successfully before workers can start.
+  local migration_id migration_state
+  migration_id="$(compose ps --all --quiet rusa-agent-migrate)"
+  test -n "$migration_id"
+  for attempt in {1..180}; do
+    migration_state="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+    [[ "$migration_state" == "exited" ]] && break
+    sleep 1
+  done
+  test "$migration_state" = "exited"
+  test "$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")" = "0"
+  test "$(docker inspect --format '{{.Image}}' "$migration_id")" = \
+    "$(docker image inspect --format '{{.Id}}' "$RUSA_AGENT_IMAGE")"
+
   assert_image rusa-api "$RUSA_API_IMAGE"
   assert_image rusa-agent-api "$RUSA_AGENT_IMAGE"
   assert_image rusa-agent-worker "$RUSA_AGENT_IMAGE"
-  curl --retry 20 --retry-delay 2 --retry-connrefused --fail --silent --show-error \
-    "$api/health/live" >/dev/null
-  curl --retry 20 --retry-delay 2 --retry-connrefused --fail --silent --show-error \
-    "$agent/health/ready" | jq -e '.status == "ready"'
+
+  # Wait for readiness rather than treating container creation as success.
+  local api_ready=false agent_ready=false
+  for attempt in {1..180}; do
+    if curl --fail --silent --show-error "$api/health/live" >/dev/null; then
+      api_ready=true
+      break
+    fi
+    sleep 1
+  done
+  test "$api_ready" = "true"
+
+  for attempt in {1..180}; do
+    if curl --fail --silent --show-error "$agent/health/ready" | jq -e '.status == "ready"' >/dev/null; then
+      agent_ready=true
+      break
+    fi
+    sleep 1
+  done
+  test "$agent_ready" = "true"
 }
 
 sql() {
