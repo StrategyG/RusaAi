@@ -21,7 +21,6 @@ from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents.runtime import build_orchestrator
 from rusa_agents.worker import (
-    LeaseLostError,
     WorkerShutdownError,
     _run_with_heartbeat,
     run_worker,
