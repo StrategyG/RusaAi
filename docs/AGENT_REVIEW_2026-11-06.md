@@ -11,15 +11,18 @@ Review objective: close the highest-risk gaps without weakening autonomy boundar
 |---|---|---|
 | Worker leases | Unique worker identity, heartbeat, lease expiry, fenced checkpoint/retry/acknowledgement | PostgreSQL stale-owner test |
 | Retry correctness | Failed retry clears terminal checkpoint so the next attempt can restart instead of replaying a terminal FAILED state | Queue behavior and worker integration path |
+| Stage recovery | Completed worker results are reused after restart; a paused external CI stage is explicitly refreshed | Checkpoint/restart test |
 | Idempotency | Duplicate key must match the same semantic payload; generated task ID and timestamp are normalized | PostgreSQL duplicate/conflict test |
 | Tenant isolation | RLS readiness checks for task and memory tables; memory insert sets tenant context | PostgreSQL RLS and readiness tests |
-| Repository scope | Exact owner/name allowlist enforced at API and GitHub gateway | API and gateway regression tests |
+| Repository scope | Exact global owner/name allowlist plus per-tenant repository assignment enforced at API and GitHub gateway | API and gateway regression tests |
 | Branch isolation | Server-derived branch is unique to tenant plus idempotency identity; arbitrary branch reuse rejected | Task contract and API tests |
 | HTTP intake | Actual streamed body bytes bounded before JSON parsing; request timeout remains 15 seconds | Chunked body and replay tests |
 | External responses | GitHub and provider bodies are streamed with byte limits | Adapter limits and configuration |
-| CI completeness | Bounded check-run pagination, stable total count, unique run IDs, complete-set validation | Incomplete check result tests |
-| Security review | Security worker must inspect branch diff and fresh CI evidence | Orchestrator tests |
+| CI completeness | Bounded check-run pagination, stable total count, unique run IDs, complete-set validation | Incomplete and paginated check-run tests |
+| Security review | Security worker fetches evidence, then runs a second read-only model pass that actually receives the complete diff and CI result | Review-only worker and orchestrator tests |
+| Secret handling | Common secret formats are redacted; diffs containing redaction markers are blocked | Redaction and hard-gate tests |
 | Commit freshness | Tester CI, Security CI, and Security diff must identify the same head SHA | Changed-head regression |
+| Diff completeness | Security context is capped at 20 files and bounded patch size; incomplete diffs are blocked | Oversized and protected-path diff tests |
 | CI triggers | Pull-request checks now run for stacked PRs regardless of target branch | Workflow contract test |
 
 ## Current test status
@@ -34,7 +37,8 @@ This revision adds or updates regression tests for the new controls. It must be 
 - [ ] PostgreSQL integration tests execute against the CI PostgreSQL service, not skip.
 - [ ] Both container images build; inference API smoke test passes.
 - [ ] Docker Compose validation succeeds with generated secrets and a real model directory.
-- [ ] Live GitHub App/token permissions match the allowlist and can read checks, create branches, write contents, and open draft PRs.
+- [ ] Live GitHub App/token permissions match the global allowlist and can read checks, create branches, write contents, and open draft PRs.
+- [ ] Tenant repository assignments match business ownership and are tested with separate tenant credentials.
 - [ ] Live provider returns valid structured JSON under configured response and timeout limits.
 - [ ] Multi-worker chaos test proves heartbeat, lease expiry, stale-owner rejection, and idempotent replay.
 - [ ] Prompt-injection, secret scanning, dependency, and repository-diff security tests pass.
