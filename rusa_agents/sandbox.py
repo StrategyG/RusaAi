@@ -65,7 +65,7 @@ class WorkspaceGateway:
             raise ToolDenied("shell metacharacters are prohibited")
         prefix=" ".join(command[:3])
         normalized=" ".join(shlex.quote(part) for part in command)
-        if prefix not in self.allowed_commands and normalized not in self.allowed_commands:
+        if not any(normalized == allowed or normalized.startswith(allowed + " ") for allowed in self.allowed_commands):
             raise ToolDenied(f"command is not allowlisted: {prefix}")
         env={"PATH":os.environ.get("PATH","/usr/bin:/bin"),"HOME":str(self.workspace),"PYTHONDONTWRITEBYTECODE":"1","PYTHONUNBUFFERED":"1"}
         process=await asyncio.create_subprocess_exec(*command,cwd=self.workspace,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT,start_new_session=True)
