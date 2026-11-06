@@ -153,7 +153,7 @@ Restore into a separately provisioned PostgreSQL 16/pgvector database. Stop appl
 Example:
 
 ```bash
-docker compose --profile backup run --rm \
+docker compose --profile backup-once run --rm \
   -v "$PWD/secrets/rusa-backup-identity.txt:/run/secrets/age-identity:ro" \
   -e RESTORE_DATABASE_URL='postgresql://rusa_agent_owner:REDACTED@rusa-agent-db:5432/rusa_agent_restore' \
   -e BACKUP_FILE='/backups/rusa-agent-<timestamp>.dump.age' \
