@@ -168,6 +168,20 @@ def _positive_float(name: str, default: float, maximum: float | None = None) -> 
     return value
 
 
+def _vllm_requires_event_loop(backend_name: str) -> bool:
+    selected = backend_name.strip().lower()
+    if selected == "vllm":
+        return True
+    if selected != "auto":
+        return False
+    try:
+        import torch
+        import vllm  # noqa: F401
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     application.state.backend = None
@@ -199,24 +213,30 @@ async def lifespan(application: FastAPI):
             last_error: Exception | None = None
             for attempt in range(1, attempts + 1):
                 try:
-                    backend = await asyncio.to_thread(
-                        load_inference_backend,
-                        str(artifact.root),
-                        backend_name=backend_name,
-                        timeout_seconds=_positive_float(
-                            "RUSA_GENERATION_TIMEOUT_SECONDS", 180.0
-                        ),
-                        max_model_len=_positive_int("RUSA_MAX_MODEL_LEN", 8192),
-                        max_num_seqs=_positive_int("RUSA_MAX_NUM_SEQS", 16),
-                        max_num_batched_tokens=_positive_int(
-                            "RUSA_MAX_NUM_BATCHED_TOKENS", 8192
-                        ),
-                        tensor_parallel_size=_positive_int(
-                            "RUSA_TENSOR_PARALLEL_SIZE", 1
-                        ),
-                        gpu_memory_utilization=_positive_float(
-                            "RUSA_GPU_MEMORY_UTILIZATION", 0.9, maximum=1.0
-                        ),
+                    def load_backend():
+                        return load_inference_backend(
+                            str(artifact.root),
+                            backend_name=backend_name,
+                            timeout_seconds=_positive_float(
+                                "RUSA_GENERATION_TIMEOUT_SECONDS", 180.0
+                            ),
+                            max_model_len=_positive_int("RUSA_MAX_MODEL_LEN", 8192),
+                            max_num_seqs=_positive_int("RUSA_MAX_NUM_SEQS", 16),
+                            max_num_batched_tokens=_positive_int(
+                                "RUSA_MAX_NUM_BATCHED_TOKENS", 8192
+                            ),
+                            tensor_parallel_size=_positive_int(
+                                "RUSA_TENSOR_PARALLEL_SIZE", 1
+                            ),
+                            gpu_memory_utilization=_positive_float(
+                                "RUSA_GPU_MEMORY_UTILIZATION", 0.9, maximum=1.0
+                            ),
+                        )
+
+                    backend = (
+                        load_backend()
+                        if _vllm_requires_event_loop(backend_name)
+                        else await asyncio.to_thread(load_backend)
                     )
                     application.state.backend = backend
                     application.state.backend_error = None
