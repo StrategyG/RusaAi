@@ -21,7 +21,7 @@ CREATE ROLE rusa_agent_api
 CREATE ROLE rusa_knowledge_worker
     NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
-GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE, SET TRUE;
+GRANT rusa_knowledge_worker TO rusa_agent_worker WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 GRANT CONNECT ON DATABASE $POSTGRES_DB TO rusa_agent_worker, rusa_agent_api;
 GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker;
 GRANT USAGE ON SCHEMA public TO rusa_agent_api, rusa_knowledge_worker;
