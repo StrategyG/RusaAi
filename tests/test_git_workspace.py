@@ -136,3 +136,50 @@ def test_publisher_filters_deployment_configuration_paths(tmp_path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
     assert GitHubPublisher._safe_changed_paths(repository) == ["src/app.py"]
+
+
+
+def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+
+    first = CodingTask(
+        objective="first lease attempt",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi", "main", "feature/aicode/lease-first"
+        ),
+        acceptance_criteria=["isolated workspace"],
+        task_id="same-task",
+        metadata={"lease_token": "lease-one"},
+    )
+    second = CodingTask(
+        objective="second lease attempt",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi", "main", "feature/aicode/lease-second"
+        ),
+        acceptance_criteria=["isolated workspace"],
+        task_id="same-task",
+        metadata={"lease_token": "lease-two"},
+    )
+
+    first_workspace = manager.create(first, "tenant-a")
+    second_workspace = manager.create(second, "tenant-a")
+    assert first_workspace != second_workspace
+    assert first_workspace.is_dir() and second_workspace.is_dir()
+
+    manager.cleanup(first, "tenant-a")
+    manager.cleanup(second, "tenant-a")
