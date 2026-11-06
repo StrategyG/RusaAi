@@ -201,6 +201,7 @@ services:
                     ).format(sql.Literal(backup_password))
                 )
             connection.execute("GRANT pg_read_all_data TO rusa_agent_backup")
+            connection.execute("ALTER ROLE rusa_agent_backup SET default_transaction_read_only = on")
             connection.execute("GRANT CONNECT ON DATABASE rusa_agent TO rusa_agent_backup")
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
         queue = PostgresTaskQueue(dsn)
