@@ -42,17 +42,23 @@ compose() {
 }
 
 health_check() {
-  local port agent_port
+  local port agent_port retries retry_delay
   port="$(awk -F= '$1 == "RUSA_PORT" { value=$2 } END { print value }' "$ENV_FILE")"
   agent_port="$(awk -F= '$1 == "RUSA_AGENT_PORT" { value=$2 } END { print value }' "$ENV_FILE")"
   port="${port:-8000}"
   agent_port="${agent_port:-8001}"
+  retries="${RUSA_DEPLOY_HEALTH_RETRIES:-12}"
+  retry_delay="${RUSA_DEPLOY_HEALTH_RETRY_DELAY:-5}"
+  [[ "$retries" =~ ^[0-9]{1,2}$ && "$retry_delay" =~ ^[0-9]{1,2}$ ]] || {
+    echo "Deployment health retry settings must be small non-negative integers." >&2
+    return 1
+  }
 
   # Liveness alone is insufficient: verify that the model is loaded and the
   # tenant-scoped agent API can reach its initialized PostgreSQL schema.
-  curl --retry 12 --retry-delay 5 --retry-connrefused --fail --silent --show-error \
+  curl --retry "$retries" --retry-delay "$retry_delay" --retry-connrefused --fail --silent --show-error \
     "http://127.0.0.1:$port/health/ready" >/dev/null
-  curl --retry 12 --retry-delay 5 --retry-connrefused --fail --silent --show-error \
+  curl --retry "$retries" --retry-delay "$retry_delay" --retry-connrefused --fail --silent --show-error \
     "http://127.0.0.1:$agent_port/health/ready" >/dev/null
 }
 
