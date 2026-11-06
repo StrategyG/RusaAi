@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,11 @@ class PostgresTaskQueue:
 
     def initialize(self) -> None:
         with self._connect() as conn:
+            if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                exists = conn.execute("SELECT to_regclass('public.aicode_jobs')").fetchone()
+                if not exists or exists[0] is None:
+                    raise RuntimeError("Production database schema is missing; apply migrations/001_aicode_core.sql")
+                return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
                     id BIGSERIAL PRIMARY KEY,
