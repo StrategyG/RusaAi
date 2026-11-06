@@ -24,10 +24,12 @@ SCHEMA_PATH = (
 )
 
 
-def load_task_validator() -> jsonschema.Draft202012Validator:
+def load_task_validator(
+    schema_path: Path = SCHEMA_PATH,
+) -> jsonschema.Draft202012Validator:
     """Load and validate the protocol schema once; fail startup on bad config."""
     try:
-        with SCHEMA_PATH.open("r", encoding="utf-8") as schema_file:
+        with schema_path.open("r", encoding="utf-8") as schema_file:
             schema = json.load(schema_file)
         jsonschema.Draft202012Validator.check_schema(schema)
         return jsonschema.Draft202012Validator(
@@ -39,7 +41,6 @@ def load_task_validator() -> jsonschema.Draft202012Validator:
         raise RuntimeError("Required A2A task schema is missing or invalid") from exc
 
 
-# Fail closed during application import/startup, never silently skip validation.
 TASK_VALIDATOR = load_task_validator()
 
 app = FastAPI(
