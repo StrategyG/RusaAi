@@ -346,3 +346,41 @@ arbitrary SQL; deployments requiring isolation against a compromised service
 process must move to per-tenant database identities or signed database
 assertions. Export the append-only audit stream to a restricted, immutable
 off-host retention system and test restore/retention independently.
+
+### Inference endpoint verification and capacity testing
+
+The API is an authenticated inference gateway, not a bundled RUSA-AI model server. It forwards chat requests to the configured OpenAI-compatible HTTPS endpoint. Before a release, run both the live inference smoke test and a staging load test against the exact provider/model combination approved for deployment.
+
+Required model and admission settings:
+
+- `RUSA_MODEL_BASE_URL`: HTTPS base URL ending in `/v1`.
+- `RUSA_MODEL_NAME`: the single model identifier allowed by this API.
+- `RUSA_MODEL_API_KEY`: provider credential supplied through the deployment secret manager.
+- `RUSA_MODEL_MAX_RESPONSE_BYTES`: maximum buffered or streamed provider response; default 2,000,000 bytes.
+- `RUSA_MAX_CONCURRENT_INFERENCES`: active inference slots; default 8.
+- `RUSA_MAX_WAITING_INFERENCES`: bounded waiting queue; default 32.
+- `RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS`: maximum queue wait; default 10 seconds.
+
+Only `developer`, `tenant_admin`, and `platform_admin` principals may invoke `POST /v1/chat/completions`. A `read_only` principal may inspect `/v1/models` but cannot incur inference cost. The model field must exactly match `RUSA_MODEL_NAME`. Queue saturation returns HTTP 429 with `Retry-After`.
+
+Run a real provider smoke test from a host with network access and the model credential injected securely:
+
+```bash
+python -m scripts.smoke_test_inference
+```
+
+The smoke test verifies `/models`, one non-streaming completion, and one SSE completion. It reports only model name, character counts, finish reason, and token usage; it does not print the provider credential or generated text.
+
+Run a bounded staging load test only with explicit acknowledgement:
+
+```bash
+export RUSA_API_BASE_URL=https://staging-api.example
+export RUSA_API_KEY=<staging-developer-key>
+export RUSA_MODEL_NAME=rusa-ai
+python scripts/load_test_inference.py --requests 40 --concurrency 4 --confirm --confirm-remote
+python scripts/load_test_inference.py --requests 40 --concurrency 4 --stream --confirm --confirm-remote
+```
+
+The load test reports success/failure counts, HTTP status distribution, throughput, p50/p95/p99 latency, and streaming time-to-first-token. Start with low concurrency, increase gradually, and record provider quota, queue 429s, API CPU/memory, database latency, and model-server GPU/CPU/memory. Do not run against production without an approved maintenance/load-test window.
+
+A smoke test or load-test script being present is not production evidence by itself. Attach output from the actual staging endpoint, the model artifact and license approval, load/soak results, and operator sign-off to the release record before declaring the inference path production-ready.
