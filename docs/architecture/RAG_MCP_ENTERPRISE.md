@@ -64,7 +64,9 @@ No document-write, arbitrary HTTP, shell, SQL, filesystem, or administrative too
 - MCP requests require an Authorization Bearer token. The server stores only SHA-256 token digests in RUSA_MCP_TENANT_KEYS, mapped to tenant IDs.
 - The client never supplies tenant_id as a tool argument. The server derives tenant identity from the authenticated token and a request-local ContextVar.
 - Every database operation sets rusa.tenant_id transaction-locally. Both knowledge tables enable and FORCE PostgreSQL RLS.
-- The MCP service uses the restricted rusa_agent_api role with SELECT-only grants on knowledge tables. The worker uses its isolated worker role for ingestion and internal RAG retrieval.
+- The MCP service uses the restricted rusa_agent_api role with SELECT-only grants on knowledge tables.
+- The agent queue/episodic runtime retains its existing rusa_agent_worker connection. For every RAG transaction, the store switches locally to the separate NOLOGIN, NOBYPASSRLS role rusa_knowledge_worker (configured with RUSA_KNOWLEDGE_DB_ROLE), then sets the tenant context. The worker login is granted membership in that restricted role; knowledge-table grants are assigned only to rusa_knowledge_worker.
+- Knowledge-store readiness rejects superuser and BYPASSRLS effective roles.
 - The agent MCP gateway has a fixed read-only tool allowlist and a separate token per tenant.
 - MCP endpoint URLs must use HTTPS, except loopback HTTP for local development or an explicitly configured private service hostname in RUSA_MCP_INTERNAL_HTTP_HOSTS. Use that exception only on a private container network; do not expose the plain-HTTP service port to untrusted networks. Redirects and ambient proxy inheritance are disabled in the client.
 - Retrieved content is untrusted data. It must never override system policy or be interpreted as executable instructions.
@@ -79,14 +81,15 @@ Use a PostgreSQL build with pgvector installed, for example pgvector/pgvector:pg
 - creates vector HNSW and full-text GIN indexes;
 - enables and forces tenant RLS;
 - creates transaction-local tenant policies;
-- grants read-only access to rusa_agent_api and read/write access to rusa_agent_worker when those roles exist.
+- grants read-only access to rusa_agent_api and read/write access to rusa_knowledge_worker when that restricted role exists.
 
-Do not run the migration as the MCP application identity. Existing database volumes do not replay initialization scripts automatically. Apply and verify the migration explicitly.
+Do not run the migration as the MCP application identity. The fresh-volume bootstrap creates rusa_knowledge_worker as a NOLOGIN, NOBYPASSRLS role and grants membership to rusa_agent_worker. For an existing volume, create that restricted role and grant membership before applying migration 005; initialization scripts do not replay automatically. Apply and verify the migration explicitly.
 
 ## Configuration
 
 Required when enabling RAG or MCP:
-- RUSA_KNOWLEDGE_DATABASE_URL: database DSN for the service.
+- RUSA_KNOWLEDGE_DATABASE_URL: database DSN for the service (the worker can use its existing agent-worker login with a transaction-local role switch).
+- RUSA_KNOWLEDGE_DB_ROLE: optional effective role to set transaction-locally; use rusa_knowledge_worker for worker RAG access and leave unset for the MCP API login.
 - RUSA_EMBEDDING_BASE_URL: HTTPS or loopback OpenAI-compatible embedding endpoint.
 - RUSA_EMBEDDING_MODEL: embedding model returning 1,536 dimensions.
 - RUSA_EMBEDDING_API_KEY: provider key, if required by the provider.
