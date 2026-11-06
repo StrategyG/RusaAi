@@ -319,10 +319,15 @@ def audit_api_task(
     actor = f"api:{principal.subject}" if principal is not None else "unauthenticated"
     config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
     sink = getattr(request.app.state, "task_policy_audit", None)
-    record_task_policy(
-        tenant_id, task_id, actor, action, allowed,
-        sink=sink, required=config.environment == "production",
-    )
+    try:
+        record_task_policy(
+            tenant_id, task_id, actor, action, allowed,
+            sink=sink, required=config.environment == "production",
+        )
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503, detail="Task policy audit is unavailable"
+        ) from None
 
 
 def require_task_permission(permission: str):
@@ -333,14 +338,19 @@ def require_task_permission(permission: str):
         try:
             tenant_id = authenticate_api_key(request, api_key, require_key=True)
         except HTTPException:
-            try:
+            principal = getattr(request.state, "principal", None)
+            if principal is None:
                 audit_api_task(
                     request, None, _request_task_id(request), "task.authenticate", False
                 )
-            except RuntimeError:
-                raise HTTPException(
-                    status_code=503, detail="Task policy audit is unavailable"
-                ) from None
+            else:
+                audit_api_task(
+                    request,
+                    principal.tenant_id,
+                    _request_task_id(request),
+                    permission.replace(":", "."),
+                    False,
+                )
             raise
 
         principal = request.state.principal
