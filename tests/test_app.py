@@ -12,7 +12,12 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import GenerationResult, _load_task_validator, app  # noqa: E402
+from app import (  # noqa: E402
+    GenerationResult,
+    _load_api_key_tenants,
+    _load_task_validator,
+    app,
+)
 
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
@@ -489,3 +494,9 @@ def test_agent_dead_letter_replay_requires_dead_letter_state(client, monkeypatch
         headers=auth_headers(),
     )
     assert response.status_code == 409
+
+
+
+def test_blank_api_key_tenant_map_uses_single_tenant_mode(monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY_TENANTS_JSON", "   ")
+    assert _load_api_key_tenants() is None

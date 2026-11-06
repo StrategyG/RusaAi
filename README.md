@@ -50,7 +50,7 @@ The API deliberately reports not-ready and returns HTTP 503 for inference until 
 
 Set RUSA_API_KEY to a random secret and RUSA_MODEL_DIR to the directory containing model files. Then run docker compose up --build -d. The model directory is mounted read-only at /models.
 
-The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only root filesystem under Compose, and exposes port 8000. Put it behind a TLS-terminating reverse proxy or gateway. Configure distributed rate limiting, request timeouts, and connection limits at that gateway; an in-process limiter is not sufficient across replicas.
+The Compose file passes explicit per-service environment variables instead of a shared env_file: the API receives its API key, while the worker receives provider/GitHub credentials. The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only root filesystem under Compose, and exposes port 8000. Put it behind a TLS-terminating reverse proxy or gateway. Configure distributed rate limiting, request timeouts, and connection limits at that gateway; an in-process limiter is not sufficient across replicas.
 
 ## Health endpoints
 
