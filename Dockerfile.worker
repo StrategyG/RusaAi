@@ -1,34 +1,52 @@
 FROM python:3.12.16-slim-trixie AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /build
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml README.md ./
 COPY rusa_agents ./rusa_agents
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir . \
-    && python -m pip install --no-cache-dir --upgrade \
-         "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && python -m pip check \
-    && python -m pip uninstall -y setuptools wheel jaraco.context \
+RUN python -m pip install --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
+    && python -m pip install .
+
+# Runtime image contains only the Python runtime and application dependencies.
+# Build tools are removed before copying, so no package manager or build backend
+# is shipped in the worker container.
+RUN python -m pip uninstall -y setuptools wheel jaraco.context \
     && python -m pip uninstall -y pip \
-    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
+    && rm -rf /usr/local/lib/python3.12/ensurepip \
+    && find /usr/local/lib/python3.12 -type d \( -name 'setuptools-*.dist-info' -o -name 'wheel-*.dist-info' -o -name 'pip-*.dist-info' \) -prune -exec rm -rf '{}' + \
+    && python - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
 
-# Clean runtime base: no inherited Python base layers or stale setuptools SBOM.
-FROM debian:trixie-slim AS runtime
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        installed = version(package)
+    except PackageNotFoundError:
+        continue
+    raise SystemExit(f"build-only package {package}=={installed} remains in worker runtime")
+PY
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
-    LD_LIBRARY_PATH=/usr/local/lib
+FROM debian:trixie-slim AS runner
+
 WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 LD_LIBRARY_PATH=/usr/local/lib
+ARG DOCKER_CE_CLI_VERSION=5:29.9.3-1~debian.13~trixie
 
+# Install only Docker CLI (not dockerd, containerd, or runc). The worker talks
+# to the separately managed rootless daemon through the mounted Unix socket.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends docker.io git ca-certificates libexpat1 libffi8 libssl3t64 libbz2-1.0 liblzma5 libsqlite3-0 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian trixie stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "docker-ce-cli=${DOCKER_CE_CLI_VERSION}" \
+    && apt-get purge -y --auto-remove curl \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
-    && ldconfig \
     && useradd --create-home --uid 10001 appuser
 
 COPY --from=builder /usr/local /usr/local
@@ -36,19 +54,16 @@ COPY --chown=appuser:appuser . /app
 
 RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
+    && docker --version \
+    && if dpkg-query -W -f='${binary:Package}\n' | grep -Eq '^(docker.io|docker-ce|containerd|containerd.io|runc)$'; then \
+         echo "Worker image must ship Docker CLI only, not a Docker daemon/runtime"; exit 1; \
+       fi \
     && python - <<'PY'
-from importlib import import_module, metadata
+import importlib
 
-for package in ("pip", "setuptools", "wheel", "jaraco.context"):
-    try:
-        metadata.version(package)
-    except metadata.PackageNotFoundError:
-        continue
-    raise SystemExit(f"Build-only package {package} remains in the worker runtime")
-
-for module in ("rusa_agents", "psycopg", "prometheus_client", "httpx"):
-    import_module(module)
-print("Worker runtime imports verified; build tooling is absent.")
+for module in ("rusa_agents.worker_main", "psycopg", "prometheus_client", "httpx"):
+    importlib.import_module(module)
+print("worker runtime imports passed")
 PY
 
 USER appuser
