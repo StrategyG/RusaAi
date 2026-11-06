@@ -316,7 +316,7 @@ def audit_api_task(
     allowed: bool,
 ) -> None:
     principal = getattr(request.state, "principal", None)
-    actor = principal.subject if principal is not None else "unauthenticated"
+    actor = f"api:{principal.subject}" if principal is not None else "unauthenticated"
     config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
     sink = getattr(request.app.state, "task_policy_audit", None)
     record_task_policy(
