@@ -15,6 +15,7 @@ class RuntimeConfig:
     database_url: str | None
     api_database_url: str | None
     worker_database_url: str | None
+    api_database_user: str | None
     audit_hmac_key: str | None
     api_keys: dict[str, str]
     metrics_api_key: str | None
@@ -92,8 +93,15 @@ class RuntimeConfig:
             raise ValueError("RUSA_TENANT_REPOSITORIES must map tenant IDs to repository-name arrays")
 
         legacy_database_url = os.getenv("RUSA_DATABASE_URL") or None
-        api_database_url = os.getenv("RUSA_API_DATABASE_URL") or legacy_database_url
-        worker_database_url = os.getenv("RUSA_WORKER_DATABASE_URL") or legacy_database_url
+        api_database_url = os.getenv("RUSA_API_DATABASE_URL") or (
+            legacy_database_url if environment != "production" else None
+        )
+        worker_database_url = os.getenv("RUSA_WORKER_DATABASE_URL") or (
+            legacy_database_url if environment != "production" else None
+        )
+        api_database_user = os.getenv("RUSA_API_DATABASE_USER") or (
+            urlparse(api_database_url).username if api_database_url else None
+        )
         legacy_api_key = os.getenv("RUSA_API_KEY")
         if legacy_api_key:
             keys.setdefault(legacy_api_key, os.getenv("RUSA_DEFAULT_TENANT", "default"))
@@ -103,6 +111,7 @@ class RuntimeConfig:
             database_url=legacy_database_url,
             api_database_url=api_database_url,
             worker_database_url=worker_database_url,
+            api_database_user=api_database_user,
             audit_hmac_key=os.getenv("RUSA_AUDIT_HMAC_KEY"),
             api_keys=keys,
             metrics_api_key=os.getenv("RUSA_METRICS_API_KEY"),
@@ -202,11 +211,13 @@ class RuntimeConfig:
         self._validate_tenant_repositories(missing)
         self._validate_model_endpoint(missing)
 
-        if self.api_database_url and self.worker_database_url:
-            api_user = urlparse(self.api_database_url).username
-            worker_user = urlparse(self.worker_database_url).username
-            if not api_user or not worker_user or api_user == worker_user:
-                missing.append("distinct PostgreSQL login identities for API and worker")
+        if self.api_database_user != "rusa_api_runtime_login":
+            missing.append("RUSA_API_DATABASE_USER must identify rusa_api_runtime_login")
+        worker_user = urlparse(self.worker_database_url).username if self.worker_database_url else None
+        if worker_user != "rusa_worker_runtime_login":
+            missing.append("RUSA_WORKER_DATABASE_URL must use rusa_worker_runtime_login")
+        if worker_user and worker_user == self.api_database_user:
+            missing.append("distinct PostgreSQL login identities for API and worker")
 
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
