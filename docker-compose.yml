@@ -77,8 +77,10 @@ services:
         from rusa_agents.memory import PostgresMemoryStore
         from rusa_agents.queue import PostgresTaskQueue
         dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
-        PostgresTaskQueue(dsn).initialize()
+        queue = PostgresTaskQueue(dsn)
+        queue.initialize()
         PostgresMemoryStore(dsn).initialize()
+        queue.configure_api_permissions()
     restart: "no"
     environment:
       RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
