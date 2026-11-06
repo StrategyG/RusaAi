@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa.ai/schemas/devops/agent-task.schema.json",
+  "title": "RUSA AI Agentic DevOps Task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "workflow_id",
+    "tenant_id",
+    "agent_id",
+    "stage",
+    "objective",
+    "input",
+    "constraints",
+    "audit"
+  ],
+  "properties": {
+    "task_id": { "type": "string", "format": "uuid" },
+    "workflow_id": { "type": "string", "format": "uuid" },
+    "tenant_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "agent_id": {
+      "type": "string",
+      "enum": [
+        "rusa_plan_agent",
+        "rusa_code_agent",
+        "rusa_build_agent",
+        "rusa_test_agent",
+        "rusa_release_agent",
+        "rusa_deploy_agent",
+        "rusa_operate_agent",
+        "rusa_monitor_agent",
+        "rusa_security_guard_agent"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "code",
+        "build",
+        "test",
+        "release",
+        "deploy",
+        "operate",
+        "monitor",
+        "security_guard"
+      ]
+    },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "input": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "user_request": { "type": "string", "minLength": 1, "maxLength": 12000 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "commit_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "plan_ref": { "type": "string", "format": "uri" },
+        "acceptance_criteria_ref": { "type": "string", "format": "uri" },
+        "build_config_ref": { "type": "string", "format": "uri" },
+        "test_plan_ref": { "type": "string", "format": "uri" },
+        "test_evidence_ref": { "type": "string", "format": "uri" },
+        "sbom_ref": { "type": "string", "format": "uri" },
+        "release_manifest_ref": { "type": "string", "format": "uri" },
+        "environment": { "type": "string", "enum": ["development", "eval", "staging", "production"] },
+        "service": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "incident_ref": { "type": "string", "format": "uri" },
+        "runbook_ref": { "type": "string", "format": "uri" },
+        "metrics_window": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" },
+          "maxItems": 100
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_tools", "network_access", "write_scope", "approval_required"],
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "network_access": { "type": "boolean" },
+        "allowed_network_destinations": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 255 }
+        },
+        "write_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "approval_required": { "type": "boolean" },
+        "approval_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "merge",
+              "release",
+              "deploy",
+              "secret_change",
+              "permission_change",
+              "destructive_action",
+              "production_data_change",
+              "external_publication"
+            ]
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_cost_usd": { "type": "number", "minimum": 0 },
+            "max_tool_calls": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "max_runtime_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "network_access": { "const": true } }, "required": ["network_access"] },
+          "then": { "required": ["allowed_network_destinations"], "properties": { "allowed_network_destinations": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "network_access": { "const": false } }, "required": ["network_access"] },
+          "then": { "properties": { "allowed_network_destinations": { "maxItems": 0 } } }
+        }
+      ]
+    },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "deadline_at": { "type": "string", "format": "date-time" },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["next_agent", "event"],
+      "properties": {
+        "next_agent": {
+          "type": "string",
+          "enum": [
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent",
+            "rusa_security_guard_agent"
+          ]
+        },
+        "event": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_at", "requested_by", "policy_version"],
+      "properties": {
+        "created_at": { "type": "string", "format": "date-time" },
+        "requested_by": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "traceparent": {
+          "type": "string",
+          "pattern": "^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+        },
+        "model_id": { "type": "string", "maxLength": 256 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "stage": { "const": "plan" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_plan_agent" }, "input": { "required": ["user_request"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "code" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_code_agent" }, "input": { "required": ["repository", "plan_ref", "acceptance_criteria"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "build" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_build_agent" }, "input": { "required": ["repository", "commit_sha", "build_config_ref"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "test" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_test_agent" }, "input": { "required": ["commit_sha", "test_plan_ref", "acceptance_criteria_ref"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "release" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_release_agent" }, "input": { "required": ["artifact_digest", "test_evidence_ref", "sbom_ref"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "deploy" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_deploy_agent" }, "input": { "required": ["release_manifest_ref", "environment"] }, "constraints": { "properties": { "approval_required": { "const": true }, "approval_scope": { "contains": { "const": "deploy" } } } } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "operate" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_operate_agent" }, "input": { "required": ["service", "runbook_ref"] } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "monitor" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_monitor_agent" }, "input": { "required": ["service", "metrics_window"] }, "constraints": { "properties": { "network_access": { "const": false }, "write_scope": { "maxItems": 0 } } } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "security_guard" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_security_guard_agent" }, "input": { "required": ["evidence_refs"] }, "constraints": { "properties": { "write_scope": { "maxItems": 0 } } } } }
+    }
+  ]
+}
