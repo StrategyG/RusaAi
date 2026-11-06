@@ -1,0 +1,301 @@
+import os
+from uuid import uuid4
+
+import pytest
+
+from rusa_agents.audit import PostgresAuditLog
+from rusa_agents.memory import PostgresMemory
+from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.rate_limit import PostgresRateLimiter
+
+DSN = os.getenv("RUSA_DATABASE_URL")
+pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
+
+
+def test_postgres_queue_tenant_scope_and_idempotency():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    assert queue.enqueue(task_id, "tenant-alpha", {"objective": "test"}, priority=100)
+    assert not queue.enqueue(task_id, "tenant-alpha", {"objective": "duplicate"}, priority=100)
+    assert queue.get(task_id, "tenant-beta") is None
+
+    job = queue.claim("pytest-worker", lease_seconds=30)
+    assert job is not None
+    assert job.task_id == task_id
+    assert job.tenant_id == "tenant-alpha"
+    assert job.lease_token
+    assert queue.heartbeat(job.id, job.tenant_id, "pytest-worker", job.lease_token, 30)
+    result = {
+        "pull_request_url": "https://github.com/StrategyG/RusaAi/pull/99",
+        "commit_sha": "a" * 40,
+        "branch": "feature/aicode/test-deadbeef",
+    }
+    assert queue.complete(
+        job.id, job.tenant_id, "pytest-worker", job.lease_token, result
+    )
+    stored = queue.get(task_id, "tenant-alpha")
+    assert stored["status"] == "succeeded"
+    assert stored["result"] == result
+
+
+def test_postgres_queue_retries_then_dead_letters():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    assert queue.enqueue(task_id, "tenant-retry", {"objective": "retry"}, max_attempts=2, priority=200)
+
+    first = queue.claim("retry-worker", lease_seconds=30)
+    assert first is not None and first.task_id == task_id
+    assert queue.fail(first.id, first.tenant_id, "retry-worker", first.lease_token, "first failure", retry_delay_seconds=0)
+
+    second = queue.claim("retry-worker", lease_seconds=30)
+    assert second is not None and second.task_id == task_id
+    assert second.attempts == 2
+    assert queue.fail(second.id, second.tenant_id, "retry-worker", second.lease_token, "second failure", retry_delay_seconds=0)
+    assert queue.get(task_id, "tenant-retry")["status"] == "failed"
+
+
+def test_postgres_memory_and_audit_integrity():
+    memory = PostgresMemory(DSN)
+    memory.initialize()
+    task_id = str(uuid4())
+    memory.save(task_id, "StrategyG/RusaAi", "verifying", {"ok": True}, tenant_id="tenant-memory")
+    assert memory.get(task_id, "tenant-memory")["payload"]["ok"] is True
+    assert memory.get(task_id, "other-tenant") is None
+
+    key = os.getenv("RUSA_AUDIT_HMAC_KEY", "ci-test-audit-key")
+    audit = PostgresAuditLog(DSN, key)
+    audit.initialize()
+    audit.record("test.event", task_id, "pytest", {"result": "pass"}, tenant_id="tenant-memory")
+    assert audit.verify()
+    assert not PostgresAuditLog(DSN, "wrong-key-" + "x" * 32).verify()
+
+
+
+def test_postgres_rate_limiter_is_tenant_scoped():
+    limiter = PostgresRateLimiter(DSN)
+    limiter.initialize()
+    route = "pytest:" + str(uuid4())
+    assert limiter.hit("tenant-rate-a", route, 1)[0] is True
+    assert limiter.hit("tenant-rate-a", route, 1)[0] is False
+    assert limiter.hit("tenant-rate-b", route, 1)[0] is True
+
+
+
+def test_postgres_queue_requires_explicit_retry_after_approval():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    assert queue.enqueue(task_id, "tenant-approval", {"objective": "approval test"})
+    job = queue.claim("approval-worker", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    review_result = {"branch": "feature/aicode/review-deadbeef"}
+    assert queue.await_approval(
+        job.id, job.tenant_id, "approval-worker", job.lease_token,
+        "review required", review_result,
+    )
+    awaiting = queue.get(task_id, "tenant-approval")
+    assert awaiting["status"] == "awaiting_approval"
+    assert awaiting["result"] == review_result
+    assert queue.retry(task_id, "wrong-tenant") is False
+    assert queue.retry(task_id, "tenant-approval") is True
+    retried = queue.get(task_id, "tenant-approval")
+    assert retried["status"] == "queued"
+    assert retried["result"] is None
+
+
+
+def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = "tenant-fencing-" + task_id[:8]
+    assert queue.enqueue(task_id, tenant_id, {"objective": "fencing"}, max_attempts=3, priority=10000)
+
+    stale = queue.claim("stale-worker", lease_seconds=30)
+    assert stale is not None and stale.task_id == task_id
+
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE aicode_jobs SET lease_until=NOW() - INTERVAL '1 second' WHERE id=%s",
+            (stale.id,),
+        )
+
+    current = queue.claim("current-worker", lease_seconds=30)
+    assert current is not None and current.task_id == task_id
+    assert current.lease_token != stale.lease_token
+    assert queue.owns_lease(current.id, tenant_id, "current-worker", current.lease_token)
+
+    assert not queue.heartbeat(
+        stale.id, tenant_id, "stale-worker", stale.lease_token, 30
+    )
+    assert not queue.complete(stale.id, tenant_id, "stale-worker", stale.lease_token)
+    assert not queue.fail(
+        stale.id, tenant_id, "stale-worker", stale.lease_token, "stale failure", 0
+    )
+    assert queue.complete(
+        current.id, tenant_id, "current-worker", current.lease_token
+    )
+
+
+
+def test_postgres_rls_and_service_role_separation():
+    import psycopg
+
+    task_id = str(uuid4())
+    with psycopg.connect(DSN) as conn:
+        conn.execute("SET LOCAL ROLE rusa_api_runtime")
+        conn.execute(
+            "SELECT set_config('rusa.tenant_id', %s, true)",
+            ("tenant-rls-alpha",),
+        )
+        conn.execute(
+            """
+            INSERT INTO public.aicode_jobs(task_id, tenant_id, payload)
+            VALUES (%s, %s, '{}'::jsonb)
+            """,
+            (task_id, "tenant-rls-alpha"),
+        )
+        visible = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert visible == ("tenant-rls-alpha",)
+
+        conn.execute(
+            "SELECT set_config('rusa.tenant_id', %s, true)",
+            ("tenant-rls-beta",),
+        )
+        hidden = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert hidden is None
+
+        conn.execute("SET LOCAL ROLE rusa_worker_runtime")
+        worker_visible = conn.execute(
+            "SELECT tenant_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert worker_visible == ("tenant-rls-alpha",)
+
+        privileges = conn.execute(
+            """
+            SELECT
+                has_table_privilege('rusa_api_runtime', 'public.aicode_memory', 'SELECT'),
+                has_table_privilege('rusa_api_runtime', 'public.aicode_audit_events', 'SELECT'),
+                has_table_privilege('rusa_worker_runtime', 'public.aicode_rate_limits', 'SELECT'),
+                has_table_privilege('rusa_worker_runtime', 'public.aicode_jobs', 'INSERT')
+            """
+        ).fetchone()
+        assert privileges == (False, False, False, False)
+
+
+
+def test_postgres_dedicated_login_roles_enforce_tenant_boundaries(monkeypatch):
+    import psycopg
+    from psycopg.errors import InsufficientPrivilege
+
+    api_dsn = os.getenv("RUSA_API_DATABASE_URL")
+    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL")
+    if not api_dsn or not worker_dsn:
+        pytest.skip("Dedicated PostgreSQL API/worker test DSNs are not configured")
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    api_queue = PostgresTaskQueue(api_dsn)
+    worker_queue = PostgresTaskQueue(worker_dsn)
+    api_queue.initialize()
+    worker_queue.initialize()
+
+    limiter = PostgresRateLimiter(api_dsn)
+    limiter.initialize()
+    memory = PostgresMemory(worker_dsn)
+    memory.initialize()
+    audit = PostgresAuditLog(worker_dsn, os.getenv("RUSA_AUDIT_HMAC_KEY", "ci-only-test-audit-key-change-me"))
+    audit.initialize()
+
+    task_id = str(uuid4())
+    tenant_id = "tenant-login-" + task_id[:8]
+    assert api_queue.enqueue(
+        task_id, tenant_id, {"objective": "verify role-level RLS"}, priority=100000
+    )
+    assert api_queue.get(task_id, tenant_id)["status"] == "queued"
+    assert api_queue.get(task_id, "tenant-not-owner") is None
+
+    with psycopg.connect(api_dsn) as conn:
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute(
+                "UPDATE public.aicode_jobs SET payload='{}'::jsonb WHERE task_id=%s",
+                (task_id,),
+            )
+
+    # The API role cannot act as a global queue consumer without tenant context.
+    assert api_queue.claim("api-must-not-claim", lease_seconds=30) is None
+    with psycopg.connect(api_dsn) as conn:
+        unscoped = conn.execute(
+            "SELECT task_id FROM public.aicode_jobs WHERE task_id=%s",
+            (task_id,),
+        ).fetchone()
+        assert unscoped is None
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute("SELECT task_id FROM public.aicode_memory LIMIT 1")
+    with psycopg.connect(api_dsn) as conn:
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute("SELECT id FROM public.aicode_audit_events LIMIT 1")
+
+    job = worker_queue.claim("worker-login-canary", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    with psycopg.connect(worker_dsn) as conn:
+        with pytest.raises(InsufficientPrivilege):
+            conn.execute(
+                "INSERT INTO public.aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, '{}'::jsonb)",
+                (str(uuid4()), tenant_id),
+            )
+    result = {"branch": "feature/aicode/login-rls"}
+    assert worker_queue.complete(
+        job.id, tenant_id, "worker-login-canary", job.lease_token, result
+    )
+    assert api_queue.get(task_id, tenant_id)["result"] == result
+
+    memory.save(
+        task_id, "StrategyG/RusaAi", "completed",
+        {"tenant_scope": tenant_id}, tenant_id=tenant_id,
+    )
+    assert memory.get(task_id, tenant_id)["payload"]["tenant_scope"] == tenant_id
+    assert memory.get(task_id, "different-tenant") is None
+
+    route = "rls-login:" + task_id
+    assert limiter.hit(tenant_id, route, 1)[0] is True
+    assert limiter.hit(tenant_id, route, 1)[0] is False
+    assert limiter.hit("other-tenant", route, 1)[0] is True
+
+    audit.record("rls.login.test", task_id, "ci-worker", {"ok": True}, tenant_id=tenant_id)
+    assert audit.verify()
+
+
+
+def test_postgres_audit_redacts_credentials_before_persisting():
+    import psycopg
+
+    task_id = str(uuid4())
+    audit = PostgresAuditLog(DSN, os.getenv("RUSA_AUDIT_HMAC_KEY", "ci-test-audit-key"))
+    audit.initialize()
+    audit.record(
+        "test.redaction",
+        task_id,
+        "pytest",
+        {
+            "api_key": "must-not-be-stored",
+            "nested": {"authorization": "Bearer should-also-be-redacted"},
+        },
+        tenant_id="tenant-audit-redaction",
+    )
+    with psycopg.connect(DSN) as conn:
+        row = conn.execute(
+            "SELECT details FROM aicode_audit_events WHERE task_id=%s AND event='test.redaction'",
+            (task_id,),
+        ).fetchone()
+    assert row is not None
+    assert row[0]["api_key"] == "[REDACTED]"
+    assert row[0]["nested"]["authorization"] == "[REDACTED]"

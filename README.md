@@ -53,7 +53,7 @@ RusaAi/
 ## Quick Start & Local Setup
 
 ### 1. Prerequisites
-- Python 3.10 or higher
+- Python 3.12 or higher
 - Docker & Docker Compose (optional for containerized deployment)
 
 ### 2. Environment Setup
@@ -120,6 +120,58 @@ pytest llm-project/tests/ -v
 - **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
 - **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
 - **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
+
+---
+
+## AICode Enterprise Coding Agent
+
+RUSA-AI includes an autonomous coding subsystem that operates within tenant-authorized repositories and isolated task branches. It uses a hierarchical master orchestrator with Analyst, Architect, Developer, Debugger, Tester, and Security workers.
+
+### Operating boundaries
+
+- Repository reads and ordinary source/test/documentation edits run in a task-specific feature worktree.
+- Model actions are restricted to named tools; arbitrary shell execution is not exposed.
+- Validation runs in a disposable, network-disabled Docker sandbox using a bounded source snapshot.
+- A successful implementation is pushed only to its generated feature branch and opened as a draft pull request.
+- Merge, deployment, release, secrets, permissions, migrations, CI workflows, and protected deployment configuration remain human-controlled.
+- Completion requires real pytest, Ruff, Bandit, compile, and required GitHub Actions evidence. Missing or failed evidence cannot be reported as success.
+
+### AICode API
+
+All task endpoints require `X-API-Key` and map the key to a tenant.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/v1/aicode/tasks` | POST | Enqueue a repository-scoped coding task |
+| `/v1/aicode/tasks/{task_id}` | GET | Read task status within the authenticated tenant |
+| `/v1/aicode/tasks/{task_id}/retry` | POST | Explicitly retry a failed or approval-paused task |
+| `/v1/aicode/tasks/{task_id}` | DELETE | Cancel a cancellable task |
+| `/health/ready` | GET | Verify model and database readiness |
+| `/metrics` | GET | Authenticated Prometheus API metrics |
+
+Example task request:
+
+```json
+{
+  "objective": "Add a regression test for the health endpoint",
+  "repository": {
+    "full_name": "StrategyG/RusaAi",
+    "base_branch": "main"
+  },
+  "acceptance_criteria": [
+    "The regression test passes",
+    "Ruff and Bandit checks pass"
+  ]
+}
+```
+
+### Production deployment
+
+The implementation and production runbook are in [docs/aicode-agent-enterprise.md](docs/aicode-agent-enterprise.md) and [docs/aicode-production-runbook.md](docs/aicode-production-runbook.md).
+
+Production deployment requires managed PostgreSQL, tenant repository allowlists, short-lived or fine-grained GitHub credentials, a dedicated rootless Docker daemon, immutable sandbox image digests, an approved OpenAI-compatible model endpoint, TLS ingress, monitoring, backups, and restore drills.
+
+**Important:** Repository code and CI success alone do not certify the deployment. Complete the release gates in the runbook and record operator approval before enabling production tenants.
 
 ---
 

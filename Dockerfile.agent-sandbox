@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PYTEST_ADDOPTS="-p no:cacheprovider" HOME=/tmp XDG_CACHE_HOME=/tmp/.cache RUFF_CACHE_DIR=/tmp/.cache/ruff
+WORKDIR /workspace
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY requirements-agent-sandbox.txt /tmp/requirements-agent-sandbox.txt
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r /tmp/requirements-agent-sandbox.txt \
+    && python -m pip install "ruff>=0.6,<1" "bandit>=1.7,<2" \
+    && useradd --create-home --uid 10001 sandbox
+USER sandbox
+
+ENTRYPOINT []
+CMD ["python", "-m", "pytest", "-q"]

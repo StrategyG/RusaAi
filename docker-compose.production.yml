@@ -1,0 +1,117 @@
+services:
+  api:
+    image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
+    pull_policy: always
+    restart: unless-stopped
+    stop_grace_period: 30s
+    init: true
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_DATABASE_URL: "${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}"
+      RUSA_API_KEYS: "${RUSA_API_KEYS:?Set tenant API keys}"
+      RUSA_METRICS_API_KEY: "${RUSA_METRICS_API_KEY:?Set operator metrics key}"
+      RUSA_TENANT_REPOSITORIES: "${RUSA_TENANT_REPOSITORIES:?Set tenant repository allowlists}"
+      RUSA_MODEL_BASE_URL: "${RUSA_MODEL_BASE_URL:?Set HTTPS model endpoint}"
+      RUSA_MODEL_NAME: "${RUSA_MODEL_NAME:-rusa-ai}"
+      RUSA_MODEL_API_KEY: "${RUSA_MODEL_API_KEY:-}"
+      RUSA_RATE_LIMIT_CHAT_PER_MINUTE: "${RUSA_RATE_LIMIT_CHAT_PER_MINUTE:-60}"
+      RUSA_RATE_LIMIT_TASKS_PER_MINUTE: "${RUSA_RATE_LIMIT_TASKS_PER_MINUTE:-10}"
+      RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE: "${RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE:-120}"
+      RUSA_MAX_REQUEST_BYTES: "${RUSA_MAX_REQUEST_BYTES:-1048576}"
+      RUSA_REQUEST_BODY_TIMEOUT_SECONDS: "${RUSA_REQUEST_BODY_TIMEOUT_SECONDS:-15}"
+      RUSA_MODEL_MAX_RESPONSE_BYTES: "${RUSA_MODEL_MAX_RESPONSE_BYTES:-2000000}"
+      RUSA_WORKER_DATABASE_URL: ""
+      RUSA_DATABASE_URL: ""
+      RUSA_API_KEY: ""
+      RUSA_AUDIT_HMAC_KEY: ""
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_SANDBOX_IMAGE: ""
+      RUSA_WORKSPACE_ROOT: ""
+      RUSA_GIT_MIRROR_ROOT: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
+      POSTGRES_PASSWORD: ""
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
+
+  worker:
+    image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
+    stop_grace_period: 65m
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "rusa_agents.worker_main"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_WORKER_DATABASE_URL: "${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}"
+      RUSA_TENANT_REPOSITORIES: "${RUSA_TENANT_REPOSITORIES:?Set tenant repository allowlists}"
+      RUSA_MODEL_BASE_URL: "${RUSA_MODEL_BASE_URL:?Set HTTPS model endpoint}"
+      RUSA_MODEL_NAME: "${RUSA_MODEL_NAME:-rusa-ai}"
+      RUSA_MODEL_API_KEY: "${RUSA_MODEL_API_KEY:-}"
+      RUSA_AUDIT_HMAC_KEY: "${RUSA_AUDIT_HMAC_KEY:?Set worker audit HMAC key}"
+      RUSA_GITHUB_TOKEN: "${RUSA_GITHUB_TOKEN:?Set least-privilege GitHub token}"
+      RUSA_SANDBOX_IMAGE: "${RUSA_SANDBOX_IMAGE:?Set immutable sandbox image digest}"
+      RUSA_WORKSPACE_ROOT: "${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}"
+      RUSA_GIT_MIRROR_ROOT: "${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}"
+      RUSA_TASK_TIMEOUT_SECONDS: "${RUSA_TASK_TIMEOUT_SECONDS:-3600}"
+      RUSA_CI_TIMEOUT_SECONDS: "${RUSA_CI_TIMEOUT_SECONDS:-900}"
+      RUSA_CI_POLL_SECONDS: "${RUSA_CI_POLL_SECONDS:-15}"
+      RUSA_MAX_PARALLEL_WORKERS: "${RUSA_MAX_PARALLEL_WORKERS:-4}"
+      RUSA_MAX_REPAIR_CYCLES: "${RUSA_MAX_REPAIR_CYCLES:-2}"
+      RUSA_METRICS_PORT: "${RUSA_METRICS_PORT:-9100}"
+      RUSA_API_DATABASE_URL: ""
+      RUSA_DATABASE_URL: ""
+      RUSA_API_KEY: ""
+      RUSA_API_KEYS: "{}"
+      RUSA_METRICS_API_KEY: ""
+      POSTGRES_PASSWORD: ""
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      DOCKER_HOST: unix:///run/docker.sock
+      RUSA_METRICS_BIND: 0.0.0.0
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    volumes:
+      - ${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
+      - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
+      - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
+    group_add:
+      - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
+    expose:
+      - "9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; data=urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3).read(); assert b'rusa_aicode_worker_ready 1.0' in data"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    networks: [rusa-internal, rusa-egress]
+
+networks:
+  rusa-internal:
+    driver: bridge
+    internal: true
+  rusa-egress:
+    driver: bridge
