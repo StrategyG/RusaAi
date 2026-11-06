@@ -97,6 +97,12 @@ def test_worker_scaling_has_bounded_graceful_shutdown_and_queue_limit():
     assert worker["environment"]["RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT"] == (
         "${RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT:-1000}"
     )
+    assert compose["services"]["rusa-agent-api"]["environment"][
+        "RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT"
+    ] == "${RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT:-1000}"
+    assert compose["services"]["rusa-api"]["environment"][
+        "RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT"
+    ] == "${RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT:-1000}"
     queue_source = (ROOT / "rusa_agents/queue.py").read_text(encoding="utf-8")
     assert "FOR UPDATE SKIP LOCKED" in queue_source
     assert "pg_advisory_xact_lock(hashtextextended(%s, 0))" in queue_source
@@ -143,3 +149,12 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
         "${RUSA_BACKUP_INTERVAL_SECONDS:-3600}"
     )
     assert (ROOT / "scripts/postgres/backup_scheduler.sh").is_file()
+
+
+def test_inference_api_maps_queue_capacity_to_retryable_http_429():
+    source = (ROOT / "llm-project/serve/app.py").read_text(encoding="utf-8")
+
+    assert "from rusa_agents.queue import PostgresTaskQueue, QueueCapacityExceededError" in source
+    assert 'headers={"Retry-After": "10"}' in source
+    assert "except QueueCapacityExceededError as exc:" in source
+
