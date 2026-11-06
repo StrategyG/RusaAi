@@ -831,11 +831,12 @@ def create_aicode_task(
         )
     return AICodeTaskResponse(
         task_id=task_id,
-        status="queued",
+        status=submission.status,
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
         replayed=not submission.created,
     )
+
 
 @app.get("/v1/aicode/tasks/{task_id}")
 def get_aicode_task(
