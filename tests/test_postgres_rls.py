@@ -200,13 +200,35 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps(registry))
     monkeypatch.delenv("RUSA_API_KEYS", raising=False)
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
-    monkeypatch.setattr(app.state, "queue", PostgresTaskQueue(api_dsn), raising=False)
+    api_queue = PostgresTaskQueue(api_dsn)
+    monkeypatch.setattr(app.state, "queue", api_queue, raising=False)
     api_audit = PostgresTaskPolicyAudit(api_dsn)
     worker_audit = PostgresTaskPolicyAudit(worker_dsn)
     api_audit.verify_ready("rusa_api_runtime")
     worker_audit.verify_ready("rusa_worker_runtime")
     monkeypatch.setattr(app.state, "task_policy_audit", api_audit, raising=False)
     caplog.set_level("INFO", logger="rusa-ai.task-policy")
+
+    # A task insert must roll back if its matching audit event cannot be committed.
+    failed_task_id = str(uuid4())
+    with connect() as admin:
+        admin.execute(
+            "REVOKE INSERT ON public.aicode_task_policy_events FROM rusa_api_runtime"
+        )
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        api_queue.enqueue(
+            failed_task_id,
+            "audit-b",
+            {"objective": "atomic audit rollback"},
+            audit_actor="api:service-b",
+        )
+    with connect() as admin:
+        admin.execute(
+            "GRANT INSERT ON public.aicode_task_policy_events TO rusa_api_runtime"
+        )
+        assert admin.execute(
+            "SELECT count(*) FROM aicode_jobs WHERE task_id=%s", (failed_task_id,)
+        ).fetchone()[0] == 0
 
     client = TestClient(app)
     api_a = {"X-API-Key": key_a, "X-Tenant-ID": "audit-b"}
