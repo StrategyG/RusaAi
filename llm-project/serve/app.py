@@ -227,6 +227,10 @@ async def lifespan(application: FastAPI):
                         artifact.manifest_sha256,
                     )
                     break
+                except asyncio.TimeoutError as exc:
+                    last_error = exc
+                    logger.error("Model loading exceeded its startup deadline; process remains not-ready")
+                    break
                 except Exception as exc:
                     last_error = exc
                     logger.exception(
