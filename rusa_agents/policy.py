@@ -1,5 +1,4 @@
 """Fail-closed, allowlist-based autonomy policy."""
-
 from dataclasses import dataclass
 from enum import Enum
 
@@ -52,7 +51,6 @@ class AutonomyPolicy:
     )
 
     def __init__(self, allowed_actions: set[str] | None = None) -> None:
-        # An explicitly empty allowlist must stay empty; it must not fall back to defaults.
         selected = (
             self.DEFAULT_ALLOWED_ACTIONS
             if allowed_actions is None
@@ -65,32 +63,28 @@ class AutonomyPolicy:
         action: str,
         risk: RiskLevel = RiskLevel.LOW,
     ) -> PolicyDecision:
+        if not isinstance(action, str) or not action.strip():
+            return PolicyDecision(False, False, "Invalid action identifier")
+        if not isinstance(risk, RiskLevel):
+            return PolicyDecision(False, False, "Invalid risk level; action denied")
         if action in self.DENIED_ACTIONS:
-            return PolicyDecision(
-                allowed=False,
-                requires_approval=False,
-                reason=f"Action '{action}' is prohibited",
-            )
+            return PolicyDecision(False, False, f"Action '{action}' is prohibited")
         if action in self.PROTECTED_ACTIONS:
             return PolicyDecision(
-                allowed=False,
-                requires_approval=True,
-                reason=f"Human approval is required for '{action}'",
+                False,
+                True,
+                f"Human approval is required for '{action}'",
             )
         if risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
             return PolicyDecision(
-                allowed=False,
-                requires_approval=True,
-                reason=f"{risk.value} risk requires human approval",
+                False,
+                True,
+                f"{risk.value} risk requires human approval",
             )
         if action not in self.allowed_actions:
             return PolicyDecision(
-                allowed=False,
-                requires_approval=False,
-                reason=f"Action '{action}' is not allowlisted",
+                False,
+                False,
+                f"Action '{action}' is not allowlisted",
             )
-        return PolicyDecision(
-            allowed=True,
-            requires_approval=False,
-            reason="Allowed by autonomy policy",
-        )
+        return PolicyDecision(True, False, "Allowed by autonomy policy")

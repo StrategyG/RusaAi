@@ -1,5 +1,4 @@
-"""Validated contracts and task state transitions for the AICode runtime."""
-
+"""Validated task contracts and state transitions for the RUSA-AI runtime."""
 from __future__ import annotations
 
 import re
@@ -10,8 +9,19 @@ from uuid import UUID, uuid4
 
 
 _OWNER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-_BRANCH_RE = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$")
+_WORK_BRANCH_RE = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$")
 _SHA_RE = re.compile(r"^[a-fA-F0-9]{40}$")
+
+
+def _validate_git_branch(branch: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,120}", branch):
+        return False
+    if any(token in branch for token in ("..", "//", "@{")):
+        return False
+    components = branch.split("/")
+    if any(not part or part.startswith(".") or part.endswith(".lock") for part in components):
+        return False
+    return not branch.endswith(("/", "."))
 
 
 class TaskState(str, Enum):
@@ -49,22 +59,19 @@ class RepositoryTarget:
 
     def __post_init__(self) -> None:
         parts = self.full_name.split("/")
-        if len(parts) != 2 or not all(_OWNER_RE.fullmatch(part) for part in parts):
+        if (
+            len(parts) != 2
+            or any(part in {".", ".."} or not _OWNER_RE.fullmatch(part) for part in parts)
+        ):
             raise ValueError("repository must use a valid owner/name identifier")
-        if not self.base_branch or not self.work_branch:
-            raise ValueError("branch names cannot be empty")
+        if not _validate_git_branch(self.base_branch):
+            raise ValueError("base_branch is not a valid Git branch name")
+        if not _validate_git_branch(self.work_branch):
+            raise ValueError("work_branch is not a valid Git branch name")
         if self.work_branch == self.base_branch:
             raise ValueError("work branch must not equal the protected base branch")
-        if not _BRANCH_RE.fullmatch(self.work_branch):
+        if not _WORK_BRANCH_RE.fullmatch(self.work_branch):
             raise ValueError("work branch must use an approved feature/fix/chore/docs prefix")
-        if (
-            ".." in self.work_branch
-            or "//" in self.work_branch
-            or self.work_branch.endswith("/")
-            or self.work_branch.endswith(".")
-            or "@{" in self.work_branch
-        ):
-            raise ValueError("work branch contains an unsafe Git ref sequence")
 
 
 @dataclass
