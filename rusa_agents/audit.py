@@ -19,7 +19,7 @@ def record_task_policy(
     action: str,
     allowed: bool,
     *,
-    sink: "PostgresTaskPolicyAudit | None" = None,
+    sink: PostgresTaskPolicyAudit | None = None,
     required: bool = False,
 ) -> None:
     """Persist and emit a redacted task authorization decision."""
