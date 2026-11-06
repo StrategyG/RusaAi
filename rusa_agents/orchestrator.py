@@ -40,6 +40,8 @@ class AICodeOrchestrator:
         "list_files": "repo_read", "write_file": "repo_write",
         "create_pull_request": "pull_request_create", "get_ci_status": "ci_read",
         "get_branch_diff": "repo_read",
+        "search_knowledge": "knowledge_read", "get_document": "knowledge_read",
+        "list_collections": "knowledge_read",
     }
 
     def __init__(
