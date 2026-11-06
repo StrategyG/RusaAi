@@ -112,12 +112,40 @@ class AICodeOrchestrator:
             ) from exc
 
     @staticmethod
-    def _criteria_passed(task: CodingTask, result: WorkerResult) -> bool:
+    def _criteria_passed(
+        task: CodingTask,
+        result: WorkerResult,
+        available_results: list[WorkerResult] | None = None,
+    ) -> bool:
         expected = set(task.acceptance_criteria)
-        return (
-            set(result.criteria_results) == expected
-            and all(result.criteria_results.get(item) is True for item in expected)
+        if (
+            set(result.criteria_results) != expected
+            or not all(result.criteria_results.get(item) is True for item in expected)
+            or set(result.criteria_evidence) != expected
+        ):
+            return False
+        tool_names = {
+            tool_result.name
+            for worker_result in [*(available_results or []), result]
+            for tool_result in worker_result.tool_results
+        }
+        required_tools = (
+            {"get_ci_status", "get_branch_diff"}
+            if result.role == WorkerRole.SECURITY
+            else {"get_ci_status"}
+            if result.role == WorkerRole.TESTER
+            else set()
         )
+        for criterion in expected:
+            evidence = result.criteria_evidence.get(criterion, "")
+            if not isinstance(evidence, str) or not evidence.strip():
+                return False
+            referenced_tools = {
+                name for name in tool_names if f"tool:{name}" in evidence
+            }
+            if not referenced_tools or not required_tools.issubset(referenced_tools):
+                return False
+        return True
 
     @staticmethod
     def _tool_result(result: WorkerResult, name: str) -> ToolResult | None:
@@ -414,7 +442,7 @@ class AICodeOrchestrator:
                         record.repair_cycles += 1
                         await self._persist(record, checkpoint_callback)
                         continue
-                    if not self._criteria_passed(task, result):
+                    if not self._criteria_passed(task, result, record.worker_results):
                         raise _TaskBlocked(
                             "tester did not verify every acceptance criterion"
                         )
@@ -500,7 +528,7 @@ class AICodeOrchestrator:
                         record,
                         checkpoint_callback,
                     )
-                    if not self._criteria_passed(task, review):
+                    if not self._criteria_passed(task, review, record.worker_results):
                         raise _TaskBlocked(
                             "security review did not verify every acceptance criterion"
                         )
