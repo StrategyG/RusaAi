@@ -223,6 +223,12 @@ def create_aicode_task(
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    config = RuntimeConfig.from_env()
+    allowed_repositories = config.tenant_repositories.get(tenant_id)
+    if config.environment == "production" and not allowed_repositories:
+        raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
+    if allowed_repositories is not None and request.repository.full_name not in allowed_repositories:
+        raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
     task_id = str(uuid4())
     payload = {
         "objective": request.objective,
