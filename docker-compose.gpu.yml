@@ -1,0 +1,15 @@
+services:
+  rusa-api:
+    build:
+      args:
+        RUSA_INSTALL_VLLM: "1"
+    environment:
+      RUSA_INFERENCE_BACKEND: vllm
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
