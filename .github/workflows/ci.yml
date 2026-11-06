@@ -35,6 +35,7 @@ jobs:
           --health-retries 10
     env:
       RUSA_TEST_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
+      DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,9 +52,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r requirements-dev.txt
       - name: Lint
-        run: ruff check llm-project/serve rusa_agents tests
+        run: ruff check llm-project/serve rusa_agents rusa_knowledge rusa_mcp tests
       - name: Compile
-        run: python -m compileall -q llm-project rusa_agents tests
+        run: python -m compileall -q llm-project rusa_agents rusa_knowledge rusa_mcp tests
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -83,6 +84,8 @@ jobs:
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
       - name: Build RAG and MCP image
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
+      - name: Build user and admin workspace image
+        run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
       - name: Smoke-test RAG and MCP imports
         run: |
           docker run --rm rusa-knowledge-mcp:${{ github.sha }} \\
