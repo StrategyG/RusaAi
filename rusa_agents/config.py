@@ -15,6 +15,7 @@ class RuntimeConfig:
     database_url: str | None
     audit_hmac_key: str | None
     api_keys: dict[str, str]
+    metrics_api_key: str | None
     workspace_root: str | None
     sandbox_image: str | None
     git_mirror_root: str | None
@@ -60,6 +61,7 @@ class RuntimeConfig:
             database_url=os.getenv("RUSA_DATABASE_URL"),
             audit_hmac_key=os.getenv("RUSA_AUDIT_HMAC_KEY"),
             api_keys=keys,
+            metrics_api_key=os.getenv("RUSA_METRICS_API_KEY"),
             workspace_root=os.getenv("RUSA_WORKSPACE_ROOT"),
             sandbox_image=os.getenv("RUSA_SANDBOX_IMAGE"),
             git_mirror_root=os.getenv("RUSA_GIT_MIRROR_ROOT"),
@@ -76,12 +78,15 @@ class RuntimeConfig:
         required = {
             "RUSA_DATABASE_URL": self.database_url,
             "RUSA_API_KEYS or RUSA_API_KEY": self.api_keys,
+            "RUSA_METRICS_API_KEY": self.metrics_api_key,
             "RUSA_TENANT_REPOSITORIES": self.tenant_repositories,
             "RUSA_MODEL_BASE_URL": self.model_base_url,
         }
         missing = [name for name, value in required.items() if not value]
         if any(len(key.encode("utf-8")) < 32 for key in self.api_keys):
             missing.append("API keys of at least 32 UTF-8 bytes")
+        if self.metrics_api_key and len(self.metrics_api_key.encode("utf-8")) < 32:
+            missing.append("RUSA_METRICS_API_KEY of at least 32 UTF-8 bytes")
         if any(not tenant.strip() for tenant in self.api_keys.values()):
             missing.append("non-empty API-key tenant mappings")
         if any(not tenant.strip() for tenant in self.tenant_repositories):
