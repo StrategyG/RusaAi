@@ -305,3 +305,21 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_publisher_never_stages_env_file_renames_or_env_suffix_files(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / ".env.example").write_text("PLACEHOLDER=value\n")
+    git("add", ".env.example", cwd=repository)
+    git("commit", "-m", "add example env", cwd=repository)
+    git("mv", ".env.example", "production.env", cwd=repository)
+
+    (repository / "config.env.local").write_text("SECRET=value\n")
+    (repository / "application.py").write_text("print('safe')\n")
+
+    assert GitHubPublisher._safe_changed_paths(repository) == ["application.py"]
