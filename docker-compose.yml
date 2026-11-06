@@ -1,5 +1,6 @@
 services:
   rusa-api:
+    image: ${RUSA_API_IMAGE:-rusa-ai:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -65,6 +66,7 @@ services:
       - no-new-privileges:true
 
   rusa-agent-api:
+    image: ${RUSA_AGENT_IMAGE:-rusa-agent-runtime:local}
     build:
       context: .
       dockerfile: Dockerfile.worker

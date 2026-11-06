@@ -1,8 +1,6 @@
 import asyncio
 import base64
 
-import pytest
-
 from rusa_agents.contracts import CodingTask, RepositoryTarget, ToolCall
 from rusa_agents.github import GitHubToolGateway
 
