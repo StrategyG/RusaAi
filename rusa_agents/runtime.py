@@ -197,6 +197,7 @@ class AICodeRuntime:
         lost_lease = asyncio.Event()
         heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
         authorized = False
+        policy_audited = False
         try:
             task = self._task(job)
             allowed_repositories = self.config.tenant_repositories.get(job.tenant_id)
@@ -206,16 +207,25 @@ class AICodeRuntime:
                 raise PermissionError("Tenant has no configured repository permissions")
 
             await self._assert_lease(job, lost_lease)
+            authorized = await asyncio.to_thread(
+                self.queue.authorize_execution,
+                job.id,
+                task.task_id,
+                job.tenant_id,
+                self.worker_id,
+                job.lease_token,
+            )
+            policy_audited = True
             record_task_policy(
                 job.tenant_id,
                 job.task_id,
                 f"worker:{self.worker_id}",
                 "task.execute",
-                True,
-                sink=self.task_policy_audit,
-                required=self.config.environment == "production",
+                authorized,
             )
-            authorized = True
+            if not authorized:
+                lost_lease.set()
+                raise RuntimeError("Worker is not authorized by the current task lease")
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
@@ -335,7 +345,7 @@ class AICodeRuntime:
             logger.info("AICode task %s completed: %s", task.task_id, pr_url)
             outcome = "success"
         except Exception as exc:
-            if not authorized:
+            if not policy_audited:
                 try:
                     record_task_policy(
                         job.tenant_id,
@@ -348,6 +358,11 @@ class AICodeRuntime:
                     )
                 except Exception:
                     logger.error("Could not persist denied task execution audit event")
+            elif not authorized:
+                record_task_policy(
+                    job.tenant_id, job.task_id, f"worker:{self.worker_id}",
+                    "task.execute", False,
+                )
             logger.exception("AICode task %s failed", job.task_id)
             outcome = "lease_lost" if lost_lease.is_set() else "failed"
             if not lost_lease.is_set():
