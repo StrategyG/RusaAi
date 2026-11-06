@@ -70,7 +70,9 @@ jobs:
           BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/rusa-backup-identity.txt
         run: |
           sudo apt-get update
-          sudo apt-get install -y age postgresql-client-16
+          sudo apt-get install -y age postgresql-client
+          pg_dump --version
+          pg_restore --version
           mkdir -p "$BACKUP_DIR"
           age-keygen -o "$BACKUP_AGE_IDENTITY_FILE"
           export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
