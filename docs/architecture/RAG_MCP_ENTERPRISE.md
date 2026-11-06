@@ -84,7 +84,7 @@ Use a PostgreSQL build with pgvector installed, for example pgvector/pgvector:pg
 - creates transaction-local tenant policies;
 - grants read-only access to rusa_agent_api and read/write access to rusa_knowledge_worker when that restricted role exists.
 
-Do not run the migration as the MCP application identity. The fresh-volume bootstrap creates rusa_knowledge_worker as a NOLOGIN, NOBYPASSRLS role and grants membership to rusa_agent_worker. For an existing volume, create that restricted role and grant membership before applying migration 005; initialization scripts do not replay automatically. In Docker Compose, run the opt-in migration job with:
+Do not run the migration as the MCP application identity. The fresh-volume bootstrap creates rusa_knowledge_worker as a NOLOGIN, NOBYPASSRLS role and grants membership to rusa_agent_worker. Migration 005 also creates or hardens this restricted role and grants membership when rusa_agent_worker exists, covering existing volumes where initialization scripts do not replay automatically. Run it with the database migration identity that has permission to install pgvector and manage roles. In Docker Compose, run the opt-in migration job with:
 
 ~~~bash
 docker compose --profile migrate run --rm rusa-knowledge-migrate
