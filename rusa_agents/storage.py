@@ -125,8 +125,12 @@ class Database:
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
 
     async def initialize(self) -> None:
-        async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        auto_create = os.getenv("RUSA_DB_AUTO_CREATE", "true").lower() == "true"
+        if auto_create:
+            async with self.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+        else:
+            await self.ping()
 
     async def ping(self) -> bool:
         async with self.engine.connect() as connection:
