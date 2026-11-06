@@ -16,8 +16,11 @@ Status: IMPLEMENTATION ADVANCED — NOT PRODUCTION CERTIFIED.
 - Agent API, separate worker process, lightweight agent image, PostgreSQL/pgvector Compose service, and Alembic initial migration.
 - Unit tests covering task contracts, policy, tenant isolation, message persistence, lease recovery, MCP allowlists, and RAG source ACL behavior.
 
+## CI evidence
+- Agent Runtime CI passed on commit 1874d0e21fc3180b6ff47e1dfe74d3a41f63e7d8: lint, compile, agent tests, dependency audit, PostgreSQL/pgvector migration, Compose validation, agent image build, and API liveness.
+- Main model/API CI for the same commit is still running; it must pass before this branch can be considered integration-ready.
+
 ## Not yet certified
-- Latest CI for the current head must pass; code written to GitHub is not evidence of a passing build.
 - PostgreSQL migration and concurrency tests must be executed against the actual pgvector container and production-like settings.
 - The main model-serving image still requires an externally supplied compatible local model artifact.
 - RAG requires an externally supplied OpenAI-compatible embeddings endpoint that returns exactly 384-dimensional vectors.
