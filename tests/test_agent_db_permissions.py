@@ -66,6 +66,7 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
     idempotency_key = uuid4().hex
     probe_table = f"rusa_api_permission_probe_{uuid4().hex}"
     probe_sequence = f"{probe_table}_seq"
+    probe_function = f"rusa_api_permission_probe_{uuid4().hex}"
 
     try:
         with psycopg.connect(DSN) as connection:
@@ -108,6 +109,9 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
             connection.execute(
                 f'CREATE SEQUENCE public."{probe_sequence}"'
             )
+            connection.execute(
+                f"CREATE FUNCTION public.\"{probe_function}\"() RETURNS BOOLEAN LANGUAGE SQL AS 'SELECT TRUE'"
+            )
             connection.execute("RESET ROLE")
 
             future_table_access = connection.execute(
@@ -118,8 +122,13 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
                 "SELECT has_sequence_privilege(%s, %s, 'USAGE')",
                 ("rusa_agent_api", f"public.{probe_sequence}"),
             ).fetchone()[0]
+            future_function_access = connection.execute(
+                "SELECT has_function_privilege(%s, %s, 'EXECUTE')",
+                ("rusa_agent_api", f"public.{probe_function}()"),
+            ).fetchone()[0]
             assert future_table_access is False
             assert future_sequence_access is False
+            assert future_function_access is False
 
         with psycopg.connect(DSN) as connection:
             connection.execute("SET ROLE rusa_agent_api")
@@ -223,4 +232,7 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
             )
             connection.execute(
                 f'DROP SEQUENCE IF EXISTS public."{probe_sequence}"'
+            )
+            connection.execute(
+                f'DROP FUNCTION IF EXISTS public."{probe_function}"()'
             )
