@@ -314,7 +314,10 @@ def test_transient_inference_failure_is_retried_once(client, monkeypatch):
     response = client.post(
         "/v1/chat/completions",
         headers=auth_headers(),
-        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+        json={
+            "messages": [{"role": "user", "content": "Hello RUSA"}],
+            "max_tokens": 64,
+        },
     )
     assert response.status_code == 200
     assert backend.attempts == 2
