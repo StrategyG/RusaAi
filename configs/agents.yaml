@@ -1,0 +1,54 @@
+system:
+  name: RUSA-AI
+  architecture: hierarchical
+  autonomy: full_with_policy_boundaries
+  max_agent_depth: 4
+  max_parallel_workers: 8
+  default_retry_attempts: 2
+
+supervisor:
+  id: rusa-master
+  role: supervisor
+  enabled: true
+
+managers:
+  - id: research-manager
+    role: manager
+    capabilities: [research, document_intelligence, knowledge_retrieval]
+  - id: development-manager
+    role: manager
+    capabilities: [software_engineering, repository_analysis, debugging]
+  - id: intelligence-manager
+    role: manager
+    capabilities: [data_analysis, model_evaluation, ml_engineering]
+  - id: operations-manager
+    role: manager
+    capabilities: [automation, integrations, workflow_operations]
+  - id: quality-security-manager
+    role: manager
+    capabilities: [testing, security_review, compliance]
+
+governance:
+  autonomous_actions:
+    - repository.read
+    - research.search
+    - document.read
+    - artifact.create
+    - workspace.write
+    - test.run
+    - branch.create
+    - feature_branch.commit
+    - pull_request.create
+  approval_required:
+    - repository.merge
+    - deployment.production
+    - release.publish
+    - secret.change
+    - permission.change
+    - data.destructive
+    - production.write
+  prohibited:
+    - audit.disable
+    - secret.exfiltrate
+    - protected_branch.force_push
+    - policy.self_modify
