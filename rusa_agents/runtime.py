@@ -28,8 +28,15 @@ def build_orchestrator() -> AICodeOrchestrator:
         os.getenv("RUSA_PROVIDER_API_KEY"),
         timeout_seconds=float(os.getenv("RUSA_PROVIDER_TIMEOUT_SECONDS", "120")),
     )
+    allowed_repositories = {
+        item.strip()
+        for item in os.getenv("RUSA_GITHUB_ALLOWED_REPOSITORIES", "").split(",")
+        if item.strip()
+    }
+    if not allowed_repositories:
+        raise RuntimeError("RUSA_GITHUB_ALLOWED_REPOSITORIES must contain explicit owner/repo entries")
     github = GitHubRepositoryGateway(github_token)
-    gateway = GitHubToolGateway(github)
+    gateway = GitHubToolGateway(github, allowed_repositories=allowed_repositories)
     data_dir = Path(os.getenv("RUSA_AGENT_DATA_DIR", ".rusa-ai"))
     data_dir.mkdir(parents=True, exist_ok=True)
     memory = SQLiteMemory(str(data_dir / "aicode-memory.sqlite3"))
