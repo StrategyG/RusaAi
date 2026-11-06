@@ -998,3 +998,38 @@ def test_task_checkpoint_omits_raw_file_write_content_and_bounds_file_reads():
     assert read_data["content_sha256"]
     restored = TaskRecord.from_dict(checkpoint)
     assert restored.worker_results[0].tool_calls[0].arguments["content_omitted"] is True
+
+
+def test_task_checkpoint_preserves_complete_ci_check_set():
+    task = make_task()
+    checks = [
+        {
+            "id": index,
+            "name": f"check-{index}",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        for index in range(100)
+    ]
+    record = TaskRecord(task=task)
+    record.worker_results.append(WorkerResult(
+        role=WorkerRole.TESTER,
+        summary="All CI checks passed",
+        tool_results=(ToolResult(
+            name="get_ci_status",
+            success=True,
+            data={
+                "head_sha": "a" * 40,
+                "checks_complete": True,
+                "total_count": 100,
+                "checks": checks,
+                "all_checks_success": True,
+            },
+            evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
+        ),),
+        criteria_results={"Tests pass": True, "Security review passes": True},
+    ))
+    restored = TaskRecord.from_dict(record.to_dict())
+    ci = restored.worker_results[0].tool_results[0]
+    assert len(ci.data["checks"]) == 100
+    assert ci.data["total_count"] == 100
