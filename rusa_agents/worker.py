@@ -1,6 +1,7 @@
 """Worker process with lease renewal, durable checkpoints, and graceful shutdown."""
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -21,6 +22,34 @@ logger = logging.getLogger("rusa-agent-worker")
 
 class LeaseLostError(RuntimeError):
     """Raised when the worker no longer owns the current task lease."""
+
+
+def _load_repository_access() -> tuple[set[str], dict[str, set[str]]]:
+    raw_global = os.getenv("RUSA_AGENT_ALLOWED_REPOSITORIES", "")
+    global_repositories = {
+        item.strip().lower() for item in raw_global.split(",") if item.strip()
+    }
+    if not global_repositories:
+        raise RuntimeError("RUSA_AGENT_ALLOWED_REPOSITORIES must contain at least one repository")
+    raw_tenants = os.getenv("RUSA_AGENT_TENANT_REPOSITORIES", "")
+    try:
+        tenant_values = json.loads(raw_tenants)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("RUSA_AGENT_TENANT_REPOSITORIES must be valid JSON") from exc
+    if not isinstance(tenant_values, dict) or not tenant_values:
+        raise RuntimeError("RUSA_AGENT_TENANT_REPOSITORIES must map tenants to repositories")
+    tenant_repositories: dict[str, set[str]] = {}
+    for tenant_id, values in tenant_values.items():
+        if not isinstance(tenant_id, str) or not isinstance(values, list) or not values:
+            raise RuntimeError("invalid tenant repository mapping")
+        repositories = {
+            item.strip().lower() for item in values
+            if isinstance(item, str) and item.strip()
+        }
+        if len(repositories) != len(values) or not repositories.issubset(global_repositories):
+            raise RuntimeError("tenant repositories must be a unique subset of the global allowlist")
+        tenant_repositories[tenant_id] = repositories
+    return global_repositories, tenant_repositories
 
 
 class QueueWorker:
@@ -199,6 +228,7 @@ def build_worker() -> QueueWorker:
         "RUSA_AGENT_GITHUB_TOKEN",
         "RUSA_AGENT_AUDIT_KEY",
         "RUSA_AGENT_ALLOWED_REPOSITORIES",
+        "RUSA_AGENT_TENANT_REPOSITORIES",
     )
     missing = [name for name in required if not os.getenv(name)]
     if missing:
@@ -215,17 +245,12 @@ def build_worker() -> QueueWorker:
         timeout_seconds=float(os.getenv("RUSA_AGENT_PROVIDER_TIMEOUT", "45")),
         max_response_bytes=int(os.getenv("RUSA_AGENT_PROVIDER_MAX_RESPONSE_BYTES", "2000000")),
     )
-    allowed_repositories = {
-        item.strip().lower()
-        for item in os.environ["RUSA_AGENT_ALLOWED_REPOSITORIES"].split(",")
-        if item.strip()
-    }
-    if not allowed_repositories:
-        raise RuntimeError("RUSA_AGENT_ALLOWED_REPOSITORIES must contain at least one repository")
+    allowed_repositories, tenant_repositories = _load_repository_access()
     github = GitHubToolGateway(
         token=os.environ["RUSA_AGENT_GITHUB_TOKEN"],
         api_url=os.getenv("RUSA_AGENT_GITHUB_API_URL", "https://api.github.com"),
         allowed_repositories=allowed_repositories,
+        tenant_repositories=tenant_repositories,
         max_response_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_RESPONSE_BYTES", "4000000")),
         max_file_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_FILE_BYTES", "1000000")),
         max_diff_files=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_FILES", "20")),
