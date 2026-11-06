@@ -1,10 +1,8 @@
 """Standalone worker process entry point."""
 from __future__ import annotations
 import asyncio, logging, os, signal
-from .mcp_gateway import MCPGateway
-from .providers import OpenAICompatibleProvider
+from .bootstrap import build_planner, build_tooling
 from .storage import Database
-from .tools import GitHubTools, ToolRegistry
 from .worker import AgentRuntime
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
@@ -12,12 +10,8 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 async def main() -> None:
     database = Database()
     await database.initialize()
-    provider = OpenAICompatibleProvider()
-    tools = ToolRegistry()
-    GitHubTools().register(tools)
-    mcp_gateway = MCPGateway.from_env()
-    await mcp_gateway.connect_and_register(tools)
-    runtime = AgentRuntime(database, provider, tools)
+    tools, mcp_gateway, _rag_service = await build_tooling(database)
+    runtime = AgentRuntime(database, build_planner(), tools)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
