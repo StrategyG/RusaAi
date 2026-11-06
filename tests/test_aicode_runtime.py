@@ -506,10 +506,13 @@ def test_orchestrator_rejects_ci_evidence_with_nonstandard_github_port(tmp_path)
 
 
 def test_orchestrator_persists_cancelled_state_and_audit(tmp_path):
+    worker_started = asyncio.Event()
+
     class BlockingWorker:
         role = WorkerRole.ANALYST
 
         async def run(self, task, prior_results):
+            worker_started.set()
             await asyncio.Event().wait()
 
     class UnusedWorker:
@@ -531,7 +534,7 @@ def test_orchestrator_persists_cancelled_state_and_audit(tmp_path):
 
     async def cancel_task():
         running = asyncio.create_task(orchestrator.run(task))
-        await asyncio.sleep(0)
+        await worker_started.wait()
         running.cancel()
         with pytest.raises(asyncio.CancelledError):
             await running

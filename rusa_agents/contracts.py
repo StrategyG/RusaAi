@@ -150,7 +150,11 @@ class TaskRecord:
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     _TRANSITIONS = {
-        TaskState.RECEIVED: {TaskState.OBSERVING, TaskState.CANCELLED},
+        TaskState.RECEIVED: {
+            TaskState.OBSERVING,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        },
         TaskState.OBSERVING: {
             TaskState.PLANNING,
             TaskState.BLOCKED,
