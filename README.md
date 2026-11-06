@@ -23,7 +23,7 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 
 ## Optional local model runtime
 
-Install the local inference dependencies with `pip install -e ".[model]"`.
+Install the local inference dependencies with `pip install -r requirements-model.txt`.
 For vLLM, use the separately managed `requirements-vllm.txt` on a compatible
 CUDA/Linux environment. Create and verify a model manifest with
 `scripts/create_model_manifest.py`, then configure `RUSA_LOCAL_MODEL_PATH`.
