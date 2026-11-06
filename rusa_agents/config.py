@@ -22,9 +22,20 @@ class RuntimeConfig:
     model_base_url: str | None
     model_name: str
     tenant_repositories: dict[str, list[str]]
+    aicode_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        raw_enabled = os.getenv("RUSA_AICODE_ENABLED")
+        if raw_enabled is None:
+            aicode_enabled = environment != "production"
+        elif raw_enabled.strip().lower() in {"1", "true", "yes", "on"}:
+            aicode_enabled = True
+        elif raw_enabled.strip().lower() in {"0", "false", "no", "off"}:
+            aicode_enabled = False
+        else:
+            raise ValueError("RUSA_AICODE_ENABLED must be a boolean value")
         try:
             keys = json.loads(os.getenv("RUSA_API_KEYS", "{}"))
         except json.JSONDecodeError as exc:
@@ -45,7 +56,7 @@ class RuntimeConfig:
         if legacy:
             keys.setdefault(legacy, os.getenv("RUSA_DEFAULT_TENANT", "default"))
         return cls(
-            environment=os.getenv("ENVIRONMENT", "development").lower(),
+            environment=environment,
             database_url=os.getenv("RUSA_DATABASE_URL"),
             audit_hmac_key=os.getenv("RUSA_AUDIT_HMAC_KEY"),
             api_keys=keys,
@@ -56,6 +67,7 @@ class RuntimeConfig:
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
             tenant_repositories=tenant_repositories,
+            aicode_enabled=aicode_enabled,
         )
 
     def validate_api(self) -> None:
