@@ -138,7 +138,13 @@ class AICodeOrchestrator:
         ):
             return "pending"
         checks = result.data.get("checks")
-        if not isinstance(checks, list) or not checks:
+        total_count = result.data.get("total_count")
+        if (
+            not isinstance(checks, list)
+            or not checks
+            or type(total_count) is not int
+            or total_count != len(checks)
+        ):
             return "pending"
         by_name = {
             item.get("name"): item for item in checks if isinstance(item, dict)
@@ -220,6 +226,38 @@ class AICodeOrchestrator:
         )
         await self._persist(record, checkpoint_callback)
         return completed
+
+    async def _run_security_review(
+        self,
+        record: TaskRecord,
+        checkpoint_callback: CheckpointCallback | None,
+    ) -> WorkerResult:
+        review = await asyncio.wait_for(
+            self.workers[WorkerRole.SECURITY].run(
+                record.task,
+                list(record.worker_results),
+                review_only=True,
+            ),
+            timeout=self.worker_timeout_seconds,
+        )
+        if review.role != WorkerRole.SECURITY or review.tool_calls:
+            raise _TaskBlocked("security review phase must be read-only and tool-free")
+        record.worker_results.append(review)
+        if review.blockers:
+            record.errors.extend(review.blockers)
+            raise _TaskBlocked("; ".join(review.blockers))
+        if review.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+            raise _ApprovalRequired(
+                f"security review assessed task risk as {review.risk.value}"
+            )
+        self._event(
+            "worker.completed",
+            record,
+            "security-review",
+            {"tool_count": 0, "summary": review.summary[:400]},
+        )
+        await self._persist(record, checkpoint_callback)
+        return review
 
     def _tester_sha(self, record: TaskRecord) -> str | None:
         tester = next(
@@ -403,17 +441,32 @@ class AICodeOrchestrator:
                         record.repair_cycles += 1
                         await self._persist(record, checkpoint_callback)
                         continue
+                    files = diff.data.get("files")
+                    changed_files = diff.data.get("changed_files")
                     if (
                         diff.data.get("diff_complete") is not True
-                        or type(diff.data.get("changed_files")) is not int
-                        or diff.data.get("changed_files", 0) < 1
+                        or type(changed_files) is not int
+                        or changed_files < 1
+                        or not isinstance(files, list)
+                        or len(files) != changed_files
+                        or any(
+                            not isinstance(item, dict)
+                            or not isinstance(item.get("path"), str)
+                            or not item.get("path")
+                            or not isinstance(item.get("patch"), str)
+                            for item in files
+                        )
                     ):
                         raise _TaskBlocked(
-                            "security review requires a complete, non-empty repository diff"
+                            "security review requires a complete, non-empty, bounded repository diff"
                         )
-                    if not self._criteria_passed(task, result):
+                    review = await self._run_security_review(
+                        record,
+                        checkpoint_callback,
+                    )
+                    if not self._criteria_passed(task, review):
                         raise _TaskBlocked(
-                            "security worker did not verify every acceptance criterion"
+                            "security review did not verify every acceptance criterion"
                         )
                     record.stage_index = 7
                     await self._persist(record, checkpoint_callback)
