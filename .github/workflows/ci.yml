@@ -208,6 +208,23 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
+      - name: Validate full production Compose configuration
+        env:
+          RUSA_MCP_IMAGE: example.invalid/rusa-ai-rag-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_MCP_DATABASE_URL: postgresql://rusa_mcp_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_WORKER_KNOWLEDGE_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_RAG_ENABLED: "true"
+          RUSA_KNOWLEDGE_DB_ROLE: rusa_knowledge_reader
+          RUSA_KNOWLEDGE_COLLECTION: agent
+          RUSA_EMBEDDING_BASE_URL: https://embedding.internal/v1
+          RUSA_EMBEDDING_API_KEY: ci-only-embedding-key
+          RUSA_EMBEDDING_MODEL: text-embedding-3-small
+          RUSA_MCP_TENANT_KEYS: '{"0000000000000000000000000000000000000000000000000000000000000000":"tenant-ci"}'
+          RUSA_MCP_ALLOWED_HOSTS: knowledge.example.com,knowledge.example.com:*
+          RUSA_MCP_BIND_PORT: "8002"
+        run: |
+          docker compose -f docker-compose.production.yml \
+            -f docker-compose.production.rag-mcp.yml config --quiet
 
   rag-mcp:
     name: RAG and MCP integration tests
