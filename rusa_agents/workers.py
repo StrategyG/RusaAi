@@ -160,7 +160,7 @@ class AgentWorker:
                 not isinstance(item, dict)
                 or set(item) != {"name", "arguments"}
                 or item["name"] not in self.TOOL_NAMES
-                or item["name"] not in self.ROLE_TOOLS[self.role]
+                or item["name"] not in self.allowed_tools
                 or not isinstance(item["arguments"], dict)
             ):
                 raise ValueError("worker proposed an invalid or unauthorized tool call")
