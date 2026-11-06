@@ -76,14 +76,14 @@ class AgentWorker:
             "search_knowledge": {
                 "arguments": {
                     "query": "required string, 1 to 2000 characters",
-                    "collection": "optional collection name; default is default",
+                    "collection": "optional collection name; default is agent",
                     "limit": "optional integer from 1 to 20; default is 5",
                 }
             },
             "get_document": {
                 "arguments": {
                     "document_id": "required UUID returned by search_knowledge",
-                    "collection": "optional collection name; default is default",
+                    "collection": "optional collection name; default is agent",
                 }
             },
             "list_collections": {"arguments": {}},
