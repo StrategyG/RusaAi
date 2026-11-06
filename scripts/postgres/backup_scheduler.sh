@@ -24,7 +24,10 @@ if [[ ! "$retry_seconds" =~ ^[1-9][0-9]{0,4}$ ]] || (( retry_seconds > 86400 ));
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-while true; do
+shutdown_requested=false
+trap 'shutdown_requested=true; echo "Shutdown requested; allowing the active backup to finish" >&2' TERM INT
+
+while [[ "$shutdown_requested" != "true" ]]; do
     cycle_started="$(date +%s)"
     if "$script_dir/backup.sh"; then
         elapsed="$(( $(date +%s) - cycle_started ))"
@@ -35,5 +38,11 @@ while true; do
         delay="$retry_seconds"
         echo "Scheduled backup failed; retrying in ${delay}s" >&2
     fi
-    sleep "$delay"
+
+    if [[ "$shutdown_requested" == "true" ]]; then
+        break
+    fi
+    sleep "$delay" || true
 done
+
+echo "Backup scheduler stopped cleanly" >&2
