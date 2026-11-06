@@ -28,14 +28,16 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
-      - name: Install dependencies
+      - name: Install package and development dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -e ".[dev]"
       - name: Lint
-        run: ruff check llm-project/serve tests
+        run: ruff check rusa_agents llm-project/serve tests
       - name: Compile
-        run: python -m compileall -q llm-project tests
+        run: python -m compileall -q rusa_agents llm-project tests
+      - name: Security static analysis
+        run: bandit -q -r rusa_agents
       - name: Test
         run: pytest -q
       - name: Audit production dependencies
