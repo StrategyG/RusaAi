@@ -63,6 +63,9 @@ jobs:
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents tests
 
+      - name: Validate time-bound Trivy exceptions
+        run: python scripts/security/validate_trivy_exceptions.py
+
       - name: Validate deployment shell scripts
         run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh tests/test_deploy_scripts.sh
 
@@ -114,7 +117,10 @@ jobs:
       - name: Build agent runtime image
         run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
 
-      - name: Scan inference API image
+      - name: Pull pinned PostgreSQL image
+        run: docker pull postgres:16.15-alpine3.22
+
+      - name: Block all CRITICAL inference API vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-ai:${{ github.sha }}
@@ -122,9 +128,31 @@ jobs:
           exit-code: "1"
           ignore-unfixed: "false"
           vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate inference API HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-ai:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete inference API vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-ai:${{ github.sha }}
+          format: json
+          output: trivy-inference-api-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
           severity: CRITICAL,HIGH
 
-      - name: Scan agent runtime image
+      - name: Block all CRITICAL agent runtime vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: rusa-agent-runtime:${{ github.sha }}
@@ -132,7 +160,71 @@ jobs:
           exit-code: "1"
           ignore-unfixed: "false"
           vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate agent runtime HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-agent-runtime:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete agent runtime vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-agent-runtime:${{ github.sha }}
+          format: json
+          output: trivy-agent-runtime-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
           severity: CRITICAL,HIGH
+
+      - name: Block all CRITICAL PostgreSQL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.22
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate PostgreSQL HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.22
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete PostgreSQL vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.22
+          format: json
+          output: trivy-postgres-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Upload complete vulnerability reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trivy-vulnerability-reports-${{ github.sha }}
+          path: |
+            trivy-inference-api-full.json
+            trivy-agent-runtime-full.json
+            trivy-postgres-full.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Generate inference API SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -152,6 +244,17 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-agent-runtime.cdx.json
           artifact-name: sbom-agent-runtime-${{ github.sha }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: false
+
+      - name: Generate PostgreSQL SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: postgres:16.15-alpine3.22
+          format: cyclonedx-json
+          output-file: sbom-postgres.cdx.json
+          artifact-name: sbom-postgres-${{ github.sha }}
           syft-version: v1.57.0
           upload-artifact: true
           upload-release-assets: false

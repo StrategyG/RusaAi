@@ -101,7 +101,10 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Scan published inference API image
+      - name: Pull pinned PostgreSQL image
+        run: docker pull postgres:16.15-alpine3.22
+
+      - name: Block all CRITICAL published inference API vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
@@ -109,9 +112,20 @@ jobs:
           exit-code: "1"
           ignore-unfixed: "false"
           vuln-type: os,library
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
 
-      - name: Scan published agent runtime image
+      - name: Gate published inference API HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Block all CRITICAL published agent runtime vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
@@ -119,7 +133,38 @@ jobs:
           exit-code: "1"
           ignore-unfixed: "false"
           vuln-type: os,library
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
+
+      - name: Gate published agent runtime HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Block all CRITICAL PostgreSQL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.22
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate PostgreSQL HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.22
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: HIGH
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
@@ -176,6 +221,17 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-agent-runtime.cdx.json
           artifact-name: sbom-agent-runtime-${{ github.ref_name }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Attach PostgreSQL SBOM to release
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: postgres:16.15-alpine3.22
+          format: cyclonedx-json
+          output-file: sbom-postgres.cdx.json
+          artifact-name: sbom-postgres-${{ github.ref_name }}
           syft-version: v1.57.0
           upload-artifact: true
           upload-release-assets: true

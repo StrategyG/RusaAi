@@ -8,7 +8,7 @@ Every push and pull request runs the reusable CI workflow:
 2. **Container security:** Compose interpolation validation, production API and worker image builds, Trivy image scans, and CycloneDX SBOM generation for both images.
 3. **Release Gate:** a single aggregate check that fails unless both mandatory jobs succeed. Configure this exact check as required on protected branches.
 
-Trivy fails the pipeline for any HIGH or CRITICAL OS/library vulnerability, including findings for which no fix is currently available. Exceptions must be reviewed, documented, time-bounded, and handled through an explicit approved policy change; do not add blanket ignore rules.
+Trivy blocks every CRITICAL finding and every HIGH finding except the exact CVEs listed in the root .trivyignore file. Each exception has a mitigation, owner, and expiry in docs/SECURITY_EXCEPTIONS.md; scripts/security/validate_trivy_exceptions.py fails CI when an exception expires or the ignore list and register diverge. Unfiltered JSON reports for both application images and PostgreSQL are retained as 30-day workflow artifacts. New CVEs are not automatically ignored.
 
 The CI workflow validates both the build-enabled development Compose file and the build-free production Compose manifest. It is reusable by the release workflow. A semantic-version tag is not published unless the complete CI workflow succeeds again on the exact tagged commit.
 

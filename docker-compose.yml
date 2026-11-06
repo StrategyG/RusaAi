@@ -45,7 +45,7 @@ services:
         max-file: "3"
 
   rusa-agent-db:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine3.22
     restart: unless-stopped
     environment:
       POSTGRES_DB: rusa_agent
