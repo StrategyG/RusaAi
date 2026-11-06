@@ -13,17 +13,24 @@ from .contracts import CodingTask
 
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
-BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk"}
+BLOCKED_SUFFIXES = {
+    ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der",
+    ".ppk", ".tfstate", ".tfvars",
+}
 BLOCKED_WRITE_NAMES = {
     ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
     "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
-    "dockerfile.agent-sandbox", "docker-compose.yml", "makefile",
+    "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
+    "containerfile", "makefile", "procfile", "serverless.yml",
+    "vercel.json", "netlify.toml",
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
 }
 BLOCKED_WRITE_PREFIXES = (
     ".github/", "migrations/", "schemas/", "llm-project/configs/",
+    "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
+    "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
 )
 
 
@@ -236,7 +243,7 @@ class GitHubPublisher:
                 path.suffix.lower() in BLOCKED_SUFFIXES
                 or path.name.lower() in {"id_rsa", "id_ed25519"}
                 or path.name.lower() in BLOCKED_WRITE_NAMES
-                or path.name.lower().startswith(("requirements", "dockerfile."))
+                or path.name.lower().startswith(("requirements", "dockerfile.", "docker-compose.", "compose."))
                 or any(raw_path.lower().startswith(prefix.lower()) for prefix in BLOCKED_WRITE_PREFIXES)
             ):
                 continue
