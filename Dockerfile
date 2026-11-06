@@ -8,7 +8,7 @@ WORKDIR /build
 COPY requirements.txt requirements-vllm.txt .
 ARG RUSA_INSTALL_VLLM=0
 RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt \
-    && if [ "$RUSA_INSTALL_VLLM" = "1" ]; then python -m pip install --no-cache-dir --prefix=/install "vllm>=0.10,<1"; fi
+    && if [ "$RUSA_INSTALL_VLLM" = "1" ]; then python -m pip install --no-cache-dir --prefix=/install -r requirements-vllm.txt; fi
 
 FROM python:3.11-slim AS runtime
 
@@ -18,6 +18,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RUSA_MAX_REQUEST_BYTES=1048576
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libnuma1 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
