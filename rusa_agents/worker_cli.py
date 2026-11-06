@@ -1,6 +1,7 @@
 """Standalone worker process entry point."""
 from __future__ import annotations
 import asyncio, logging, os, signal
+from .mcp_gateway import MCPGateway
 from .providers import OpenAICompatibleProvider
 from .storage import Database
 from .tools import GitHubTools, ToolRegistry
@@ -14,6 +15,8 @@ async def main() -> None:
     provider = OpenAICompatibleProvider()
     tools = ToolRegistry()
     GitHubTools().register(tools)
+    mcp_gateway = MCPGateway.from_env()
+    await mcp_gateway.connect_and_register(tools)
     runtime = AgentRuntime(database, provider, tools)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -28,6 +31,7 @@ async def main() -> None:
                 except asyncio.TimeoutError:
                     pass
     finally:
+        await mcp_gateway.close()
         await database.close()
 
 if __name__ == "__main__":
