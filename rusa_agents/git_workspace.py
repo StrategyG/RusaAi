@@ -7,6 +7,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -166,7 +167,7 @@ class GitHubPublisher:
                 path.suffix.lower() in BLOCKED_SUFFIXES
                 or path.name.lower() in {"id_rsa", "id_ed25519"}
                 or path.name.lower() in BLOCKED_WRITE_NAMES
-                or path.name.lower().startswith(("requirements-", "dockerfile."))
+                or path.name.lower().startswith(("requirements", "dockerfile."))
                 or any(raw_path.startswith(prefix) for prefix in BLOCKED_WRITE_PREFIXES)
             ):
                 continue
@@ -186,10 +187,18 @@ class GitHubPublisher:
         if current.returncode or current.stdout.strip() != branch:
             raise RuntimeError("Workspace branch does not match the task branch")
         remote = self._run(["git", "remote", "get-url", "origin"], str(root))
-        if remote.returncode or "github.com" not in remote.stdout or repository.lower() not in remote.stdout.lower():
-            raise RuntimeError("Origin remote does not match the requested GitHub repository")
-        if "@" in remote.stdout.split("://", 1)[-1].split("/", 1)[0]:
-            raise RuntimeError("Credential-bearing remote URLs are prohibited")
+        if remote.returncode:
+            raise RuntimeError("Origin remote is unavailable")
+        parsed_remote = urlparse(remote.stdout.strip())
+        remote_repository = parsed_remote.path.strip("/").removesuffix(".git")
+        if (
+            parsed_remote.scheme != "https"
+            or parsed_remote.hostname != "github.com"
+            or parsed_remote.username
+            or parsed_remote.password
+            or remote_repository.lower() != repository.lower()
+        ):
+            raise RuntimeError("Origin must be credential-free HTTPS to the exact authorized GitHub repository")
 
         changed = self._safe_changed_paths(root)
         if changed:
