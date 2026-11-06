@@ -15,6 +15,7 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - Request IDs, basic security headers, a content-length limit, and generic internal error responses are added.
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
+- The API database role is restricted to SELECT/INSERT on the task queue; it has no task mutation/deletion or memory-table/sequence privileges, and remains subject to forced RLS.
 - Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
 
 ## Current verification boundary
@@ -31,7 +32,9 @@ The code changes require successful CI on the remediation pull request. The mode
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
 | Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented in code; PostgreSQL integration CI and staging verification pending |
-| Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
+| Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; staging retention and isolation verification pending |
+| Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
+| MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |

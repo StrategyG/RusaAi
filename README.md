@@ -53,7 +53,7 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 7. Restrict the GitHub App or fine-grained token to the same global repository set. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
 8. Start the services with docker compose up --build -d.
 
-The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The inference API binds to 127.0.0.1 by default; put it behind a TLS reverse proxy and change RUSA_BIND_ADDRESS only when binding to a deliberate private interface. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
 
 Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated global owner/name allowlist. RUSA_AGENT_TENANT_REPOSITORIES assigns a subset of those repositories to each tenant; the API and GitHub gateway both enforce the tenant assignment. RUSA_AGENT_REQUIRED_CI_CHECKS is a JSON array of exact GitHub check-run names required for success.
 

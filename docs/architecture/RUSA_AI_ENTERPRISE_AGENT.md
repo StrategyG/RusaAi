@@ -143,18 +143,18 @@ The PostgreSQL queue uses tenant-scoped idempotency, FOR UPDATE SKIP LOCKED, bou
 
 ## 6. Memory architecture
 
-PostgreSQL is the source of truth for task and episodic memory. Queue and memory tables enable and force PostgreSQL row-level security. The API connects with a restricted non-BYPASSRLS role and sets a transaction-local tenant context only after validating that tenant's API key. Workers use a separate BYPASSRLS database role to claim tasks across tenants; this credential is isolated from the API container.
+PostgreSQL is the source of truth for task and episodic memory. Queue and memory tables enable and force PostgreSQL row-level security. The API connects with a restricted non-BYPASSRLS role that has only SELECT/INSERT on the task queue and no memory-table or sequence privileges; it sets a transaction-local tenant context only after validating that tenant's API key. Workers use a separate BYPASSRLS database role to claim tasks across tenants; this credential is isolated from the API container.
 
 | Memory type | Purpose | Lifecycle |
 |---|---|---|
-| Working memory | Current task, stage, tool evidence, worker results | Stored in task checkpoint; terminal records default to 30-day retention |
-| Episodic memory | Short outcome summaries from completed tasks | Tenant-scoped; default TTL 90 days |
-| Semantic/project memory | Curated repository conventions and stable project facts | Namespace-scoped; reviewed and versioned |
-| Procedural memory | Validated workflows and runbooks | Stored as reviewed documentation, not arbitrary model-generated commands |
+| Working memory | Current task, stage, tool evidence, worker results | Implemented in durable task checkpoints; terminal records default to 30-day retention |
+| Episodic memory | Short outcome summaries from completed tasks | Implemented with tenant RLS, PostgreSQL full-text search, redaction, and default 90-day TTL |
+| Semantic/project memory | Curated repository conventions and stable project facts | Not implemented; requires reviewed ingestion and semantic retrieval |
+| Procedural memory | Validated workflows and runbooks | Reviewed documentation only; no separate procedural store |
 
 Every retrieval is filtered by tenant_id and namespace. Memory stores outcome summaries, not secrets or raw credentials. Expired records can be purged; tenant deletion is supported. Production deployments must enable encrypted database volumes, backups, access logging, and a documented deletion/retention policy.
 
-The initial implementation uses PostgreSQL full-text search. Vector retrieval/pgvector is an optional future adapter and must pass tenant-isolation and retrieval-quality tests before activation.
+The current retrieval implementation is lexical PostgreSQL full-text search, not complete semantic RAG. Chunk ingestion, embedding generation, pgvector/hybrid retrieval, reranking, citation/grounding enforcement, and retrieval-quality evaluation remain release blockers for any semantic-RAG claim.
 
 ## 7. Tools and permissions
 
@@ -170,6 +170,8 @@ The initial implementation uses PostgreSQL full-text search. Vector retrieval/pg
 | Audit | HMAC-chained event record | No raw secrets or file contents |
 
 No arbitrary shell, unrestricted network, local filesystem access, secret retrieval, force push, merge, deployment, release, or permission-management tool is registered. GitHub Actions is the isolated execution environment for tests and build validation. The agent does not execute repository code on the worker host.
+
+The GitHub integration is a native REST adapter, not an MCP server. MCP transport, authenticated tool/resource discovery, per-session tenant propagation, protocol conformance, and MCP client interoperability are not implemented and must be delivered as a separate, explicitly secured integration before MCP support is advertised.
 
 ## 8. Evaluation and release gates
 
