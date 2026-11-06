@@ -244,3 +244,40 @@ Do not declare production certification until:
 - Backup/restore and worker-restart drills pass.
 - Metrics are scraped and alerts are tested.
 - Security review and operator sign-off are recorded.
+
+## Runtime hardening rollout — 2026-11-06
+
+### Lease fencing migration
+
+The AICode queue now uses a per-claim UUID lease token. Every worker heartbeat and state transition must present the current token, and the database rejects updates from expired or superseded leases. Each attempt also receives a distinct feature branch and worktree to prevent stale retries from sharing a checkout.
+
+Before deploying this version:
+
+1. Stop and drain all AICode workers.
+2. Back up the PostgreSQL database.
+3. Apply `migrations/002_aicode_lease_fencing.sql` with the database migration owner.
+4. Confirm `public.aicode_jobs.lease_token` exists.
+5. Deploy the API and worker images built from the same commit.
+6. Start one canary worker, verify claim/heartbeat/complete, then scale workers.
+7. Confirm old worker processes are fully stopped before re-enabling normal task intake.
+
+The migration requeues tasks that were marked running so they can be claimed with a fresh token. Do not run old and new worker versions concurrently during this migration.
+
+### Request and model response limits
+
+The API now defaults to a 1 MiB request-body limit and a 15-second request-body read timeout. Configure:
+
+- `RUSA_MAX_REQUEST_BYTES`: integer from 1,024 to 50,000,000 bytes.
+- `RUSA_REQUEST_BODY_TIMEOUT_SECONDS`: number from 0.1 to 60 seconds.
+- `RUSA_MODEL_MAX_RESPONSE_BYTES`: integer from 1 to 50,000,000 bytes; default 2,000,000.
+
+The ASGI middleware counts received bytes rather than trusting Content-Length, so chunked requests are also bounded. Both agent and inference provider adapters stream and cap response bodies before JSON parsing.
+
+### Remaining production certification blockers
+
+The current code still requires independent verification before it can be certified production-ready:
+
+- Database row-level security and separate API/worker database identities are not yet enforced by the current runtime schema; tenant filters in application queries are not a substitute for database RLS.
+- Semantic/vector memory (pgvector), dynamic DAG planning, and manager-level orchestration are not yet fully implemented in the current runtime.
+- Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
+- Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
