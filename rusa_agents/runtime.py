@@ -126,9 +126,11 @@ class AICodeRuntime:
                 return
 
     async def _await_human_review(self, job: Job, task: CodingTask, reason: str) -> None:
-        await asyncio.to_thread(
+        updated = await asyncio.to_thread(
             self.queue.await_approval, job.id, job.tenant_id, self.worker_id, reason
         )
+        if not updated:
+            raise RuntimeError("Queue rejected awaiting-approval transition because the lease was lost")
         await asyncio.to_thread(
             self.audit.record,
             "task.awaiting_approval",
@@ -202,8 +204,18 @@ class AICodeRuntime:
                 ),
                 lost_lease,
             )
+            await asyncio.to_thread(
+                self.audit.record,
+                "pull_request.created",
+                task.task_id,
+                self.worker_id,
+                {"pull_request_url": pr_url, "commit_sha": commit_sha},
+                tenant_id=job.tenant_id,
+            )
             ci_timeout = int(os.getenv("RUSA_CI_TIMEOUT_SECONDS", "900"))
             ci_poll = int(os.getenv("RUSA_CI_POLL_SECONDS", "15"))
+            if not 60 <= ci_timeout <= 3600 or not 5 <= ci_poll <= 60:
+                raise ValueError("CI timeout must be 60-3600s and poll interval 5-60s")
             ci_ok, ci_reason = await self._await_with_lease(
                 self.publisher.wait_for_ci(
                     task.repository.full_name, commit_sha,
