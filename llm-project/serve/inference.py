@@ -38,7 +38,7 @@ class ModelRuntime:
         self.model: Any = None
         self.tokenizer: Any = None
         self.device = "unloaded"
-        self._torch: Any = None
+        self._torch: Any = None\n        self.max_context_tokens = 0
 
     @property
     def ready(self) -> bool:
@@ -61,7 +61,7 @@ class ModelRuntime:
                 "Inference dependencies are missing; install requirements.txt"
             ) from exc
 
-        if torch.cuda.is_available():
+        self._torch = torch\n\n        if torch.cuda.is_available():
             dtype = (
                 torch.bfloat16
                 if getattr(torch.cuda, "is_bf16_supported", lambda: False)()
@@ -151,7 +151,7 @@ class ModelRuntime:
     ) -> Dict[str, Any]:
         self._require_ready()
         torch = self._torch or __import__("torch")
-        inputs = self._tokenize_one(messages)
+        inputs = self._tokenize_one(messages, max_tokens)
         prompt_tokens = int(inputs["attention_mask"].sum().item())
         with torch.inference_mode():
             output = self.model.generate(
