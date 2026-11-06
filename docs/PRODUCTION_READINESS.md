@@ -17,6 +17,7 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 - CI gates lint, compile, tests, dependency audit, image build, and a container liveness smoke test.
 - Reusing a tenant idempotency key with a different normalized task payload returns HTTP 409; identical retries return the original task ID and work branch.
 - The tenant-scoped agent API supports task status, cancellation, and explicit retry of failed tasks; cancellation revokes the active worker lease.
+- The tenant API database role receives only `SELECT`, `INSERT`, and `UPDATE` on the task queue; broad table/sequence defaults are revoked, and readiness verifies the required queue privileges.
 - Compose publishes API ports on host loopback only, keeps database/worker/migration ports private, and runs a one-shot schema bootstrap before the API and worker.
 
 ## Current verification boundary
