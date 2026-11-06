@@ -24,7 +24,7 @@ Use RUSA_INFERENCE_BACKEND=transformers for CPU validation or a small single-GPU
 
 ### vLLM production candidate
 
-Use RUSA_INFERENCE_BACKEND=vllm when the model and target GPU are supported by the selected vLLM/PyTorch/CUDA versions. vLLM provides continuous batching and paged KV-cache management. Configure:
+Use RUSA_INFERENCE_BACKEND=vllm when the model and target GPU are supported by the selected vLLM/PyTorch/CUDA versions. The supplied GPU Compose override requests NVIDIA devices and builds the optional vLLM dependency; it still requires NVIDIA Container Toolkit and a supported host driver. vLLM provides continuous batching and paged KV-cache management. Configure:
 - RUSA_MAX_MODEL_LEN
 - RUSA_MAX_NUM_SEQS
 - RUSA_MAX_NUM_BATCHED_TOKENS
