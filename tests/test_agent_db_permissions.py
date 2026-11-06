@@ -45,6 +45,20 @@ def test_api_role_has_only_minimum_queue_permissions_and_no_future_defaults():
         connection.execute(
             "GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker"
         )
+        # Recreate both global and schema-specific legacy defaults to prove
+        # the migration removes every inherited grant, not only local defaults.
+        connection.execute(
+            """
+            ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO rusa_agent_api
+            """
+        )
+        connection.execute(
+            """
+            ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker
+            GRANT EXECUTE ON FUNCTIONS TO rusa_agent_api
+            """
+        )
         # Recreate the broad legacy defaults to prove migration removes them.
         connection.execute(
             """
