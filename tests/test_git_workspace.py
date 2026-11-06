@@ -183,3 +183,125 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
 
     manager.cleanup(first, "tenant-a")
     manager.cleanup(second, "tenant-a")
+
+
+def _github_check_run(
+    name,
+    *,
+    suite_id,
+    run_id,
+    status="completed",
+    conclusion="success",
+    head_sha="a" * 40,
+    app_id=15368,
+    app_slug="github-actions",
+):
+    return {
+        "id": run_id,
+        "name": name,
+        "head_sha": head_sha,
+        "status": status,
+        "conclusion": conclusion,
+        "check_suite": {"id": suite_id},
+        "app": {"id": app_id, "slug": app_slug},
+    }
+
+
+def test_ci_evidence_requires_all_jobs_from_latest_trusted_suite():
+    sha = "a" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=100, run_id=1001, head_sha=sha),
+        _github_check_run("Build production image", suite_id=100, run_id=1002, head_sha=sha),
+        _github_check_run("Test, lint, and security", suite_id=101, run_id=1011, head_sha=sha),
+        _github_check_run(
+            "Build production image",
+            suite_id=101,
+            run_id=1012,
+            status="in_progress",
+            conclusion=None,
+            head_sha=sha,
+        ),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "pending"
+    assert "still running" in reason
+
+
+def test_ci_evidence_does_not_fall_back_to_an_older_successful_suite():
+    sha = "b" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=200, run_id=2001, head_sha=sha),
+        _github_check_run("Build production image", suite_id=200, run_id=2002, head_sha=sha),
+        _github_check_run(
+            "Test, lint, and security",
+            suite_id=201,
+            run_id=2011,
+            conclusion="failure",
+            head_sha=sha,
+        ),
+        _github_check_run("Build production image", suite_id=201, run_id=2012, head_sha=sha),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "failure"
+    assert "Test, lint, and security" in reason
+
+
+def test_ci_evidence_requires_exact_sha_and_official_github_actions_app():
+    sha = "c" * 40
+    runs = [
+        _github_check_run(
+            "Test, lint, and security",
+            suite_id=300,
+            run_id=3001,
+            head_sha="d" * 40,
+        ),
+        _github_check_run(
+            "Build production image",
+            suite_id=300,
+            run_id=3002,
+            head_sha=sha,
+            app_id=42,
+            app_slug="untrusted-check-producer",
+        ),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "pending"
+    assert "No trusted GitHub Actions checks" in reason
+
+
+def test_ci_evidence_rejects_skipped_required_jobs():
+    sha = "e" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=400, run_id=4001, head_sha=sha),
+        _github_check_run(
+            "Build production image",
+            suite_id=400,
+            run_id=4002,
+            conclusion="skipped",
+            head_sha=sha,
+        ),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "failure"
+    assert "skipped" in reason
+
+
+def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
+    sha = "f" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=500, run_id=5001, head_sha=sha),
+        _github_check_run("Build production image", suite_id=499, run_id=4992, head_sha=sha),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "pending"
+    assert "incomplete" in reason
