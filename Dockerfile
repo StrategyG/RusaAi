@@ -28,4 +28,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-CMD ["uvicorn", "llm-project.serve.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# "llm-project" is not a valid Python package name; expose serve/ as the import directory.
+CMD ["uvicorn", "app:app", "--app-dir", "/app/llm-project/serve", "--host", "0.0.0.0", "--port", "8000"]
