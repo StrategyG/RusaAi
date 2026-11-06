@@ -15,6 +15,20 @@ from .contracts import CodingTask, ToolCall, ToolResult
 from .policy import AutonomyPolicy
 
 
+_SECRET_PATTERNS = (
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"), "[REDACTED TOKEN]"),
+    (re.compile(r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"), r"\1\2[REDACTED]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
+)
+
+
+def redact_sensitive_text(value: str) -> str:
+    for pattern, replacement in _SECRET_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
+
+
 class GitHubToolGateway:
     def __init__(
         self,
@@ -140,7 +154,6 @@ class GitHubToolGateway:
                 },
             )
         except RuntimeError:
-            # A concurrent retry may have created the deterministic task branch.
             existing = await self._request(
                 "GET", f"{root}/git/ref/heads/{branch}", allow_not_found=True,
             )
@@ -178,7 +191,7 @@ class GitHubToolGateway:
         return ToolResult(
             name="read_file",
             success=True,
-            data={"path": path, "ref": ref, "content": decoded},
+            data={"path": path, "ref": ref, "content": redact_sensitive_text(decoded)},
             evidence={"source": "github_contents_api", "sha": result.get("sha")},
         )
 
@@ -272,7 +285,6 @@ class GitHubToolGateway:
                 },
             )
         except RuntimeError:
-            # A concurrent retry may have opened the same PR.
             existing = await self._request("GET", f"{root}/pulls", params=query)
             if isinstance(existing, list) and existing:
                 result = existing[0]
@@ -410,9 +422,9 @@ class GitHubToolGateway:
         )
         if not isinstance(first, dict):
             raise RuntimeError("GitHub compare response was invalid")
-        changed_files = first.get("files")
+        first_files = first.get("files")
         changed_count = first.get("changed_files")
-        if not isinstance(changed_files, list) or type(changed_count) is not int:
+        if not isinstance(first_files, list) or type(changed_count) is not int:
             raise RuntimeError("GitHub compare response omitted file metadata")
 
         page_count = max(1, math.ceil(changed_count / 100))
@@ -437,8 +449,12 @@ class GitHubToolGateway:
                 if not isinstance(item, dict):
                     diff_complete = False
                     continue
+                filename = str(item.get("filename", ""))
                 patch = item.get("patch")
-                if not isinstance(patch, str):
+                if not filename or not AutonomyPolicy.safe_repository_path(filename):
+                    patch = ""
+                    diff_complete = False
+                elif not isinstance(patch, str):
                     patch = ""
                     diff_complete = False
                 if len(patch) > 12_000 or diff_chars + len(patch) > self.max_diff_chars:
@@ -446,11 +462,11 @@ class GitHubToolGateway:
                     diff_complete = False
                 diff_chars += len(patch)
                 collected.append({
-                    "path": str(item.get("filename", "")),
+                    "path": filename,
                     "status": item.get("status"),
                     "additions": item.get("additions"),
                     "deletions": item.get("deletions"),
-                    "patch": patch,
+                    "patch": redact_sensitive_text(patch),
                 })
 
         if len(collected) != changed_count:
