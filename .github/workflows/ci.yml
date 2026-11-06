@@ -79,14 +79,20 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability --profile agent --profile knowledge --profile rag-evaluation --profile gpu config --quiet
             rm -f .env
           fi
+      - name: Validate observability component configurations
+        run: bash scripts/observability/validate-configs.sh
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Tag agent runtime for database migration smoke test
+        run: docker tag rusa-agent-runtime:${{ github.sha }} rusa-agent-runtime:local
       - name: Build RAG and MCP image
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-knowledge-mcp:${{ github.sha }} .
       - name: Build user and admin workspace image
         run: docker build --pull -f apps/web/Dockerfile -t rusa-ai-web:${{ github.sha }} .
+      - name: Smoke-test observability deployment
+        run: bash scripts/observability/smoke-test-compose.sh
       - name: Smoke-test RAG and MCP imports
         run: |
           docker run --rm rusa-knowledge-mcp:${{ github.sha }} python -c "import rusa_knowledge.service, rusa_mcp.server; print('RAG and MCP imports ok')"
