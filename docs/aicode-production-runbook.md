@@ -20,9 +20,11 @@ Apply the migration as a schema owner/admin, not as the application runtime user
 
 ```bash
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_core.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 ```
 
-The migration creates `aicode_jobs`, `aicode_memory`, `aicode_audit_events`, `aicode_rate_limits`, audit immutability triggers, and the restricted `rusa_runtime` role.
+The migrations create `aicode_jobs`, `aicode_memory`, `aicode_audit_events`, `aicode_rate_limits`, audit immutability triggers, lease-fencing tokens, durable task-result storage, and the restricted `rusa_runtime` role. Apply all three migrations in order; the API and worker fail closed if the required lease-token or result columns are missing.
 
 Keep `rusa_runtime` as a NOLOGIN privilege group. Create a separate login role and grant membership, for example:
 
@@ -205,7 +207,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
