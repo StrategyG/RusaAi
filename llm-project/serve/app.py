@@ -332,6 +332,7 @@ class RequestContextAndBodyLimitMiddleware:
                 response = JSONResponse(
                     status_code=400,
                     content={"detail": "Invalid Content-Length header"},
+                    headers={"Connection": "close"},
                 )
                 await response(scope, receive, send_with_headers)
                 return
@@ -346,6 +347,7 @@ class RequestContextAndBodyLimitMiddleware:
                 response = JSONResponse(
                     status_code=413,
                     content={"detail": "Request body exceeds the configured size limit"},
+                    headers={"Connection": "close"},
                 )
                 await response(scope, receive, send_with_headers)
                 return
