@@ -43,9 +43,22 @@ jobs:
         run: python -m pytest -q tests
 
   docker-build:
-    name: Docker build
+    name: Docker build and smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build container image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Run container and verify liveness
+        run: |
+          docker run --detach --name rusa-ai-smoke -p 8000:8000 rusa-ai:${{ github.sha }}
+          cleanup() { docker logs rusa-ai-smoke; docker rm --force rusa-ai-smoke; }
+          trap cleanup EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not become healthy within 60 seconds"
+          exit 1
