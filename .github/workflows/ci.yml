@@ -40,11 +40,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-agent.txt
-            requirements-dev.txt
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -66,7 +61,7 @@ jobs:
           if [ -d rusa_agents ]; then
             python -m compileall -q llm-project rusa_agents tests
           else
-            python -m py_compile llm-project/serve/app.py tests/test_app.py
+            python -m compileall -q llm-project tests
           fi
       - name: Test
         env:
