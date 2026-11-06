@@ -58,18 +58,23 @@ if [[ "$BACKUP_FILE" == s3://* ]]; then
     aws "${aws_args[@]}" s3 cp "$BACKUP_FILE" "$temporary_encrypted" --only-show-errors
     encrypted_file="$temporary_encrypted"
     temporary_checksum="$(mktemp /tmp/rusa-agent-checksum.XXXXXX)"
-    if aws "${aws_args[@]}" s3 cp "${BACKUP_FILE}.sha256" "$temporary_checksum" --only-show-errors 2>/dev/null; then
-        expected_hash="$(awk '{print $1}' "$temporary_checksum")"
-        actual_hash="$(sha256sum "$encrypted_file" | awk '{print $1}')"
-        [[ "$expected_hash" == "$actual_hash" ]] || {
-            echo "Backup checksum verification failed" >&2
-            exit 1
-        }
+    if ! aws "${aws_args[@]}" s3 cp "${BACKUP_FILE}.sha256" "$temporary_checksum" --only-show-errors 2>/dev/null; then
+        echo "S3 backup checksum sidecar is missing" >&2
+        exit 1
     fi
+    expected_hash="$(awk '{print $1}' "$temporary_checksum")"
+    actual_hash="$(sha256sum "$encrypted_file" | awk '{print $1}')"
+    [[ "$expected_hash" == "$actual_hash" ]] || {
+        echo "Backup checksum verification failed" >&2
+        exit 1
+    }
 elif [[ ! -f "$encrypted_file" ]]; then
     echo "Backup file does not exist" >&2
     exit 1
-elif [[ -f "${encrypted_file}.sha256" ]]; then
+elif [[ ! -f "${encrypted_file}.sha256" ]]; then
+    echo "Backup checksum sidecar is missing" >&2
+    exit 1
+else
     (
         cd "$(dirname "$encrypted_file")"
         sha256sum -c "$(basename "$encrypted_file").sha256"
