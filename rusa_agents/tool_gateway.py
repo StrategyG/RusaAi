@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
-import subprocess
+import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -17,6 +17,10 @@ from uuid import uuid4
 
 from .contracts import WorkerRole
 from .metrics import TOOL_EXECUTIONS
+
+
+DOCKER_BIN = shutil.which("docker")
+GIT_BIN = shutil.which("git")
 
 
 class ToolDenied(PermissionError):
@@ -56,9 +60,11 @@ class DockerSandbox:
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
+        if not DOCKER_BIN:
+            raise RuntimeError("Docker CLI is not installed in the worker image")
         try:
-            info = subprocess.run(
-                ["docker", "info", "--format", "{{json .SecurityOptions}}"],
+            info = subprocess.run(  # nosec B603 - fixed argv and absolute Docker executable
+                [DOCKER_BIN, "info", "--format", "{{json .SecurityOptions}}"],
                 check=False, capture_output=True, text=True, timeout=20,
             )
         except FileNotFoundError as exc:
@@ -70,8 +76,8 @@ class DockerSandbox:
         if require_rootless and "rootless" not in info.stdout.lower():
             raise RuntimeError("Production Docker daemon must run in rootless mode")
         if require_image:
-            inspected = subprocess.run(
-                ["docker", "image", "inspect", self.image],
+            inspected = subprocess.run(  # nosec B603 - fixed argv and absolute Docker executable
+                [DOCKER_BIN, "image", "inspect", self.image],
                 check=False, capture_output=True, text=True, timeout=30,
             )
             if inspected.returncode != 0:
@@ -137,7 +143,7 @@ class DockerSandbox:
                     copy_function=bounded_copy,
                 )
                 for directory, _, filenames in os.walk(snapshot):
-                    os.chmod(directory, 0o555)  # nosec B103 - read/traverse only; Docker bind mount is read-only
+                    os.chmod(directory, 0o555)  # nosec B103 - intentionally read-only sandbox snapshot  # nosec B103 - read/traverse only; Docker bind mount is read-only
                     for filename in filenames:
                         path = Path(directory) / filename
                         if not path.is_symlink():
@@ -148,7 +154,7 @@ class DockerSandbox:
 
             container_name = f"rusa-sandbox-{uuid4().hex}"
             command = [
-                "docker", "run", "--rm", "--name", container_name,
+                DOCKER_BIN, "run", "--rm", "--name", container_name,
                 "--network=none",
                 "--read-only",
                 "--user", "10001:10001",
@@ -158,7 +164,7 @@ class DockerSandbox:
                 f"--memory={self.memory_limit}",
                 f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - private ephemeral container tmpfs
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - container-only ephemeral tmpfs  # nosec B108 - private ephemeral container tmpfs
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,readonly",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--env", "PYTHONPYCACHEPREFIX=/tmp/pycache",
@@ -171,7 +177,7 @@ class DockerSandbox:
                 *self.PROFILES[profile],
             ]
             try:
-                completed = subprocess.run(
+                completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
                     command,
                     check=False,
                     capture_output=True,
@@ -184,8 +190,8 @@ class DockerSandbox:
                 return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
             except subprocess.TimeoutExpired:
                 try:
-                    subprocess.run(
-                        ["docker", "rm", "-f", container_name],
+                    subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
+                        [DOCKER_BIN, "rm", "-f", container_name],
                         check=False, capture_output=True, text=True, timeout=30,
                         env={key: value for key, value in os.environ.items()
                              if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
@@ -359,8 +365,10 @@ class WorkspaceToolGateway:
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:
-        completed = subprocess.run(
-            ["git", "-C", str(self.workspace), "diff", "--no-ext-diff", "--no-textconv", "--"],
+        if not GIT_BIN:
+            return ToolResult(False, "Git executable is unavailable in the worker image.")
+        completed = subprocess.run(  # nosec B603 - fixed argv, absolute executable, shell=False
+            [GIT_BIN, "-C", str(self.workspace), "diff", "--no-ext-diff", "--no-textconv", "--"],
             check=False, capture_output=True, text=True, timeout=30,
         )
         if completed.returncode != 0:
