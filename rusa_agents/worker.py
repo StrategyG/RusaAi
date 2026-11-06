@@ -30,7 +30,7 @@ async def _run_with_heartbeat(
     lease_seconds: int,
 ) -> Any:
     execution = asyncio.create_task(orchestrator.run(task))
-    heartbeat_interval = max(5, lease_seconds // 3)
+    heartbeat_interval = min(30, max(5, lease_seconds // 3))
     while True:
         done, _ = await asyncio.wait({execution}, timeout=heartbeat_interval)
         if done:

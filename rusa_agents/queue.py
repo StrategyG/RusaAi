@@ -73,7 +73,7 @@ class PostgresTaskQueue:
                 """
                 ALTER TABLE rusa_agent_jobs
                 ADD CONSTRAINT rusa_agent_jobs_state_check
-                CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter'))
+                CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'dead_letter', 'cancelled'))
                 """
             )
             db.execute(
@@ -299,6 +299,30 @@ class PostgresTaskQueue:
                 (retryable, error[:4000], tenant_id, task_id, worker_id),
             )
         return cursor.rowcount == 1
+
+    def cancel(self, tenant_id: str, task_id: str) -> bool:
+        """Cancel queued/running work and fence off any current worker lease."""
+        with self._connect() as db:
+            cursor = db.execute(
+                """
+                UPDATE rusa_agent_jobs
+                SET state='cancelled',
+                    lease_owner=NULL,
+                    lease_until=NULL,
+                    last_error='cancelled by authenticated tenant',
+                    updated_at=now()
+                WHERE tenant_id=%s AND task_id=%s::uuid
+                    AND state IN ('queued', 'running')
+                """,
+                (tenant_id, task_id),
+            )
+            if cursor.rowcount == 1:
+                return True
+            row = db.execute(
+                "SELECT state FROM rusa_agent_jobs WHERE tenant_id=%s AND task_id=%s::uuid",
+                (tenant_id, task_id),
+            ).fetchone()
+        return bool(row and row["state"] == "cancelled")
 
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
         with self._connect() as db:

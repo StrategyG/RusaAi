@@ -395,3 +395,47 @@ def test_chunked_or_oversized_request_body_is_rejected(client):
         content=b"x" * (1024 * 1024 + 1),
     )
     assert response.status_code == 413
+
+
+
+def test_agent_task_cancellation_is_tenant_scoped_and_idempotent(client, monkeypatch):
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def cancel(self, tenant_id, task_id):
+            self.calls.append((tenant_id, task_id))
+            return True
+
+        def get(self, tenant_id, task_id):
+            return {"state": "cancelled"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-cancel")
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent/tasks/{task_id}/cancel",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 202
+    assert response.json() == {"task_id": task_id, "state": "cancelled"}
+    assert queue.calls == [("tenant-cancel", task_id)]
+
+
+def test_agent_task_cancellation_returns_409_for_terminal_task(client, monkeypatch):
+    class FakeQueue:
+        def cancel(self, tenant_id, task_id):
+            return False
+
+        def get(self, tenant_id, task_id):
+            return {"state": "succeeded"}
+
+    app.state.task_queue = FakeQueue()
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+    response = client.post(
+        f"/v1/agent/tasks/{uuid.uuid4()}/cancel",
+        headers=auth_headers(),
+    )
+    assert response.status_code == 409

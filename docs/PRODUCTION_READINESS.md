@@ -28,7 +28,7 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 | Agent CI | Lint, compile, unit/integration tests, Bandit, dependency audit | Pending current branch CI |
 | Container runtime | API and worker image build, startup, health and queue smoke tests | Pending current branch CI and runtime validation |
 | PostgreSQL operations | Migration strategy, HA, connection pool, backup and restore drill | Open |
-| Queue reliability | Lease heartbeat and current-owner completion/failure guards; cancellation, dead-letter inspection, replay controls, queue-age alerts | Partially implemented; operational gates open |
+| Queue reliability | Lease heartbeat, current-owner fencing, tenant-scoped cancellation, dead-letter inspection, replay controls, queue-age alerts | Core lease/cancellation controls implemented; dead-letter operations and queue-age alerts remain open |
 | Tenant security | Authenticated API-key hash mapping, per-tenant repository allowlists, and cross-tenant queue/memory/audit isolation tests | Implemented in code; production configuration and penetration validation required |
 | GitHub permissions | GitHub App or fine-grained token, least privilege, rotation, installation scope tests | Deployment configuration required |
 | Agent safety | Prompt-injection, malicious repository content, tool abuse, path and protected-file tests | Open |
@@ -52,4 +52,4 @@ The AICode branch CI must pass after the latest changes. The runtime has not yet
 
 ## Queue reliability implementation
 
-The worker renews active PostgreSQL leases, and queue completion/failure writes require a current unexpired lease. Expired final-attempt jobs are terminalized rather than stranded. PostgreSQL integration tests and operational validation remain required. Cancellation, dead-letter inspection, operator replay, queue-age monitoring, and backup/restore remain open.
+The worker renews active PostgreSQL leases, and queue completion/failure writes require a current unexpired lease. Tenant-scoped cancellation immediately fences the current lease; the worker observes lease loss within at most 30 seconds and cancels orchestration. Expired final-attempt jobs are terminalized rather than stranded. PostgreSQL integration tests and operational validation remain required. Dead-letter inspection, operator replay, queue-age monitoring, and backup/restore remain open.

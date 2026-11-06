@@ -64,6 +64,7 @@ The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only 
 - POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
 - POST /v1/agent/tasks: requires X-API-Key and Idempotency-Key; validates and enqueues a task in PostgreSQL. Requires RUSA_AGENT_ENABLED=true and DATABASE_URL.
 - GET /v1/agent/tasks/{task_id}: requires X-API-Key; returns task status only within the authenticated tenant.
+- POST /v1/agent/tasks/{task_id}/cancel: requires X-API-Key; cancels queued/running work for the authenticated tenant.
 
 ## Agent worker
 

@@ -680,6 +680,29 @@ def get_agent_task(
     }
 
 
+@app.post("/v1/agent/tasks/{task_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+def cancel_agent_task(
+    task_id: uuid.UUID,
+    http_request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
+    if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=503, detail="AICode task processing is disabled")
+    queue = getattr(http_request.app.state, "task_queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Agent task queue is not configured")
+    cancelled = queue.cancel(tenant_id, str(task_id))
+    if not cancelled:
+        record = queue.get(tenant_id, str(task_id))
+        if record is None:
+            raise HTTPException(status_code=404, detail="Agent task was not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task cannot be cancelled from state {record['state']}",
+        )
+    return {"task_id": str(task_id), "state": "cancelled"}
+
+
 @app.post(
     "/v1/validate-task",
     response_model=TaskValidationResponse,
