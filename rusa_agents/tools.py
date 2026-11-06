@@ -10,6 +10,8 @@ from urllib.parse import quote
 import httpx
 import jsonschema
 
+from .security import redact_sensitive_data
+
 
 class ToolError(RuntimeError):
     pass
@@ -106,7 +108,8 @@ class ToolRegistry:
             jsonschema.validate(arguments, self._metadata[name]["input_schema"])
         except jsonschema.ValidationError as exc:
             raise ToolError("Tool arguments do not match the registered input schema") from exc
-        return await handler(**arguments)
+        result = await handler(**arguments)
+        return redact_sensitive_data(result)
 
 
 class GitHubTools:
