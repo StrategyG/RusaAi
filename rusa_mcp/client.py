@@ -132,7 +132,11 @@ class MCPToolClient:
             follow_redirects=False,
             trust_env=False,
         ) as http_client:
-            transport = streamable_http_client(self.server_url, http_client=http_client)
+            transport = streamable_http_client(
+                self.server_url,
+                http_client=http_client,
+                max_sse_event_size=self.max_response_bytes,
+            )
             async with Client(transport) as client:
                 listed = await client.list_tools()
                 if name not in {tool.name for tool in listed.tools}:
