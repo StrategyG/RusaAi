@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
-import os
 import queue
 import threading
 import uuid
@@ -119,7 +119,7 @@ def verify_model_artifact(
         expected = expected_manifest_sha256.strip().lower()
         if len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected):
             raise ModelArtifactError("RUSA_MODEL_MANIFEST_SHA256 must be a SHA-256 hex digest")
-        if not hashlib.compare_digest(manifest_sha, expected):
+        if not hmac.compare_digest(manifest_sha, expected):
             raise ModelArtifactError("Model manifest SHA-256 does not match the pinned digest")
 
     try:
@@ -169,7 +169,7 @@ def verify_model_artifact(
         ):
             raise ModelArtifactError(f"Invalid SHA-256 digest for {relative_name}")
         actual_digest = sha256_file(resolved_target)
-        if not hashlib.compare_digest(actual_digest, expected_digest.lower()):
+        if not hmac.compare_digest(actual_digest, expected_digest.lower()):
             raise ModelArtifactError(f"Model artifact checksum mismatch: {relative_name}")
         verified.add(relative_path.as_posix())
 
@@ -208,16 +208,17 @@ class TransformersBackend:
     name = "transformers"
     supports_batching = False
 
-    def __init__(self, model: Any, tokenizer: Any, torch: Any, device: str, timeout_seconds: float):
+    def __init__(self, model: Any, tokenizer: Any, torch: Any, device: str, timeout_seconds: float, max_model_len: int):
         self.model = model
         self.tokenizer = tokenizer
         self.torch = torch
         self.device = device
         self.timeout_seconds = timeout_seconds
+        self.max_model_len = max_model_len
         self._generation_lock = threading.Lock()
 
     @classmethod
-    def from_pretrained(cls, model_path: str, *, timeout_seconds: float) -> "TransformersBackend":
+    def from_pretrained(cls, model_path: str, *, timeout_seconds: float, max_model_len: int) -> "TransformersBackend":
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -271,6 +272,7 @@ class TransformersBackend:
             torch=torch,
             device=input_device,
             timeout_seconds=timeout_seconds,
+            max_model_len=max_model_len,
         )
 
     async def generate(
@@ -322,6 +324,10 @@ class TransformersBackend:
         )
         encoded = {key: value.to(self.device) for key, value in encoded.items()}
         prompt_tokens = int(encoded["input_ids"].shape[-1])
+        if prompt_tokens + max_new_tokens > self.max_model_len:
+            raise ValueError(
+                f"Prompt plus requested output exceeds the configured context limit ({self.max_model_len} tokens)"
+            )
         streamer = TextIteratorStreamer(
             self.tokenizer,
             skip_prompt=True,
@@ -388,7 +394,7 @@ class TransformersBackend:
                         asyncio.to_thread(next_text),
                         timeout=self.timeout_seconds,
                     )
-                except asyncio.TimeoutError as exc:
+                except (asyncio.TimeoutError, queue.Empty) as exc:
                     raise TimeoutError("Timed out waiting for the next generated token") from exc
                 if item is sentinel:
                     break
@@ -590,4 +596,5 @@ def load_inference_backend(
     return TransformersBackend.from_pretrained(
         model_path,
         timeout_seconds=timeout_seconds,
+        max_model_len=max_model_len,
     )
