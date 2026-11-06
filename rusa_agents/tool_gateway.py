@@ -100,6 +100,9 @@ class DockerSandbox:
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,rw",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
+                "--env", "HOME=/tmp",
+                "--env", "XDG_CACHE_HOME=/tmp/.cache",
+                "--env", "RUFF_CACHE_DIR=/tmp/.cache/ruff",
                 "--env", "PYTEST_ADDOPTS=-p no:cacheprovider",
                 "--workdir", "/workspace",
                 self.image,
@@ -143,14 +146,15 @@ class WorkspaceToolGateway:
     PROTECTED_PARTS = {
         ".git", ".env", ".env.local", ".env.production", ".secrets",
         ".ssh", ".aws", ".azure", "secrets", "credentials",
+        ".gitattributes", ".gitmodules", ".lfsconfig",
     }
     PROTECTED_PREFIXES = (".github/workflows/",)
     PROTECTED_NAMES = {
         "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
         "credentials.json", "service-account.json", ".npmrc", ".pypirc",
-        ".netrc", "secrets.json", "token.json",
+        ".netrc", "secrets.json", "token.json", ".gitattributes", ".gitmodules", ".lfsconfig",
     }
-    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore"}
+    PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk"}
     PROTECTED_WRITE_NAMES = {
         ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
         "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
@@ -226,8 +230,11 @@ class WorkspaceToolGateway:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
-        if target.name.lower() in self.PROTECTED_WRITE_NAMES or any(
-            relative.startswith(prefix) for prefix in self.PROTECTED_WRITE_PREFIXES
+        if (
+            target.name.lower() in self.PROTECTED_WRITE_NAMES
+            or target.name.lower().startswith(("requirements", "dockerfile."))
+            or PurePosixPath(relative).suffix.lower() in self.PROTECTED_SUFFIXES
+            or any(relative.startswith(prefix) for prefix in self.PROTECTED_WRITE_PREFIXES)
         ):
             raise ToolDenied("Dependency, deployment, schema, and migration files require human review")
         target.parent.mkdir(parents=True, exist_ok=True)
