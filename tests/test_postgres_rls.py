@@ -157,3 +157,12 @@ def test_runtime_role_groups_are_non_login_non_bypass():
 
     assert {row[0] for row in rows} == {"rusa_api_runtime", "rusa_worker_runtime"}
     assert all(row[1] is False and row[2] is False and row[3] is False for row in rows)
+
+
+def test_queue_rejects_privilege_group_as_login_identity():
+    from rusa_agents.queue import PostgresTaskQueue
+
+    with connect() as conn:
+        conn.execute("SET LOCAL ROLE rusa_api_runtime")
+        with pytest.raises(RuntimeError, match="non-superuser LOGIN role"):
+            PostgresTaskQueue._validate_production_role(conn)
