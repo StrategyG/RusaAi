@@ -24,6 +24,7 @@ COPY --from=builder /install /usr/local
 COPY llm-project/serve /app/llm-project/serve
 COPY rusa_agents /app/rusa_agents
 COPY schemas /app/schemas
+RUN mkdir -p /data && chown 10001:10001 /data
 
 USER 10001:10001
 
