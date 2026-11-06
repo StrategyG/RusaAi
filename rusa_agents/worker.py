@@ -629,9 +629,23 @@ class AgentRuntime:
                 {"tool": tool_name, "cursor": cursor, "result": result},
             )
 
-        await self._verify_and_finish(tenant_id, task_id)
+        final_answer = await self.orchestrator.synthesize(snapshot, previous)
+        await self._publish(
+            tenant_id,
+            task_id,
+            WorkerRole.SYNTHESIZER,
+            WorkerRole.SUPERVISOR,
+            "task.result",
+            final_answer,
+        )
+        await self._verify_and_finish(tenant_id, task_id, final_answer)
 
-    async def _verify_and_finish(self, tenant_id: str, task_id: str) -> None:
+    async def _verify_and_finish(
+        self,
+        tenant_id: str,
+        task_id: str,
+        final_answer: dict[str, Any],
+    ) -> None:
         async with self.database.session() as session:
             row = await session.scalar(
                 select(TaskRow).where(
@@ -705,6 +719,7 @@ class AgentRuntime:
             if target == TaskStatus.SUCCEEDED:
                 row.result = {
                     "tool_results": results,
+                    "final_answer": final_answer,
                     "acceptance_criteria": row.acceptance_criteria,
                     "acceptance_criteria_evaluated": False,
                     "verification_scope": [
