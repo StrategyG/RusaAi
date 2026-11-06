@@ -275,3 +275,149 @@ async def test_claim_moves_queued_task_to_running(database, registry):
     assert claimed == task_id
     assert task["status"] == TaskStatus.RUNNING.value
     assert task["attempts"] == 1
+
+
+class FakeEmbeddings:
+    async def embed_query(self, query: str) -> list[float]:
+        return [0.1, 0.2, 0.3]
+
+    async def embed_documents(self, documents: list[str]) -> list[list[float]]:
+        return [[0.1, 0.2, 0.3] for _ in documents]
+
+
+class FakeVectorIndex:
+    def __init__(self):
+        self.records = {}
+
+    async def upsert(self, tenant_id, source_id, chunks):
+        self.records[(tenant_id, source_id)] = chunks
+
+    async def search(self, tenant_id, embedding, top_k, allowed_source_ids=None):
+        from rusa_agents.rag import RetrievedChunk
+
+        results = []
+        for (stored_tenant, source_id), chunks in self.records.items():
+            if stored_tenant != tenant_id:
+                continue
+            if allowed_source_ids is not None and source_id not in allowed_source_ids:
+                continue
+            results.extend(
+                RetrievedChunk(
+                    chunk_id=chunk["chunk_id"],
+                    source_id=source_id,
+                    text=chunk["text"],
+                    score=0.9,
+                    metadata=chunk["metadata"],
+                )
+                for chunk in chunks
+            )
+        return results[:top_k]
+
+    async def delete_source(self, tenant_id, source_id):
+        return len(self.records.pop((tenant_id, source_id), []))
+
+
+@pytest.mark.asyncio
+async def test_rag_ingestion_retrieval_and_source_acl():
+    from rusa_agents.rag import RAGService
+
+    index = FakeVectorIndex()
+    rag = RAGService(FakeEmbeddings(), index)
+    text_value = "RUSA-AI architecture " * 180
+    chunks = await rag.ingest_text(
+        "tenant-a",
+        "design-doc",
+        "Architecture",
+        text_value,
+        {"classification": "internal"},
+    )
+    assert chunks > 1
+    assert len(await rag.retrieve("tenant-a", "agent architecture")) == min(chunks, 5)
+    assert await rag.retrieve(
+        "tenant-a",
+        "agent architecture",
+        allowed_source_ids=["another-source"],
+    ) == []
+    assert await rag.retrieve("tenant-b", "agent architecture") == []
+    assert await rag.delete_source("tenant-a", "design-doc") == chunks
+
+
+@pytest.mark.asyncio
+async def test_mcp_gateway_registers_only_allowlisted_tools(monkeypatch):
+    from rusa_agents.mcp_gateway import MCPRemoteServer
+
+    class FakeResponse:
+        def __init__(self, payload, status_code=200):
+            self.status_code = status_code
+            self.headers = {
+                "content-type": "application/json",
+                "Mcp-Session-Id": "test-session",
+            }
+            self._payload = payload
+            self.content = b"{}" if status_code != 202 else b""
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.closed = False
+
+        async def post(self, url, headers, json):
+            method = json["method"]
+            request_id = json.get("id")
+            if method == "initialize":
+                result = {"protocolVersion": "2025-03-26", "capabilities": {}, "serverInfo": {"name": "test"}}
+            elif method == "notifications/initialized":
+                return FakeResponse({}, status_code=202)
+            elif method == "tools/list":
+                result = {
+                    "tools": [
+                        {
+                            "name": "echo",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                                "required": ["message"],
+                                "additionalProperties": False,
+                            },
+                        },
+                        {"name": "admin_delete", "inputSchema": {"type": "object"}},
+                    ]
+                }
+            elif method == "tools/call":
+                result = {"content": [{"type": "text", "text": json["params"]["arguments"]["message"]}]}
+            else:
+                raise AssertionError(f"Unexpected MCP method: {method}")
+            return FakeResponse({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+        async def aclose(self):
+            self.closed = True
+
+    monkeypatch.setattr("rusa_agents.mcp_gateway.httpx.AsyncClient", FakeClient)
+    registry = ToolRegistry()
+    server = MCPRemoteServer(
+        alias="docs",
+        endpoint="https://mcp.example.test/mcp",
+        token="",
+        allowed_tools=["echo"],
+    )
+    await server.connect(registry)
+    assert registry.names() == {"mcp.docs.echo"}
+    result = await registry.execute("mcp.docs.echo", {"message": "hello"})
+    assert result["content"][0]["text"] == "hello"
+    with pytest.raises(ToolError):
+        await registry.execute("mcp.docs.echo", {"unexpected": "value"})
+    await server.close()
+
+
+def test_mcp_gateway_rejects_non_https_remote_endpoint():
+    from rusa_agents.mcp_gateway import MCPRemoteServer
+
+    with pytest.raises(ValueError):
+        MCPRemoteServer(
+            alias="unsafe",
+            endpoint="http://remote.example.test/mcp",
+            token="",
+            allowed_tools=["search"],
+        )
