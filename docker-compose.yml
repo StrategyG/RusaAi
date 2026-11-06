@@ -21,6 +21,14 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     environment:
       RUSA_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
     ports:
@@ -45,6 +53,14 @@ services:
     command: ["python", "-m", "rusa_agents.worker_main"]
     restart: unless-stopped
     init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file: .env
