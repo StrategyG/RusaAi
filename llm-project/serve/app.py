@@ -851,6 +851,7 @@ def create_aicode_task(
         work_branch_prefix=work_branch_prefix,
     )
 
+
 @app.get("/v1/aicode/tasks/{task_id}")
 def get_aicode_task(
     task_id: UUID,
