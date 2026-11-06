@@ -83,3 +83,35 @@ When RUSA_TEST_DATABASE_URL is configured, PostgreSQL integration tests exercise
 A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, outbound egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
 
 The runtime foundation is not a production certification. A real provider, GitHub App, PostgreSQL deployment, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested.
+
+
+## Semantic RAG and MCP knowledge plane
+
+The staging integration branch includes an optional tenant-scoped semantic knowledge plane:
+
+- Document parsing, chunking, embeddings, and hybrid retrieval.
+- PostgreSQL with the pgvector extension, forced row-level security, and a restricted `rusa_knowledge_worker` role.
+- Read-only MCP tools: `search_knowledge`, `get_document`, and `list_collections`.
+- Agent-side routing between GitHub tools and knowledge tools.
+- Composite episodic and semantic memory for specialist workers.
+
+RAG is disabled by default. To enable local RAG retrieval for the agent worker, configure `RUSA_RAG_ENABLED=true` and the embedding provider settings in `.env`, then start the agent profile:
+
+```bash
+docker compose --profile agent up -d --build
+```
+
+When `RUSA_MCP_SERVER_URL` is empty, the worker uses the local knowledge gateway. To use the separate MCP server, configure `RUSA_MCP_SERVER_URL=http://rusa-mcp:8002/mcp`, provision unique tenant bearer tokens in `RUSA_MCP_TENANT_TOKENS`, and configure `RUSA_MCP_TENANT_KEYS` as a JSON map of SHA-256 token hashes to tenant IDs. Then start both profiles:
+
+```bash
+docker compose --profile agent --profile knowledge up -d --build
+```
+
+Never put plaintext tenant bearer tokens in `RUSA_MCP_TENANT_KEYS`. The MCP server is loopback-published for local administration; internal service traffic uses the Docker network. Knowledge ingestion is available through the operator CLI:
+
+```bash
+python -m rusa_knowledge.cli ingest --file ./documents/guide.pdf --tenant-id tenant-a --collection agent
+python -m rusa_knowledge.cli check
+```
+
+The RAG/MCP feature remains subject to PostgreSQL/pgvector integration tests, MCP protocol tests, tenant-isolation verification, and staging deployment checks. It is not a production certification.
