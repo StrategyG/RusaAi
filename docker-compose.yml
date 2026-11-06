@@ -112,7 +112,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    command: ["python", "-m", "rusa_agents.worker"]
+    command: ["-m", "rusa_agents.worker"]
     restart: unless-stopped
     init: true
     environment:
