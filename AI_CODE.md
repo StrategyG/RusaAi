@@ -39,7 +39,7 @@ Approval required: merge, repository deletion, force push, deployment, release, 
 
 Prohibited: audit disabling, secret exfiltration, force-push to the default branch, and repository transfer.
 
-Protected paths include .github/workflows/, CODEOWNERS, environment/secret files, Docker and Compose configuration, dependency manifests, and build configuration. Changing protected paths requires a human-reviewed workflow.
+Protected paths include CI/CD configuration, CODEOWNERS, environment/secret files, Docker and Compose configuration, deployment/infrastructure manifests, dependency manifests, and build configuration. Changing protected paths requires a human-reviewed workflow.
 
 No production credential may be supplied to a worker. GitHub access must use a narrowly scoped token or GitHub App installation token, limited to the target repository and necessary contents/PR/check permissions.
 

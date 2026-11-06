@@ -543,3 +543,18 @@ def test_orchestrator_persists_cancelled_state_and_audit(tmp_path):
         for line in (tmp_path / "cancel-audit.jsonl").read_text().splitlines()
     ]
     assert any(entry["event"] == "task.cancelled" for entry in entries)
+
+
+
+def test_github_gateway_protects_dependency_and_deployment_manifests():
+    protected_paths = (
+        "package.json",
+        "package-lock.json",
+        "services/api/Cargo.toml",
+        "go.mod",
+        "deploy/production.yaml",
+        "terraform/main.tf",
+        ".travis.yml",
+    )
+    for path in protected_paths:
+        assert GitHubToolGateway.is_protected_write_path(path), path
