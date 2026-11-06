@@ -461,3 +461,16 @@ def test_github_gateway_protects_nested_codeowners_and_ci_files():
     )
     for path in protected_paths:
         assert GitHubToolGateway.is_protected_write_path(path), path
+
+
+
+def test_github_gateway_blocks_nested_environment_and_secret_files():
+    sensitive_paths = (
+        "config/.env",
+        "deploy/.env.production",
+        "config/secrets.yaml",
+        "service/credentials.json",
+        ".kube/config",
+    )
+    for path in sensitive_paths:
+        assert GitHubToolGateway.is_sensitive_path(path), path

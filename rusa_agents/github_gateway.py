@@ -299,6 +299,10 @@ class GitHubToolGateway:
             "pipfile.lock",
             "setup.py",
             "setup.cfg",
+            "requirements.txt",
+            "requirements-dev.txt",
+            "requirements-model.txt",
+            "requirements.lock",
         }
     )
     SENSITIVE_NAMES = frozenset(
@@ -328,10 +332,15 @@ class GitHubToolGateway:
         parts = normalized.split("/")
         basename = parts[-1]
         return (
-            normalized == ".env"
-            or normalized.startswith(".env.")
+            basename == ".env"
+            or basename.startswith(".env.")
             or basename in cls.SENSITIVE_NAMES
-            or any(part in {".ssh", ".aws", ".gnupg", "secrets", "secret"} for part in parts)
+            or basename in {"secret", "secrets", ".envrc", "kubeconfig"}
+            or basename.startswith(("secret.", "secrets.", "credentials."))
+            or any(
+                part in {".ssh", ".aws", ".gnupg", ".kube", "secrets", "secret"}
+                for part in parts
+            )
             or normalized.endswith(cls.SENSITIVE_SUFFIXES)
         )
 
