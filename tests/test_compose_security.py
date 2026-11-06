@@ -39,5 +39,7 @@ def test_schema_migration_gates_api_and_worker_without_worker_health_dependency(
     }
     assert services["rusa-agent-migrate"]["restart"] == "no"
     migration_command = " ".join(services["rusa-agent-migrate"]["command"])
-    assert "PostgresTaskQueue(dsn).initialize()" in migration_command
+    assert "queue = PostgresTaskQueue(dsn)" in migration_command
+    assert "queue.initialize()" in migration_command
     assert "PostgresMemoryStore(dsn).initialize()" in migration_command
+    assert "queue.configure_api_permissions()" in migration_command
