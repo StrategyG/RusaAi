@@ -49,7 +49,7 @@ def evaluate_retrieval(
     max_cases: int = 10_000,
 ) -> dict[str, Any]:
     """Evaluate ranked document IDs against a manually curated relevance dataset."""
-    if not 1 <= k <= 100 or not 1 <= max_cases <= 100_000:
+    if not 1 <= k <= 20 or not 1 <= max_cases <= 100_000:
         raise ValueError("evaluation limits are invalid")
 
     recall_values: list[float] = []
@@ -74,11 +74,11 @@ def evaluate_retrieval(
         results = retrieve(query, k)
         if not isinstance(results, list):
             raise ValueError("retriever must return a list of ranked documents")
-        retrieved_ids = [
+        retrieved_ids = list(dict.fromkeys(
             item["document_id"]
-            for item in results[:k]
+            for item in results
             if isinstance(item, dict) and isinstance(item.get("document_id"), str)
-        ]
+        ))[:k]
         recall_values.append(recall_at_k(retrieved_ids, relevant_ids, k))
         reciprocal_values.append(reciprocal_rank_at_k(retrieved_ids, relevant_ids, k))
         ndcg_values.append(ndcg_at_k(retrieved_ids, relevant_ids, k))
