@@ -15,6 +15,37 @@ from app import GenerationResult, app, _load_task_validator  # noqa: E402
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
 
+class FakeKnowledgeService:
+    def __init__(self):
+        self.calls = []
+
+    def search(self, *, tenant_id, collection, query, limit=5):
+        self.calls.append((tenant_id, collection, query, limit))
+        return [{
+            "source_uri": "library://tenant-a/guide.pdf",
+            "document_id": "doc-123",
+            "content": "The approved policy requires a documented review before release.",
+            "score": 0.92,
+        }]
+
+    def close(self):
+        return None
+
+
+class RAGBackend:
+    def __init__(self):
+        self.messages = None
+
+    def generate(self, messages, *, max_new_tokens, temperature, top_p):
+        self.messages = messages
+        return GenerationResult(
+            content="Release requires a documented review [doc-123].",
+            prompt_tokens=30,
+            completion_tokens=12,
+            finish_reason="stop",
+        )
+
+
 class FakeBackend:
     def generate(
         self,
@@ -39,6 +70,7 @@ def client(monkeypatch):
     monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-ai-v1")
+    monkeypatch.setenv("RUSA_RAG_ENABLED", "false")
     monkeypatch.delenv("TASK_ENVELOPE_SCHEMA_PATH", raising=False)
     _load_task_validator.cache_clear()
 
@@ -46,6 +78,7 @@ def client(monkeypatch):
         app.state.backend = FakeBackend()
         yield test_client
         app.state.backend = None
+        app.state.knowledge_service = None
 
     _load_task_validator.cache_clear()
 
@@ -225,3 +258,37 @@ def test_a2a_validation_requires_api_key(client):
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 401
+
+
+def test_chat_completion_uses_tenant_scoped_rag_evidence(client, monkeypatch):
+    monkeypatch.setenv("RUSA_RAG_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_ID", "tenant-rag-test")
+    knowledge = FakeKnowledgeService()
+    backend = RAGBackend()
+    app.state.knowledge_service = knowledge
+    app.state.backend = backend
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={
+            "model": "rusa-ai-v1",
+            "messages": [{"role": "user", "content": "What review is required before release?"}],
+            "max_tokens": 64,
+        },
+    )
+
+    assert response.status_code == 200
+    assert knowledge.calls == [(
+        "tenant-rag-test",
+        "agent",
+        "What review is required before release?",
+        5,
+    )]
+    system_context = "\\n".join(
+        message.content for message in backend.messages if message.role == "system"
+    )
+    assert "untrusted evidence" in system_context
+    assert "library://tenant-a/guide.pdf" in system_context
+    assert "doc-123" in system_context
+    assert "documented review before release" in system_context
