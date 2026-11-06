@@ -116,6 +116,11 @@ class AICodeOrchestrator:
         record = TaskRecord(task=task)
         previous_attempt_results: list[WorkerResult] = []
         try:
+            record.transition(TaskState.OBSERVING)
+            await self._audit(
+                "task.received", task, "aicode-master",
+                {"repository": task.repository.full_name},
+            )
             previous = await asyncio.to_thread(
                 self.memory.get,
                 task.task_id,
@@ -150,11 +155,6 @@ class AICodeOrchestrator:
                             blockers=[str(error) for error in prior_errors[:10]],
                         )
                     )
-            await self._audit(
-                "task.received", task, "aicode-master",
-                {"repository": task.repository.full_name},
-            )
-            record.transition(TaskState.OBSERVING)
             await self._persist(record)
             record.transition(TaskState.PLANNING)
             await self._persist(record)
