@@ -12,6 +12,7 @@ import json
 import re
 from typing import Any
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 import httpx
 
