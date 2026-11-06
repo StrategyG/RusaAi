@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -19,13 +20,18 @@ from .contracts import CodingTask, RepositoryTarget
 from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
+AGENT_BODY_TIMEOUT_SECONDS = float(os.getenv("RUSA_AGENT_BODY_TIMEOUT_SECONDS", "15"))
+
 
 class RequestGuardMiddleware:
     """Bound and buffer every HTTP request body, including chunked bodies."""
 
-    def __init__(self, app, max_request_bytes):
+    def __init__(self, app, max_request_bytes, body_timeout_seconds=15.0):
+        if not isinstance(body_timeout_seconds, (int, float)) or body_timeout_seconds <= 0:
+            raise ValueError("body_timeout_seconds must be positive")
         self.app = app
         self.max_request_bytes = max_request_bytes
+        self.body_timeout_seconds = float(body_timeout_seconds)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -73,21 +79,35 @@ class RequestGuardMiddleware:
                 await send_error(413, "Request body exceeds the configured size limit")
                 return
 
-        buffered_messages = []
-        received_bytes = 0
-        while True:
-            message = await receive()
-            if message["type"] == "http.disconnect":
-                return
-            if message["type"] != "http.request":
-                continue
-            received_bytes += len(message.get("body", b""))
-            if received_bytes > limit:
-                await send_error(413, "Request body exceeds the configured size limit")
-                return
-            buffered_messages.append(message)
-            if not message.get("more_body", False):
-                break
+        async def collect_body():
+            buffered = []
+            received = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    return "disconnect", None
+                if message["type"] != "http.request":
+                    continue
+                received += len(message.get("body", b""))
+                if received > limit:
+                    return "too_large", None
+                buffered.append(message)
+                if not message.get("more_body", False):
+                    return "ok", buffered
+
+        try:
+            outcome, buffered_messages = await asyncio.wait_for(
+                collect_body(),
+                timeout=self.body_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            await send_error(408, "Request body intake timed out")
+            return
+        if outcome == "disconnect":
+            return
+        if outcome == "too_large":
+            await send_error(413, "Request body exceeds the configured size limit")
+            return
 
         async def replay_receive():
             if buffered_messages:
@@ -135,7 +155,7 @@ def tenant_repository_allowlist(tenant_id: str) -> frozenset[str]:
             )
     if tenant_id not in mapping:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant has no repository access")
-    return frozenset(mapping[tenant_id])
+    return frozenset(repository.lower() for repository in mapping[tenant_id])
 
 
 
@@ -223,7 +243,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(RequestGuardMiddleware, max_request_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
+app.add_middleware(
+    RequestGuardMiddleware,
+    max_request_bytes=lambda: MAX_AGENT_REQUEST_BYTES,
+    body_timeout_seconds=AGENT_BODY_TIMEOUT_SECONDS,
+)
 
 
 
@@ -258,7 +282,7 @@ def create_task(
         r"[A-Za-z0-9_.:-]{1,128}", idempotency_key
     ):
         raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
-    if body.repository not in tenant_repository_allowlist(tenant_id):
+    if body.repository.lower() not in tenant_repository_allowlist(tenant_id):
         raise HTTPException(status_code=403, detail="Repository is not allowlisted for this tenant")
     try:
         RepositoryTarget(
