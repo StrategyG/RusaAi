@@ -13,23 +13,22 @@ COPY --chown=appuser:appuser . /app
 
 RUN python -m pip install --no-cache-dir .
 RUN python -m pip uninstall -y setuptools wheel jaraco.context || true
-# The official Python image and OS packages can leave duplicate package metadata
-# in both site-packages and dist-packages. Remove every runtime copy, not just
-# the version selected by pip, so scanners and runtime imports see no build tools.
-RUN find /usr/local/lib /usr/lib -type d \\
-    \\( -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \\
-       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \\
-       -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \\) \\
-    -prune -exec rm -rf '{}' + \\
-    && if find /usr/local/lib /usr/lib -type d \\
-         \\( -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \\
-            -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \\
-            -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \\) \\
-         -print -quit | grep -q .; then \\
-         echo "Build-only Python packaging tools remain in the runtime image" >&2; exit 1; \\
-       fi \\
-    && python -m pip check \\
-    && python - <<'PY'
+# Remove duplicate metadata from both site-packages and dist-packages, including
+# stale .dist-info/.egg-info directories that pip may not select for uninstall.
+RUN find /usr/local/lib /usr/lib -type d \( \
+    -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \
+    -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \
+    -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
+  \) -prune -exec rm -rf '{}' + \
+  && if find /usr/local/lib /usr/lib -type d \( \
+       -name setuptools -o -name 'setuptools-*.dist-info' -o -name 'setuptools*.egg-info' \
+       -o -name wheel -o -name 'wheel-*.dist-info' -o -name 'wheel*.egg-info' \
+       -o -path '*/jaraco/context' -o -name 'jaraco_context-*.dist-info' \
+     \) -print -quit | grep -q .; then \
+       echo "Build-only Python packaging tools remain in the runtime image" >&2; exit 1; \
+     fi \
+  && python -m pip check \
+  && python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
 for package in ("setuptools", "wheel", "jaraco.context"):
