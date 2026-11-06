@@ -612,3 +612,205 @@ def test_default_required_checks_match_repository_workflow():
     workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
     for name in make_orchestrator(FakeTools()).required_ci_checks:
         assert f"name: {name}\n" in workflow
+
+
+def test_github_gateway_rejects_repository_outside_allowlist_before_network(monkeypatch):
+    task_id = "other-task-id"
+    key = "other-task-key"
+    branch = CodingTask.expected_work_branch_for("tenant-a", key, task_id)
+    other_task = CodingTask(
+        tenant_id="tenant-a",
+        objective="Read another repository",
+        repository=RepositoryTarget(
+            full_name="other-owner/private-repo",
+            base_branch="main",
+            work_branch=branch,
+        ),
+        acceptance_criteria=("No changes",),
+        idempotency_key=key,
+        task_id=task_id,
+    )
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+
+    async def no_network(*args, **kwargs):
+        pytest.fail("Repository allowlist must be enforced before network access")
+
+    monkeypatch.setattr(gateway, "_request", no_network)
+    with pytest.raises(PermissionError, match="allowlist"):
+        asyncio.run(gateway.execute(other_task, ToolCall("list_files")))
+
+
+def test_github_gateway_redacts_secrets_from_file_and_diff(monkeypatch):
+    import base64
+
+    task = make_task()
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+    github_token = "ghp_" + "A" * 32
+    file_text = f'api_key = "supersecret-value-123456"\ntoken = "{github_token}"\n'
+    encoded = base64.b64encode(file_text.encode()).decode()
+
+    async def request(method, path, **kwargs):
+        if "/contents/" in path:
+            return {
+                "type": "file",
+                "size": len(file_text.encode()),
+                "content": encoded,
+                "sha": "f" * 40,
+            }
+        if "/branches/main" in path:
+            return {"commit": {"sha": "b" * 40}}
+        if "/branches/rusa-agent/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        if "/compare/" in path:
+            return {
+                "changed_files": 1,
+                "files": [{
+                    "filename": "src/config.py",
+                    "status": "modified",
+                    "additions": 1,
+                    "deletions": 0,
+                    "patch": f'+token = "{github_token}"\n',
+                }],
+            }
+        raise AssertionError(f"unexpected GitHub path: {path}")
+
+    monkeypatch.setattr(gateway, "_request", request)
+    read = asyncio.run(gateway.execute(
+        task, ToolCall("read_file", {"path": "src/config.py"}),
+    ))
+    diff = asyncio.run(gateway.execute(task, ToolCall("get_branch_diff")))
+
+    assert "supersecret-value" not in read.data["content"]
+    assert github_token not in read.data["content"]
+    assert "[REDACTED" in read.data["content"]
+    assert github_token not in diff.data["files"][0]["patch"]
+    assert "[REDACTED TOKEN]" in diff.data["files"][0]["patch"]
+
+
+def test_github_gateway_paginates_all_check_runs(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+    first_page = [
+        {"id": index, "name": f"check-{index}", "status": "completed", "conclusion": "success"}
+        for index in range(1, 101)
+    ]
+    second_page = [{
+        "id": 101,
+        "name": "Lint, test, and audit dependencies",
+        "status": "completed",
+        "conclusion": "success",
+    }]
+
+    async def request(method, path, **kwargs):
+        if "/branches/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        page = kwargs["params"]["page"]
+        return {
+            "total_count": 101,
+            "check_runs": first_page if page == "1" else second_page,
+        }
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("get_ci_status")))
+    assert result.data["checks_complete"] is True
+    assert result.data["total_count"] == 101
+    assert len(result.data["checks"]) == 101
+    assert result.data["all_checks_success"] is True
+
+
+def test_github_gateway_fails_closed_when_check_run_total_changes(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+
+    async def request(method, path, **kwargs):
+        if "/branches/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        page = kwargs["params"]["page"]
+        total = 101 if page == "1" else 102
+        runs = [
+            {"id": index, "name": f"check-{index}", "status": "completed", "conclusion": "success"}
+            for index in range(100)
+        ] if page == "1" else [{
+            "id": 101, "name": "last-check", "status": "completed", "conclusion": "success",
+        }]
+        return {"total_count": total, "check_runs": runs}
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("get_ci_status")))
+    assert result.data["checks_complete"] is False
+    assert result.data["all_checks_success"] is False
+
+
+def test_github_gateway_marks_oversized_security_diff_incomplete(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+        max_diff_files=20,
+    )
+
+    async def request(method, path, **kwargs):
+        if "/branches/main" in path:
+            return {"commit": {"sha": "b" * 40}}
+        if "/branches/rusa-agent/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        if "/compare/" in path:
+            return {
+                "changed_files": 21,
+                "files": [
+                    {
+                        "filename": f"src/module_{index}.py",
+                        "status": "modified",
+                        "additions": 1,
+                        "deletions": 0,
+                        "patch": "+safe = True",
+                    }
+                    for index in range(21)
+                ],
+            }
+        raise AssertionError(f"unexpected GitHub path: {path}")
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("get_branch_diff")))
+    assert result.data["diff_complete"] is False
+    assert result.data["changed_files"] == 21
+    assert len(result.data["files"]) == 20
+
+
+def test_github_gateway_never_returns_patch_for_protected_file(monkeypatch):
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
+
+    async def request(method, path, **kwargs):
+        if "/branches/main" in path:
+            return {"commit": {"sha": "b" * 40}}
+        if "/branches/rusa-agent/" in path:
+            return {"commit": {"sha": "a" * 40}}
+        if "/compare/" in path:
+            return {
+                "changed_files": 1,
+                "files": [{
+                    "filename": "config/.env.production",
+                    "status": "modified",
+                    "additions": 1,
+                    "deletions": 0,
+                    "patch": "+API_KEY=top-secret-value",
+                }],
+            }
+        raise AssertionError(f"unexpected GitHub path: {path}")
+
+    monkeypatch.setattr(gateway, "_request", request)
+    result = asyncio.run(gateway.execute(make_task(), ToolCall("get_branch_diff")))
+    assert result.data["diff_complete"] is False
+    assert result.data["files"][0]["patch"] == ""
