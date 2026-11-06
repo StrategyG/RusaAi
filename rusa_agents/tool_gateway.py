@@ -22,6 +22,13 @@ DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
 
 
+def _is_env_file_name(name: str) -> bool:
+    lowered = name.lower()
+    if lowered == ".env.example":
+        return False
+    return lowered == ".env" or lowered.startswith(".env.") or ".env." in lowered or lowered.endswith(".env")
+
+
 class ToolDenied(PermissionError):
     """Raised when a worker attempts an operation outside its role policy."""
 
@@ -113,6 +120,8 @@ class DockerSandbox:
             ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
             "authorized_keys", "known_hosts", "credentials.json",
             "service-account.json", "secrets.json", "token.json",
+            "secrets.yaml", "secrets.yml", "secret.yaml", "secret.yml",
+            "credentials.yaml", "credentials.yml",
         }
         sensitive_suffixes = {
             ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt",
@@ -128,7 +137,7 @@ class DockerSandbox:
                     candidate.is_symlink()
                     or lowered in sensitive_parts
                     or lowered in sensitive_names
-                    or (lowered.startswith(".env") and lowered != ".env.example")
+                    or _is_env_file_name(lowered)
                     or lowered.endswith((".tfstate", ".tfstate.backup"))
                     or candidate.suffix.lower() in sensitive_suffixes
                     or lowered in {"__pycache__", ".pytest_cache", ".ruff_cache"}
@@ -261,7 +270,7 @@ class WorkspaceToolGateway:
             raise ToolDenied("Absolute paths, traversal, and backslashes are prohibited")
         if any(
             part.lower() in self.PROTECTED_PARTS
-            or (part.lower().startswith(".env") and part.lower() != ".env.example")
+            or _is_env_file_name(part)
             for part in candidate.parts
         ):
             raise ToolDenied("Access to protected paths is prohibited")
@@ -283,7 +292,7 @@ class WorkspaceToolGateway:
             raise ToolDenied("Path escapes the assigned workspace")
         if any(
             part.lower() in self.PROTECTED_PARTS
-            or (part.lower().startswith(".env") and part.lower() != ".env.example")
+            or _is_env_file_name(part)
             for part in resolved.relative_to(self.workspace).parts
         ):
             raise ToolDenied("Resolved path points to protected content")
