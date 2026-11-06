@@ -666,3 +666,51 @@ def test_workspace_task_queries_are_scoped_by_tenant_and_user():
 
     with psycopg.connect(DSN) as connection:
         connection.execute("DELETE FROM rusa_agent_tasks WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_postgres_failed_task_requeue_cannot_bypass_tenant_capacity():
+    queue = PostgresTaskQueue(DSN, max_outstanding_per_tenant=1)
+    queue.initialize()
+    PostgresMemoryStore(DSN).initialize()
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute("""
+            DO $rusa$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_worker') THEN
+                    CREATE ROLE rusa_agent_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api') THEN
+                    CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+                END IF;
+            END
+            $rusa$
+        """)
+        connection.execute(
+            "ALTER ROLE rusa_agent_worker NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS"
+        )
+        connection.execute(
+            "ALTER ROLE rusa_agent_api NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+        )
+
+    queue.configure_api_permissions()
+    tenant_id = f"rusa-test-requeue-capacity-{uuid4().hex}"
+    failed_task = make_task(tenant_id, f"failed-{uuid4().hex}")
+    queued_task = make_task(tenant_id, f"queued-{uuid4().hex}")
+    failed_id = queue.enqueue(failed_task)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "UPDATE rusa_agent_tasks SET status='failed' WHERE tenant_id=%s AND task_id=%s",
+            (tenant_id, failed_id),
+        )
+
+    queue.enqueue(queued_task)
+    with pytest.raises(QueueCapacityExceededError, match="capacity is full"):
+        queue.requeue_failed(tenant_id, failed_id)
+
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM rusa_agent_tasks WHERE tenant_id=%s",
+            (tenant_id,),
+        )
