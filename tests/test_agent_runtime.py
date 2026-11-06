@@ -58,6 +58,7 @@ def registry() -> ToolRegistry:
         "github.read_file",
         "github.create_branch",
         "github.write_file",
+        "github.compare_branches",
         "github.get_ci_status",
         "github.create_pull_request",
     }:
@@ -97,6 +98,20 @@ def valid_plan() -> AgentPlan:
                         "branch": "feature/agent-runtime-test",
                     },
                     "purpose": "Write the requested change",
+                },
+                {
+                    "tool": "github.compare_branches",
+                    "arguments": {
+                        "repository": "StrategyG/RusaAi",
+                        "base": "main",
+                        "head": "feature/agent-runtime-test",
+                    },
+                    "purpose": "Collect the complete bounded branch diff",
+                },
+                {
+                    "tool": "agent.review_diff",
+                    "arguments": {},
+                    "purpose": "Independently review the branch diff and acceptance criteria",
                 },
                 {
                     "tool": "github.create_pull_request",
@@ -455,6 +470,8 @@ async def test_approver_can_resume_task_blocked_on_ci(database, registry):
         {"tool": "github.list_files", "purpose": "inspect", "result": {"entries": []}},
         {"tool": "github.create_branch", "purpose": "branch", "result": {"sha": "a" * 40}},
         {"tool": "github.write_file", "purpose": "write", "result": {"commit_sha": "b" * 40}},
+        {"tool": "github.compare_branches", "purpose": "diff", "result": {"files": []}},
+        {"tool": "agent.review_diff", "purpose": "review", "result": {"approved": True}},
         {"tool": "github.create_pull_request", "purpose": "PR", "result": {"number": 1}},
         {"tool": "github.get_ci_status", "purpose": "CI", "result": {"commit_sha": "b" * 40, "all_passed": False}},
     ]
@@ -470,8 +487,8 @@ async def test_approver_can_resume_task_blocked_on_ci(database, registry):
     await runtime.resume("tenant-a", task_id)
     task = await runtime.get_task("tenant-a", task_id)
     assert task["status"] == TaskStatus.QUEUED.value
-    assert task["cursor"] == 4
-    assert len(task["tool_results"]) == 4
+    assert task["cursor"] == 6
+    assert len(task["tool_results"]) == 6
     assert task["error"] is None
 
 
@@ -506,8 +523,21 @@ def test_github_tool_path_policy_blocks_secret_material():
 
 
 class ExecutionProvider:
+    def __init__(self, review_approved=True):
+        self.review_approved = review_approved
+
     async def complete(self, system_prompt: str, user_prompt: str) -> str:
         import json
+
+        if "independent Reviewer agent" in system_prompt:
+            return json.dumps(
+                {
+                    "approved": self.review_approved,
+                    "summary": "Review completed against the supplied acceptance criteria",
+                    "findings": [] if self.review_approved else ["Potential issue requires human review"],
+                    "risk_level": "low" if self.review_approved else "medium",
+                }
+            )
 
         return json.dumps(
             {
@@ -540,6 +570,20 @@ class ExecutionProvider:
                             "branch": "feature/agent-e2e-test",
                         },
                         "purpose": "Write a test artifact",
+                    },
+                    {
+                        "tool": "github.compare_branches",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "base": "main",
+                            "head": "feature/agent-e2e-test",
+                        },
+                        "purpose": "Collect branch diff for reviewer",
+                    },
+                    {
+                        "tool": "agent.review_diff",
+                        "arguments": {},
+                        "purpose": "Review code changes before PR",
                     },
                     {
                         "tool": "github.create_pull_request",
@@ -577,6 +621,15 @@ async def test_worker_executes_full_plan_and_verifies_completion(database):
     async def write_file(**kwargs):
         return {"path": kwargs["path"], "commit_sha": "b" * 40}
 
+    async def compare_branches(**kwargs):
+        return {
+            "status": "ahead",
+            "ahead_by": 1,
+            "behind_by": 0,
+            "total_files": 1,
+            "files": [{"filename": "docs/e2e.md", "patch": "+Validated worker execution"}],
+        }
+
     async def create_pull_request(**kwargs):
         return {"number": 42, "draft": True}
 
@@ -592,6 +645,7 @@ async def test_worker_executes_full_plan_and_verifies_completion(database):
         ("github.list_files", list_files),
         ("github.create_branch", create_branch),
         ("github.write_file", write_file),
+        ("github.compare_branches", compare_branches),
         ("github.create_pull_request", create_pull_request),
         ("github.get_ci_status", get_ci_status),
     ):
@@ -607,7 +661,7 @@ async def test_worker_executes_full_plan_and_verifies_completion(database):
 
     task = await runtime.get_task("tenant-e2e", task_id)
     assert task["status"] == TaskStatus.SUCCEEDED.value
-    assert task["cursor"] == 5
+    assert task["cursor"] == 7
     assert task["result"]["verified"] is True
     assert task["result"]["acceptance_criteria_evaluated"] is False
     messages = await runtime.messages.history("tenant-e2e", task_id)
@@ -620,3 +674,57 @@ def test_pgvector_index_enforces_embedding_dimension():
 
     with pytest.raises(ValueError):
         PostgresVectorIndex._vector_literal([0.1, 0.2, 0.3])
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejection_pauses_until_approver_override(database):
+    async def list_files(**kwargs):
+        return {"entries": []}
+
+    async def create_branch(**kwargs):
+        return {"sha": "a" * 40}
+
+    async def write_file(**kwargs):
+        return {"commit_sha": "b" * 40}
+
+    async def compare_branches(**kwargs):
+        return {"files": [{"filename": "docs/review.md", "patch": "+change"}]}
+
+    async def create_pull_request(**kwargs):
+        return {"number": 9, "draft": True}
+
+    async def get_ci_status(**kwargs):
+        return {"commit_sha": kwargs["commit_sha"], "all_passed": True}
+
+    tools = ToolRegistry()
+    for name, handler in (
+        ("github.list_files", list_files),
+        ("github.create_branch", create_branch),
+        ("github.write_file", write_file),
+        ("github.compare_branches", compare_branches),
+        ("github.create_pull_request", create_pull_request),
+        ("github.get_ci_status", get_ci_status),
+    ):
+        tools.register(name, handler, input_schema={"type": "object"})
+
+    runtime = AgentRuntime(database, ExecutionProvider(review_approved=False), tools)
+    task_id = await runtime.submit(
+        "tenant-review",
+        "request-review-001",
+        make_task(work_branch="feature/agent-e2e-test").model_dump(),
+    )
+    await runtime.run_once()
+    task = await runtime.get_task("tenant-review", task_id)
+    assert task["status"] == TaskStatus.AWAITING_APPROVAL.value
+    assert task["pending_action"] == "agent.review_diff"
+
+    await runtime.approve("tenant-review", task_id, "agent.review_diff")
+    await runtime.run_once()
+    task = await runtime.get_task("tenant-review", task_id)
+    assert task["status"] == TaskStatus.SUCCEEDED.value
+    review = next(
+        item["result"]
+        for item in task["tool_results"]
+        if item["tool"] == "agent.review_diff"
+    )
+    assert review["human_override"] is True
