@@ -13,7 +13,7 @@ COPY rusa_agents ./rusa_agents
 ARG RUSA_INSTALL_LOCAL_MODEL=0
 RUN python -m pip install --no-cache-dir --prefix=/install --no-deps . \
     && if [ "$RUSA_INSTALL_LOCAL_MODEL" = "1" ]; then \
-         python -m pip install --no-cache-dir --prefix=/install ".[model]"; \
+         python -m pip install --no-cache-dir --prefix=/install -r requirements-model.txt; \
        fi
 RUN PYTHONPATH=/install/lib/python3.12/site-packages python -m pip check \
     && python -m pip uninstall -y setuptools wheel jaraco.context \
