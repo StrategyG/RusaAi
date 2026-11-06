@@ -1,7 +1,3 @@
-from __future__ import annotations
-
-import uuid
-
 import pytest
 
 from rusa_agents.devops.contracts import (
@@ -16,6 +12,8 @@ TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
 
 def _task() -> dict:
+    import uuid
+
     return {
         "schema_version": 1,
         "task_id": str(uuid.uuid4()),
@@ -49,6 +47,8 @@ def _task() -> dict:
 
 
 def _result() -> dict:
+    import uuid
+
     return {
         "schema_version": 1,
         "task_id": str(uuid.uuid4()),
