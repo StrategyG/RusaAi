@@ -227,7 +227,15 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
     return tenant_id
 
 
-@app.get("/metrics", dependencies=[Depends(verify_api_key)])
+
+def verify_metrics_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Metrics are operator-only and never accept tenant-scoped API keys."""
+    expected = os.getenv("RUSA_METRICS_API_KEY")
+    if not expected or not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Invalid metrics API key")
+
+
+@app.get("/metrics", dependencies=[Depends(verify_metrics_key)])
 def metrics_endpoint():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
