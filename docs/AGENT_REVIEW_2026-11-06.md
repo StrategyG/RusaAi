@@ -13,8 +13,14 @@ Review objective: close the highest-risk gaps without weakening autonomy boundar
 | Retry correctness | Failed retry clears terminal checkpoint so the next attempt can restart instead of replaying a terminal FAILED state | Queue behavior and worker integration path |
 | Stage recovery | Completed worker results are reused after restart; a paused external CI stage is explicitly refreshed | Checkpoint/restart test |
 | Idempotency | Duplicate key must match the same semantic payload; generated task ID and timestamp are normalized | PostgreSQL duplicate/conflict test |
-| Tenant isolation | RLS readiness checks for task and memory tables; memory insert sets tenant context | PostgreSQL RLS and readiness tests |
+| Tenant isolation | RLS readiness checks for task and memory tables; memory insert sets tenant context; API tenant map must match the credential map exactly | PostgreSQL RLS and API isolation tests |
 | Repository scope | Exact global owner/name allowlist plus per-tenant repository assignment enforced at API and GitHub gateway | API and gateway regression tests |
+| Checkpoint privacy | Raw read/write file contents are omitted from durable checkpoints; content hashes and sizes are retained; memory and audit details redact secrets | Checkpoint and HMAC audit redaction tests |
+| Lease fencing | Worker checks current lease ownership before every repository tool call; heartbeat interval tightened to one-sixth of lease duration | Stale lease tool-guard and PostgreSQL lease tests |
+| GitHub write idempotency | Ambiguous Contents API write responses are reconciled by reading the target branch file before retrying | Ambiguous commit recovery test |
+| Inference request limits | Streamed/chunked request bodies are bounded before JSON parsing on both inference and agent APIs | Inference and agent ASGI middleware tests |
+| Protected operations | Dependency manifests, lockfiles, container files, infrastructure, deployment, and GitHub configuration writes require human approval | Policy path approval tests |
+| CI configuration | Required GitHub check names are configured as a validated JSON array; complete check-run sets are preserved in checkpoints | Worker configuration and checkpoint tests |
 | Branch isolation | Server-derived branch is unique to tenant plus idempotency identity; arbitrary branch reuse rejected | Task contract and API tests |
 | HTTP intake | Actual streamed body bytes bounded before JSON parsing; request timeout remains 15 seconds | Chunked body and replay tests |
 | External responses | GitHub and provider bodies are streamed with byte limits | Adapter limits and configuration |
@@ -27,15 +33,18 @@ Review objective: close the highest-risk gaps without weakening autonomy boundar
 
 ## Current test status
 
-The earlier review revision recorded 60 passed and 3 skipped, with PostgreSQL integration tests skipped locally because no RUSA_TEST_DATABASE_URL was configured. That result applies to the earlier commit, not automatically to the changes in this revision.
+- **PR #11 CI migration:** GitHub Actions run 42182286658 passed on commit 3025cf04b3085aa7481610639ddb512b3354b01f. This validates the default-branch CI migration and the two corrected legacy API fixtures. The agent-specific image was not present in this PR branch and was therefore skipped.
+- **PR #7 implementation baseline:** GitHub Actions run 42183099336 passed on commit 6857a5c7a3060fea4eed9f5979e4b1e26bf95221. Lint, compile, tests, dependency audit, inference image build, agent image build, and inference liveness smoke test all passed.
+- **PR #8 hardening branch:** current head is 9740661f71e31b2669d1527e713a294604794bf2. It remains a draft PR and does not yet have a verified full CI result for this head. The additional tests authored in this revision must not be counted as passing until a workflow run executes against this exact commit.
 
-This revision adds or updates regression tests for the new controls. It must be validated by the GitHub Actions run on the latest branch head. A test authored but not executed is not evidence of a passing test.
+A passing PR #7 run validates the implementation baseline, not the newer PR #8 hardening changes. The PR #8 branch still requires its own full CI run, including PostgreSQL integration tests and both container builds.
 
 ## Verification still required
 
-- [ ] GitHub Actions test job passes on the current branch head.
-- [ ] PostgreSQL integration tests execute against the CI PostgreSQL service, not skip.
-- [ ] Both container images build; inference API smoke test passes.
+- [x] GitHub Actions baseline test job passes on PR #7 head 6857a5c7a3060fea4eed9f5979e4b1e26bf95221.
+- [x] PostgreSQL integration tests execute against the CI PostgreSQL service on PR #7, not skip.
+- [x] Both container images build; inference API smoke test passes on PR #7.
+- [ ] Full GitHub Actions suite passes on PR #8 head 9740661f71e31b2669d1527e713a294604794bf2 after the CI migration is approved/merged and the draft PR is made ready for checks.
 - [ ] Docker Compose validation succeeds with generated secrets and a real model directory.
 - [ ] Live GitHub App/token permissions match the global allowlist and can read checks, create branches, write contents, and open draft PRs.
 - [ ] Tenant repository assignments match business ownership and are tested with separate tenant credentials.
@@ -48,7 +57,7 @@ This revision adds or updates regression tests for the new controls. It must be 
 
 ## Production decision
 
-NOT YET CERTIFIED PRODUCTION-READY. The repository now has stronger code-level controls, but a production decision requires the verification evidence above. No merge to main, deployment, release, or live credential configuration is implied by this review.
+NOT YET CERTIFIED PRODUCTION-READY. The repository now has stronger code-level controls and a passing CI baseline on PR #7, but the newest PR #8 hardening changes are not yet CI-verified. A production decision requires the remaining verification evidence above. PR #11 is a CI migration PR and PR #8 is still draft; no merge to main, deployment, release, or live credential configuration is implied by this review.
 
 
 ## CI trigger correction
