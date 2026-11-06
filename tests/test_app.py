@@ -79,11 +79,11 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
         def __init__(self):
             self.items = {}
 
-        def enqueue(self, task_id, tenant_id, payload):
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
             self.items[(tenant_id, task_id)] = payload
             return True
 
-        def get(self, task_id, tenant_id):
+        def get(self, task_id, tenant_id, *, audit_actor=None):
             payload = self.items.get((tenant_id, task_id))
             if payload is None:
                 return None
@@ -94,7 +94,7 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
                 "result": None,
             }
 
-        def retry(self, task_id, tenant_id):
+        def retry(self, task_id, tenant_id, *, audit_actor=None):
             return (tenant_id, task_id) in self.items
 
     monkeypatch.setenv("ENVIRONMENT", "development")
@@ -167,7 +167,7 @@ def test_metrics_endpoint_requires_operator_key(monkeypatch):
 
 def test_aicode_task_retry_is_tenant_scoped(monkeypatch):
     class RetryQueue:
-        def retry(self, task_id, tenant_id):
+        def retry(self, task_id, tenant_id, *, audit_actor=None):
             return tenant_id == "tenant-alpha" and task_id == "00000000-0000-4000-8000-000000000001"
 
     monkeypatch.setenv("ENVIRONMENT", "development")
@@ -274,7 +274,7 @@ def test_aicode_task_status_exposes_result_only_to_owning_tenant(monkeypatch):
     task_id = "00000000-0000-4000-8000-000000000001"
 
     class ResultQueue:
-        def get(self, requested_id, tenant_id):
+        def get(self, requested_id, tenant_id, *, audit_actor=None):
             if requested_id != task_id or tenant_id != "tenant-alpha":
                 return None
             return {
