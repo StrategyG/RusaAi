@@ -232,6 +232,20 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
+        for variable, default, minimum, maximum in (
+            ("RUSA_TASK_TIMEOUT_SECONDS", "3600", 60, 3600),
+            ("RUSA_CI_TIMEOUT_SECONDS", "900", 60, 3600),
+            ("RUSA_CI_POLL_SECONDS", "15", 5, 60),
+            ("RUSA_MAX_PARALLEL_WORKERS", "4", 1, 16),
+            ("RUSA_MAX_REPAIR_CYCLES", "2", 0, 5),
+        ):
+            try:
+                value = int(os.getenv(variable, default))
+            except ValueError:
+                missing.append(f"{variable} must be an integer")
+                continue
+            if not minimum <= value <= maximum:
+                missing.append(f"{variable} must be between {minimum} and {maximum}")
         missing.extend(self._validate_tenants_and_model())
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
