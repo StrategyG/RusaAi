@@ -57,7 +57,7 @@ Run:
 - ruff check llm-project/serve rusa_agents tests
 - python -m compileall -q llm-project rusa_agents tests
 - pytest -q
-- pip-audit -r requirements.txt -r requirements-agent.txt
+- pip-audit -r requirements-dev.txt
 
 CI also builds both production images from the same candidate commit, scans API/agent/PostgreSQL images with Trivy, publishes CycloneDX SBOM artifacts, starts the production Compose stack with a real PostgreSQL service, verifies tenant RLS readiness, and performs a manual plus automatic rollback drill against a persistent PostgreSQL volume.
 
