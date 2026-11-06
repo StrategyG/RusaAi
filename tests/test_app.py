@@ -119,6 +119,18 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     queue = StubQueue()
     monkeypatch.setattr(app.state, "queue", queue, raising=False)
 
+    missing_key = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Add a health endpoint test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert missing_key.status_code == 400
+    assert missing_key.json()["detail"] == "A valid Idempotency-Key header is required (1-128 safe ASCII characters)"
+
     response = client.post(
         "/v1/aicode/tasks",
         headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-tenant-scope-001"},
