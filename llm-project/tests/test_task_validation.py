@@ -123,7 +123,7 @@ def test_errors_do_not_echo_submitted_values(valid_envelope):
     assert response.status_code == 200
     assert response.json()["valid"] is False
     assert "do-not-return-this-secret" not in response.text
-    assert "$: contains an unsupported field" in response.json()["errors"]
+    assert "$: unsupported field(s): unexpected" in response.json()["errors"]
 
 
 def test_missing_schema_fails_startup(monkeypatch, tmp_path):
