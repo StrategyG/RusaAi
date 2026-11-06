@@ -20,19 +20,19 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 
 ## Current verification boundary
 
-The code changes require successful CI on the remediation pull request. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+Latest CI on commit d4c941e1aafcb7018df6bd277b01af2e03a8ebd4 passed both required jobs: lint, compile, 123 tests (including PostgreSQL integration), dependency audit, Docker Compose validation, both image builds, agent import smoke test, and inference API liveness smoke test. This is code/build evidence only, not production certification. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
 
 ## Release gates still open
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | Pending CI on remediation PR |
+| API foundation | CI, schema tests, auth tests, container smoke test | Passed on d4c941e; live deployment configuration and staging verification pending |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented in code; PostgreSQL integration CI and staging verification pending |
-| Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; staging retention and isolation verification pending |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented; PostgreSQL integration CI passed; staging soak and live multi-worker verification pending |
+| Episodic memory | PostgreSQL full-text retrieval, tenant RLS, TTL, redaction, deletion | Implemented; CI tenant-isolation/redaction tests passed; staging retention verification pending |
 | Semantic RAG | Ingestion/chunking, embeddings, vector or hybrid retrieval, grounded citations, retrieval evaluation | Not implemented |
 | MCP protocol | Authenticated MCP server/client, tenant-scoped tools/resources, protocol conformance tests | Not implemented; GitHub is accessed through a bounded native REST gateway |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
