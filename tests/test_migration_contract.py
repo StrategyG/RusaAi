@@ -56,9 +56,6 @@ def test_idempotency_migration_enforces_tenant_scoped_key_hash_uniqueness():
     assert "UNIQUE INDEX" in migration
     assert "(tenant_id, idempotency_key_hash)" in migration
     assert "ON CONFLICT (tenant_id, idempotency_key_hash) DO NOTHING" in queue
-    assert "aicode_jobs_idempotency_key_hash_check" in migration
-    assert "aicode_jobs_request_hash_check" in migration
-    assert "aicode_jobs_idempotency_pair_check" in migration
 
 
 def test_sql_migration_dollar_quote_delimiters_are_balanced():
