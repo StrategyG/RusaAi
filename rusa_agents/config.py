@@ -22,7 +22,7 @@ class RuntimeConfig:
     model_base_url: str | None
     model_name: str
     tenant_repositories: dict[str, list[str]]
-    aicode_enabled: bool = True
+    aicode_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
