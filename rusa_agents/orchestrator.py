@@ -140,13 +140,17 @@ class HierarchicalOrchestrator:
                 raise PlanRejected("Branch diff must be collected exactly once after all writes")
             if len(review_indexes) != 1 or review_indexes[0] <= compare_indexes[0]:
                 raise PlanRejected("An independent reviewer must inspect the branch diff")
-            if task["require_pull_request"]:
+            if task["require_pull_request"] and len(pr_indexes) != 1:
+                raise PlanRejected("A single draft pull request is required")
+            if pr_indexes:
                 if len(pr_indexes) != 1 or pr_indexes[0] <= review_indexes[0]:
                     raise PlanRejected("A single draft pull request must follow reviewer approval")
-            if task["require_ci"]:
-                if len(ci_indexes) != 1 or ci_indexes[0] <= write_indexes[-1]:
-                    raise PlanRejected("CI verification must follow all repository writes")
-                final_gate = pr_indexes[0] if task["require_pull_request"] else review_indexes[0]
+            if task["require_ci"] and len(ci_indexes) != 1:
+                raise PlanRejected("A single CI verification step is required")
+            if ci_indexes:
+                if len(ci_indexes) != 1:
+                    raise PlanRejected("Plan must contain at most one CI verification step")
+                final_gate = pr_indexes[0] if pr_indexes else review_indexes[0]
                 if ci_indexes[0] <= final_gate:
                     raise PlanRejected("CI verification must be the final step after review and PR")
 
