@@ -28,7 +28,7 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
 
 def test_ci_applies_all_database_migrations_once_in_version_order():
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', workflow)
+    migrations = re.findall(r"psql .*?-f migrations/(\d{3}_[A-Za-z0-9_-]+\.sql)", workflow)
 
     assert migrations == [
         "001_aicode_core.sql",
