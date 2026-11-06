@@ -1,6 +1,7 @@
 """Bounded JSON tool-use loop for autonomous coding workers."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -102,7 +103,11 @@ class AutonomousCodeWorker:
                     blockers=["Too many tool actions in one model response."],
                 )
             for action in actions:
-                if not isinstance(action, dict) or not isinstance(action.get("name"), str):
+                if (
+                    not isinstance(action, dict)
+                    or not isinstance(action.get("name"), str)
+                    or set(action) - {"name", "arguments"}
+                ):
                     return WorkerResult(
                         role=self.role, summary="Malformed tool action.",
                         success=False, artifacts=artifacts, evidence=evidence,
@@ -115,7 +120,7 @@ class AutonomousCodeWorker:
                         blockers=["Worker attempted an operation outside its role permissions."],
                     )
                 try:
-                    result = self.gateway.execute(action, self.role)
+                    result = await asyncio.to_thread(self.gateway.execute, action, self.role)
                 except (ToolDenied, ValueError, OSError) as exc:
                     return WorkerResult(
                         role=self.role, summary=f"Tool operation denied: {exc}",
