@@ -64,9 +64,6 @@ def redact_sensitive_data(value: Any) -> Any:
     if isinstance(value, str):
         sanitized = value
         for pattern in _SECRET_PATTERNS:
-            if pattern.pattern.startswith("(?i)"):
-                sanitized = pattern.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", sanitized)
-            else:
-                sanitized = pattern.sub("[REDACTED]", sanitized)
+            sanitized = pattern.sub("[REDACTED]", sanitized)
         return sanitized
     return value
