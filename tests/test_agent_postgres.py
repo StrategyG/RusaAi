@@ -143,7 +143,10 @@ def test_postgres_row_level_security_filters_and_rejects_other_tenants():
         """)
         connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_test_rls")
         connection.execute("GRANT SELECT, INSERT ON rusa_agent_tasks TO rusa_agent_test_rls")
-        connection.execute("GRANT SELECT ON rusa_agent_memory TO rusa_agent_test_rls")
+        connection.execute("GRANT SELECT, INSERT ON rusa_agent_memory TO rusa_agent_test_rls")
+        connection.execute(
+            "GRANT USAGE, SELECT ON SEQUENCE rusa_agent_memory_memory_id_seq TO rusa_agent_test_rls"
+        )
         connection.execute("SET ROLE rusa_agent_test_rls")
         connection.execute(
             "SELECT set_config('rusa.tenant_id', %s, true)",
@@ -173,6 +176,22 @@ def test_postgres_row_level_security_filters_and_rejects_other_tenants():
                     (tenant_id, task_id, idempotency_key, payload)
                 VALUES (%s, %s, %s, '{}'::jsonb)
             """, (tenant_b, f"forbidden-{marker}", f"forbidden-{marker}"))
+
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with psycopg.connect(DSN) as connection:
+            connection.execute("SET ROLE rusa_agent_test_rls")
+            connection.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_a,),
+            )
+            connection.execute(
+                """
+                INSERT INTO rusa_agent_memory
+                    (tenant_id, namespace, content, source)
+                VALUES (%s, 'episodic', %s, 'rls-test')
+                """,
+                (tenant_b, f"forbidden memory {marker}"),
+            )
 
     with psycopg.connect(DSN) as connection:
         connection.execute(
