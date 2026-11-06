@@ -10,7 +10,7 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - Local-only Transformers adapter with no implicit model downloads or remote custom code.
 - Liveness/readiness separation, request IDs, security headers, and request-size guard.
 - Hierarchical AICode workers: analyst, architect, developer, debugger, tester, and security.
-- Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, and draft PR creation.
+- Role-scoped GitHub tool gateway with feature-branch-only writes, protected paths, bounded tool calls, task-owned commit markers, and idempotent draft PR reuse.
 - PostgreSQL durable queue with idempotency keys, leases, bounded retries, and worker process.
 - Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
 - API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.

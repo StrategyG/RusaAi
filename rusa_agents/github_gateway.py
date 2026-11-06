@@ -161,9 +161,16 @@ class GitHubRepositoryGateway:
         repository: str,
         base_branch: str,
         work_branch: str,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         base = await self.get_branch(repository, base_branch)
         base_sha = base["commit"]["sha"]
+        marker = None
+        if task_id is not None:
+            try:
+                marker = f"[RUSA-AI task:{UUID(task_id)}]"
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("task_id must be a UUID") from exc
         try:
             return await self._request(
                 "POST",
@@ -177,11 +184,41 @@ class GitHubRepositoryGateway:
             if exc.status_code != 422:
                 raise
             existing = await self.get_branch(repository, work_branch)
-            if existing["commit"]["sha"] != base_sha:
+            existing_sha = existing["commit"]["sha"]
+            if existing_sha == base_sha:
+                return {
+                    "ref": f"refs/heads/{work_branch}",
+                    "object": existing["commit"],
+                    "reused": True,
+                }
+            if marker is None:
                 raise RuntimeError(
                     "work branch already exists with a different head; refusing to reuse it"
                 ) from exc
-            return {"ref": f"refs/heads/{work_branch}", "object": existing["commit"]}
+            comparison = await self._request(
+                "GET",
+                f"/repos/{repository}/compare/{base_sha}...{existing_sha}",
+            )
+            commits = comparison.get("commits", [])
+            messages = [
+                str(item.get("commit", {}).get("message", ""))
+                for item in commits
+            ]
+            if (
+                comparison.get("status") != "ahead"
+                or comparison.get("ahead_by") != len(commits)
+                or not commits
+                or any(not message.startswith(marker) for message in messages)
+            ):
+                raise RuntimeError(
+                    "existing work branch is not exclusively owned by this AICode task"
+                ) from exc
+            return {
+                "ref": f"refs/heads/{work_branch}",
+                "object": existing["commit"],
+                "reused": True,
+                "verified_task_commits": len(commits),
+            }
 
     async def write_file(
         self,
@@ -190,8 +227,16 @@ class GitHubRepositoryGateway:
         content: str,
         branch: str,
         message: str,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
         safe_path = self.validate_path(path)
+        if task_id is not None:
+            try:
+                marker = f"[RUSA-AI task:{UUID(task_id)}]"
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("task_id must be a UUID") from exc
+            if not message.startswith(marker):
+                message = f"{marker} {message.strip()}"
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         file_path = f"/repos/{repository}/contents/{quote(safe_path, safe='/')}"
         current_sha = None
@@ -228,19 +273,63 @@ class GitHubRepositoryGateway:
         base: str,
         title: str,
         body: str,
+        task_id: str | None = None,
     ) -> dict[str, Any]:
-        return await self._request(
-            "POST",
-            f"/repos/{repository}/pulls",
-            json_body={
-                "title": title[:200],
-                "body": body[:60000],
-                "head": head,
-                "base": base,
-                "draft": True,
-                "maintainer_can_modify": True,
-            },
-        )
+        task_marker = None
+        safe_body = body[:60000]
+        if task_id is not None:
+            try:
+                task_marker = f"<!-- RUSA-AI task:{UUID(task_id)} -->"
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("task_id must be a UUID") from exc
+            safe_body = f"{body[:59000].rstrip()}\n\n{task_marker}"
+        try:
+            return await self._request(
+                "POST",
+                f"/repos/{repository}/pulls",
+                json_body={
+                    "title": title[:200],
+                    "body": safe_body,
+                    "head": head,
+                    "base": base,
+                    "draft": True,
+                    "maintainer_can_modify": True,
+                },
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code != 422 or task_marker is None:
+                raise
+            owner = repository.split("/", 1)[0]
+            existing_prs = await self._request(
+                "GET",
+                f"/repos/{repository}/pulls",
+                params={
+                    "state": "open",
+                    "head": f"{owner}:{head}",
+                    "base": base,
+                    "per_page": 100,
+                },
+            )
+            matches = [
+                item
+                for item in existing_prs
+                if item.get("head", {}).get("ref") == head
+                and item.get("base", {}).get("ref") == base
+            ]
+            if len(matches) != 1:
+                raise RuntimeError(
+                    "GitHub rejected pull-request creation and no unique task PR was found"
+                ) from exc
+            existing = matches[0]
+            if existing.get("draft") is not True:
+                raise RuntimeError(
+                    "existing pull request is no longer a draft; refusing to modify it"
+                ) from exc
+            if task_marker not in str(existing.get("body", "")):
+                raise RuntimeError(
+                    "existing draft pull request is not owned by this AICode task"
+                ) from exc
+            return existing
 
     async def get_check_runs(self, repository: str, branch: str) -> tuple[str, list[dict[str, Any]]]:
         branch_data = await self.get_branch(repository, branch)
@@ -523,7 +612,12 @@ class GitHubToolGateway:
                     raise ValueError("file content exceeds the configured size limit")
                 return {"ok": True, "data": self.redact_secrets(data)}
             if action == "repo.create_branch":
-                data = await self.github.create_branch(repository, base, work)
+                data = await self.github.create_branch(
+                    repository,
+                    base,
+                    work,
+                    task_id=task.task_id,
+                )
                 return {"ok": True, "data": data}
             if action == "repo.write_file":
                 path = self.github.validate_path(arguments["path"])
@@ -538,6 +632,7 @@ class GitHubToolGateway:
                     content,
                     work,
                     str(arguments.get("message", "AICode: update repository file")),
+                    task_id=task.task_id,
                 )
                 artifacts = [data["path"]] if not data.get("unchanged") else []
                 return {"ok": True, "data": data, "artifacts": artifacts}
@@ -548,6 +643,7 @@ class GitHubToolGateway:
                     base,
                     str(arguments["title"]),
                     str(arguments.get("body", "")),
+                    task_id=task.task_id,
                 )
                 url = str(data.get("html_url", ""))
                 head_sha = str(data.get("head", {}).get("sha", ""))

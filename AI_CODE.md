@@ -51,8 +51,8 @@ No production credential may be supplied to a worker. GitHub access must use a n
 4. Read files only from the base or task work branch.
 5. Validate relative paths; reject absolute paths, traversal, .git, and protected paths.
 6. Limit file size and tool-call count.
-7. Write only to the task work branch.
-8. Create a draft pull request; do not merge.
+7. Prefix every task commit with the immutable task UUID marker; reuse an existing branch only when every commit ahead of base is owned by the same task.
+8. Create or safely reuse the task's draft pull request; do not merge.
 9. Wait for checks associated with the exact work-branch commit SHA.
 10. Report PR URL, commit SHA, CI evidence, and unresolved blockers.
 
@@ -79,7 +79,7 @@ Missing, pending, stale, or failed checks must not be interpreted as success. A 
 
 ## 7. Durable queue
 
-PostgreSQL is the multi-worker queue of record. Use SKIP LOCKED claims, unique (tenant_id, idempotency_key), lease ownership, bounded attempts, and exponential retry delay. Queue operations must be idempotent. Workers must complete/fail only jobs for which they still own the lease.
+PostgreSQL is the multi-worker queue of record. Use SKIP LOCKED claims, unique (tenant_id, idempotency_key), lease ownership, bounded attempts, and exponential retry delay. Queue operations must be idempotent. GitHub branch/PR creation and task commits must also be idempotent across worker retries. Workers must complete/fail only jobs for which they still own the lease.
 
 The worker renews leases during long-running tasks; queue completion/failure operations must require an unexpired lease. Tenant-scoped cancellation, dead-letter inspection, manual replay, and queue-age reporting are implemented. Alerting, retention policy, and operator approval workflow for replay remain release gates before sustained workloads.
 

@@ -614,3 +614,132 @@ def test_runtime_requires_repository_allowlist_for_single_tenant(monkeypatch):
 
     with pytest.raises(RuntimeError, match="fallback tenant"):
         build_orchestrator()
+
+
+
+def test_github_gateway_reuses_existing_branch_only_for_same_task_commits(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+    task_id = str(uuid.uuid4())
+    base_sha = "a" * 40
+    head_sha = "b" * 40
+
+    async def fake_get_branch(repository, branch):
+        sha = base_sha if branch == "main" else head_sha
+        return {"commit": {"sha": sha}}
+
+    async def fake_request(method, path, **kwargs):
+        if method == "POST":
+            raise GitHubAPIError(422, "reference already exists")
+        assert "/compare/" in path
+        return {
+            "status": "ahead",
+            "ahead_by": 1,
+            "commits": [
+                {"commit": {"message": f"[RUSA-AI task:{task_id}] update source"}}
+            ],
+        }
+
+    monkeypatch.setattr(gateway, "get_branch", fake_get_branch)
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    result = asyncio.run(
+        gateway.create_branch(
+            "StrategyG/RusaAi",
+            "main",
+            "feature/retryable-task",
+            task_id=task_id,
+        )
+    )
+    assert result["reused"] is True
+    assert result["verified_task_commits"] == 1
+
+
+def test_github_gateway_refuses_to_reuse_branch_with_foreign_commits(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+    task_id = str(uuid.uuid4())
+
+    async def fake_get_branch(repository, branch):
+        sha = "a" * 40 if branch == "main" else "b" * 40
+        return {"commit": {"sha": sha}}
+
+    async def fake_request(method, path, **kwargs):
+        if method == "POST":
+            raise GitHubAPIError(422, "reference already exists")
+        return {
+            "status": "ahead",
+            "ahead_by": 1,
+            "commits": [{"commit": {"message": "[RUSA-AI task:other] foreign change"}}],
+        }
+
+    monkeypatch.setattr(gateway, "get_branch", fake_get_branch)
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    with pytest.raises(RuntimeError, match="not exclusively owned"):
+        asyncio.run(
+            gateway.create_branch(
+                "StrategyG/RusaAi",
+                "main",
+                "feature/foreign-branch",
+                task_id=task_id,
+            )
+        )
+
+
+def test_github_gateway_tags_file_commits_with_task_id(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+    task_id = str(uuid.uuid4())
+    captured = {}
+
+    async def fake_request(method, path, **kwargs):
+        if method == "GET":
+            raise GitHubAPIError(404, "file not found")
+        captured.update(kwargs["json_body"])
+        return {
+            "commit": {"sha": VALID_COMMIT_SHA},
+            "content": {"sha": VALID_COMMIT_SHA},
+        }
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    asyncio.run(
+        gateway.write_file(
+            "StrategyG/RusaAi",
+            "src/example.py",
+            "print('safe')",
+            "feature/task-retry",
+            "update file",
+            task_id=task_id,
+        )
+    )
+    assert captured["message"].startswith(f"[RUSA-AI task:{task_id}]")
+
+
+def test_github_gateway_reuses_existing_task_draft_pull_request(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+    task_id = str(uuid.uuid4())
+    marker = f"<!-- RUSA-AI task:{task_id} -->"
+
+    async def fake_request(method, path, **kwargs):
+        if method == "POST":
+            raise GitHubAPIError(422, "pull request already exists")
+        return [
+            {
+                "number": 12,
+                "draft": True,
+                "body": f"implementation details\n\n{marker}",
+                "html_url": "https://github.com/StrategyG/RusaAi/pull/12",
+                "head": {"ref": "feature/task-retry", "sha": VALID_COMMIT_SHA},
+                "base": {"ref": "main"},
+            }
+        ]
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    result = asyncio.run(
+        gateway.create_pull_request(
+            "StrategyG/RusaAi",
+            "feature/task-retry",
+            "main",
+            "AICode retry",
+            "implementation details",
+            task_id=task_id,
+        )
+    )
+    assert result["number"] == 12
+    assert result["draft"] is True
