@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
 import os
 import re
 import shutil
 import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
