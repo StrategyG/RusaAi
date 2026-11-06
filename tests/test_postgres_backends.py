@@ -1,7 +1,7 @@
 import os
-import psycopg
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from rusa_agents.audit import PostgresAuditLog
