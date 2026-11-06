@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from itertools import islice
 from pathlib import Path
 from typing import Any, Literal
 
@@ -44,6 +45,8 @@ def load_task_validator(
             f"Unable to load required task schema: {schema_path}"
         ) from exc
 
+    if not isinstance(schema, dict):
+        raise RuntimeError("Task schema root must be a JSON object.")
     if schema.get("$schema") != Draft202012Validator.META_SCHEMA["$id"]:
         raise RuntimeError(
             "Task schema must declare JSON Schema Draft 2020-12."
@@ -154,7 +157,7 @@ class TaskValidationResponse(BaseModel):
 def health_check() -> dict[str, str]:
     """Liveness endpoint; it does not claim that model inference is ready."""
     return {
-        "status": "ok",
+        "status": "healthy",
         "service": "rusa-ai-api",
         "version": "1.0.0",
         "environment": os.getenv("ENVIRONMENT", "development"),
@@ -209,14 +212,55 @@ def chat_completions(request: ChatCompletionRequest) -> ChatCompletionResponse:
     )
 
 
-def _format_validation_error(error: Any) -> str:
+def _json_path(error: Any) -> str:
     path = "$"
     for part in error.absolute_path:
-        path += f"[{part}]" if isinstance(part, int) else f".{part}"
-    message = error.message
-    if len(message) > 240:
-        message = f"{message[:237]}..."
-    return f"{path}: {message}"
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += f".{str(part)[:80]}"
+    return path[:256]
+
+
+def _format_validation_error(error: Any) -> str:
+    """Return field-oriented feedback without echoing submitted field values."""
+    path = _json_path(error)
+    rule = error.validator
+
+    if rule == "required" and isinstance(error.instance, dict):
+        for field in error.validator_value:
+            if (
+                field not in error.instance
+                and error.message == f"{field!r} is a required property"
+            ):
+                return f"{path}.{field}: is required"
+        return f"{path}: is missing a required property"
+    if rule == "type":
+        return f"{path}: must have type {error.validator_value}"
+    if rule == "format":
+        return f"{path}: must use the {error.validator_value} format"
+    if rule == "enum":
+        allowed = ", ".join(str(value) for value in error.validator_value)
+        return f"{path}: must be one of [{allowed}]"
+    if rule == "const":
+        return f"{path}: must equal the required value"
+    if rule == "minLength":
+        return f"{path}: must contain at least {error.validator_value} characters"
+    if rule == "maxLength":
+        return f"{path}: must contain at most {error.validator_value} characters"
+    if rule == "minItems":
+        return f"{path}: must contain at least {error.validator_value} items"
+    if rule == "maxItems":
+        return f"{path}: must contain at most {error.validator_value} items"
+    if rule == "pattern":
+        return f"{path}: does not match the required pattern"
+    if rule == "additionalProperties":
+        return f"{path}: contains unsupported properties"
+    if rule in {"minimum", "exclusiveMinimum"}:
+        return f"{path}: is below the permitted minimum"
+    if rule in {"maximum", "exclusiveMaximum"}:
+        return f"{path}: exceeds the permitted maximum"
+    return f"{path}: does not satisfy the schema constraint ({rule})"
 
 
 @app.post(
@@ -228,22 +272,27 @@ def validate_task_envelope(
     request: TaskValidationRequest,
 ) -> TaskValidationResponse:
     validator: Draft202012Validator = app.state.task_validator
+    errors = list(
+        islice(
+            validator.iter_errors(request.envelope),
+            MAX_VALIDATION_ERRORS + 1,
+        )
+    )
+    has_more_errors = len(errors) > MAX_VALIDATION_ERRORS
     errors = sorted(
-        validator.iter_errors(request.envelope),
+        errors[:MAX_VALIDATION_ERRORS],
         key=lambda error: (
             tuple(str(part) for part in error.absolute_path),
+            error.validator or "",
             error.message,
         ),
     )
 
-    if not errors:
-        return TaskValidationResponse(valid=True)
+    details = [_format_validation_error(error) for error in errors]
+    if has_more_errors:
+        details.append(
+            f"More than {MAX_VALIDATION_ERRORS} validation errors; "
+            "correct the listed issues and resubmit."
+        )
 
-    details = [
-        _format_validation_error(error)
-        for error in errors[:MAX_VALIDATION_ERRORS]
-    ]
-    if len(errors) > MAX_VALIDATION_ERRORS:
-        details.append("Additional validation errors omitted.")
-
-    return TaskValidationResponse(valid=False, errors=details)
+    return TaskValidationResponse(valid=not details, errors=details)
