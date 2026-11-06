@@ -267,3 +267,19 @@ def test_agent_task_submission_fails_closed_without_queue(client):
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 503
+
+
+def test_agent_task_submission_rejects_non_create_envelope(client):
+    class FakeQueue:
+        def enqueue(self, *args):
+            raise AssertionError("queue must not receive non-create events")
+
+    app.state.task_queue = FakeQueue()
+    envelope = valid_envelope()
+    envelope["type"] = "task.cancel"
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0004"},
+        json={"envelope": envelope},
+    )
+    assert response.status_code == 422
