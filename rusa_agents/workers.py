@@ -1,5 +1,6 @@
 """Structured specialist workers; model output is data, never executable code."""
 
+import asyncio
 import json
 from typing import Any, Protocol
 
@@ -65,7 +66,9 @@ class AgentWorker:
             for item in prior_results[-8:]
         ]
         memories = (
-            self.memory.search(task.tenant_id, task.objective, limit=5)
+            await asyncio.to_thread(
+                self.memory.search, task.tenant_id, task.objective, limit=5,
+            )
             if self.memory is not None
             else []
         )
