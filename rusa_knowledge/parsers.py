@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 2_000_000
@@ -58,10 +59,31 @@ def parse_file(path: str | Path, *, source_uri: str | None = None) -> ParsedDocu
         reader = PdfReader(BytesIO(raw), strict=False)
         if reader.is_encrypted:
             raise ValueError("encrypted PDF files are not supported")
+        if len(reader.pages) > 5000:
+            raise ValueError("PDF exceeds the 5000-page parsing limit")
         content = "\n\n".join(page.extract_text() or "" for page in reader.pages)
         parser = "pypdf"
     else:
         from docx import Document
+
+        try:
+            with ZipFile(BytesIO(raw)) as archive:
+                entries = archive.infolist()
+                expanded_size = sum(entry.file_size for entry in entries)
+                if len(entries) > 10_000 or expanded_size > 50 * 1024 * 1024:
+                    raise ValueError("DOCX archive exceeds safe expansion limits")
+                if any(
+                    entry.file_size > 25 * 1024 * 1024
+                    or (entry.compress_size == 0 and entry.file_size > 0)
+                    or (
+                        entry.compress_size > 0
+                        and entry.file_size / entry.compress_size > 1000
+                    )
+                    for entry in entries
+                ):
+                    raise ValueError("DOCX archive contains an unsafe compression ratio")
+        except BadZipFile as exc:
+            raise ValueError("DOCX file is not a valid ZIP archive") from exc
 
         document = Document(BytesIO(raw))
         blocks = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
