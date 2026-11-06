@@ -489,32 +489,51 @@ class PostgresTaskQueue:
             "dead_letter": 0,
             "cancelled": 0,
         }
-        where = "tenant_id=%s"
-        params: list[Any] = [tenant_id]
-        if user_id is not None:
-            where += " AND payload->>'user_id'=%s"
-            params.append(user_id)
         with self._connect() as db:
-            rows = db.execute(
-                f"""
-                SELECT state, COUNT(*)::int AS task_count
-                FROM rusa_agent_jobs
-                WHERE {where}
-                GROUP BY state
-                """,
-                tuple(params),
-            ).fetchall()
-            age_row = db.execute(
-                f"""
-                SELECT COALESCE(
-                    EXTRACT(EPOCH FROM now() - MIN(created_at)),
-                    0
-                )::float AS oldest_queued_age_seconds
-                FROM rusa_agent_jobs
-                WHERE {where} AND state='queued'
-                """,
-                tuple(params),
-            ).fetchone()
+            if user_id is None:
+                rows = db.execute(
+                    """
+                    SELECT state, COUNT(*)::int AS task_count
+                    FROM rusa_agent_jobs
+                    WHERE tenant_id=%s
+                    GROUP BY state
+                    """,
+                    (tenant_id,),
+                ).fetchall()
+                age_row = db.execute(
+                    """
+                    SELECT COALESCE(
+                        EXTRACT(EPOCH FROM now() - MIN(created_at)),
+                        0
+                    )::float AS oldest_queued_age_seconds
+                    FROM rusa_agent_jobs
+                    WHERE tenant_id=%s AND state='queued'
+                    """,
+                    (tenant_id,),
+                ).fetchone()
+            else:
+                rows = db.execute(
+                    """
+                    SELECT state, COUNT(*)::int AS task_count
+                    FROM rusa_agent_jobs
+                    WHERE tenant_id=%s AND payload->>'user_id'=%s
+                    GROUP BY state
+                    """,
+                    (tenant_id, user_id),
+                ).fetchall()
+                age_row = db.execute(
+                    """
+                    SELECT COALESCE(
+                        EXTRACT(EPOCH FROM now() - MIN(created_at)),
+                        0
+                    )::float AS oldest_queued_age_seconds
+                    FROM rusa_agent_jobs
+                    WHERE tenant_id=%s
+                      AND payload->>'user_id'=%s
+                      AND state='queued'
+                    """,
+                    (tenant_id, user_id),
+                ).fetchone()
         for row in rows:
             counts[row["state"]] = row["task_count"]
         return {
