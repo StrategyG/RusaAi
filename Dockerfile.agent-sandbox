@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /workspace
+
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r /tmp/requirements.txt \
+    && python -m pip install "ruff>=0.6,<1" "bandit>=1.7,<2" \
+    && useradd --create-home --uid 10001 sandbox
+USER sandbox
+
+ENTRYPOINT []
+CMD ["python", "-m", "pytest", "-q"]
