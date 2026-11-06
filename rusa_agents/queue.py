@@ -139,6 +139,16 @@ class PostgresTaskQueue:
                         "Production idempotency uniqueness is not installed; "
                         "apply migrations/006_aicode_client_idempotency.sql"
                     )
+                idempotency_constraint = conn.execute("""
+                    SELECT convalidated FROM pg_constraint
+                    WHERE conname='aicode_jobs_idempotency_pair_check'
+                      AND conrelid='public.aicode_jobs'::regclass
+                """).fetchone()
+                if not idempotency_constraint or not idempotency_constraint[0]:
+                    raise RuntimeError(
+                        "Production idempotency validation constraint is missing or unvalidated; "
+                        "apply migrations/006_aicode_client_idempotency.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
