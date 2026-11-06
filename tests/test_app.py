@@ -89,6 +89,9 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
                 return None
             return {"task_id": task_id, "tenant_id": tenant_id, "payload": payload}
 
+        def retry(self, task_id, tenant_id):
+            return (tenant_id, task_id) in self.items
+
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}')
@@ -137,3 +140,27 @@ def test_metrics_endpoint_requires_authentication_and_returns_metrics(monkeypatc
     response = client.get("/metrics", headers={"X-API-Key": "metrics-key"})
     assert response.status_code == 200
     assert "rusa_api_requests_total" in response.text
+
+
+
+def test_aicode_task_retry_is_tenant_scoped(monkeypatch):
+    class RetryQueue:
+        def retry(self, task_id, tenant_id):
+            return tenant_id == "tenant-alpha" and task_id == "00000000-0000-4000-8000-000000000001"
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", RetryQueue(), raising=False)
+    task_id = "00000000-0000-4000-8000-000000000001"
+    accepted = client.post(
+        f"/v1/aicode/tasks/{task_id}/retry",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert accepted.status_code == 202
+    assert accepted.json()["status"] == "queued"
+
+    invalid = client.post(
+        "/v1/aicode/tasks/not-a-uuid/retry",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert invalid.status_code == 422
