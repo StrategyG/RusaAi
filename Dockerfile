@@ -22,6 +22,7 @@ RUN groupadd --system --gid 10001 rusa \
 
 COPY --from=builder /install /usr/local
 COPY llm-project/serve /app/llm-project/serve
+COPY rusa_agents /app/rusa_agents
 COPY schemas /app/schemas
 
 USER 10001:10001
