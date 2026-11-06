@@ -1,19 +1,22 @@
 # RUSA-AI
 
-FastAPI service and agent-task protocol utilities for RUSA-AI.
+FastAPI serving API and Agent-to-Agent (A2A) task-envelope validation.
 
-## Repository layout
+## Scope and runtime status
 
-- `llm-project/serve/app.py`: FastAPI application.
-- `llm-project/model/blueprint.py`: model architecture blueprint (not an inference runtime).
-- `schemas/a2a/task-envelope.schema.json`: A2A task envelope, JSON Schema 2020-12.
+- `llm-project/serve/app.py`: FastAPI application and liveness endpoint.
+- `llm-project/model/blueprint.py`: architecture blueprint only; it is not an inference runtime.
+- `schemas/a2a/task-envelope.schema.json`: A2A JSON Schema Draft 2020-12 contract.
 - `tests/test_app.py`: API and schema-validation tests.
-- `.github/workflows/ci.yml`: required lint, pytest, and Docker build checks.
+- `requirements-serve.txt`: minimal serving dependencies.
+- `requirements-test.txt`: serving and test dependencies.
+- `requirements.txt`: full project/training dependencies.
+
+**Important:** `POST /v1/chat/completions` currently returns a deterministic placeholder response. No trained model or inference backend is connected. Do not represent this branch as production model inference until a real backend has been configured and smoke-tested.
 
 ## Requirements
 
-- Python 3.10+
-- Docker (optional, for container build/run)
+Python 3.10+; Docker is optional for containerized operation.
 
 ## Local setup
 
@@ -23,43 +26,42 @@ cd RusaAi
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-test.txt
 ```
 
 ## Configuration
 
-Set `RUSA_API_KEY` to enable API-key authentication for `POST /v1/chat/completions`.
-When unset, the endpoint does not require an API key. Send the configured key in
-the `X-API-Key` header. Do not commit secrets to the repository.
+Set `RUSA_API_KEY` to enable API-key authentication for
+`POST /v1/chat/completions`. When configured, provide it using the
+`X-API-Key` header. If unset, the endpoint is unauthenticated; configure it
+before exposing the service beyond a trusted local environment.
 
-## Run the API
-
-The current serving entry point is a Python file under a directory containing a
-hyphen, so use `--app-dir` rather than a dotted package path:
+## Run
 
 ```bash
-uvicorn app:app --app-dir llm-project/serve --host 0.0.0.0 --port 8000 --reload
+uvicorn app:app --app-dir llm-project/serve --host 0.0.0.0 --port 8000
 ```
 
-Check liveness:
+`GET /health` is a liveness check. It returns HTTP 200 and
+`{"status":"healthy"}` when the API process is alive. It does not assert
+inference-backend readiness.
+
+The A2A schema is loaded and checked at application startup. Missing, malformed,
+or invalid schema configuration prevents the application from starting. Task
+requests are validated against the cached Draft 2020-12 validator with format
+checking enabled.
+
+## API smoke tests
 
 ```bash
 curl -i http://localhost:8000/health
-```
-
-The liveness contract returns HTTP 200 and JSON `status: "healthy"` when the
-API process is running. It does not assert that an inference backend is ready.
-
-Example authenticated chat request (when `RUSA_API_KEY` is configured):
-
-```bash
 curl http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: YOUR_RUSA_API_KEY' \
   -d '{"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-## Tests and lint
+## Quality checks
 
 ```bash
 python -m pip install flake8
@@ -67,15 +69,16 @@ flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --st
 python -m pytest -q tests
 ```
 
-CI runs these checks and builds the Docker image for pushes and pull requests
-targeting `main`. Lint errors in the configured fatal categories fail the job;
-there is intentionally no `|| true` suppression.
+GitHub Actions runs lint, pytest, and Docker build independently for pushes
+and pull requests targeting `main`. Fatal lint findings fail CI; no
+failure-suppressing shell fallback is used.
 
 ## Docker
 
 ```bash
 docker build -t rusa-ai:local .
-docker run --rm -p 8000:8000 rusa-ai:local
+docker run --rm -p 8000:8000 -e RUSA_API_KEY=replace-me rusa-ai:local
 ```
 
-The container starts the same FastAPI entry point used locally.
+The serving image installs only `requirements-serve.txt`; training dependencies
+such as PyTorch are intentionally excluded from the API runtime image.
