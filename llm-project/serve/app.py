@@ -16,6 +16,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 
 from rusa_agents.config import RuntimeConfig
+from rusa_agents.providers import OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -42,11 +43,22 @@ async def lifespan(application: FastAPI):
     config.validate()
     application.state.config = config
     application.state.queue = None
+    if config.model_base_url:
+        set_inference_provider(
+            OpenAIChatInferenceProvider(
+                config.model_base_url,
+                default_model=config.model_name,
+                api_key=os.getenv("RUSA_MODEL_API_KEY"),
+            )
+        )
+    else:
+        set_inference_provider(None)
     if config.database_url:
         queue = PostgresTaskQueue(config.database_url)
         queue.initialize()
         application.state.queue = queue
     yield
+    set_inference_provider(None)
 
 
 app = FastAPI(
@@ -174,10 +186,15 @@ def health_check():
 
 
 @app.get("/health/ready")
-def readiness_check():
+async def readiness_check():
     if inference_provider is None:
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
-    return {"status": "ready", "inference": "configured"}
+    try:
+        await inference_provider.check_ready()
+    except Exception:
+        logger.exception("Inference readiness probe failed")
+        raise HTTPException(status_code=503, detail="Inference backend is unavailable") from None
+    return {"status": "ready", "inference": "reachable"}
 
 
 @app.post(
