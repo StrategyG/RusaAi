@@ -22,18 +22,20 @@ This ledger separates the API serving foundation from the complete RUSA-AI model
 
 ## Current verification boundary
 
-The code changes require successful CI on the remediation pull request. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+The tenant task-lifecycle and database-permission remediation passed GitHub Actions on PR #16 head `6fee8d09565f52900ace4d7e1e1c95c7311d0c95` (run `42190607014`): 134 tests passed, Ruff and compile passed, both dependency audits reported no known vulnerabilities, Compose validation passed, both container images built, agent runtime imports passed, and inference API liveness passed. This is code/container CI evidence only. The model adapter can be tested with a fake backend, but a real model cannot be tested without a compatible model artifact and target hardware.
+
+PR #16 remains a draft and GitHub currently reports it as not mergeable because its base snapshot predates the latest PR #15 branch head. Synchronize/rebase the stacked branch after PR #15 is finalized; do not merge or deploy the stale branch.
 
 ## Release gates still open
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema tests, auth tests, container smoke test | CI passed on PR #15 head 7bc4ba1; staging deployment verification pending |
+| API foundation | CI, schema tests, auth tests, container smoke test | CI passed on PR #16 head 6fee8d0 (run 42190607014: 134 tests, lint, compile, dependency audits, Compose validation, both image builds, runtime import smoke test, and inference liveness); staging deployment verification pending |
 | Real model artifact | Model ID/revision, license, checksum, tokenizer, chat template | Blocked: no weights supplied |
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | CI passed on PR #15 head 7bc4ba1, including PostgreSQL integration and both container builds; staging verification pending |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | CI passed on PR #16 head 6fee8d0 (run 42190607014), including PostgreSQL tenant/RLS and lease-fencing integration tests, task lifecycle tests, least-privilege API database tests, and both container builds; staging verification pending |
 | Memory/RAG | Tenant-scoped PostgreSQL storage, retrieval, redaction, deletion, relevance evaluation | Storage and isolation implemented; relevance evaluation and production retention verification pending |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
