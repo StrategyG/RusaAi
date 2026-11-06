@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import Response
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -72,11 +72,95 @@ async def lifespan(application: FastAPI):
     set_inference_provider(None)
 
 
+class MaxRequestBodySizeMiddleware:
+    """Enforce a hard request-body cap, including chunked bodies without Content-Length."""
+
+    def __init__(self, app, max_body_bytes: int):
+        if max_body_bytes < 1:
+            raise ValueError("max_body_bytes must be positive")
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    @staticmethod
+    async def _reject(send, status_code: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        content_lengths = [value for key, value in scope.get("headers", []) if key.lower() == b"content-length"]
+        if len(content_lengths) > 1:
+            await self._reject(send, 400, "Invalid Content-Length header")
+            return
+        if content_lengths:
+            try:
+                declared_length = int(content_lengths[0])
+            except ValueError:
+                await self._reject(send, 400, "Invalid Content-Length header")
+                return
+            if declared_length < 0:
+                await self._reject(send, 400, "Invalid Content-Length header")
+                return
+            if declared_length > self.max_body_bytes:
+                await self._reject(send, 413, "Request body exceeds the configured size limit")
+                return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_body_bytes:
+                await self._reject(send, 413, "Request body exceeds the configured size limit")
+                return
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
+def _configured_max_request_bytes() -> int:
+    try:
+        value = int(os.getenv("RUSA_MAX_REQUEST_BYTES", str(16 * 1024 * 1024)))
+    except ValueError as exc:
+        raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be an integer") from exc
+    if not 1024 <= value <= 64 * 1024 * 1024:
+        raise RuntimeError("RUSA_MAX_REQUEST_BYTES must be between 1024 and 67108864")
+    return value
+
+
 app = FastAPI(
     title="RUSA-AI Serving and Agent API",
     description="Authenticated inference, task intake, and A2A validation API.",
     version="1.1.0",
     lifespan=lifespan,
+)
+app.add_middleware(
+    MaxRequestBodySizeMiddleware,
+    max_body_bytes=_configured_max_request_bytes(),
 )
 
 
