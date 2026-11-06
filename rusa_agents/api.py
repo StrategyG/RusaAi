@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
 from .queue import PostgresTaskQueue
+from .http_limits import BodyLimitMiddleware
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 
@@ -62,10 +63,10 @@ def authenticate_tenant(
         or len(value) < 32
         or not value.isascii()
         for key, value in tenant_keys.items()
-    ):
+    ) or len(set(tenant_keys.values())) != len(tenant_keys):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Agent tenant credentials must use valid tenant IDs and ASCII keys of at least 32 characters",
+            detail="Agent tenant credentials must be unique ASCII keys of at least 32 characters",
         )
     expected = tenant_keys.get(tenant_id)
     if (
@@ -103,6 +104,9 @@ app = FastAPI(
     openapi_url=None,
     lifespan=lifespan,
 )
+
+
+app.add_middleware(BodyLimitMiddleware, max_bytes=lambda: MAX_AGENT_REQUEST_BYTES)
 
 
 @app.middleware("http")

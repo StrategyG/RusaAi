@@ -77,8 +77,8 @@ class FakeTools:
             return ToolResult(
                 name=call.name,
                 success=True,
-                data={"checks": checks, "checks_complete": True, "all_checks_success": outcome == "passed"},
-                evidence={"source": "fake-ci"},
+                data={"head_sha": "a" * 40, "checks": checks, "checks_complete": True, "all_checks_success": outcome == "passed"},
+                evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
             )
         return ToolResult(
             name=call.name,
@@ -429,3 +429,38 @@ def test_default_required_checks_match_repository_workflow():
     workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
     for name in make_orchestrator(FakeTools()).required_ci_checks:
         assert f"name: {name}\n" in workflow
+
+
+@pytest.mark.parametrize("tamper", ["sha", "source", "failure"])
+def test_ci_gate_rejects_unverifiable_evidence(tamper):
+    from dataclasses import replace
+
+    result = asyncio.run(FakeTools().execute(make_task(), ToolCall("get_ci_status")))
+    if tamper == "sha":
+        result = replace(result, evidence={**result.evidence, "head_sha": "b" * 40})
+    elif tamper == "source":
+        result = replace(result, evidence={**result.evidence, "source": "model_claim"})
+    else:
+        result = replace(result, success=False)
+    assert make_orchestrator(FakeTools())._ci_outcome(result) == "pending"
+
+
+def test_changed_head_after_security_requires_reverification():
+    from dataclasses import replace
+
+    class MovingHeadTools(FakeTools):
+        async def execute(self, task, call):
+            result = await super().execute(task, call)
+            if len(self.calls) > 1:
+                return replace(result, data={**result.data, "head_sha": "b" * 40},
+                               evidence={**result.evidence, "head_sha": "b" * 40})
+            return result
+
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    record = asyncio.run(make_orchestrator(
+        MovingHeadTools(), {WorkerRole.TESTER: tester}
+    ).run(make_task()))
+    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.stage_index == 3

@@ -40,7 +40,7 @@ not performed in this review. No production deployment or main-branch merge.
 Main still contains the earlier mock-serving baseline; existing hardening and
 agent PRs must be reconciled and reviewed before merge. This patch targets PR
 #7's branch and does not certify the entire product as production-ready.
-The agent API's request-size middleware currently checks Content-Length only;
-actual streamed body limits still need enforcement. Provider/GitHub response
+The follow-up design refinement adds streamed-body byte limits and a 15-second
+body intake timeout; see architecture section 11 for the updated evidence ledger. Provider/GitHub response
 resource limits and CI evidence identity/freshness deserve further adversarial
 review. Live infrastructure and model evaluation evidence remain required.

@@ -38,13 +38,23 @@ def configure_api(monkeypatch):
     monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
 
 
+def task_body():
+    return {
+        "objective": "Add regression tests",
+        "repository": "StrategyG/RusaAi",
+        "base_branch": "main",
+        "work_branch": "feature/api-test",
+        "acceptance_criteria": ["Tests pass"],
+    }
+
+
 def test_agent_api_requires_authentication(monkeypatch):
     configure_api(monkeypatch)
     with TestClient(api.app) as client:
         response = client.post(
             "/v1/agent/tasks",
             headers={"X-Tenant-ID": "tenant-a"},
-            json={},
+            json=task_body(),
         )
     assert response.status_code == 401
 
@@ -52,15 +62,8 @@ def test_agent_api_requires_authentication(monkeypatch):
 def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
     configure_api(monkeypatch)
     headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
-    body = {
-        "objective": "Add regression tests",
-        "repository": "StrategyG/RusaAi",
-        "base_branch": "main",
-        "work_branch": "feature/api-test",
-        "acceptance_criteria": ["Tests pass"],
-    }
     with TestClient(api.app) as client:
-        created = client.post("/v1/agent/tasks", headers=headers, json=body)
+        created = client.post("/v1/agent/tasks", headers=headers, json=task_body())
         assert created.status_code == 202
         assert created.headers["X-Request-ID"]
         assert created.headers["Cache-Control"] == "no-store"
@@ -78,13 +81,8 @@ def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
 def test_agent_api_rejects_invalid_branch_target(monkeypatch):
     configure_api(monkeypatch)
     headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
-    body = {
-        "objective": "Change repository",
-        "repository": "StrategyG/RusaAi",
-        "base_branch": "main",
-        "work_branch": "main",
-        "acceptance_criteria": ["No regression"],
-    }
+    body = task_body()
+    body["work_branch"] = "main"
     with TestClient(api.app) as client:
         response = client.post("/v1/agent/tasks", headers=headers, json=body)
     assert response.status_code == 422
@@ -98,6 +96,21 @@ def test_agent_api_rejects_unmapped_tenant_key(monkeypatch):
     assert response.status_code == 401
 
 
+def test_agent_api_rejects_duplicate_tenant_keys(monkeypatch):
+    monkeypatch.setenv(
+        "RUSA_AGENT_TENANT_KEYS",
+        json.dumps({"tenant-a": "same-key-" + "x" * 40, "tenant-b": "same-key-" + "x" * 40}),
+    )
+    monkeypatch.setenv("RUSA_AGENT_API_DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(api, "PostgresTaskQueue", FakeQueue)
+    with TestClient(api.app) as client:
+        response = client.get(
+            "/v1/agent/tasks/missing",
+            headers={"X-API-Key": "same-key-" + "x" * 40, "X-Tenant-ID": "tenant-a"},
+        )
+    assert response.status_code == 503
+
+
 def test_agent_api_enforces_request_size_limit(monkeypatch):
     configure_api(monkeypatch)
     monkeypatch.setattr(api, "MAX_AGENT_REQUEST_BYTES", 16)
@@ -109,3 +122,12 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
+
+
+def test_agent_api_limits_chunked_body_without_content_length(monkeypatch):
+    configure_api(monkeypatch)
+    monkeypatch.setattr(api, "MAX_AGENT_REQUEST_BYTES", 16)
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", content=iter([b"a" * 10, b"b" * 10]))
+    assert response.status_code == 413
+    assert response.headers["X-Request-ID"]
