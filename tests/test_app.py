@@ -237,19 +237,86 @@ def test_invalid_a2a_envelope_fails_schema_validation(client):
     assert response.json()["errors"]
 
 
-def test_a2a_schema_missing_fails_closed(client, monkeypatch, tmp_path):
+def test_a2a_schema_is_loaded_during_startup(client):
+    assert app.state.task_validator is _load_task_validator(
+        os.getenv(
+            "TASK_ENVELOPE_SCHEMA_PATH",
+            str(__import__("app").DEFAULT_SCHEMA_PATH),
+        )
+    )
+
+
+def test_a2a_schema_missing_fails_startup(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "RUSA_API_KEY",
+        TEST_API_KEY,
+    )
     monkeypatch.setenv(
         "TASK_ENVELOPE_SCHEMA_PATH",
         str(tmp_path / "missing-schema.json"),
     )
     _load_task_validator.cache_clear()
 
+    with pytest.raises(RuntimeError, match="schema is missing or invalid"):
+        with TestClient(app):
+            pass
+
+    _load_task_validator.cache_clear()
+
+
+def test_a2a_schema_invalid_fails_startup(monkeypatch, tmp_path):
+    schema_path = tmp_path / "invalid-schema.json"
+    schema_path.write_text(
+        '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"not-a-json-type"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("TASK_ENVELOPE_SCHEMA_PATH", str(schema_path))
+    _load_task_validator.cache_clear()
+
+    with pytest.raises(RuntimeError, match="schema is missing or invalid"):
+        with TestClient(app):
+            pass
+
+    _load_task_validator.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value", "expected_message"),
+    [
+        ("task_id", "not-a-uuid", "task_id: must be a valid uuid value"),
+        ("created_at", "yesterday", "created_at: must be a valid date-time value"),
+    ],
+)
+def test_a2a_format_constraints_are_enforced(
+    client, field, invalid_value, expected_message
+):
+    envelope = valid_envelope()
+    envelope[field] = invalid_value
+
     response = client.post(
         "/v1/validate-task",
         headers=auth_headers(),
-        json={"envelope": valid_envelope()},
+        json={"envelope": envelope},
     )
-    assert response.status_code == 503
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert expected_message in response.json()["errors"]
+
+
+def test_a2a_validation_errors_do_not_echo_submitted_values(client):
+    envelope = valid_envelope()
+    envelope["task_id"] = "private-invalid-value"
+
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": envelope},
+    )
+
+    assert response.status_code == 200
+    assert "private-invalid-value" not in str(response.json()["errors"])
 
 
 def test_a2a_validation_requires_api_key(client):
