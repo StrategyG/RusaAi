@@ -29,11 +29,24 @@ The code changes require successful CI on the remediation pull request. The mode
 | Model quality | Versioned benchmark dataset, task success, safety evaluation | Blocked |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency | Blocked |
 | High-throughput serving | Runtime selection and load test for target model | Open |
-| Multi-agent runtime | Orchestrator, workers, queue, retries, idempotency, cancellation | Not implemented |
-| Memory/RAG | Storage, retrieval evaluation, tenant isolation, retention/deletion | Not implemented |
+| Multi-agent runtime | Hierarchical orchestrator, specialist workers, PostgreSQL queue, durable checkpoints, bounded retries, per-claim lease fencing | Implemented in code; current-branch CI and live PostgreSQL evidence pending |
+| Memory/RAG | PostgreSQL episodic memory, tenant-scoped access, TTL and deletion | Storage controls implemented; retrieval-quality evaluation and vector/RAG layer remain open |
 | Security operations | TLS, gateway rate limiting, secret rotation, penetration tests | Deployment configuration required |
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
+
+## Queue lease fencing
+
+Every queue claim receives a cryptographically random lease token. Heartbeat,
+checkpoint, acknowledgement and retry must present both the worker ID and the
+current token. Reclaiming a task rotates the token, so an earlier execution is
+rejected even if the same worker ID is reused. API database credentials remain
+NOBYPASSRLS; the worker credential is a privileged service identity and must
+never be exposed to the API or tenant clients.
+
+The token migration is additive and idempotent. Queue readiness remains false
+until the lease-token column and forced tenant RLS policy are present. CI must
+exercise same-worker-ID stale-lease recovery against PostgreSQL before release.
 
 ## Deployment rules
 

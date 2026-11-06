@@ -590,9 +590,13 @@ def test_orchestrator_persists_each_checkpoint_and_propagates_checkpoint_failure
         checkpoints.append((record.state.value, record.stage_index))
 
     task = make_task()
-    record = asyncio.run(make_orchestrator(FakeTools(["passed", "passed"])).run(
-        task, checkpoint_callback=persist,
-    ))
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    record = asyncio.run(make_orchestrator(
+        FakeTools(["passed", "passed"]),
+        {WorkerRole.TESTER: tester},
+    ).run(task, checkpoint_callback=persist))
     assert record.state == TaskState.SUCCEEDED
     assert any(stage == 3 for _, stage in checkpoints)
     assert checkpoints[-1] == ("succeeded", 7)

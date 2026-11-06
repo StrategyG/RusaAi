@@ -120,6 +120,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(
     title="RUSA-AI Agent API",
+    lifespan=lifespan,
     description="Tenant-scoped task submission and status API.",
     version="1.0.0",
     docs_url=None,
