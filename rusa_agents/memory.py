@@ -64,12 +64,23 @@ class PostgresMemoryStore:
                            WHERE schemaname='public'
                              AND tablename='rusa_agent_memory'
                              AND policyname='rusa_memory_tenant_isolation'
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM pg_attribute AS a
+                           WHERE a.attrelid=c.oid AND a.attname='search_vector'
+                             AND a.attgenerated='s' AND NOT a.attisdropped
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM pg_indexes
+                           WHERE schemaname='public'
+                             AND tablename='rusa_agent_memory'
+                             AND indexname='idx_rusa_memory_search'
                        )
                 FROM pg_class AS c
                 JOIN pg_namespace AS n ON n.oid=c.relnamespace
                 WHERE n.nspname='public' AND c.relname='rusa_agent_memory'
             """).fetchone()
-        return bool(row and row[0] and row[1] and row[2])
+        return bool(row and all(row))
 
     def store(
         self,
