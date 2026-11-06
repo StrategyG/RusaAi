@@ -2,27 +2,26 @@ name: CI
 
 on:
   push:
-    branches:
-      - "**"
+    branches: ["**"]
   pull_request:
-    branches:
-      - "**"
+    branches: ["**"]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: rusa-ai-ci-${{ github.workflow }}-${{ github.ref }}
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  quality:
     name: Lint, test, and audit dependencies
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
         env:
           POSTGRES_DB: rusa_test
           POSTGRES_USER: rusa_test
@@ -37,74 +36,420 @@ jobs:
     env:
       RUSA_TEST_DATABASE_URL: postgresql://rusa_test:rusa_test_password@localhost:5432/rusa_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: |
             requirements.txt
             requirements-agent.txt
             requirements-dev.txt
-      - name: Install dependencies
+
+      - name: Install CPU-only PyTorch for CI
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple "torch>=2.2,<3"
+
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+
       - name: Lint
         run: ruff check llm-project/serve rusa_agents tests
+
       - name: Compile
         run: python -m compileall -q llm-project rusa_agents tests
+
+      - name: Validate time-bound Trivy exceptions
+        run: python scripts/security/validate_trivy_exceptions.py
+
+      - name: Validate deployment shell scripts
+        run: bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh scripts/postgres/init-agent-db.sh tests/test_deploy_scripts.sh tests/test_staging_rollback.sh tests/smoke_release_stack.sh
+
+      - name: Test deployment and rollback behavior
+        run: bash tests/test_deploy_scripts.sh
+
       - name: Test
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m pytest -q
-      - name: Audit production dependencies
-        run: |
-          pip-audit -r requirements.txt
-          pip-audit -r requirements-agent.txt
+        run: python -m pytest -q --junitxml=test-results.xml
 
-  container:
+      - name: Audit all Python dependencies
+        run: pip-audit -r requirements-dev.txt
+
+  container-security:
     name: Build and smoke-test containers
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: quality
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Validate Compose configuration
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Validate Docker Compose configuration
+        env:
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_API_IMAGE: rusa-ai:local
+          RUSA_AGENT_IMAGE: rusa-agent-runtime:local
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
         run: |
-          export RUSA_API_KEY=ci-only-inference-key-123456789012345678901234567890
-          export RUSA_MODEL_DIR=.
-          export RUSA_AGENT_DB_PASSWORD=ciownerpassword123456789
-          export RUSA_AGENT_WORKER_DB_PASSWORD=ciworkerpassword123456789
-          export RUSA_AGENT_API_DB_PASSWORD=ciapassword123456789
-          export RUSA_AGENT_TENANT_KEYS='{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
-          export RUSA_AGENT_TENANT_REPOSITORIES='{"tenant-a":["StrategyG/RusaAi"]}'
-          export RUSA_AGENT_PROVIDER_BASE_URL=https://provider.example.invalid/v1
-          export RUSA_AGENT_PROVIDER_API_KEY=ci-provider-placeholder
-          export RUSA_AGENT_MODEL=ci-model
-          export RUSA_AGENT_GITHUB_TOKEN=ci-github-placeholder
-          export RUSA_AGENT_AUDIT_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           docker compose config --quiet
+          docker compose --file docker-compose.production.yml config --quiet
+
       - name: Build inference API image
-        run: docker build --pull -t rusa-ai:${{ github.sha }} .
+        run: docker build --pull --file Dockerfile --tag rusa-ai:${{ github.sha }} .
+
+      - name: Verify patched inference API dependencies
+        run: |
+          docker run --rm --entrypoint python rusa-ai:${{ github.sha }} -c '
+          from importlib.metadata import distributions
+          from packaging.version import Version
+
+          minimums = {
+              "msgpack": Version("1.2.3"),
+              "urllib3": Version("2.8.0"),
+              "setuptools": Version("78.1.1"),
+          }
+          found = {name: [] for name in minimums}
+          for dist in distributions():
+              name = (dist.metadata.get("Name") or "").lower().replace("_", "-")
+              if name in found:
+                  found[name].append(Version(dist.version))
+          for name, minimum in minimums.items():
+              versions = found[name]
+              if not versions or any(version < minimum for version in versions):
+                  raise SystemExit(f"{name} versions {versions} do not meet security floor {minimum}")
+              print(f"{name}: {versions}")
+          '
+
       - name: Build agent runtime image
-        run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
-      - name: Run inference API container
+        run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
+
+      - name: Pull pinned PostgreSQL image
+        run: docker pull postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+
+      - name: Block all CRITICAL inference API vulnerabilities
+        id: api-critical-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-ai:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate inference API HIGH vulnerabilities
+        id: api-high-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-ai:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete inference API vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-ai:${{ github.sha }}
+          format: json
+          output: trivy-inference-api-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Block all CRITICAL agent runtime vulnerabilities
+        id: agent-critical-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-agent-runtime:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate agent runtime HIGH vulnerabilities
+        id: agent-high-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-agent-runtime:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete agent runtime vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: rusa-agent-runtime:${{ github.sha }}
+          format: json
+          output: trivy-agent-runtime-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Block all CRITICAL PostgreSQL vulnerabilities
+        id: postgres-critical-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate PostgreSQL HIGH vulnerabilities
+        id: postgres-high-scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Export complete PostgreSQL vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: json
+          output: trivy-postgres-full.json
+          exit-code: "0"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Upload complete vulnerability reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trivy-vulnerability-reports-${{ github.sha }}
+          path: |
+            trivy-inference-api-full.json
+            trivy-agent-runtime-full.json
+            trivy-postgres-full.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Generate inference API SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: rusa-ai:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom-inference-api.cdx.json
+          artifact-name: sbom-inference-api-${{ github.sha }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: false
+
+      - name: Generate agent runtime SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: rusa-agent-runtime:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom-agent-runtime.cdx.json
+          artifact-name: sbom-agent-runtime-${{ github.sha }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: false
+
+      - name: Generate PostgreSQL SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: cyclonedx-json
+          output-file: sbom-postgres.cdx.json
+          artifact-name: sbom-postgres-${{ github.sha }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: false
+
+      - name: Smoke-test production Compose stack
+        id: production-compose-smoke
+        env:
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_API_IMAGE: rusa-ai:${{ github.sha }}
+          RUSA_AGENT_IMAGE: rusa-agent-runtime:${{ github.sha }}
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
         run: |
-          docker run -d --name rusa-ai-ci \
-            -p 127.0.0.1:8000:8000 \
-            -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
-            rusa-ai:${{ github.sha }}
-      - name: Verify liveness
-        run: |
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:8000/health/live; then
-              exit 0
+          set -euo pipefail
+          cleanup() {
+            result=$?
+            set +e
+            docker compose --file docker-compose.production.yml ps --all
+            for service in rusa-agent-migrate rusa-agent-worker rusa-agent-api; do
+              container_id="$(docker compose --file docker-compose.production.yml ps --all --quiet "$service")"
+              if [[ -n "$container_id" ]]; then
+                echo "Diagnostics for $service"
+                docker inspect --format '{{json .State.Health.Log}}' "$container_id" || true
+              fi
+            done
+            docker compose --file docker-compose.production.yml logs --tail 100 || true
+            docker compose --file docker-compose.production.yml down --volumes --remove-orphans
+            return "$result"
+          }
+          trap cleanup EXIT
+
+          docker compose --file docker-compose.production.yml up --detach --no-build
+
+          migration_id=""
+          migration_exit_code=""
+          for attempt in {1..180}; do
+            migration_id="$(docker compose --file docker-compose.production.yml ps --all --quiet rusa-agent-migrate)"
+            if [[ -n "$migration_id" ]]; then
+              migration_status="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+              if [[ "$migration_status" == "exited" ]]; then
+                migration_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")"
+                break
+              fi
             fi
-            sleep 2
+            sleep 1
           done
-          docker logs rusa-ai-ci
-          exit 1
-      - name: Cleanup
+          if [[ "$migration_exit_code" != "0" ]]; then
+            docker compose --file docker-compose.production.yml logs --tail 100 rusa-agent-migrate || true
+            echo "PostgreSQL schema migration did not complete successfully." >&2
+            exit 1
+          fi
+          docker compose --file docker-compose.production.yml exec -T -e PGPASSWORD="$RUSA_AGENT_DB_PASSWORD" rusa-agent-db \
+            psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -c \
+            "SELECT tablename, policyname, qual, with_check FROM pg_policies WHERE schemaname='public' AND tablename IN ('rusa_agent_tasks','rusa_agent_memory') ORDER BY tablename, policyname"
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_PORT:-8000}/health/live >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/live >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            http://127.0.0.1:${RUSA_AGENT_PORT:-8001}/health/ready >/dev/null
+
+          docker compose --file docker-compose.production.yml exec -T rusa-agent-db pg_isready -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent
+          schema_count="$(docker compose --file docker-compose.production.yml exec -T -e PGPASSWORD="$RUSA_AGENT_DB_PASSWORD" rusa-agent-db \
+            psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -Atqc \
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('rusa_agent_tasks','rusa_agent_memory') AND c.relrowsecurity AND c.relforcerowsecurity")"
+          test "$schema_count" = "2"
+
+          auth_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"health probe"}]}' \
+            http://127.0.0.1:${RUSA_PORT:-8000}/v1/chat/completions)"
+          test "$auth_status" = "401"
+
+      - name: Build previous-branch rollback baseline images
+        if: github.event_name == 'pull_request'
+        env:
+          PREVIOUS_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          test -n "$PREVIOUS_SHA"
+          git fetch --no-tags origin "$PREVIOUS_SHA"
+          baseline_dir="$RUNNER_TEMP/rollback-baseline"
+          git worktree add --detach "$baseline_dir" "$PREVIOUS_SHA"
+          docker build --pull --file "$baseline_dir/Dockerfile" --tag "rusa-ai:$PREVIOUS_SHA" "$baseline_dir"
+          docker build --pull --file "$baseline_dir/Dockerfile.worker" --tag "rusa-agent-runtime:$PREVIOUS_SHA" "$baseline_dir"
+
+      - name: Verify application upgrade and rollback compatibility on PostgreSQL
+        if: github.event_name == 'pull_request'
+        id: app-compatibility-smoke
+        env:
+          COMPOSE_PROJECT_NAME: rusa-compatibility-${{ github.run_id }}
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_PORT: "18080"
+          RUSA_AGENT_PORT: "18081"
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        run: bash tests/smoke_release_stack.sh "${{ github.sha }}" "${{ github.event.pull_request.base.sha }}"
+
+      - name: Exercise real PostgreSQL deployment and rollback
+        id: staging-rollback-drill
+        run: bash tests/test_staging_rollback.sh "rusa-agent-runtime:${{ github.sha }}"
+
+      - name: Enforce all image scans and production smoke test
         if: always()
-        run: docker rm -f rusa-ai-ci || true
+        env:
+          API_CRITICAL: ${{ steps.api-critical-scan.outcome }}
+          API_HIGH: ${{ steps.api-high-scan.outcome }}
+          AGENT_CRITICAL: ${{ steps.agent-critical-scan.outcome }}
+          AGENT_HIGH: ${{ steps.agent-high-scan.outcome }}
+          POSTGRES_CRITICAL: ${{ steps.postgres-critical-scan.outcome }}
+          POSTGRES_HIGH: ${{ steps.postgres-high-scan.outcome }}
+          PRODUCTION_SMOKE: ${{ steps.production-compose-smoke.outcome }}
+          STAGING_ROLLBACK: ${{ steps.staging-rollback-drill.outcome }}
+          APP_COMPATIBILITY: ${{ steps.app-compatibility-smoke.outcome }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          printf 'API critical: %s | API high: %s | Agent critical: %s | Agent high: %s | PostgreSQL critical: %s | PostgreSQL high: %s | Production smoke: %s | Staging rollback: %s | App compatibility: %s\n' "$API_CRITICAL" "$API_HIGH" "$AGENT_CRITICAL" "$AGENT_HIGH" "$POSTGRES_CRITICAL" "$POSTGRES_HIGH" "$PRODUCTION_SMOKE" "$STAGING_ROLLBACK" "$APP_COMPATIBILITY"
+          test "$API_CRITICAL" = "success"
+          test "$API_HIGH" = "success"
+          test "$AGENT_CRITICAL" = "success"
+          test "$AGENT_HIGH" = "success"
+          test "$POSTGRES_CRITICAL" = "success"
+          test "$POSTGRES_HIGH" = "success"
+          test "$PRODUCTION_SMOKE" = "success"
+          test "$STAGING_ROLLBACK" = "success"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            test "$APP_COMPATIBILITY" = "success"
+          fi
+
+  release-gate:
+    name: Release Gate
+    if: always()
+    needs:
+      - quality
+      - container-security
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every mandatory job to pass
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          CONTAINER_RESULT: ${{ needs.container-security.result }}
+        run: |
+          printf 'Quality: %s\nContainer security: %s\n' "$QUALITY_RESULT" "$CONTAINER_RESULT"
+          test "$QUALITY_RESULT" = "success"
+          test "$CONTAINER_RESULT" = "success"

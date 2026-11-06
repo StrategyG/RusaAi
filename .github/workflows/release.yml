@@ -1,0 +1,395 @@
+name: Release and Production Deployment
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-version:
+    name: Validate semantic version and release-branch ancestry
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Require a semantic version tag
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH (for example v1.2.3)." >&2
+            exit 1
+          fi
+
+      - name: Require the tagged commit to be reachable from main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tags may only target commits already merged into main." >&2
+            exit 1
+          fi
+
+  ci:
+    name: Re-run complete CI for release commit
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish, scan, sign, and attest images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs:
+      - validate-version
+      - ci
+    permissions:
+      contents: write
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      agent_digest: ${{ steps.agent.outputs.digest }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish inference API image
+        id: api
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
+            ghcr.io/strategyg/rusa-ai:${{ github.sha }}
+            ghcr.io/strategyg/rusa-ai:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and publish agent runtime image
+        id: agent
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
+            ghcr.io/strategyg/rusa-agent-runtime:${{ github.sha }}
+            ghcr.io/strategyg/rusa-agent-runtime:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Pull pinned PostgreSQL image
+        run: docker pull postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+
+      - name: Block all CRITICAL published inference API vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate published inference API HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Block all CRITICAL published agent runtime vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate published agent runtime HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          trivyignores: .trivyignore
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Block all CRITICAL PostgreSQL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Gate PostgreSQL HIGH vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: table
+          exit-code: "1"
+          ignore-unfixed: "false"
+          vuln-type: os,library
+          severity: HIGH
+
+      - name: Smoke-test the published image digests with PostgreSQL
+        env:
+          RUSA_API_KEY: ci-only-inference-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: .
+          RUSA_PORT: "28000"
+          RUSA_AGENT_PORT: "28001"
+          RUSA_API_IMAGE: ghcr.io/strategyg/rusa-ai@${{ steps.api.outputs.digest }}
+          RUSA_AGENT_IMAGE: ghcr.io/strategyg/rusa-agent-runtime@${{ steps.agent.outputs.digest }}
+          RUSA_AGENT_DB_PASSWORD: ciownerpassword123456789
+          RUSA_AGENT_WORKER_DB_PASSWORD: ciworkerpassword123456789
+          RUSA_AGENT_API_DB_PASSWORD: ciapassword123456789
+          RUSA_AGENT_TENANT_KEYS: '{"tenant-a":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_TENANT_REPOSITORIES: '{"tenant-a":["StrategyG/RusaAi"]}'
+          RUSA_AGENT_PROVIDER_BASE_URL: https://provider.example.invalid/v1
+          RUSA_AGENT_PROVIDER_API_KEY: ci-provider-placeholder
+          RUSA_AGENT_MODEL: ci-model
+          RUSA_AGENT_GITHUB_TOKEN: ci-github-placeholder
+          RUSA_AGENT_AUDIT_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        run: |
+          set -euo pipefail
+          project="rusa-release-$GITHUB_RUN_ID"
+          cleanup() {
+            docker compose --project-name "$project" --file docker-compose.production.yml down --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker compose --project-name "$project" --file docker-compose.production.yml config --quiet
+          docker compose --project-name "$project" --file docker-compose.production.yml up --detach --no-build
+
+          migration_id=""
+          migration_exit_code=""
+          for attempt in {1..180}; do
+            migration_id="$(docker compose --project-name "$project" --file docker-compose.production.yml ps --all --quiet rusa-agent-migrate)"
+            if [[ -n "$migration_id" ]]; then
+              migration_status="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+              if [[ "$migration_status" == "exited" ]]; then
+                migration_exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")"
+                break
+              fi
+            fi
+            sleep 1
+          done
+          if [[ "$migration_exit_code" != "0" ]]; then
+            docker compose --project-name "$project" --file docker-compose.production.yml logs --tail 100 rusa-agent-migrate || true
+            echo "Published PostgreSQL schema migration did not complete successfully." >&2
+            exit 1
+          fi
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            "http://127.0.0.1:$RUSA_PORT/health/live" >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-connrefused --fail --silent --show-error \
+            "http://127.0.0.1:$RUSA_AGENT_PORT/health/ready" >/dev/null
+          docker compose --project-name "$project" --file docker-compose.production.yml exec -T rusa-agent-db \
+            pg_isready -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent
+          schema_count="$(docker compose --project-name "$project" --file docker-compose.production.yml exec -T -e PGPASSWORD="$RUSA_AGENT_DB_PASSWORD" rusa-agent-db \
+            psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -Atqc \
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('rusa_agent_tasks','rusa_agent_memory') AND c.relrowsecurity AND c.relforcerowsecurity")"
+          test "$schema_count" = "2"
+          auth_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST --header 'Content-Type: application/json' \
+            --data '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"health probe"}]}' \
+            "http://127.0.0.1:$RUSA_PORT/v1/chat/completions")"
+          test "$auth_status" = "401"
+
+      - name: Exercise rollback with the published agent image
+        run: bash tests/test_staging_rollback.sh "ghcr.io/strategyg/rusa-agent-runtime@${{ steps.agent.outputs.digest }}"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Sign immutable image digests
+        env:
+          API_IMAGE: ghcr.io/strategyg/rusa-ai
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          AGENT_IMAGE: ghcr.io/strategyg/rusa-agent-runtime
+          AGENT_DIGEST: ${{ steps.agent.outputs.digest }}
+        run: |
+          cosign sign --yes "$API_IMAGE@$API_DIGEST"
+          cosign sign --yes "$AGENT_IMAGE@$AGENT_DIGEST"
+
+      - name: Attest inference API build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai
+          subject-digest: ${{ steps.api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest agent runtime build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/strategyg/rusa-agent-runtime
+          subject-digest: ${{ steps.agent.outputs.digest }}
+          push-to-registry: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
+
+      - name: Attach inference API SBOM to release
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ghcr.io/strategyg/rusa-ai:${{ github.ref_name }}
+          format: cyclonedx-json
+          output-file: sbom-inference-api.cdx.json
+          artifact-name: sbom-inference-api-${{ github.ref_name }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Attach agent runtime SBOM to release
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ghcr.io/strategyg/rusa-agent-runtime:${{ github.ref_name }}
+          format: cyclonedx-json
+          output-file: sbom-agent-runtime.cdx.json
+          artifact-name: sbom-agent-runtime-${{ github.ref_name }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: true
+
+      - name: Attach PostgreSQL SBOM to release
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: postgres:16.15-alpine3.24@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+          format: cyclonedx-json
+          output-file: sbom-postgres.cdx.json
+          artifact-name: sbom-postgres-${{ github.ref_name }}
+          syft-version: v1.57.0
+          upload-artifact: true
+          upload-release-assets: true
+
+  deploy-production:
+    name: Deploy production with automatic rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    needs: publish
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout deployment assets
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Authenticate to GHCR for signature verification
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign for deployment verification
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Verify image signatures before deployment
+        env:
+          API_IMAGE: ghcr.io/strategyg/rusa-ai
+          API_DIGEST: ${{ needs.publish.outputs.api_digest }}
+          AGENT_IMAGE: ghcr.io/strategyg/rusa-agent-runtime
+          AGENT_DIGEST: ${{ needs.publish.outputs.agent_digest }}
+        run: |
+          expected_identity="https://github.com/StrategyG/RusaAi/.github/workflows/release.yml@refs/tags/$GITHUB_REF_NAME"
+          issuer="https://token.actions.githubusercontent.com"
+          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$API_IMAGE@$API_DIGEST"
+          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$AGENT_IMAGE@$AGENT_DIGEST"
+
+      - name: Configure pinned SSH host identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_SSH_PRIVATE_KEY:?Configure production environment secret PRODUCTION_SSH_PRIVATE_KEY}"
+          : "${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production environment secret PRODUCTION_SSH_KNOWN_HOSTS}"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Deploy immutable image digests
+        env:
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+          GHCR_PULL_USERNAME: ${{ vars.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          API_IMAGE: ghcr.io/strategyg/rusa-ai@${{ needs.publish.outputs.api_digest }}
+          AGENT_IMAGE: ghcr.io/strategyg/rusa-agent-runtime@${{ needs.publish.outputs.agent_digest }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_SSH_HOST:?Configure production environment variable PRODUCTION_SSH_HOST}"
+          : "${PRODUCTION_SSH_USER:?Configure production environment variable PRODUCTION_SSH_USER}"
+          : "${PRODUCTION_DEPLOY_PATH:?Configure production environment variable PRODUCTION_DEPLOY_PATH}"
+          [[ "$PRODUCTION_DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+            echo "PRODUCTION_DEPLOY_PATH must be a safe absolute path." >&2
+            exit 1
+          }
+
+          remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "mkdir -p '$PRODUCTION_DEPLOY_PATH/scripts/postgres' '$PRODUCTION_DEPLOY_PATH/scripts/deploy'"
+
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes docker-compose.production.yml \
+            "$remote:$PRODUCTION_DEPLOY_PATH/docker-compose.yml"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/postgres/init-agent-db.sh \
+            "$remote:$PRODUCTION_DEPLOY_PATH/scripts/postgres/init-agent-db.sh"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/deploy/compose-deploy.sh \
+            "$remote:$PRODUCTION_DEPLOY_PATH/scripts/deploy/compose-deploy.sh"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/deploy/compose-rollback.sh \
+            "$remote:$PRODUCTION_DEPLOY_PATH/scripts/deploy/compose-rollback.sh"
+
+          if [[ -n "${GHCR_PULL_TOKEN:-}" ]]; then
+            : "${GHCR_PULL_USERNAME:?Set GHCR_PULL_USERNAME when GHCR_PULL_TOKEN is configured}"
+            printf '%s' "$GHCR_PULL_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+              "docker login ghcr.io --username '$GHCR_PULL_USERNAME' --password-stdin"
+          fi
+
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
+            "cd '$PRODUCTION_DEPLOY_PATH' && chmod 0755 scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh && ./scripts/deploy/compose-deploy.sh '$API_IMAGE' '$AGENT_IMAGE'"

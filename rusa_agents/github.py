@@ -38,6 +38,7 @@ class GitHubToolGateway:
         max_diff_patch_chars: int = 5500,
         max_diff_chars: int = 100_000,
         allowed_repositories_by_tenant: dict[str, set[str]] | None = None,
+        policy: AutonomyPolicy | None = None,
     ) -> None:
         parsed = urlparse(api_url)
         if (
@@ -69,6 +70,7 @@ class GitHubToolGateway:
                 raise ValueError("per-tenant repository allowlist is invalid")
         self.api_url = api_url.rstrip("/")
         self.token = token
+        self.policy = policy or AutonomyPolicy()
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
         self.max_file_bytes = max_file_bytes
         self.max_response_bytes = max_response_bytes

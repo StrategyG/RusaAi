@@ -1,0 +1,195 @@
+name: rusa-ai
+
+services:
+  rusa-api:
+    image: "${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable GHCR digest in .env}"
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${RUSA_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: production
+      RUSA_API_KEY: ${RUSA_API_KEY:?Set RUSA_API_KEY in .env}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-ai-v1}
+      RUSA_MODEL_PATH: /models
+      RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
+      TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
+    volumes:
+      - type: bind
+        source: ${RUSA_MODEL_DIR:?Set RUSA_MODEL_DIR in .env}
+        target: /models
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rusa-agent-db:
+    image: postgres:16.15-alpine3.24@sha256:1fb72075a1de85a1d39de23c2da81baef1b71bf5c0b61a14cbbfdb072a6246d9
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rusa_agent
+      POSTGRES_USER: rusa_agent_owner
+      POSTGRES_PASSWORD: ${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}
+      RUSA_AGENT_WORKER_DB_PASSWORD: ${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD in .env}
+      RUSA_AGENT_API_DB_PASSWORD: ${RUSA_AGENT_API_DB_PASSWORD:?Set RUSA_AGENT_API_DB_PASSWORD in .env}
+    volumes:
+      - rusa-agent-postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres/init-agent-db.sh:/docker-entrypoint-initdb.d/10-init-agent-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  rusa-agent-migrate:
+    image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
+    command:
+      - -c
+      - |
+        import os
+        from rusa_agents.healthcheck import main as worker_healthcheck
+        from rusa_agents.memory import PostgresMemoryStore
+        from rusa_agents.queue import PostgresTaskQueue
+
+        database_url = os.environ["RUSA_AGENT_DATABASE_URL"]
+        queue = PostgresTaskQueue(database_url)
+        queue.initialize()
+        memory = PostgresMemoryStore(database_url)
+        memory.initialize()
+
+        if worker_healthcheck() != 0:
+            raise SystemExit("Worker healthcheck failed after PostgreSQL schema initialization")
+    restart: "no"
+    environment:
+      RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
+  rusa-agent-api:
+    image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
+    command: ["-m", "uvicorn", "rusa_agents.api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${RUSA_AGENT_PORT:-8001}:8001"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    environment:
+      RUSA_AGENT_API_DATABASE_URL: postgresql://rusa_agent_api:${RUSA_AGENT_API_DB_PASSWORD:?Set RUSA_AGENT_API_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+      RUSA_AGENT_TENANT_KEYS: '${RUSA_AGENT_TENANT_KEYS:?Set RUSA_AGENT_TENANT_KEYS in .env}'
+      RUSA_AGENT_TENANT_REPOSITORIES: '${RUSA_AGENT_TENANT_REPOSITORIES:?Set RUSA_AGENT_TENANT_REPOSITORIES in .env}'
+      RUSA_AGENT_MAX_REQUEST_BYTES: ${RUSA_AGENT_MAX_REQUEST_BYTES:-262144}
+      RUSA_AGENT_REQUEST_TIMEOUT_SECONDS: ${RUSA_AGENT_REQUEST_TIMEOUT_SECONDS:-15}
+    depends_on:
+      rusa-agent-worker:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rusa-agent-worker:
+    image: "${RUSA_AGENT_IMAGE:?Set RUSA_AGENT_IMAGE to an immutable GHCR digest in .env}"
+    command: ["-m", "rusa_agents.worker"]
+    restart: unless-stopped
+    init: true
+    environment:
+      RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+      RUSA_AGENT_PROVIDER_BASE_URL: ${RUSA_AGENT_PROVIDER_BASE_URL:?Set RUSA_AGENT_PROVIDER_BASE_URL in .env}
+      RUSA_AGENT_PROVIDER_API_KEY: ${RUSA_AGENT_PROVIDER_API_KEY:?Set RUSA_AGENT_PROVIDER_API_KEY in .env}
+      RUSA_AGENT_MODEL: ${RUSA_AGENT_MODEL:?Set RUSA_AGENT_MODEL in .env}
+      RUSA_AGENT_GITHUB_TOKEN: ${RUSA_AGENT_GITHUB_TOKEN:?Set RUSA_AGENT_GITHUB_TOKEN in .env}
+      RUSA_AGENT_GITHUB_MAX_RESPONSE_BYTES: ${RUSA_AGENT_GITHUB_MAX_RESPONSE_BYTES:-2000000}
+      RUSA_AGENT_GITHUB_MAX_FILE_BYTES: ${RUSA_AGENT_GITHUB_MAX_FILE_BYTES:-1000000}
+      RUSA_AGENT_GITHUB_MAX_CHECK_PAGES: ${RUSA_AGENT_GITHUB_MAX_CHECK_PAGES:-10}
+      RUSA_AGENT_GITHUB_MAX_DIFF_PAGES: ${RUSA_AGENT_GITHUB_MAX_DIFF_PAGES:-3}
+      RUSA_AGENT_GITHUB_MAX_DIFF_FILES: ${RUSA_AGENT_GITHUB_MAX_DIFF_FILES:-20}
+      RUSA_AGENT_GITHUB_MAX_DIFF_PATCH_CHARS: ${RUSA_AGENT_GITHUB_MAX_DIFF_PATCH_CHARS:-5500}
+      RUSA_AGENT_GITHUB_MAX_DIFF_CHARS: ${RUSA_AGENT_GITHUB_MAX_DIFF_CHARS:-100000}
+      RUSA_AGENT_TENANT_REPOSITORIES: '${RUSA_AGENT_TENANT_REPOSITORIES:?Set RUSA_AGENT_TENANT_REPOSITORIES in .env}'
+      RUSA_AGENT_AUDIT_KEY: ${RUSA_AGENT_AUDIT_KEY:?Set RUSA_AGENT_AUDIT_KEY in .env}
+      RUSA_AGENT_AUDIT_PATH: /var/lib/rusa-agent/audit.jsonl
+      RUSA_AGENT_PROVIDER_TIMEOUT: ${RUSA_AGENT_PROVIDER_TIMEOUT:-45}
+      RUSA_AGENT_WORKER_TIMEOUT: ${RUSA_AGENT_WORKER_TIMEOUT:-120}
+      RUSA_AGENT_MAX_REPAIR_CYCLES: ${RUSA_AGENT_MAX_REPAIR_CYCLES:-2}
+      RUSA_AGENT_POLL_INTERVAL: ${RUSA_AGENT_POLL_INTERVAL:-1}
+      RUSA_AGENT_QUEUE_LEASE_SECONDS: ${RUSA_AGENT_QUEUE_LEASE_SECONDS:-300}
+      RUSA_AGENT_QUEUE_HEARTBEAT_SECONDS: ${RUSA_AGENT_QUEUE_HEARTBEAT_SECONDS:-60}
+    volumes:
+      - rusa-agent-audit-data:/var/lib/rusa-agent
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-m", "rusa_agents.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  rusa-agent-postgres-data:
+  rusa-agent-audit-data:
