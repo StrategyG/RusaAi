@@ -36,7 +36,7 @@ jobs:
 
       - name: Compile Python sources
         run: |
-          python -m compileall -q llm-project tests
+          python -m compileall -q llm-project tests scripts
 
       - name: Lint critical errors
         run: |
