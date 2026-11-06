@@ -74,7 +74,6 @@ def test_postgres_memory_and_audit_integrity():
     assert not PostgresAuditLog(DSN, "wrong-key-" + "x" * 32).verify()
 
 
-
 def test_postgres_rate_limiter_is_tenant_scoped():
     limiter = PostgresRateLimiter(DSN)
     limiter.initialize()
@@ -82,7 +81,6 @@ def test_postgres_rate_limiter_is_tenant_scoped():
     assert limiter.hit("tenant-rate-a", route, 1)[0] is True
     assert limiter.hit("tenant-rate-a", route, 1)[0] is False
     assert limiter.hit("tenant-rate-b", route, 1)[0] is True
-
 
 
 def test_postgres_queue_requires_explicit_retry_after_approval():
@@ -105,7 +103,6 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     retried = queue.get(task_id, "tenant-approval")
     assert retried["status"] == "queued"
     assert retried["result"] is None
-
 
 
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
@@ -139,7 +136,6 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     assert queue.complete(
         current.id, tenant_id, "current-worker", current.lease_token
     )
-
 
 
 def test_postgres_rls_and_service_role_separation():
