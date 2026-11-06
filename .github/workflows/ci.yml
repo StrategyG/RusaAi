@@ -17,6 +17,7 @@ jobs:
   quality:
     name: Lint and test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,6 +40,15 @@ jobs:
         run: |
           python -m flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
 
+      - name: Verify lint gate rejects violations
+        run: |
+          probe="$(mktemp --suffix=.py)"
+          printf 'def lint_probe():\n    return undefined_name\n' > "$probe"
+          if python -m flake8 "$probe" --select=F821; then
+            echo "Lint accepted an undefined name." >&2
+            exit 1
+          fi
+
       - name: Compile
         run: python -m compileall -q llm-project/serve tests
 
@@ -49,6 +59,7 @@ jobs:
     name: Build and smoke-test production container
     runs-on: ubuntu-latest
     needs: quality
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,14 +84,16 @@ jobs:
           }
           trap cleanup EXIT
 
+          ready=0
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:8000/health > /tmp/rusa-health.json; then
+              ready=1
               break
             fi
             sleep 1
           done
-
-          grep --quiet '"status":"ok"' /tmp/rusa-health.json
+          test "$ready" = "1"
+          grep --quiet '"status":"healthy"' /tmp/rusa-health.json
 
           unauthenticated_status="$(curl --silent --output /tmp/rusa-unauth.json --write-out '%{http_code}' \
             --request POST http://127.0.0.1:8000/v1/chat/completions \
