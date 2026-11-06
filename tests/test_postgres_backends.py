@@ -70,3 +70,18 @@ def test_postgres_rate_limiter_is_tenant_scoped():
     assert limiter.hit("tenant-rate-a", route, 1)[0] is True
     assert limiter.hit("tenant-rate-a", route, 1)[0] is False
     assert limiter.hit("tenant-rate-b", route, 1)[0] is True
+
+
+
+def test_postgres_queue_requires_explicit_retry_after_approval():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    assert queue.enqueue(task_id, "tenant-approval", {"objective": "approval test"})
+    job = queue.claim("approval-worker", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    assert queue.await_approval(job.id, job.tenant_id, "approval-worker", "review required")
+    assert queue.get(task_id, "tenant-approval")["status"] == "awaiting_approval"
+    assert queue.retry(task_id, "wrong-tenant") is False
+    assert queue.retry(task_id, "tenant-approval") is True
+    assert queue.get(task_id, "tenant-approval")["status"] == "queued"
