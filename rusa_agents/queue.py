@@ -8,6 +8,10 @@ from typing import Any
 from .contracts import CodingTask, TaskRecord, TaskState
 
 
+class IdempotencyConflictError(ValueError):
+    """Raised when an idempotency key is reused for a different task payload."""
+
+
 class PostgresTaskQueue:
     def __init__(self, dsn: str) -> None:
         if not dsn:
@@ -112,7 +116,9 @@ class PostgresTaskQueue:
             if isinstance(stored_payload, str):
                 stored_payload = json.loads(stored_payload)
             if self._normalized_payload(stored_payload) != self._normalized_payload(payload):
-                raise ValueError("idempotency key was already used with a different task payload")
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
             return str(existing[0])
 
     def claim(self, lease_seconds: int = 300) -> dict[str, Any] | None:

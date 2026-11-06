@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import CodingTask, RepositoryTarget
-from .queue import PostgresTaskQueue
+from .queue import IdempotencyConflictError, PostgresTaskQueue
 
 MAX_AGENT_REQUEST_BYTES = int(os.getenv("RUSA_AGENT_MAX_REQUEST_BYTES", "262144"))
 
@@ -76,27 +76,40 @@ class RequestGuardMiddleware:
                 await send_error(413, "Request body exceeds the configured size limit")
                 return
 
-        buffered_messages = []
-        received_bytes = 0
-        while True:
-            try:
-                message = await asyncio.wait_for(
-                    receive(), timeout=self.body_timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                await send_error(408, "Request body timed out")
-                return
-            if message["type"] == "http.disconnect":
-                return
-            if message["type"] != "http.request":
-                continue
-            received_bytes += len(message.get("body", b""))
-            if received_bytes > limit:
-                await send_error(413, "Request body exceeds the configured size limit")
-                return
-            buffered_messages.append(message)
-            if not message.get("more_body", False):
-                break
+        class BodyTooLarge(Exception):
+            pass
+
+        class ClientDisconnected(Exception):
+            pass
+
+        async def collect_body():
+            messages = []
+            received_bytes = 0
+            while True:
+                message = await receive()
+                if message["type"] == "http.disconnect":
+                    raise ClientDisconnected
+                if message["type"] != "http.request":
+                    continue
+                received_bytes += len(message.get("body", b""))
+                if received_bytes > limit:
+                    raise BodyTooLarge
+                messages.append(message)
+                if not message.get("more_body", False):
+                    return messages
+
+        try:
+            buffered_messages = await asyncio.wait_for(
+                collect_body(), timeout=self.body_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            await send_error(408, "Request body timed out")
+            return
+        except BodyTooLarge:
+            await send_error(413, "Request body exceeds the configured size limit")
+            return
+        except ClientDisconnected:
+            return
 
         async def replay_receive():
             if buffered_messages:
@@ -294,6 +307,8 @@ def create_task(
             task_id=task_id,
         )
         task_id = request.app.state.queue.enqueue(task)
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {

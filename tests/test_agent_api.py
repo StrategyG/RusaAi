@@ -3,19 +3,32 @@ import json
 from fastapi.testclient import TestClient
 
 from rusa_agents import api
+from rusa_agents.queue import IdempotencyConflictError
 
 
 class FakeQueue:
     def __init__(self, dsn):
         self.tasks = {}
         self.idempotency = {}
+        self.idempotency_payloads = {}
 
     def check_ready(self):
         return True
 
     def enqueue(self, task):
         key = (task.tenant_id, task.idempotency_key or task.task_id)
+        payload = task.to_dict()
         if key in self.idempotency:
+            existing = dict(self.idempotency_payloads[key])
+            existing.pop("task_id", None)
+            existing.pop("created_at", None)
+            candidate = dict(payload)
+            candidate.pop("task_id", None)
+            candidate.pop("created_at", None)
+            if existing != candidate:
+                raise IdempotencyConflictError(
+                    "idempotency key was already used with a different task payload"
+                )
             return self.idempotency[key]
         self.tasks[task.task_id] = {
             "tenant_id": task.tenant_id,
@@ -25,6 +38,7 @@ class FakeQueue:
             "last_error": None,
         }
         self.idempotency[key] = task.task_id
+        self.idempotency_payloads[key] = payload
         return task.task_id
 
     def get(self, tenant_id, task_id):
@@ -131,6 +145,22 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
             json={"objective": "A" * 100},
         )
     assert response.status_code == 413
+
+
+def test_agent_api_rejects_idempotency_key_reuse_with_changed_payload(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {
+        "X-API-Key": "a" * 48,
+        "X-Tenant-ID": "tenant-a",
+        "Idempotency-Key": "retry-conflict",
+    }
+    with TestClient(api.app) as client:
+        first = client.post("/v1/agent/tasks", headers=headers, json=task_body())
+        changed_body = task_body()
+        changed_body["objective"] = "Different objective"
+        second = client.post("/v1/agent/tasks", headers=headers, json=changed_body)
+    assert first.status_code == 202
+    assert second.status_code == 409
 
 
 def test_agent_api_reuses_same_tenant_branch_for_idempotent_retry(monkeypatch):
