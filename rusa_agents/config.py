@@ -129,8 +129,8 @@ class RuntimeConfig:
         if cls._looks_placeholder(hostname) or cls._looks_placeholder(password):
             errors.append(f"{variable} must not contain example host/password placeholders")
         ssl_modes = parse_qs(parsed.query).get("sslmode", [])
-        if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
-            errors.append(f"{variable} must use sslmode=require, verify-ca, or verify-full")
+        if not ssl_modes or ssl_modes[-1] != "verify-full":
+            errors.append(f"{variable} must use sslmode=verify-full")
         return errors
 
     def _validate_tenants_and_model(self) -> list[str]:
