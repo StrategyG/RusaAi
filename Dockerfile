@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/python:3.11-dev AS builder
+FROM cgr.dev/chainguard/python:3.11.17-dev AS builder
 
 USER root
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -12,11 +12,13 @@ RUN python -m venv /venv \
     && /venv/bin/pip uninstall -y pip setuptools wheel jaraco.context \
     && rm -f /venv/bin/pip /venv/bin/pip3 /venv/bin/pip3.11
 
-FROM cgr.dev/chainguard/python:3.11 AS runtime
+FROM cgr.dev/chainguard/python:3.11.17 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
+    HOME=/tmp \
+    TMPDIR=/tmp \
     RUSA_MAX_REQUEST_BYTES=1048576 \
     PATH="/venv/bin:$PATH"
 

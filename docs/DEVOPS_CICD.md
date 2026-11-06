@@ -51,7 +51,7 @@ Configure these environment secrets:
 | `PRODUCTION_SSH_KNOWN_HOSTS` | Pinned host key entry; do not generate trust dynamically in CI |
 | `GHCR_PULL_TOKEN` | Optional read:packages token if GHCR images are private |
 
-The production host must have Docker Engine, Docker Compose v2, `curl`, `flock`, network access to GHCR, and a pre-provisioned `.env` file. Runtime images use Chainguard's minimal Python 3.11 Wolfi runtime, with dependency installation isolated in a separate development builder stage. The final runtime excludes package managers and build-only tooling. The model directory referenced by `RUSA_MODEL_DIR` must exist and be mounted read-only. Keep database volumes persistent and place the API behind a TLS reverse proxy or gateway.
+The production host must have Docker Engine, Docker Compose v2, `curl`, `flock`, network access to GHCR, and a pre-provisioned `.env` file. Runtime images use Chainguard's minimal Python 3.11.17 Wolfi runtime, with dependency installation isolated in a separate development builder stage. The final runtime excludes package managers and build-only tooling. The model directory referenced by `RUSA_MODEL_DIR` must exist and be mounted read-only. Keep database volumes persistent and place the API behind a TLS reverse proxy or gateway.
 
 The production `.env` file must contain all runtime secrets and configuration from `.env.example`. Before the first automated rollout, seed `RUSA_API_IMAGE` and `RUSA_AGENT_IMAGE` with the immutable GHCR digests of the currently running, known-good images. This baseline is required so the first automated deployment has a real rollback target. Never upload the production `.env` file to GitHub or commit it to the repository.
 

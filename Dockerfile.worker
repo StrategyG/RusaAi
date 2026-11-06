@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/python:3.11-dev AS builder
+FROM cgr.dev/chainguard/python:3.11.17-dev AS builder
 
 USER root
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,10 +14,12 @@ RUN python -m venv /venv \
     && mkdir -p /var/lib/rusa-agent \
     && chown -R 65532:65532 /var/lib/rusa-agent
 
-FROM cgr.dev/chainguard/python:3.11 AS runtime
+FROM cgr.dev/chainguard/python:3.11.17 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    HOME=/tmp \
+    TMPDIR=/tmp \
     PATH="/venv/bin:$PATH"
 
 WORKDIR /app
