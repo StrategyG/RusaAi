@@ -1,4 +1,6 @@
 import os
+import secrets
+import uuid
 from pathlib import Path
 
 import pytest
@@ -12,40 +14,58 @@ if not DSN:
 @pytest.fixture(scope="module")
 def knowledge_store():
     import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
     migration = Path("migrations/005_rag_knowledge_pgvector.sql").read_text(encoding="utf-8")
-    with psycopg.connect(DSN, autocommit=True) as connection:
-        connection.execute("DROP TABLE IF EXISTS public.rusa_knowledge_chunks CASCADE")
-        connection.execute("DROP TABLE IF EXISTS public.rusa_knowledge_documents CASCADE")
-        connection.execute(migration)
-        connection.execute(
-            """
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_roles WHERE rolname = 'rusa_knowledge_test_api'
-                ) THEN
-                    CREATE ROLE rusa_knowledge_test_api NOLOGIN NOBYPASSRLS;
-                END IF;
-            END;
-            $$
-            """
+    role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
+    role_password = secrets.token_urlsafe(32)
+
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        # The test database is dedicated to CI. The migration is idempotent and must
+        # never drop existing application tables or data.
+        admin.execute(migration)
+        admin.execute(
+            sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
+                sql.Identifier(role_name),
+                sql.Literal(role_password),
+            )
         )
-        connection.execute("ALTER ROLE rusa_knowledge_test_api NOBYPASSRLS")
-        connection.execute("GRANT USAGE ON SCHEMA public TO rusa_knowledge_test_api")
-        connection.execute(
-            "GRANT SELECT ON public.rusa_knowledge_documents, "
-            "public.rusa_knowledge_chunks TO rusa_knowledge_test_api"
+        admin.execute(
+            sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role_name))
         )
+        admin.execute(
+            sql.SQL(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON "
+                "public.rusa_knowledge_documents, public.rusa_knowledge_chunks TO {}"
+            ).format(sql.Identifier(role_name))
+        )
+
+    connection_options = conninfo_to_dict(DSN)
+    connection_options["user"] = role_name
+    connection_options["password"] = role_password
+    restricted_dsn = make_conninfo(**connection_options)
 
     from rusa_knowledge.store import PostgresKnowledgeStore
 
-    store = PostgresKnowledgeStore(DSN, min_pool_size=1, max_pool_size=2)
+    store = PostgresKnowledgeStore(restricted_dsn, min_pool_size=1, max_pool_size=2)
     try:
         assert store.check_ready() is True
-        yield store
+        yield store, restricted_dsn
     finally:
         store.close()
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {}").format(
+                    sql.Identifier(role_name)
+                )
+            )
+            admin.execute(
+                sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA public FROM {}").format(
+                    sql.Identifier(role_name)
+                )
+            )
+            admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name)))
 
 
 def _unit_vector(index: int) -> list[float]:
@@ -57,7 +77,7 @@ def _unit_vector(index: int) -> list[float]:
 def test_pgvector_hybrid_retrieval_and_tenant_rls(knowledge_store):
     import psycopg
 
-    store = knowledge_store
+    store, restricted_dsn = knowledge_store
     tenant_a_document = store.ingest_document(
         tenant_id="tenant-a",
         collection="agent",
@@ -102,8 +122,9 @@ def test_pgvector_hybrid_retrieval_and_tenant_rls(knowledge_store):
         {"collection": "agent", "document_count": 1}
     ]
 
-    with psycopg.connect(DSN) as connection:
-        connection.execute("SET ROLE rusa_knowledge_test_api")
+    # Query without a tenant filter: FORCE ROW LEVEL SECURITY must still hide
+    # tenant B from the restricted non-superuser application role.
+    with psycopg.connect(restricted_dsn) as connection:
         connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("tenant-a",))
         visible = connection.execute(
             "SELECT tenant_id FROM public.rusa_knowledge_documents ORDER BY tenant_id"
