@@ -176,7 +176,7 @@ docker compose up -d
 docker compose --profile worker up -d --build
 ```
 
-For production, pre-provision `.env` with the API, worker, and sandbox digest references from a reviewed release, separate managed TLS DSNs, rootless Docker socket, workspace/mirror paths, tenant API-key digests, and other required secrets. Keep `RUSA_AICODE_ENABLED=false` for the initial rollout. The manual `.github/workflows/deploy-production.yml` workflow requires the `production` environment approval, verifies all three Cosign signatures against the exact release workflow identity, and then transfers the Compose manifest and deployment scripts over pinned SSH.
+For production, pre-provision `.env` with the API, worker, and sandbox digest references from a reviewed release, separate managed TLS DSNs, rootless Docker socket, workspace/mirror paths, tenant API-key digests, and other required secrets. Before every deployment or rollback, set `RUSA_AICODE_ENABLED=false`, wait until all active AICode tasks have reached a safe terminal/checkpoint state, and confirm no worker is executing a task. The deployment script fails closed if task intake is enabled; it does not drain active work itself. Re-enable `RUSA_AICODE_ENABLED=true` only after post-deploy smoke tests and operator approval. The manual `.github/workflows/deploy-production.yml` workflow requires the `production` environment approval, verifies all three Cosign signatures against the exact release workflow identity, and then transfers the Compose manifest and deployment scripts over pinned SSH.
 
 The host deployment script can also be run manually after verifying the signatures and release manifest:
 
