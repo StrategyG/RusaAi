@@ -288,6 +288,11 @@ def create_task(
         task_id = request.app.state.queue.enqueue(task)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent task queue is temporarily unavailable",
+        ) from exc
     return {
         "task_id": task_id,
         "status": "queued",
@@ -302,7 +307,13 @@ def get_task(
     request: Request,
     tenant_id: str = Depends(authenticate_tenant),
 ) -> dict[str, Any]:
-    result = request.app.state.queue.get(tenant_id, task_id)
+    try:
+        result = request.app.state.queue.get(tenant_id, task_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent task queue is temporarily unavailable",
+        ) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"task_id": task_id, "tenant_id": tenant_id, **result}
