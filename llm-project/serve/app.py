@@ -677,7 +677,7 @@ def get_agent_task(
         "result": record["result"],
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],
-        "last_error": record["last_error"],
+        "last_error": record.get("last_error"),
     }
 
 
