@@ -168,8 +168,12 @@ class AICodeRuntime:
                 pass
         return True
 
-    async def run_forever(self, poll_seconds: float = 2.0) -> None:
-        while True:
+    async def run_forever(self, poll_seconds: float = 2.0, stop_event: asyncio.Event | None = None) -> None:
+        stop_event = stop_event or asyncio.Event()
+        while not stop_event.is_set():
             processed = await self.run_once()
             if not processed:
-                await asyncio.sleep(poll_seconds)
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
+                except asyncio.TimeoutError:
+                    pass
