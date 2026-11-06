@@ -203,7 +203,7 @@ async def lifespan(application: FastAPI):
                 verify_model_artifact,
                 model_path,
                 expected_manifest_sha256=expected_manifest_sha,
-                require_pinned_manifest=environment == "production",
+                require_pinned_manifest=environment not in {"development", "dev", "test"},
             )
             application.state.artifact = artifact
             application.state.model_name = os.getenv("RUSA_MODEL_NAME", "rusa-ai-v1")
