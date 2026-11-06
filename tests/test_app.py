@@ -11,7 +11,7 @@ sys.path.insert(
     ),
 )
 
-from app import app  # noqa: E402
+from app import app, load_task_validator  # noqa: E402
 
 client = TestClient(app)
 
@@ -30,7 +30,7 @@ def valid_task_envelope():
             "acceptance_criteria": ["The task is validated"],
             "repository": "StrategyG/RusaAi",
             "base_branch": "main",
-            "work_branch": "test/fixture-validation",
+            "work_branch": "fix/fixture-validation",
         },
         "policy": {
             "allowed_actions": ["read_repository"],
@@ -75,3 +75,8 @@ def test_validate_task_rejects_invalid_uuid():
     response = client.post("/v1/validate-task", json={"envelope": envelope})
     assert response.status_code == 200
     assert response.json()["valid"] is False
+
+
+def test_schema_validator_is_loaded_and_has_format_checker():
+    assert isinstance(load_task_validator(), type(load_task_validator()))
+    assert load_task_validator().FORMAT_CHECKER is not None
