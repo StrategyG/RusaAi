@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -37,6 +38,67 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     stored = queue.get(task_id, "tenant-alpha")
     assert stored["status"] == "succeeded"
     assert stored["result"] == result
+
+
+def test_postgres_queue_idempotency_is_tenant_scoped_payload_bound_and_race_safe():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant_id = "tenant-idempotency-" + uuid4().hex[:8]
+    key = "client-request-" + uuid4().hex
+    request_hash = "a" * 64
+    payload = {"objective": "create exactly one task"}
+    created_tasks = []
+
+    try:
+        first = queue.enqueue_idempotent(
+            str(uuid4()), tenant_id, payload, key, request_hash
+        )
+        assert first.created is True
+        assert first.conflict is False
+        if first.created:
+            created_tasks.append((first.task_id, tenant_id))
+
+        replay = queue.enqueue_idempotent(
+            str(uuid4()), tenant_id, payload, key, request_hash
+        )
+        assert replay.created is False
+        assert replay.conflict is False
+        assert replay.task_id == first.task_id
+
+        changed = queue.enqueue_idempotent(
+            str(uuid4()), tenant_id, {"objective": "different payload"}, key, "b" * 64
+        )
+        assert changed.created is False
+        assert changed.conflict is True
+        assert changed.task_id == first.task_id
+
+        other_tenant_id = tenant_id + "-other"
+        other_tenant = queue.enqueue_idempotent(
+            str(uuid4()), other_tenant_id, payload, key, request_hash
+        )
+        assert other_tenant.created is True
+        assert other_tenant.task_id != first.task_id
+        if other_tenant.created:
+            created_tasks.append((other_tenant.task_id, other_tenant_id))
+
+        race_tenant = tenant_id + "-race"
+        race_key = "concurrent-" + uuid4().hex
+
+        def submit(_):
+            return queue.enqueue_idempotent(
+                str(uuid4()), race_tenant, payload, race_key, request_hash
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(submit, range(8)))
+        assert len({item.task_id for item in results}) == 1
+        assert sum(item.created for item in results) == 1
+        assert all(not item.conflict for item in results)
+        if any(item.created for item in results):
+            created_tasks.append((results[0].task_id, race_tenant))
+    finally:
+        for created_task_id, created_tenant_id in created_tasks:
+            queue.cancel(created_task_id, created_tenant_id)
 
 
 def test_postgres_queue_retries_then_dead_letters():
