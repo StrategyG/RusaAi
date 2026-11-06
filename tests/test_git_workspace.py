@@ -1,4 +1,5 @@
 import subprocess
+
 import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
