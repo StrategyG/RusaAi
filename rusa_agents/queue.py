@@ -274,8 +274,8 @@ class PostgresTaskQueue:
         priority: int = 0,
         *,
         audit_actor: str | None = None,
-    ) -> tuple[str, bool]:
-        """Create once per tenant/key; identical retries return the original task ID."""
+    ) -> tuple[str, bool, str]:
+        """Create once per tenant/key; identical retries return the original task ID and state."""
         import re
 
         if (
@@ -305,7 +305,7 @@ class PostgresTaskQueue:
                 )
                 VALUES (%s, %s, %s::jsonb, %s, %s, %s)
                 ON CONFLICT DO NOTHING
-                RETURNING task_id::text
+                RETURNING task_id::text, status
                 """,
                 (
                     task_id, tenant_id, json.dumps(payload, ensure_ascii=False),
@@ -316,11 +316,11 @@ class PostgresTaskQueue:
                 self._record_policy_event(
                     conn, tenant_id, task_id, audit_actor, "task.create", "allow"
                 )
-                return str(inserted[0]), True
+                return str(inserted[0]), True, str(inserted[1])
 
             existing = conn.execute(
                 """
-                SELECT task_id::text, payload
+                SELECT task_id::text, payload, status
                 FROM aicode_jobs
                 WHERE tenant_id=%s AND idempotency_key=%s
                 FOR UPDATE
@@ -343,7 +343,7 @@ class PostgresTaskQueue:
             self._record_policy_event(
                 conn, tenant_id, str(existing[0]), audit_actor, "task.create", "allow"
             )
-            return str(existing[0]), False
+            return str(existing[0]), False, str(existing[2])
 
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
