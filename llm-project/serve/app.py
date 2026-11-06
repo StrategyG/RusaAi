@@ -128,11 +128,6 @@ def validate_task(req: TaskValidationRequest):
             valid=False,
             errors=[f"Schema validation error: {str(e)}"],
         )
-nal
-from fastapi import FastAPI, HTTPException, Security, Depends, status
-from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
-import jsonschema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
