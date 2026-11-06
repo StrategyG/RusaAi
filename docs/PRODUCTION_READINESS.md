@@ -15,7 +15,8 @@ This ledger distinguishes implemented repository foundations from evidence requi
 - Tenant-scoped PostgreSQL task memory and append-only hash-chained audit log; SQLite/JSONL remain development adapters.
 - API-key hash mapping for authenticated tenant identity and per-tenant GitHub repository allowlists.
 - Authenticated A2A task submission, cancellation, and replay requests are recorded in the tenant-scoped PostgreSQL audit chain before queue mutation.
-- CI for lint, compile, tests, Bandit, dependency audit, container build, and API smoke test.
+- CI for lint, compile, tests, Bandit, dependency audit, container build, and API/web readiness smoke tests.
+- Manual staging image publication and protected-environment deployment workflow; deployment remains opt-in and requires host/registry secrets.
 
 ## Current verification
 
@@ -38,6 +39,7 @@ The AICode branch CI passed on commit 5a5a24dfd64eadaab5d3bb658d827967809f668f (
 | Hardware capacity | p50/p95 latency, throughput, concurrency, RAM/VRAM and context limits | Blocked |
 | Observability | Central logs, metrics, traces, alerts, kill switch and incident runbook | Open |
 | Resilience | Load/soak, failover, rollback, backup/restore and disaster recovery drills | Open |
+| Staging pipeline | Immutable GHCR image build, protected environment, pinned SSH host verification, Compose health-gated rollout | Workflow implemented; staging host, environment approvals/secrets, and live deployment evidence not yet configured |
 | Production rollout | Staging canary, SLO approval, security review and owner sign-off | Not performed |
 
 ## Deployment rules
@@ -48,6 +50,7 @@ The AICode branch CI passed on commit 5a5a24dfd64eadaab5d3bb658d827967809f668f (
 - Do not use a shared Compose env_file for API and worker; inject only the secrets each service requires.
 - Keep task worker egress restricted to the approved model provider and GitHub API.
 - Do not treat SQLite memory or local JSONL audit as multi-replica production storage.
+- Staging deployment is manual only. Configure required reviewers on the GitHub `staging` environment and use a dedicated least-privilege SSH deploy account.
 - Do not mark the complete RUSA-AI product production-ready until all applicable release gates have objective evidence and owner approval.
 
 

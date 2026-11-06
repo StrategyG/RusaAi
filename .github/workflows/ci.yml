@@ -9,6 +9,8 @@ on:
   pull_request:
     branches:
       - main
+      - "fix/**"
+      - "feat/**"
 
 permissions:
   contents: read
@@ -82,6 +84,7 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.staging.yml config --quiet
           rm .env
       - name: Build API, model, worker, and web images
         run: |

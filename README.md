@@ -97,6 +97,10 @@ docker compose --profile agent up -d --build rusa-agent-worker
 
 For local frontend development, install dependencies in apps/web and run npm run dev. The Vite development server proxies /v1 and /health to the FastAPI service. See docs/ui-ux/user-admin-workspace.md for routes, security boundaries, and setup details.
 
+## Staging deployment
+
+A manual GitHub Actions workflow can publish immutable API/model, agent-worker, and web images to GHCR and optionally deploy them to a protected staging environment. It does not deploy automatically. Configure the GitHub `staging` environment with required reviewers, host/SSH secrets, a read-only GHCR pull token, and a host-managed `.env` before selecting `deploy`. Start with `build-only` to publish and inspect images without touching a server. See [the operations runbook](docs/OPERATIONS_RUNBOOK.md#4-staging-image-publication-and-deployment).
+
 ## Agent worker
 
 Set RUSA_AGENT_ENABLED=true, DATABASE_URL, RUSA_PROVIDER_BASE_URL, RUSA_PROVIDER_ALLOWED_HOSTS, RUSA_PROVIDER_MODEL, RUSA_PROVIDER_API_KEY (when required), and RUSA_GITHUB_TOKEN in the secret-backed .env file. For a single-tenant deployment, configure RUSA_GITHUB_ALLOWED_REPOSITORIES. For a multi-tenant deployment, configure RUSA_API_KEY_TENANTS_JSON with SHA-256 API-key hashes and RUSA_GITHUB_TENANT_REPOSITORIES_JSON with a separate repository allowlist for every authenticated tenant. Remote model provider hostnames must appear in RUSA_PROVIDER_ALLOWED_HOSTS. Do not use a shared global repository allowlist for multiple tenants. Start the API and PostgreSQL with docker compose up --build -d, then start the optional worker with docker compose --profile agent up -d rusa-agent-worker. Use a GitHub App or fine-grained token restricted to the target repository. The worker does not merge or deploy.
