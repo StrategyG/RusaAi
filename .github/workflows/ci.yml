@@ -112,10 +112,10 @@ jobs:
           docker compose --file docker-compose.production.yml config --quiet
 
       - name: Build inference API image
-        run: docker build --pull --file Dockerfile --tag rusa-ai:${{ github.sha }} .
+        run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --file Dockerfile --tag rusa-ai:${{ github.sha }} .
 
       - name: Build agent runtime image
-        run: docker build --pull --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
+        run: docker build --pull --label "org.opencontainers.image.revision=$GITHUB_SHA" --file Dockerfile.worker --tag rusa-agent-runtime:${{ github.sha }} .
 
       - name: Pull pinned PostgreSQL image
         run: docker pull docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
@@ -129,8 +129,8 @@ jobs:
 
       - name: Build rollback baseline images
         run: |
-          docker build --pull --file rollback-baseline/Dockerfile --tag rusa-ai:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
-          docker build --pull --file rollback-baseline/Dockerfile.worker --tag rusa-agent-runtime:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
+          docker build --pull --label org.opencontainers.image.revision=1881dad952193cdc6bb8b9245fc293a997e553ac --file rollback-baseline/Dockerfile --tag rusa-ai:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
+          docker build --pull --label org.opencontainers.image.revision=1881dad952193cdc6bb8b9245fc293a997e553ac --file rollback-baseline/Dockerfile.worker --tag rusa-agent-runtime:1881dad952193cdc6bb8b9245fc293a997e553ac rollback-baseline
 
       - name: Exercise deployment and rollback with PostgreSQL
         env:
@@ -288,7 +288,6 @@ jobs:
           syft-version: v1.57.0
           upload-artifact: true
           upload-release-assets: false
-
 
   release-gate:
     name: Release Gate
