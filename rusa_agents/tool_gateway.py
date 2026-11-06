@@ -143,7 +143,7 @@ class DockerSandbox:
                     copy_function=bounded_copy,
                 )
                 for directory, _, filenames in os.walk(snapshot):
-                    os.chmod(directory, 0o555)  # nosec B103 - intentionally read-only sandbox snapshot  # nosec B103 - read/traverse only; Docker bind mount is read-only
+                    os.chmod(directory, 0o555)  # nosec B103 - sanitized snapshot is intentionally read-only for sandbox execution  # nosec B103 - intentionally read-only sandbox snapshot  # nosec B103 - read/traverse only; Docker bind mount is read-only
                     for filename in filenames:
                         path = Path(directory) / filename
                         if not path.is_symlink():
@@ -164,13 +164,14 @@ class DockerSandbox:
                 f"--memory={self.memory_limit}",
                 f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - container-only ephemeral tmpfs  # nosec B108 - private ephemeral container tmpfs
+                "--tmpfs", "/run/rusa-tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - container-only ephemeral tmpfs  # nosec B108 - private ephemeral container tmpfs
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,readonly",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
-                "--env", "PYTHONPYCACHEPREFIX=/tmp/pycache",
-                "--env", "HOME=/tmp",
-                "--env", "XDG_CACHE_HOME=/tmp/.cache",
-                "--env", "RUFF_CACHE_DIR=/tmp/.cache/ruff",
+                "--env", "TMPDIR=/run/rusa-tmp",
+                "--env", "PYTHONPYCACHEPREFIX=/run/rusa-tmp/pycache",
+                "--env", "HOME=/run/rusa-tmp",
+                "--env", "XDG_CACHE_HOME=/run/rusa-tmp/.cache",
+                "--env", "RUFF_CACHE_DIR=/run/rusa-tmp/.cache/ruff",
                 "--env", "PYTEST_ADDOPTS=-p no:cacheprovider",
                 "--workdir", "/workspace",
                 self.image,
