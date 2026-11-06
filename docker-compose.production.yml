@@ -3,6 +3,7 @@ services:
     image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
     pull_policy: always
     restart: unless-stopped
+    stop_grace_period: 30s
     init: true
     env_file: .env
     environment:
