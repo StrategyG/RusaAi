@@ -45,6 +45,7 @@ class AutonomyPolicy:
         "go.mod", "go.sum", "gemfile", "gemfile.lock",
         "composer.json", "composer.lock", ".npmrc", ".pypirc", ".netrc",
         ".git-credentials", "credentials.json", "secrets.json",
+        "containerfile", ".dockerignore", ".containerignore", "docker-bake.hcl",
     }
 
     def __init__(self, allowed_actions: set[str] | None = None) -> None:
@@ -67,7 +68,9 @@ class AutonomyPolicy:
         ):
             return False
         filename = parts[-1].lower()
-        if filename in AutonomyPolicy.PROTECTED_FILES:
+        if filename in AutonomyPolicy.PROTECTED_FILES or filename.startswith(
+            ("dockerfile.", "containerfile.", "docker-compose.", "compose.")
+        ):
             return False
         if filename.startswith("requirements") and filename.endswith(".txt"):
             return False
