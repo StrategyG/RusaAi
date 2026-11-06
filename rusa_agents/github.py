@@ -85,7 +85,7 @@ class GitHubToolGateway:
         if (
             timeout_seconds <= 0 or max_response_bytes < 1024 or max_file_bytes < 1024
             or not 1 <= max_check_pages <= 10 or not 1 <= max_diff_pages <= 3
-            or not 1 <= max_diff_files <= 100 or not 1024 <= max_diff_patch_chars <= 12000
+            or not 1 <= max_diff_files <= 20 or not 1024 <= max_diff_patch_chars <= 12000
             or max_diff_chars < max_diff_patch_chars
         ):
             raise ValueError("invalid GitHub gateway limits")
