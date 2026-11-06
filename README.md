@@ -190,6 +190,12 @@ The request model accepts `stream`, but Server-Sent Events are not implemented. 
 
 This branch is suitable for deploying the API/schema-validation scaffold after CI passes. It is **not** a production model-serving or autonomous-agent release until a real inference backend and the agent runtime are implemented, integrated, and tested.
 
+### Deployment controls not included
+
+- API-key authentication uses one shared service secret; there is no per-user identity, RBAC, or tenant isolation in this branch.
+- There is no built-in distributed rate limiting, TLS termination, or external secret-manager integration.
+- Before any public deployment, place the service behind a trusted TLS ingress/API gateway, apply rate limits, manage and rotate the key through a secret manager, and enforce network access controls. Do not expose the container port directly to the public internet.
+
 ## License
 
 No `LICENSE` file is currently present in the repository. Do not assume MIT redistribution rights until the repository owner adds an explicit license.
