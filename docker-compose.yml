@@ -64,6 +64,46 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  rusa-agent-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: rusa-agent-runtime:local
+    command:
+      - python
+      - -c
+      - |
+        import os
+        import psycopg
+        from rusa_agents.memory import PostgresMemoryStore
+        from rusa_agents.queue import PostgresTaskQueue
+        owner_dsn = os.environ["RUSA_AGENT_OWNER_DATABASE_URL"]
+        with psycopg.connect(owner_dsn) as connection:
+            connection.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+            connection.execute("REVOKE CREATE ON SCHEMA public FROM rusa_agent_api")
+            connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_api")
+            connection.execute("GRANT USAGE, CREATE ON SCHEMA public TO rusa_agent_worker")
+        dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
+        queue = PostgresTaskQueue(dsn)
+        queue.initialize()
+        PostgresMemoryStore(dsn).initialize()
+        queue.configure_api_permissions()
+    restart: "no"
+    environment:
+      RUSA_AGENT_OWNER_DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+      RUSA_AGENT_DATABASE_URL: postgresql://rusa_agent_worker:${RUSA_AGENT_WORKER_DB_PASSWORD:?Set RUSA_AGENT_WORKER_DB_PASSWORD}@rusa-agent-db:5432/rusa_agent
+    depends_on:
+      rusa-agent-db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+
   rusa-agent-api:
     build:
       context: .
@@ -81,10 +121,8 @@ services:
       RUSA_AGENT_TENANT_REPOSITORIES: '${RUSA_AGENT_TENANT_REPOSITORIES:?Set RUSA_AGENT_TENANT_REPOSITORIES in .env}'
       RUSA_AGENT_MAX_REQUEST_BYTES: ${RUSA_AGENT_MAX_REQUEST_BYTES:-262144}
     depends_on:
-      rusa-agent-db:
-        condition: service_healthy
-      rusa-agent-worker:
-        condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -140,8 +178,8 @@ services:
     volumes:
       - rusa-agent-audit-data:/var/lib/rusa-agent
     depends_on:
-      rusa-agent-db:
-        condition: service_healthy
+      rusa-agent-migrate:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
