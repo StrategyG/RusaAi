@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -83,8 +84,9 @@ class DockerSandbox:
             except (OSError, ToolDenied) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
+            container_name = f"rusa-sandbox-{uuid4().hex}"
             command = [
-                "docker", "run", "--rm",
+                "docker", "run", "--rm", "--name", container_name,
                 "--network=none",
                 "--read-only",
                 "--user", "10001:10001",
@@ -92,6 +94,7 @@ class DockerSandbox:
                 "--security-opt=no-new-privileges:true",
                 "--pids-limit=128",
                 f"--memory={self.memory_limit}",
+                f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,rw",
@@ -114,6 +117,15 @@ class DockerSandbox:
             except FileNotFoundError as exc:
                 return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
             except subprocess.TimeoutExpired:
+                try:
+                    subprocess.run(
+                        ["docker", "rm", "-f", container_name],
+                        check=False, capture_output=True, text=True, timeout=30,
+                        env={key: value for key, value in os.environ.items()
+                             if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
             output = (completed.stdout + "\n" + completed.stderr)[-20000:]
             return ToolResult(
