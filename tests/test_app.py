@@ -117,6 +117,7 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/Allowed"]}')
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
