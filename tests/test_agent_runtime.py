@@ -487,3 +487,19 @@ async def test_blocked_task_with_unknown_reason_requires_operator_review(databas
         await session.commit()
     with pytest.raises(ValueError):
         await runtime.resume("tenant-a", task_id)
+
+
+def test_github_tool_path_policy_blocks_secret_material():
+    from rusa_agents.tools import ToolError, _assert_safe_file_path
+
+    _assert_safe_file_path(".env.example")
+    _assert_safe_file_path("docs/architecture.md")
+    for path in (
+        ".env",
+        ".env.production",
+        "secrets/token.json",
+        ".ssh/id_rsa",
+        "certs/private.pem",
+    ):
+        with pytest.raises(ToolError):
+            _assert_safe_file_path(path)
