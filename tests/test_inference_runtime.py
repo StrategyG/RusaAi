@@ -120,7 +120,7 @@ def test_missing_weight_files_are_rejected(tmp_path):
         },
     )
     manifest_sha = sha256_file(tmp_path / "rusa-model-manifest.json")
-    with pytest.raises(ModelArtifactError, match="weight files"):
+    with pytest.raises(ModelArtifactError, match="safetensors weights"):
         verify_model_artifact(
             tmp_path,
             expected_manifest_sha256=manifest_sha,
