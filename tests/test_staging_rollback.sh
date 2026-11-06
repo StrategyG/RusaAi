@@ -57,14 +57,24 @@ CANDIDATE_API_IMAGE="$(build_and_push_api candidate 200 candidate)"
 UNHEALTHY_API_IMAGE="$(build_and_push_api unhealthy 503 unhealthy)"
 
 docker image inspect "$AGENT_IMAGE_TAG" >/dev/null
-AGENT_REGISTRY_TAG="$REGISTRY_HOST/rusa-agent-runtime:rollback-drill"
-docker tag "$AGENT_IMAGE_TAG" "$AGENT_REGISTRY_TAG"
-docker push "$AGENT_REGISTRY_TAG"
-AGENT_IMAGE="$(docker image inspect --format='{{index .RepoDigests 0}}' "$AGENT_REGISTRY_TAG")"
+build_and_push_agent() {
+  local tag="$1"
+  local release_id="$2"
+  local image="$REGISTRY_HOST/rusa-agent-runtime:$tag"
+  docker build --file scripts/testing/Dockerfile.agent-label \
+    --build-arg "BASE_IMAGE=$AGENT_IMAGE_TAG" \
+    --build-arg "RELEASE_ID=$release_id" \
+    --tag "$image" . >&2
+  docker push "$image" >&2
+  docker image inspect --format='{{index .RepoDigests 0}}' "$image"
+}
+
+PREVIOUS_AGENT_IMAGE="$(build_and_push_agent previous previous)"
+CANDIDATE_AGENT_IMAGE="$(build_and_push_agent candidate candidate)"
 
 cat > "$ENV_FILE" <<EOF
 RUSA_API_IMAGE=$PREVIOUS_API_IMAGE
-RUSA_AGENT_IMAGE=$AGENT_IMAGE
+RUSA_AGENT_IMAGE=$PREVIOUS_AGENT_IMAGE
 RUSA_API_KEY=$API_KEY
 RUSA_MODEL_DIR=$ROOT_DIR
 RUSA_PORT=18080
@@ -90,7 +100,7 @@ export RUSA_DEPLOY_HEALTH_RETRY_DELAY=1
 export COMPOSE_PROJECT_NAME="$PROJECT_NAME"
 
 # Deploy a healthy candidate through the real immutable-digest deployment path.
-"$ROOT_DIR/scripts/deploy/compose-deploy.sh" "$CANDIDATE_API_IMAGE" "$AGENT_IMAGE"
+"$ROOT_DIR/scripts/deploy/compose-deploy.sh" "$CANDIDATE_API_IMAGE" "$CANDIDATE_AGENT_IMAGE"
 grep -Fxq "RUSA_API_IMAGE=$CANDIDATE_API_IMAGE" "$ENV_FILE"
 
 # Store a sentinel row, then recreate the worker so its idempotent schema setup
@@ -106,17 +116,19 @@ compose exec -T -e PGPASSWORD="$DB_PASSWORD" rusa-agent-db \
 # Manual rollback must restore the old immutable image and preserve database data.
 "$ROOT_DIR/scripts/deploy/compose-rollback.sh"
 grep -Fxq "RUSA_API_IMAGE=$PREVIOUS_API_IMAGE" "$ENV_FILE"
+grep -Fxq "RUSA_AGENT_IMAGE=$PREVIOUS_AGENT_IMAGE" "$ENV_FILE"
 compose exec -T -e PGPASSWORD="$DB_PASSWORD" rusa-agent-db \
   psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -Atqc \
   "SELECT 1 FROM rusa_agent_memory WHERE tenant_id='rollback-ci' AND content='$SENTINEL'" | grep -qx 1
 
 # An unhealthy release must fail deployment, automatically restore the known-good
 # image, and leave the PostgreSQL volume and sentinel record intact.
-if "$ROOT_DIR/scripts/deploy/compose-deploy.sh" "$UNHEALTHY_API_IMAGE" "$AGENT_IMAGE"; then
+if "$ROOT_DIR/scripts/deploy/compose-deploy.sh" "$UNHEALTHY_API_IMAGE" "$CANDIDATE_AGENT_IMAGE"; then
   echo "Unhealthy candidate unexpectedly passed deployment readiness." >&2
   exit 1
 fi
 grep -Fxq "RUSA_API_IMAGE=$PREVIOUS_API_IMAGE" "$ENV_FILE"
+grep -Fxq "RUSA_AGENT_IMAGE=$PREVIOUS_AGENT_IMAGE" "$ENV_FILE"
 compose exec -T -e PGPASSWORD="$DB_PASSWORD" rusa-agent-db \
   psql -h 127.0.0.1 -U rusa_agent_owner -d rusa_agent -Atqc \
   "SELECT 1 FROM rusa_agent_memory WHERE tenant_id='rollback-ci' AND content='$SENTINEL'" | grep -qx 1
