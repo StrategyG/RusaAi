@@ -28,7 +28,7 @@ USER appuser
 VOLUME ["/models"]
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)" || exit 1
 
 # One worker per model process prevents duplicate checkpoint loads and GPU overcommit.
