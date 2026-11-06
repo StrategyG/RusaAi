@@ -38,7 +38,7 @@ jobs:
       - name: Checkout deployment manifest and scripts
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: main
+          ref: ${{ inputs.release_tag }}
 
       - name: Validate release tag and image digest inputs
         shell: bash
