@@ -140,6 +140,7 @@ class TransformersBackend:
             str(path),
             local_files_only=True,
             trust_remote_code=False,
+            use_safetensors=True,
             dtype=dtype,
         )
         model.to(device)
