@@ -143,6 +143,9 @@ def test_encrypted_backup_service_is_opt_in_and_not_publicly_published():
     assert "RESTORE_CONFIRM_DATABASE" in restore_script
     assert "--single-transaction" in restore_script
     assert "--clean" in restore_script
+    assert "age --decrypt" in restore_script
+    assert "| pg_restore" in restore_script
+    assert "temporary_plain" not in restore_script
 
     scheduler = services["rusa-agent-db-backup-scheduler"]
     assert scheduler["profiles"] == ["backup"]
