@@ -114,7 +114,7 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
-            "rusa-ai-worker:${{ github.sha }}" \\
+            "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -152,7 +152,8 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
-            "rusa-ai-worker:${{ github.sha }}"; do
+            "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
               --severity CRITICAL,HIGH --pkg-types os,library "${image}"
           done
