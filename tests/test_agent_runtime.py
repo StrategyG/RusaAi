@@ -990,7 +990,7 @@ async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database,
         "metrics-task-002",
         make_task(work_branch="feature/metrics-two").model_dump(),
     )
-    third = await runtime.submit(
+    await runtime.submit(
         "tenant-metrics",
         "metrics-task-003",
         make_task(work_branch="feature/metrics-three").model_dump(),
