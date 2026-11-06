@@ -244,11 +244,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         "/v1/aicode/tasks",
         headers={**api_a, "Idempotency-Key": "rls-tenant-override-001"},
         json={
-        "objective": "Tenant identity must come from credentials",
-        "repository": {"full_name": "StrategyG/RusaAi"},
-        "acceptance_criteria": ["The request tenant must be rejected"],
-        "tenant_id": "audit-b",
-    })
+            "objective": "Tenant identity must come from credentials",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["The request tenant must be rejected"],
+            "tenant_id": "audit-b",
+        },
+    )
     assert rejected_tenant_override.status_code == 422
     task_id = response.json()["task_id"]
     path = f"/v1/aicode/tasks/{task_id}"
