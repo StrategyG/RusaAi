@@ -1,10 +1,11 @@
 name: RUSA-AI CI
 
 on:
+  # PR branches are validated by pull_request only; avoid duplicate push runs.
   push:
-    branches: [main, feature/aicode-agent-enterprise, "fix/**", "feat/**"]
+    branches: [main]
   pull_request:
-    branches: [main, "fix/**", "feat/**"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
