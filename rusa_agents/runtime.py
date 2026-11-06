@@ -65,7 +65,7 @@ class AICodeRuntime:
     def _task(job: Job) -> CodingTask:
         data: dict[str, Any] = job.payload
         repository = data["repository"]
-        lease_suffix = job.lease_token.replace("-", "")[:8]
+        lease_suffix = job.lease_token.replace("-", "")[:24]
         return CodingTask(
             objective=data["objective"],
             repository=RepositoryTarget(
@@ -254,6 +254,12 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease)
+
+            def lease_is_current() -> bool:
+                return not lost_lease.is_set() and self.queue.owns_lease(
+                    job.id, job.tenant_id, self.worker_id, job.lease_token
+                )
+
             commit_sha = await self._await_with_lease(
                 asyncio.to_thread(
                     self.publisher.commit_and_push,
@@ -261,6 +267,7 @@ class AICodeRuntime:
                     task.repository.full_name,
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
+                    lease_guard=lease_is_current,
                 ),
                 lost_lease,
             )
@@ -280,6 +287,7 @@ class AICodeRuntime:
                         "\n\nAutomated test and security evidence is recorded in the task audit trail. "
                         "This pull request is draft and requires human review before merge."
                     ),
+                    lease_guard=lease_is_current,
                 ),
                 lost_lease,
             )
