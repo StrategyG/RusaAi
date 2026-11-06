@@ -65,8 +65,9 @@ def _is_absolute_uri(value: object) -> bool:
     return True
 
 
-FormatChecker.checks("date-time")(_is_rfc3339_datetime)
-FormatChecker.checks("uri")(_is_absolute_uri)
+TASK_FORMAT_CHECKER = FormatChecker()
+TASK_FORMAT_CHECKER.checks("date-time")(_is_rfc3339_datetime)
+TASK_FORMAT_CHECKER.checks("uri")(_is_absolute_uri)
 
 
 logger = logging.getLogger("rusa-ai-serve")
@@ -299,7 +300,7 @@ def _load_task_validator(schema_path: str) -> jsonschema.protocols.Validator:
 
     validator_class = jsonschema.validators.validator_for(schema)
     validator_class.check_schema(schema)
-    return validator_class(schema, format_checker=FormatChecker())
+    return validator_class(schema, format_checker=TASK_FORMAT_CHECKER)
 
 
 def get_task_validator() -> jsonschema.protocols.Validator:
