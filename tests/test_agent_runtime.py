@@ -925,3 +925,45 @@ def test_orchestrator_reuses_checkpointed_worker_result_after_restart():
     resumed = asyncio.run(orchestrator.run(task, record))
     assert resumed.state == TaskState.SUCCEEDED
     assert analyst.calls == 1
+
+
+def test_orchestrator_blocks_diff_with_detected_secret_material():
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    security = ScriptedWorker(WorkerRole.SECURITY, [worker_result(
+        WorkerRole.SECURITY, [
+            ToolCall("get_ci_status"),
+            ToolCall("get_branch_diff"),
+        ]
+    )])
+    tools = FakeTools(["passed", "passed"])
+    original_execute = tools.execute
+
+    async def execute_with_secret(task, call):
+        result = await original_execute(task, call)
+        if call.name == "get_branch_diff":
+            return ToolResult(
+                name="get_branch_diff",
+                success=True,
+                data={
+                    "base_sha": "b" * 40,
+                    "head_sha": "a" * 40,
+                    "changed_files": 1,
+                    "files": [{
+                        "path": "src/config.py",
+                        "patch": "+api_key = [REDACTED TOKEN]",
+                    }],
+                    "diff_complete": True,
+                },
+                evidence={"source": "github_compare_api", "head_sha": "a" * 40},
+            )
+        return result
+
+    tools.execute = execute_with_secret
+    record = asyncio.run(make_orchestrator(
+        tools,
+        {WorkerRole.TESTER: tester, WorkerRole.SECURITY: security},
+    ).run(make_task()))
+    assert record.state == TaskState.BLOCKED
+    assert "potential secret material" in record.errors[-1]
