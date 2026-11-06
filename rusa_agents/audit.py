@@ -1,14 +1,49 @@
-"""Append-only hash-chained audit trail with optional mandatory HMAC signing."""
+"""Append-only hash-chained audit trail with mandatory secret redaction."""
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any
+
+
+_SENSITIVE_KEY = re.compile(
+    r"(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization|credential|private[_-]?key)",
+    re.IGNORECASE,
+)
+_BEARER_VALUE = re.compile(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/-]+=*")
+_SECRET_ASSIGNMENT = re.compile(
+    r"""(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|authorization)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)"""
+)
+_PROVIDER_TOKEN = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b"
+)
+_DATABASE_PASSWORD = re.compile(r"(?i)(postgres(?:ql)?://[^:/@\s]+:)[^@\s]+(@)")
+_QUERY_SECRET = re.compile(r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|password|secret)=)[^&\s]+")
+
+
+def redact_audit_value(value: Any, key: str = "") -> Any:
+    """Remove credential-like values recursively before they are persisted or hashed."""
+    if _SENSITIVE_KEY.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(child_key): redact_audit_value(child_value, str(child_key))
+                for child_key, child_value in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_audit_value(item) for item in value]
+    if isinstance(value, str):
+        redacted = _BEARER_VALUE.sub(r"\1[REDACTED]", value)
+        redacted = _SECRET_ASSIGNMENT.sub(r"\1\2[REDACTED]", redacted)
+        redacted = _PROVIDER_TOKEN.sub("[REDACTED]", redacted)
+        redacted = _DATABASE_PASSWORD.sub(r"\1[REDACTED]\2", redacted)
+        redacted = _QUERY_SECRET.sub(r"\1[REDACTED]", redacted)
+        return redacted
+    return value
 
 
 class AuditLog:
@@ -75,7 +110,7 @@ class AuditLog:
                 "task_id": task_id,
                 "tenant_id": tenant_id,
                 "actor": actor,
-                "details": details or {},
+                "details": redact_audit_value(details or {}),
                 "previous_hash": previous,
             }
             row["record_hash"] = self._digest(row)
@@ -150,6 +185,7 @@ class PostgresAuditLog:
 
     def record(self, event: str, task_id: str, actor: str,
                details: dict[str, Any] | None = None, tenant_id: str = "default") -> None:
+        safe_details = redact_audit_value(details or {})
         with self._connect() as conn:
             conn.execute("SELECT pg_advisory_xact_lock(741203091)")
             previous_row = conn.execute(
@@ -159,7 +195,7 @@ class PostgresAuditLog:
             row = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "event": event, "task_id": task_id, "tenant_id": tenant_id,
-                "actor": actor, "details": details or {}, "previous_hash": previous,
+                "actor": actor, "details": safe_details, "previous_hash": previous,
             }
             digest = self._digest(row)
             conn.execute("""
