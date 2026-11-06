@@ -3,11 +3,12 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from itertools import islice
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import jsonschema
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import BaseModel, Field
@@ -24,7 +25,7 @@ SCHEMA_PATH = (
     / "a2a"
     / "task-envelope.schema.json"
 )
-TASK_ENVELOPE_VALIDATOR: Optional[Draft202012Validator] = None
+MAX_VALIDATION_ERRORS = 50
 
 
 def load_task_envelope_validator() -> Draft202012Validator:
@@ -32,20 +33,26 @@ def load_task_envelope_validator() -> Draft202012Validator:
     try:
         with SCHEMA_PATH.open("r", encoding="utf-8") as schema_file:
             schema = json.load(schema_file)
+
+        if not isinstance(schema, dict):
+            raise ValueError("The A2A schema root must be a JSON object.")
+        expected_draft = Draft202012Validator.META_SCHEMA["$id"]
+        if schema.get("$schema") != expected_draft:
+            raise ValueError("The A2A schema must declare JSON Schema Draft 2020-12.")
+
         Draft202012Validator.check_schema(schema)
         return Draft202012Validator(schema, format_checker=FormatChecker())
-    except (OSError, json.JSONDecodeError, jsonschema.SchemaError) as exc:
+    except (OSError, json.JSONDecodeError, ValueError, jsonschema.SchemaError) as exc:
         raise RuntimeError(
             f"Unable to load valid A2A task envelope schema at {SCHEMA_PATH}"
         ) from exc
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    global TASK_ENVELOPE_VALIDATOR
-    TASK_ENVELOPE_VALIDATOR = load_task_envelope_validator()
+async def lifespan(application: FastAPI):
+    application.state.task_envelope_validator = load_task_envelope_validator()
     yield
-    TASK_ENVELOPE_VALIDATOR = None
+    application.state.task_envelope_validator = None
 
 
 app = FastAPI(
@@ -103,29 +110,58 @@ class TaskValidationRequest(BaseModel):
 
 class TaskValidationResponse(BaseModel):
     valid: bool
-    errors: Optional[List[str]] = None
+    errors: List[str] = Field(default_factory=list)
+
+
+def _json_path(error: jsonschema.ValidationError) -> str:
+    path = "$"
+    for part in error.absolute_path:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += f".{str(part)[:80]}"
+    return path[:256]
 
 
 def _client_validation_message(error: jsonschema.ValidationError) -> str:
     """Return actionable field-level feedback without echoing submitted values."""
-    path = ".".join(str(part) for part in error.absolute_path) or "$"
+    path = _json_path(error)
+
     if error.validator == "required" and isinstance(error.instance, dict):
-        missing = sorted(set(error.validator_value) - set(error.instance))
-        field = missing[0] if missing else "field"
-        return f"{path}.{field}: is required"
-    messages = {
-        "required": "is required",
-        "additionalProperties": "contains an unsupported field",
-        "type": "has an invalid type",
-        "format": "has an invalid format",
-        "const": "does not match the required value",
-        "enum": "is not an allowed value",
-        "minLength": "is shorter than allowed",
-        "maxLength": "is longer than allowed",
-        "minItems": "contains too few items",
-        "pattern": "has an invalid format",
-    }
-    return f"{path}: {messages.get(error.validator, 'is invalid')}"
+        missing = next(
+            (
+                field
+                for field in error.validator_value
+                if field not in error.instance
+                and error.message == f"{field!r} is a required property"
+            ),
+            None,
+        )
+        if missing is None:
+            missing_fields = sorted(set(error.validator_value) - set(error.instance))
+            missing = missing_fields[0] if missing_fields else "field"
+        return f"{path}.{missing}: is required"
+
+    if error.validator == "type":
+        return f"{path}: must have type {error.validator_value}"
+    if error.validator == "format":
+        return f"{path}: must use the {error.validator_value} format"
+    if error.validator == "enum":
+        allowed = ", ".join(str(value) for value in error.validator_value)
+        return f"{path}: must be one of [{allowed}]"
+    if error.validator == "const":
+        return f"{path}: must equal the required value"
+    if error.validator == "minLength":
+        return f"{path}: must contain at least {error.validator_value} characters"
+    if error.validator == "maxLength":
+        return f"{path}: must contain at most {error.validator_value} characters"
+    if error.validator == "minItems":
+        return f"{path}: must contain at least {error.validator_value} items"
+    if error.validator == "pattern":
+        return f"{path}: does not match the required pattern"
+    if error.validator == "additionalProperties":
+        return f"{path}: contains an unsupported field"
+    return f"{path}: does not satisfy the schema"
 
 
 @app.get("/health", status_code=status.HTTP_200_OK)
@@ -175,19 +211,33 @@ def chat_completions(request: ChatCompletionRequest):
 
 
 @app.post("/v1/validate-task", response_model=TaskValidationResponse)
-def validate_task_envelope(request: TaskValidationRequest):
-    if TASK_ENVELOPE_VALIDATOR is None:
+def validate_task_envelope(
+    request: TaskValidationRequest,
+    http_request: Request,
+):
+    validator = getattr(http_request.app.state, "task_envelope_validator", None)
+    if validator is None:
         logger.error("A2A schema validator is not initialized")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Task validation is unavailable",
         )
 
+    errors = list(islice(validator.iter_errors(request.envelope), MAX_VALIDATION_ERRORS + 1))
+    has_more_errors = len(errors) > MAX_VALIDATION_ERRORS
     errors = sorted(
-        TASK_ENVELOPE_VALIDATOR.iter_errors(request.envelope),
-        key=lambda error: (list(map(str, error.absolute_path)), error.validator or ""),
+        errors[:MAX_VALIDATION_ERRORS],
+        key=lambda error: (
+            list(map(str, error.absolute_path)),
+            error.validator or "",
+            error.message,
+        ),
     )
-    return TaskValidationResponse(
-        valid=not errors,
-        errors=[_client_validation_message(error) for error in errors],
-    )
+    client_errors = [_client_validation_message(error) for error in errors]
+    if has_more_errors:
+        client_errors.append(
+            f"$: more than {MAX_VALIDATION_ERRORS} validation errors; "
+            "correct the listed issues and resubmit"
+        )
+
+    return TaskValidationResponse(valid=not client_errors, errors=client_errors)
