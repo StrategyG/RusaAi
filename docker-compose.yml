@@ -45,7 +45,7 @@ services:
         max-file: "3"
 
   rusa-agent-db:
-    image: postgres:16.15-alpine3.22
+    image: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
     restart: unless-stopped
     environment:
       POSTGRES_DB: rusa_agent

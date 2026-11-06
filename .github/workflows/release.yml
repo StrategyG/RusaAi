@@ -102,7 +102,7 @@ jobs:
           sbom: true
 
       - name: Pull pinned PostgreSQL image
-        run: docker pull postgres:16.15-alpine3.22
+        run: docker pull docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
 
       - name: Block all CRITICAL published inference API vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -149,7 +149,7 @@ jobs:
       - name: Block all CRITICAL PostgreSQL vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -159,7 +159,7 @@ jobs:
       - name: Gate PostgreSQL HIGH vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: postgres:16.15-alpine3.22
+          image-ref: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: table
           exit-code: "1"
           ignore-unfixed: "false"
@@ -228,7 +228,7 @@ jobs:
       - name: Attach PostgreSQL SBOM to release
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
-          image: postgres:16.15-alpine3.22
+          image: docker.io/library/postgres:16.14-alpine3.22@sha256:786dab398303b8ce7cb76b407bb21ef2e4dfbbbd4c6abcf3d29b3130467ffdbc
           format: cyclonedx-json
           output-file: sbom-postgres.cdx.json
           artifact-name: sbom-postgres-${{ github.ref_name }}
