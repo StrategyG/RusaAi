@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TORCH_INDEX_URL: ${RUSA_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     image: rusa-ai:local
     restart: unless-stopped
     init: true

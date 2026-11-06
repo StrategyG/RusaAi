@@ -68,10 +68,28 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        env:
+          RUSA_API_KEY: "ci-only-inference-key-123456789012345678901234567890"
+          RUSA_MODEL_DIR: "/tmp/rusa-model"
+          RUSA_AGENT_DB_PASSWORD: "ci-owner-db-password"
+          RUSA_AGENT_WORKER_DB_PASSWORD: "ci-worker-db-password"
+          RUSA_AGENT_API_DB_PASSWORD: "ci-api-db-password"
+          RUSA_AGENT_TENANT_KEYS: '{"ci-tenant":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+          RUSA_AGENT_PROVIDER_BASE_URL: "https://provider.example.invalid/v1"
+          RUSA_AGENT_PROVIDER_API_KEY: "ci-only-provider-key"
+          RUSA_AGENT_MODEL: "ci-placeholder-model"
+          RUSA_AGENT_GITHUB_TOKEN: "ci-only-github-token"
+          RUSA_AGENT_ALLOWED_REPOSITORIES: "StrategyG/RusaAi"
+          RUSA_AGENT_AUDIT_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        run: docker compose config --quiet
       - name: Build inference API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build agent runtime image
         run: docker build --pull -f Dockerfile.worker -t rusa-agent-runtime:${{ github.sha }} .
+      - name: Smoke-test agent runtime imports
+        run: |
+          docker run --rm --entrypoint python rusa-agent-runtime:${{ github.sha }} -c "from rusa_agents.api import app; import rusa_agents.worker; assert app.title == 'RUSA-AI Agent API'"
       - name: Run inference API container
         run: |
           docker run -d --name rusa-ai-ci \

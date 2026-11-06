@@ -583,6 +583,35 @@ def test_changed_head_after_tester_requires_fresh_ci_and_diff():
     assert record.stage_index == 3
 
 
+def test_changed_head_after_security_requires_master_final_ci_recheck():
+    class FinalHeadChangeTools(FakeTools):
+        def __init__(self):
+            super().__init__(["passed", "passed", "passed"])
+            self.ci_calls = 0
+
+        async def execute(self, task, call):
+            result = await super().execute(task, call)
+            if call.name == "get_ci_status":
+                self.ci_calls += 1
+                if self.ci_calls == 3:
+                    return replace(
+                        result,
+                        data={**result.data, "head_sha": "b" * 40},
+                        evidence={**result.evidence, "head_sha": "b" * 40},
+                    )
+            return result
+
+    tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
+        WorkerRole.TESTER, [ToolCall("get_ci_status")]
+    )])
+    record = asyncio.run(make_orchestrator(
+        FinalHeadChangeTools(),
+        {WorkerRole.TESTER: tester},
+    ).run(make_task()))
+    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.stage_index == 3
+
+
 def test_orchestrator_persists_each_checkpoint_and_propagates_checkpoint_failure():
     checkpoints = []
 

@@ -51,6 +51,8 @@ See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.m
 6. Restrict the GitHub App or fine-grained token to the same repository allowlist. Do not grant administration, Actions write, secrets, environments, or deployment permissions.
 7. Start the services with docker compose up --build -d.
 
+The inference image defaults to the official CPU-only PyTorch wheel index to avoid bundling CUDA runtime libraries in CPU deployments. For GPU deployments, set `RUSA_TORCH_INDEX_URL` to the official PyTorch CUDA wheel index matching the target runtime and configure the NVIDIA container runtime before building.
+
 The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS.
 
 Set Idempotency-Key on task submission to prevent duplicate tasks. Reusing the key with a different task payload is rejected. The agent generates the work branch itself under rusa-agent/{tenant-hash}/{request-hash}; clients must not select or reuse arbitrary branches. RUSA_AGENT_ALLOWED_REPOSITORIES is a comma-separated, exact owner/name allowlist enforced by both the API and GitHub gateway.

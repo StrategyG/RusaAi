@@ -35,6 +35,14 @@ The code changes require successful CI on the remediation pull request. The mode
 | Reliability operations | Backups, restore drill, rollback, alerting, incident runbook | Not implemented |
 | Production rollout | Staging soak, canary, SLO approval, owner sign-off | Not performed |
 
+## Inference image and hardware target
+
+The default inference image installs CPU-only PyTorch wheels to avoid pulling
+CUDA runtime libraries into CPU deployments. GPU deployments must override
+`RUSA_TORCH_INDEX_URL` with the official PyTorch wheel index that matches the
+target CUDA runtime, enable the NVIDIA container runtime, and repeat model
+latency/throughput and memory-capacity tests on the actual hardware.
+
 ## Queue lease fencing
 
 Every queue claim receives a cryptographically random lease token. Heartbeat,

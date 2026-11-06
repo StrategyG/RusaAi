@@ -420,6 +420,42 @@ class AICodeOrchestrator:
                     continue
 
             if record.stage_index == 7:
+                security_worker = next(
+                    (
+                        item for item in reversed(record.worker_results)
+                        if item.role == WorkerRole.SECURITY
+                    ),
+                    None,
+                )
+                security_ci = (
+                    self._tool_result(security_worker, "get_ci_status")
+                    if security_worker is not None
+                    else None
+                )
+                if security_ci is None:
+                    raise _TaskBlocked(
+                        "security worker did not provide final CI evidence"
+                    )
+                final_ci = await asyncio.wait_for(
+                    self.tools.execute(task, ToolCall("get_ci_status")),
+                    timeout=self.worker_timeout_seconds,
+                )
+                self._event(
+                    "task.final_ci",
+                    record,
+                    "rusa-master",
+                    dict(final_ci.evidence),
+                )
+                if (
+                    self._ci_outcome(final_ci) != "passed"
+                    or final_ci.data.get("head_sha")
+                    != security_ci.data.get("head_sha")
+                ):
+                    return await self._wait_for_ci(
+                        record,
+                        "branch head changed or CI stopped passing after security verification",
+                        checkpoint_callback,
+                    )
                 self._event(
                     "task.completion_candidate",
                     record,
