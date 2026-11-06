@@ -23,8 +23,8 @@ class AuditLog:
         self._lock = RLock()
         configured_key = hmac_key or os.getenv("RUSA_AUDIT_HMAC_KEY")
         self._key = configured_key.encode("utf-8") if configured_key else None
-        if require_hmac and self._key is None:
-            raise RuntimeError("RUSA_AUDIT_HMAC_KEY is required for production audit logging")
+        if require_hmac and (self._key is None or len(self._key) < 32):
+            raise RuntimeError("RUSA_AUDIT_HMAC_KEY must contain at least 32 bytes in production")
         if self.path.exists() and not self.verify():
             raise RuntimeError("Existing audit log failed integrity verification")
 
@@ -87,8 +87,8 @@ class PostgresAuditLog:
     """Central HMAC-chained audit store for multi-worker deployments."""
 
     def __init__(self, dsn: str, hmac_key: str):
-        if not dsn or not hmac_key:
-            raise ValueError("PostgreSQL DSN and audit HMAC key are required")
+        if not dsn or not hmac_key or len(hmac_key.encode("utf-8")) < 32:
+            raise ValueError("PostgreSQL DSN and an audit HMAC key of at least 32 bytes are required")
         self.dsn = dsn
         self._key = hmac_key.encode("utf-8")
 
