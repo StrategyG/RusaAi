@@ -152,7 +152,7 @@ def worker_result(role, calls=(), risk=RiskLevel.LOW, blockers=()):
         blockers=tuple(blockers),
         criteria_results={"Tests pass": True, "Security review passes": True},
         criteria_evidence={
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     )
@@ -273,7 +273,7 @@ def test_worker_contract_rejects_tool_outside_role_allowlist():
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
         "criteria_evidence": {
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     }))
@@ -290,7 +290,7 @@ def test_worker_contract_accepts_structured_read_tool():
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
         "criteria_evidence": {
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     }))
@@ -326,7 +326,7 @@ def test_security_worker_is_instructed_to_review_diff_and_ci():
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
         "criteria_evidence": {
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     }))
@@ -427,7 +427,7 @@ def test_orchestrator_blocks_when_acceptance_criteria_are_not_verified():
         tool_calls=(ToolCall("get_ci_status"),),
         criteria_results={"Tests pass": True, "Security review passes": False},
         criteria_evidence={
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:checks failed",
         },
     )])
@@ -875,7 +875,7 @@ def test_security_review_only_mode_sees_prior_diff_and_rejects_tools():
         tool_results=(ci_result, diff_result),
         criteria_results={"Tests pass": True, "Security review passes": True},
         criteria_evidence={
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     )]
@@ -886,7 +886,7 @@ def test_security_review_only_mode_sees_prior_diff_and_rejects_tools():
         "risk": "high",
         "criteria_results": {"Tests pass": True, "Security review passes": False},
         "criteria_evidence": {
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_branch_diff:unsafe eval detected",
         },
     }))
@@ -906,7 +906,7 @@ def test_security_review_only_mode_rejects_any_tool_call():
         "risk": "low",
         "criteria_results": {"Tests pass": True, "Security review passes": True},
         "criteria_evidence": {
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     }))
@@ -1019,7 +1019,7 @@ def test_task_checkpoint_omits_raw_file_write_content_and_bounds_file_reads():
         ),),
         criteria_results={"Tests pass": True, "Security review passes": True},
         criteria_evidence={
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     ))
@@ -1066,7 +1066,7 @@ def test_task_checkpoint_preserves_complete_ci_check_set():
         ),),
         criteria_results={"Tests pass": True, "Security review passes": True},
         criteria_evidence={
-            "Tests pass": "tool:get_ci_status:checks passed",
+            "Tests pass": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
             "Security review passes": "tool:get_ci_status:passed; tool:get_branch_diff:reviewed",
         },
     ))
