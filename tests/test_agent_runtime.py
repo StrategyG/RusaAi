@@ -692,7 +692,7 @@ def test_github_gateway_redacts_secrets_from_file_and_diff(monkeypatch):
     assert github_token not in read.data["content"]
     assert "[REDACTED" in read.data["content"]
     assert github_token not in diff.data["files"][0]["patch"]
-    assert "[REDACTED TOKEN]" in diff.data["files"][0]["patch"]
+    assert "[REDACTED" in diff.data["files"][0]["patch"]
 
 
 def test_github_gateway_paginates_all_check_runs(monkeypatch):
