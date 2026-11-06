@@ -95,7 +95,7 @@ class MCPRemoteServer:
                 async def handler(_tool_name=name, **arguments: Any) -> dict[str, Any]:
                     return await self.call_tool(_tool_name, arguments)
 
-                registry.register(public_name, handler)
+                registry.register(public_name, handler, tool.get("description", "MCP remote tool"), schema)
                 registered += 1
             if registered == 0:
                 raise MCPProtocolError(
