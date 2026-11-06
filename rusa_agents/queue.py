@@ -125,12 +125,6 @@ class PostgresTaskQueue:
             row = conn.execute("SELECT 1").fetchone()
         return row is not None and row[0] == 1
 
-    @staticmethod
-    def _set_tenant_context(conn: Any, tenant_id: str) -> None:
-        if not tenant_id or not tenant_id.strip():
-            raise ValueError("A non-empty tenant_id is required")
-        conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
-
     def enqueue(self, task_id: str, tenant_id: str, payload: dict[str, Any],
                 max_attempts: int = 3, priority: int = 0) -> bool:
         if not tenant_id or not task_id or max_attempts < 1:
