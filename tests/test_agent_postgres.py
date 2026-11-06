@@ -267,3 +267,19 @@ def test_postgres_queue_and_memory_readiness_require_forced_tenant_rls():
     memory.initialize()
     assert queue.check_ready() is True
     assert memory.check_ready() is True
+
+
+def test_postgres_memory_redacts_secrets_before_persistence():
+    memory = PostgresMemoryStore(DSN)
+    memory.initialize()
+    tenant_id = f"rusa-test-memory-redact-{uuid4().hex}"
+    memory.store(
+        tenant_id,
+        'configuration api_key = "raw-memory-secret-value-123456"',
+        source="redaction-integration-test",
+    )
+    results = memory.search(tenant_id, "redacted")
+    assert results
+    assert "raw-memory-secret-value-123456" not in results[0]["content"]
+    assert "[REDACTED]" in results[0]["content"]
+    memory.delete_tenant(tenant_id)
