@@ -201,8 +201,12 @@ def build_worker() -> QueueWorker:
     dsn = os.environ["RUSA_AGENT_DATABASE_URL"]
     queue = PostgresTaskQueue(dsn)
     queue.initialize()
+    if not queue.check_ready():
+        raise RuntimeError("agent task queue RLS schema is not ready")
     memory = PostgresMemoryStore(dsn)
     memory.initialize()
+    if not memory.check_ready():
+        raise RuntimeError("agent memory RLS schema is not ready")
     provider = OpenAICompatibleProvider(
         base_url=os.environ["RUSA_AGENT_PROVIDER_BASE_URL"],
         api_key=os.environ["RUSA_AGENT_PROVIDER_API_KEY"],
@@ -238,6 +242,13 @@ def build_worker() -> QueueWorker:
             tenant_id: set(repositories)
             for tenant_id, repositories in tenant_repositories.items()
         },
+        max_response_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_RESPONSE_BYTES", "2000000")),
+        max_file_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_FILE_BYTES", "1000000")),
+        max_check_pages=int(os.getenv("RUSA_AGENT_GITHUB_MAX_CHECK_PAGES", "10")),
+        max_diff_pages=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_PAGES", "3")),
+        max_diff_files=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_FILES", "20")),
+        max_diff_patch_chars=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_PATCH_CHARS", "5500")),
+        max_diff_chars=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_CHARS", "100000")),
     )
     audit = HMACAuditLog(
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
