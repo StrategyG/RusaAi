@@ -14,7 +14,7 @@ from rusa_agents.queue import PostgresTaskQueue
 
 @pytest.fixture
 def postgres_runtime():
-    dsn = os.getenv("TEST_DATABASE_URL")
+    dsn = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not dsn:
         pytest.skip("TEST_DATABASE_URL is not configured")
     tenant_id = f"pytest-{uuid.uuid4().hex}"
