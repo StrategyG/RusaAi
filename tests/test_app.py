@@ -1,7 +1,8 @@
 import uuid
 
-from app import app, set_inference_provider
 from fastapi.testclient import TestClient
+
+from app import app, set_inference_provider
 
 
 client = TestClient(app)
