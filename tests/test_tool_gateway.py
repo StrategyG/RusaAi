@@ -63,7 +63,7 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         lambda path, uid, gid: chown_calls.append((path, uid, gid)),
     )
 
-    def fake_run(command, **kwargs):
+    def fake_bounded(self, command, timeout_seconds, env, max_output_bytes):
         captured_command.extend(command)
         mount = next(item for item in command if item.startswith("type=bind,src="))
         snapshot = mount.split("src=", 1)[1].split(",dst=", 1)[0]
@@ -80,10 +80,10 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         assert not (snapshot_path / ".npmrc").exists()
         assert not (snapshot_path / "terraform.tfstate").exists()
         assert not (snapshot_path / "linked-secret.txt").exists()
-        return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
+        return 0, "passed", "completed", 6
 
     monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
-    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
+    monkeypatch.setattr(DockerSandbox, "_run_bounded", fake_bounded)
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
     assert result.evidence["profile"] == "pytest"
@@ -177,16 +177,16 @@ def test_sandbox_snapshot_excludes_non_hidden_env_files(tmp_path, monkeypatch):
     (workspace / "config.env.local").write_text("TOKEN=do-not-copy")
     (workspace / "secrets.yaml").write_text("password: do-not-copy")
 
-    def fake_run(command, **kwargs):
+    def fake_bounded(self, command, timeout_seconds, env, max_output_bytes):
         mount = next(item for item in command if item.startswith("type=bind,src="))
         snapshot = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         assert not (snapshot / "production.env").exists()
         assert not (snapshot / "config.env.local").exists()
         assert not (snapshot / "secrets.yaml").exists()
-        return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
+        return 0, "passed", "completed", 6
 
     monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
-    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
+    monkeypatch.setattr(DockerSandbox, "_run_bounded", fake_bounded)
     assert DockerSandbox(image="sandbox:test").run(workspace, "pytest").ok
 
 
@@ -210,3 +210,24 @@ def test_sandbox_snapshot_enforces_file_count_limit(tmp_path, monkeypatch):
     result = sandbox.run(workspace, "pytest")
     assert result.ok is False
     assert "file-count limit" in result.output
+
+
+
+def test_sandbox_bounded_runner_limits_output():
+    import sys
+
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stdout.write('x' * 1000000); sys.stdout.flush()",
+    ]
+    code, output, outcome, output_bytes = DockerSandbox._run_bounded(
+        command,
+        timeout_seconds=10,
+        env=os.environ.copy(),
+        max_output_bytes=4096,
+    )
+    assert outcome == "output_limit"
+    assert len(output.encode("utf-8")) <= 4096
+    assert output_bytes > 4096
+    assert code is not None
