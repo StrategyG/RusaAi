@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
@@ -34,7 +35,12 @@ class TaskCreate(BaseModel):
 
     objective: str = Field(min_length=8, max_length=8000)
     repository: str = Field(pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-    base_branch: str = Field(default="main", min_length=1, max_length=255)
+    base_branch: str = Field(
+        default="main",
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._/-]+$",
+    )
     work_branch: str = Field(min_length=3, max_length=255)
     context: str = Field(default="", max_length=20000)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=30)
@@ -59,9 +65,9 @@ class TaskCreate(BaseModel):
     @field_validator("work_branch")
     @classmethod
     def validate_work_branch(cls, value: str) -> str:
-        if not value.startswith(("feature/", "fix/", "chore/", "docs/")):
-            raise ValueError("work_branch must use feature/, fix/, chore/, or docs/ prefix")
-        if ".." in value or value.startswith("/") or value.endswith("/"):
+        if not re.fullmatch(r"(feature|fix|chore|docs)/[A-Za-z0-9._/-]+", value):
+            raise ValueError("work_branch must use a safe feature/, fix/, chore/, or docs/ ref")
+        if any(segment in {"", ".", ".."} for segment in value.split("/")):
             raise ValueError("work_branch contains an unsafe path segment")
         return value
 
