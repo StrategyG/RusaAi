@@ -14,7 +14,7 @@ from .contracts import CodingTask
 
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
-BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore"}
+BLOCKED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk"}
 BLOCKED_WRITE_NAMES = {
     ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
     "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
