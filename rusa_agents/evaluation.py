@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timezone
+import os
 from typing import Any
 
 from sqlalchemy import select
@@ -88,6 +89,12 @@ class AgentEvaluator:
 
         completed = sum(status_counts.get(name, 0) for name in TERMINAL_STATUSES)
         succeeded = status_counts.get("succeeded", 0)
+        terminal_tasks = [task for task in tasks if task.status in TERMINAL_STATUSES]
+        first_attempt_succeeded = sum(
+            1 for task in terminal_tasks
+            if task.status == "succeeded" and task.attempts == 1
+        )
+        retry_count = sum(max(0, task.attempts - 1) for task in tasks)
         reviewed_rejections = sum(
             1
             for event in audit_events
@@ -100,6 +107,19 @@ class AgentEvaluator:
             "status_counts": status_counts,
             "completion_rate": round(completed / total, 4) if total else None,
             "success_rate": round(succeeded / completed, 4) if completed else None,
+            "first_attempt_success_rate": round(
+                first_attempt_succeeded / completed, 4
+            ) if completed else None,
+            "first_attempt_success_count": first_attempt_succeeded,
+            "retry_count": retry_count,
+            "model_name": os.getenv("RUSA_AGENT_MODEL_NAME"),
+            "model_revision": os.getenv("RUSA_AGENT_MODEL_REVISION"),
+            "policy_version": os.getenv("RUSA_POLICY_VERSION"),
+            "policy_decision_accuracy": None,
+            "false_allow_count": None,
+            "false_deny_count": None,
+            "cost_per_task": None,
+            "cost_measurement_status": "NOT_MEASURED: provider token and price telemetry is not available in task rows",
             "failure_rate": round(status_counts.get("failed", 0) / completed, 4) if completed else None,
             "retry_rate": round(
                 sum(1 for task in tasks if task.attempts > 1) / total,
@@ -124,6 +144,8 @@ class AgentEvaluator:
                 "Rates are calculated over the most recent tenant-scoped task sample.",
                 "Plans counted as validated passed deterministic plan validation before persistence.",
                 "Citation validation rate reflects the synthesis citation allowlist check, not human source-quality review.",
-                "Model token usage, monetary cost, policy violation rate, and benchmark accuracy require additional instrumentation and are not inferred.",
+                "Policy decision accuracy and false-allow/false-deny counts require labeled policy-decision events; they are NOT_MEASURED.",
+                "Model token usage and monetary cost require provider usage/price telemetry; cost_per_task is NOT_MEASURED.",
+                "Model and policy revision identifiers are read from deployment environment and remain null when not configured.",
             ],
         }
