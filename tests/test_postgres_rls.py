@@ -300,6 +300,9 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert "sensitive objective sentinel" not in caplog.text
     assert key_a not in caplog.text and key_b not in caplog.text
 
+    assert not worker.authorize_execution(
+        job.id, task_id, "audit-b", "policy-test-worker", str(uuid4())
+    )
     assert worker.authorize_execution(
         job.id, task_id, "audit-b", "policy-test-worker", job.lease_token
     )
@@ -356,4 +359,5 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "api:service-b", "task.retry", "allow"),
         ("audit-b", "api:service-b", "task.cancel", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
+        ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
