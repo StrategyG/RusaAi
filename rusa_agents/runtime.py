@@ -102,8 +102,14 @@ class AICodeRuntime:
         heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
         try:
             task = self._task(job)
+            allowed_repositories = self.config.tenant_repositories.get(job.tenant_id)
+            if allowed_repositories is not None and task.repository.full_name not in allowed_repositories:
+                raise PermissionError("Tenant is not authorized for this repository")
+            if self.config.environment == "production" and not allowed_repositories:
+                raise PermissionError("Tenant has no configured repository permissions")
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
-            record = await orchestrator.run(task)
+            task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
+            record = await asyncio.wait_for(orchestrator.run(task), timeout=task_timeout)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease; refusing to publish")
             if record.state != TaskState.SUCCEEDED:
