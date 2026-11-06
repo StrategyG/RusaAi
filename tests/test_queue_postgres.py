@@ -22,9 +22,10 @@ def queue_and_tenant():
             db.execute("DELETE FROM rusa_agent_jobs WHERE tenant_id=%s", (tenant,))
 
 
-def make_payload(objective="exercise queue"):
+def make_payload(tenant_id, objective="exercise queue"):
     return {
         "task_id": str(uuid.uuid4()),
+        "tenant_id": tenant_id,
         "objective": objective,
         "repository": {
             "full_name": "StrategyG/RusaAi",
@@ -38,13 +39,13 @@ def make_payload(objective="exercise queue"):
 def test_idempotency_returns_existing_task_and_rejects_changed_payload(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    payload = make_payload()
+    payload = make_payload(tenant)
     payload["task_id"] = task_id
     first = queue.enqueue(tenant, task_id, payload, "same-idempotency-key")
     replay = queue.enqueue(tenant, task_id, payload, "same-idempotency-key")
     assert replay["task_id"] == first["task_id"]
 
-    changed = make_payload("different objective")
+    changed = make_payload(tenant, "different objective")
     with pytest.raises(ValueError, match="different task payload"):
         queue.enqueue(tenant, changed["task_id"], changed, "same-idempotency-key")
 
@@ -52,7 +53,7 @@ def test_idempotency_returns_existing_task_and_rejects_changed_payload(queue_and
 def test_lease_owner_can_heartbeat_and_complete(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    payload = make_payload()
+    payload = make_payload(tenant)
     payload["task_id"] = task_id
     queue.enqueue(tenant, task_id, payload, "lease-ownership-key")
     job = queue.claim("worker-a", lease_seconds=60)
@@ -69,7 +70,7 @@ def test_lease_owner_can_heartbeat_and_complete(queue_and_tenant):
 def test_retry_limit_transitions_job_to_failed(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    payload = make_payload()
+    payload = make_payload(tenant)
     payload["task_id"] = task_id
     queue.enqueue(tenant, task_id, payload, "retry-limit-key", max_attempts=2)
     first = queue.claim("worker-a", lease_seconds=60)
@@ -90,7 +91,7 @@ def test_retry_limit_transitions_job_to_failed(queue_and_tenant):
 def test_expired_final_attempt_is_terminalized(queue_and_tenant):
     queue, tenant = queue_and_tenant
     task_id = str(uuid.uuid4())
-    payload = make_payload()
+    payload = make_payload(tenant)
     payload["task_id"] = task_id
     queue.enqueue(tenant, task_id, payload, "expired-final-lease-key", max_attempts=1)
     job = queue.claim("worker-a", lease_seconds=60)
