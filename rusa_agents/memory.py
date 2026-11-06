@@ -34,6 +34,15 @@ class PostgresMemoryStore:
                 )
             """)
             connection.execute("""
+                ALTER TABLE rusa_agent_memory
+                ADD COLUMN IF NOT EXISTS search_vector TSVECTOR
+                GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED
+            """)
+            connection.execute("""
+                CREATE INDEX IF NOT EXISTS idx_rusa_memory_search
+                ON rusa_agent_memory USING GIN(search_vector)
+            """)
+            connection.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rusa_memory_tenant_created
                 ON rusa_agent_memory(tenant_id, namespace, created_at DESC)
             """)
@@ -82,6 +91,7 @@ class PostgresMemoryStore:
             raise ValueError("memory source must contain 1 to 512 characters")
         if not 1 <= ttl_days <= 3650:
             raise ValueError("ttl_days must be between 1 and 3650")
+        content = redact_sensitive_text(content)
         metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
         if len(metadata_json) > 8000:
             raise ValueError("memory metadata exceeds 8000 characters")
