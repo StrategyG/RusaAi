@@ -238,8 +238,17 @@ async def test_submit_is_idempotent_and_tenant_scoped(database, registry):
 @pytest.mark.asyncio
 async def test_memory_store_is_tenant_scoped(database):
     memory = MemoryStore(database)
-    await memory.put("tenant-a", "project", "architecture", "Hierarchical supervisor")
-    assert await memory.get("tenant-a", "project", "architecture") is not None
+    await memory.put(
+        "tenant-a",
+        "project",
+        "architecture",
+        "Hierarchical supervisor uses api_key=supersecretvalue",
+        {"password": "plain-secret"},
+    )
+    stored = await memory.get("tenant-a", "project", "architecture")
+    assert stored is not None
+    assert "supersecretvalue" not in stored["content"]
+    assert stored["metadata"]["password"] == "[REDACTED]"
     assert await memory.get("tenant-b", "project", "architecture") is None
     assert len(await memory.search("tenant-a", "supervisor")) == 1
     assert await memory.search("tenant-b", "supervisor") == []
@@ -338,7 +347,7 @@ async def test_rag_ingestion_retrieval_and_source_acl():
 
     index = FakeVectorIndex()
     rag = RAGService(FakeEmbeddings(), index)
-    text_value = "RUSA-AI architecture " * 180
+    text_value = ("RUSA-AI architecture api_key=supersecretvalue " * 180)
     chunks = await rag.ingest_text(
         "tenant-a",
         "design-doc",
@@ -347,6 +356,9 @@ async def test_rag_ingestion_retrieval_and_source_acl():
         {"classification": "internal"},
     )
     assert chunks > 1
+    assert "supersecretvalue" not in " ".join(
+        item["text"] for item in index.records[("tenant-a", "design-doc")]
+    )
     assert len(await rag.retrieve("tenant-a", "agent architecture")) == min(chunks, 5)
     assert await rag.retrieve(
         "tenant-a",
@@ -728,3 +740,20 @@ async def test_reviewer_rejection_pauses_until_approver_override(database):
         if item["tool"] == "agent.review_diff"
     )
     assert review["human_override"] is True
+
+
+def test_secret_redaction_handles_common_token_formats():
+    from rusa_agents.security import redact_sensitive_data
+
+    sanitized = redact_sensitive_data(
+        {
+            "api_key": "direct-secret",
+            "message": "github token ghp_123456789012345678901234567890 and Bearer abcdefghijklmnop",
+            "nested": {"password": "another-secret"},
+        }
+    )
+    assert sanitized["api_key"] == "[REDACTED]"
+    assert "direct-secret" not in str(sanitized)
+    assert "123456789012345678901234567890" not in sanitized["message"]
+    assert "abcdefghijklmnop" not in sanitized["message"]
+    assert sanitized["nested"]["password"] == "[REDACTED]"
