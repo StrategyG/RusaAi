@@ -59,7 +59,7 @@ The web login is single-tenant per deployment and is scoped to RUSA_TENANT_ID. B
 1. Start PostgreSQL and the API with RUSA_AUTH_ENABLED=true, DATABASE_URL, RUSA_AUTH_SECRET (at least 32 bytes), RUSA_TENANT_ID, RUSA_BOOTSTRAP_ADMIN_EMAIL, and RUSA_BOOTSTRAP_ADMIN_PASSWORD.
 2. Install frontend dependencies in apps/web with npm install.
 3. Run npm run dev in apps/web. Vite proxies /v1 and /health to http://127.0.0.1:8000.
-4. Open http://localhost:5173 and sign in with the bootstrap administrator.
+4. For plain HTTP local development, set RUSA_COOKIE_SECURE=false in the API environment. Open http://localhost:5173 and sign in with the bootstrap administrator.
 
 ## Run with Docker Compose
 
