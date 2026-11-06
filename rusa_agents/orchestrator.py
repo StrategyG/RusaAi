@@ -6,6 +6,7 @@ import asyncio
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
 from .memory import SQLiteMemory
+from .metrics import WORKER_STEPS
 from .policy import AutonomyPolicy
 from .workers import Worker
 
@@ -136,6 +137,9 @@ class AICodeOrchestrator:
                     record.transition(TaskState.BLOCKED)
                     break
                 result = await self.workers[role].run(task, list(record.results))
+                WORKER_STEPS.labels(
+                    role.value, "success" if result.success else "failure"
+                ).inc()
                 record.results.append(result)
                 await self._audit(
                     "worker.completed", task, role.value,
