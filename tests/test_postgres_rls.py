@@ -29,6 +29,7 @@ def apply_database_migrations():
             "003_aicode_task_results.sql",
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
+            "006_aicode_idempotency.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -232,19 +233,23 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
 
     client = TestClient(app)
     api_a = {"X-API-Key": key_a, "X-Tenant-ID": "audit-b"}
-    api_b = {"X-API-Key": key_b}
+    api_b = {"X-API-Key": key_b, "Idempotency-Key": "rls-task-create-001"}
     response = client.post("/v1/aicode/tasks", headers=api_b, json={
         "objective": "sensitive objective sentinel",
         "repository": {"full_name": "StrategyG/RusaAi"},
         "acceptance_criteria": ["The test passes"],
     })
     assert response.status_code == 202
-    rejected_tenant_override = client.post("/v1/aicode/tasks", headers=api_a, json={
-        "objective": "Tenant identity must come from credentials",
-        "repository": {"full_name": "StrategyG/RusaAi"},
-        "acceptance_criteria": ["The request tenant must be rejected"],
-        "tenant_id": "audit-b",
-    })
+    rejected_tenant_override = client.post(
+        "/v1/aicode/tasks",
+        headers={**api_a, "Idempotency-Key": "rls-tenant-override-001"},
+        json={
+            "objective": "Tenant identity must come from credentials",
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["The request tenant must be rejected"],
+            "tenant_id": "audit-b",
+        },
+    )
     assert rejected_tenant_override.status_code == 422
     task_id = response.json()["task_id"]
     path = f"/v1/aicode/tasks/{task_id}"

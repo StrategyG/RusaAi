@@ -7,6 +7,7 @@ from app import app, set_inference_provider
 from fastapi.testclient import TestClient
 
 from rusa_agents.providers import InferenceStreamEvent
+from rusa_agents.queue import IdempotencyConflictError
 
 client = TestClient(app)
 
@@ -82,10 +83,21 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     class StubQueue:
         def __init__(self):
             self.items = {}
+            self.idempotency = {}
 
-        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+        def enqueue_idempotent(
+            self, task_id, tenant_id, payload, idempotency_key, request_hash,
+            *, audit_actor=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            existing = self.idempotency.get(key)
+            if existing is not None:
+                if existing[1] != request_hash:
+                    raise IdempotencyConflictError(existing[0])
+                return existing[0], False
             self.items[(tenant_id, task_id)] = payload
-            return True
+            self.idempotency[key] = (task_id, request_hash)
+            return task_id, True
 
         def get(self, task_id, tenant_id, *, audit_actor=None):
             payload = self.items.get((tenant_id, task_id))
@@ -107,9 +119,40 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     queue = StubQueue()
     monkeypatch.setattr(app.state, "queue", queue, raising=False)
 
-    response = client.post(
+    missing_key = client.post(
         "/v1/aicode/tasks",
         headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Add a health endpoint test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert missing_key.status_code == 422
+
+    invalid_key = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "invalid key"},
+        json={
+            "objective": "Add a health endpoint test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert invalid_key.status_code == 422
+
+    openapi = client.get("/openapi.json").json()
+    parameters = openapi["paths"]["/v1/aicode/tasks"]["post"]["parameters"]
+    idempotency_header = next(
+        parameter for parameter in parameters
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["in"] == "header"
+    assert idempotency_header["required"] is True
+
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-tenant-scope-001"},
         json={
             "objective": "Add a health endpoint test",
             "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
@@ -122,6 +165,31 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert data["work_branch_prefix"].startswith("feature/aicode/")
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
+
+    replay = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-tenant-scope-001"},
+        json={
+            "objective": "Add a health endpoint test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert replay.status_code == 202
+    assert replay.json()["task_id"] == data["task_id"]
+    assert replay.json()["idempotent_replay"] is True
+    assert replay.json()["status"] == "already_submitted"
+
+    conflict = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-tenant-scope-001"},
+        json={
+            "objective": "A different objective",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["The test passes"],
+        },
+    )
+    assert conflict.status_code == 409
 
 
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
@@ -145,7 +213,7 @@ def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": production_key},
+        headers={"X-API-Key": production_key, "Idempotency-Key": "task-unauthorized-repo-001"},
         json={
             "objective": "Try another repository",
             "repository": {"full_name": "someone/private-repo"},
@@ -249,7 +317,7 @@ def test_aicode_task_intake_respects_kill_switch(monkeypatch):
     monkeypatch.setattr(app.state, "queue", object(), raising=False)
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": "tenant-key"},
+        headers={"X-API-Key": "tenant-key", "Idempotency-Key": "task-kill-switch-001"},
         json={
             "objective": "Add a test",
             "repository": {"full_name": "StrategyG/RusaAi"},
@@ -326,7 +394,7 @@ def test_task_rbac_denies_read_only_principal_and_audits_decision(monkeypatch, c
 
     response = client.post(
         "/v1/aicode/tasks",
-        headers={"X-API-Key": key},
+        headers={"X-API-Key": key, "Idempotency-Key": "task-rbac-denied-001"},
         json={
             "objective": "This must be denied",
             "repository": {"full_name": "StrategyG/RusaAi"},
