@@ -209,8 +209,10 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
         else:
             limit = int(os.getenv("RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
         try:
+            route = request.scope.get("route")
+            route_key = getattr(route, "path", request.url.path)
             allowed, retry_after = limiter.hit(
-                tenant_id, f"{request.method}:{request.url.path}", limit, 60
+                tenant_id, f"{request.method}:{route_key}", limit, 60
             )
         except Exception:
             logger.exception("Tenant rate limiter is unavailable")
