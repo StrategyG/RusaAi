@@ -9,7 +9,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import Response
@@ -355,12 +355,12 @@ def create_aicode_task(
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
-def get_aicode_task(task_id: str, tenant_id: str = Depends(verify_api_key)):
+def get_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
-        result = queue.get(task_id, tenant_id)
+        result = queue.get(str(task_id), tenant_id)
     except Exception:
         logger.exception("Could not read AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
@@ -369,16 +369,33 @@ def get_aicode_task(task_id: str, tenant_id: str = Depends(verify_api_key)):
     return result
 
 
-@app.delete("/v1/aicode/tasks/{task_id}", status_code=202)
-def cancel_aicode_task(task_id: str, tenant_id: str = Depends(verify_api_key)):
+
+@app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
+def retry_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
+    """Require an explicit tenant-authenticated retry after failure or human review."""
     queue = getattr(app.state, "queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
     try:
-        cancelled = queue.cancel(task_id, tenant_id)
+        retried = queue.retry(str(task_id), tenant_id)
+    except Exception:
+        logger.exception("Could not retry AICode task")
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    if not retried:
+        raise HTTPException(status_code=409, detail="Task is unavailable or not in a retryable state")
+    return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
+
+
+@app.delete("/v1/aicode/tasks/{task_id}", status_code=202)
+def cancel_aicode_task(task_id: UUID, tenant_id: str = Depends(verify_api_key)):
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        cancelled = queue.cancel(str(task_id), tenant_id)
     except Exception:
         logger.exception("Could not cancel AICode task")
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
-    return {"task_id": task_id, "status": "cancelled"}
+    return {"task_id": str(task_id), "status": "cancelled"}
