@@ -19,6 +19,7 @@ RUN apt-get update \
     && python -c "import setuptools, wheel; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (84, 1); assert tuple(map(int, wheel.__version__.split('.')[:2])) >= (0, 46)" \
     && rm -rf /usr/local/lib/python3.11/ensurepip \
     && find /usr/local/lib/python3.11 -type d -name "setuptools-70.3.0.dist-info" -prune -exec rm -rf "{}" + \
+    && find / -type f -name METADATA -exec sh -c 'if grep -qi "^Name: setuptools$" "$1"; then echo "SETUPTOOLS_METADATA=$1"; grep -E "^(Name|Version):" "$1"; fi' _ "{}" \; \
     && groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
 
