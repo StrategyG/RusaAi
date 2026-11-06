@@ -150,6 +150,17 @@ class WorkspaceToolGateway:
         ".netrc", "secrets.json", "token.json",
     }
     PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore"}
+    PROTECTED_WRITE_NAMES = {
+        ".env.example", ".gitignore", ".dockerignore", "requirements.txt",
+        "requirements-agent-sandbox.txt", "pyproject.toml", "dockerfile",
+        "dockerfile.agent-sandbox", "docker-compose.yml", "makefile",
+        "setup.py", "setup.cfg", "package.json", "package-lock.json",
+        "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
+        "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
+    }
+    PROTECTED_WRITE_PREFIXES = (
+        ".github/", "migrations/", "schemas/", "llm-project/configs/",
+    )
 
     def __init__(
         self,
@@ -205,6 +216,11 @@ class WorkspaceToolGateway:
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
         target = self._resolve(raw_path)
+        relative = target.relative_to(self.workspace).as_posix()
+        if target.name.lower() in self.PROTECTED_WRITE_NAMES or any(
+            relative.startswith(prefix) for prefix in self.PROTECTED_WRITE_PREFIXES
+        ):
+            raise ToolDenied("Dependency, deployment, schema, and migration files require human review")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return ToolResult(True, f"Wrote {raw_path}", {"path": raw_path, "bytes": len(content.encode("utf-8"))})
