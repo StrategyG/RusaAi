@@ -13,14 +13,6 @@ from .storage import AuditRow, Database, TaskRow
 
 
 TERMINAL_STATUSES = {"succeeded", "failed", "blocked", "cancelled"}
-EVALUATION_EVENTS = (
-    "task.awaiting_approval",
-    "policy.decision",
-    "policy.benchmark_decision",
-    "task.started",
-)
-
-
 def _percentile(values: list[float], percentile: int) -> float | None:
     """Return the nearest-rank percentile, or None for an empty sample."""
     if not values:
