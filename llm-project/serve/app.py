@@ -854,9 +854,10 @@ def create_aicode_task(
         },
         "acceptance_criteria": request.acceptance_criteria,
     }
+    status_value = "queued"
     try:
         if idempotency_key is not None:
-            task_id, created, status_value = queue.enqueue_idempotent(
+            task_id, _, status_value = queue.enqueue_idempotent(
                 task_id,
                 tenant_id,
                 payload,
