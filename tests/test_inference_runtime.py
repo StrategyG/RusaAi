@@ -126,3 +126,14 @@ def test_missing_weight_files_are_rejected(tmp_path):
             expected_manifest_sha256=manifest_sha,
             require_pinned_manifest=True,
         )
+
+
+def test_unmanifested_extra_weight_shard_is_rejected(tmp_path):
+    manifest_sha = build_artifact(tmp_path)
+    (tmp_path / "extra-shard.safetensors").write_bytes(b"unlisted weights")
+    with pytest.raises(ModelArtifactError, match="Unmanifested model artifact file"):
+        verify_model_artifact(
+            tmp_path,
+            expected_manifest_sha256=manifest_sha,
+            require_pinned_manifest=True,
+        )
