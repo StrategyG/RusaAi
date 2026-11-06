@@ -37,7 +37,7 @@ SCHEMA_PATH = (
     / "task-envelope.schema.json"
 )
 MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", str(1_048_576)))
-MAX_BATCH_SIZE = int(os.getenv("RUSA_MAX_BATCH_SIZE", "16"))
+MAX_BATCH_SIZE = int(os.getenv("RUSA_MAX_BATCH_SIZE", "4"))
 MAX_TOKENS = int(os.getenv("RUSA_MAX_TOKENS", "4096"))
 QUEUE_TIMEOUT_SECONDS = float(os.getenv("RUSA_QUEUE_TIMEOUT_SECONDS", "30"))
 
@@ -396,15 +396,21 @@ async def chat_completions(
                         "model": runtime.model_name,
                         "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
                     }, ensure_ascii=False) + "\n\n"
+                stream_usage = runtime.count_usage(messages, "".join(streamed_pieces))
+                stream_finish_reason = (
+                    "length"
+                    if stream_usage["completion_tokens"] >= payload.max_tokens
+                    else "stop"
+                )
                 yield "data: " + json.dumps({
                     "id": response_id,
                     "object": "chat.completion.chunk",
                     "created": created,
                     "model": runtime.model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": stream_finish_reason}],
                 }) + "\n\n"
                 if payload.stream_options and payload.stream_options.include_usage:
-                    usage = runtime.count_usage(messages, "".join(streamed_pieces))
+                    usage = stream_usage
                     yield "data: " + json.dumps({
                         "id": response_id,
                         "object": "chat.completion.chunk",
