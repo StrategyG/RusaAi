@@ -6,11 +6,13 @@ on:
       - main
       - "fix/**"
       - "feat/**"
+      - "integration/staging-baseline-*"
   pull_request:
     branches:
       - main
       - "fix/**"
       - "feat/**"
+      - "integration/staging-baseline-*"
 
 permissions:
   contents: read
