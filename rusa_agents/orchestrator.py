@@ -119,14 +119,14 @@ class AICodeOrchestrator:
         checks = result.data.get("checks", [])
         if not checks:
             return "pending"
+        if any(item.get("status") != "completed" for item in checks):
+            return "pending"
         required = {
             item.get("name"): item for item in checks
             if item.get("name") in self.required_ci_checks
         }
         if not self.required_ci_checks.issubset(required):
-            return "pending"
-        if any(required[name].get("status") != "completed" for name in self.required_ci_checks):
-            return "pending"
+            return "failed"
         if any(required[name].get("conclusion") != "success" for name in self.required_ci_checks):
             return "failed"
         return "passed"

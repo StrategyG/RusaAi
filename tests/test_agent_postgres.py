@@ -1,8 +1,8 @@
 import os
 from uuid import uuid4
 
-import pytest
 import psycopg
+import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget, TaskRecord, TaskState
 from rusa_agents.memory import PostgresMemoryStore
@@ -72,7 +72,7 @@ def test_postgres_memory_is_tenant_scoped_and_deletable():
     assert memory.search("tenant-memory-a", marker) == []
 
 
-def test_postgres_row_level_security_filters_other_tenants():
+def test_postgres_row_level_security_filters_and_rejects_other_tenants():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
     memory = PostgresMemoryStore(DSN)
@@ -96,7 +96,7 @@ def test_postgres_row_level_security_filters_other_tenants():
             $$
         """)
         connection.execute("GRANT USAGE ON SCHEMA public TO rusa_agent_test_rls")
-        connection.execute("GRANT SELECT ON rusa_agent_tasks TO rusa_agent_test_rls")
+        connection.execute("GRANT SELECT, INSERT ON rusa_agent_tasks TO rusa_agent_test_rls")
         connection.execute("GRANT SELECT ON rusa_agent_memory TO rusa_agent_test_rls")
         connection.execute("SET ROLE rusa_agent_test_rls")
         connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("tenant-rls-a",))
@@ -111,3 +111,16 @@ def test_postgres_row_level_security_filters_other_tenants():
 
     assert task_rows == [("tenant-rls-a", id_a)]
     assert memory_rows == [("tenant-rls-a", f"rls memory {marker}")]
+
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with psycopg.connect(DSN) as connection:
+            connection.execute("SET ROLE rusa_agent_test_rls")
+            connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", ("tenant-rls-a",))
+            connection.execute(
+                """
+                INSERT INTO rusa_agent_tasks
+                    (tenant_id, task_id, idempotency_key, payload)
+                VALUES (%s, %s, %s, '{}'::jsonb)
+                """,
+                ("tenant-rls-b", f"forbidden-{marker}", f"forbidden-{marker}"),
+            )

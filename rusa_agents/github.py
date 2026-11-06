@@ -61,6 +61,17 @@ class GitHubToolGateway:
             raise RuntimeError("GitHub API returned an unexpected response")
         return result
 
+    def _check_regular_file_size(self, result: dict[str, Any]) -> int:
+        try:
+            size = int(result.get("size", 0))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("GitHub returned an invalid file size") from exc
+        if size < 0 or size > self.max_file_bytes:
+            raise RuntimeError("repository file exceeds the configured size limit")
+        if size and result.get("encoding") != "base64":
+            raise RuntimeError("repository file is not available as bounded base64 content")
+        return size
+
     async def _ensure_branch(self, task: CodingTask) -> dict[str, Any]:
         root = self._root(task)
         branch = quote(task.repository.work_branch, safe="/")
@@ -96,6 +107,7 @@ class GitHubToolGateway:
         )
         if not isinstance(result, dict) or result.get("type") != "file":
             raise RuntimeError("repository file was not found or is not a regular file")
+        self._check_regular_file_size(result)
         encoded = result.get("content", "").replace("\n", "")
         content = base64.b64decode(encoded)
         if len(content) > self.max_file_bytes:
@@ -122,8 +134,10 @@ class GitHubToolGateway:
         current = await self._request(
             "GET", endpoint, params={"ref": task.repository.work_branch}, allow_not_found=True,
         )
-        if isinstance(current, dict) and current.get("type") != "file":
-            raise PermissionError("agent writes cannot replace symlinks or non-regular files")
+        if isinstance(current, dict):
+            if current.get("type") != "file":
+                raise PermissionError("agent writes cannot replace symlinks or non-regular files")
+            self._check_regular_file_size(current)
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         if isinstance(current, dict):
             old_content = base64.b64decode(current.get("content", "").replace("\n", ""))
