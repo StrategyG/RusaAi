@@ -10,7 +10,7 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import GenerationResult, app, _load_task_validator  # noqa: E402
+from app import GenerationResult, _load_task_validator, app  # noqa: E402
 
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
