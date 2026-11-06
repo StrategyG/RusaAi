@@ -227,7 +227,6 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
     return tenant_id
 
 
-
 def verify_metrics_key(x_api_key: str | None = Header(default=None)) -> None:
     """Metrics are operator-only and never accept tenant-scoped API keys."""
     expected = os.getenv("RUSA_METRICS_API_KEY")
