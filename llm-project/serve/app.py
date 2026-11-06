@@ -109,6 +109,10 @@ class TaskValidationResponse(BaseModel):
 def _client_validation_message(error: jsonschema.ValidationError) -> str:
     """Return actionable field-level feedback without echoing submitted values."""
     path = ".".join(str(part) for part in error.absolute_path) or "$"
+    if error.validator == "required" and isinstance(error.instance, dict):
+        missing = sorted(set(error.validator_value) - set(error.instance))
+        field = missing[0] if missing else "field"
+        return f"{path}.{field}: is required"
     messages = {
         "required": "is required",
         "additionalProperties": "contains an unsupported field",
