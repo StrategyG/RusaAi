@@ -52,7 +52,9 @@ class ScriptedWorker:
         self.role = role
         self.results = deque(results)
 
-    async def run(self, task, prior_results):
+    async def run(self, task, prior_results, *, review_only=False):
+        if review_only:
+            return worker_result(self.role)
         if not self.results:
             return worker_result(self.role)
         return self.results.popleft()
@@ -105,8 +107,20 @@ class FakeTools:
                         "patch": "+return True",
                     }],
                     "diff_complete": True,
+                    "sensitive_content_detected": False,
                 },
                 evidence={"source": "github_compare_api", "head_sha": "a" * 40},
+            )
+        if call.name == "create_pull_request":
+            return ToolResult(
+                name=call.name,
+                success=True,
+                data={
+                    "number": 1,
+                    "url": "https://github.com/StrategyG/RusaAi/pull/1",
+                    "draft": True,
+                },
+                evidence={"source": "github_pull_requests_api"},
             )
         return ToolResult(
             name=call.name,
@@ -143,14 +157,21 @@ def make_orchestrator(tools, overrides=None, audit=None):
     overrides = overrides or {}
     workers = []
     for role in WorkerRole:
-        default_result = (
-            worker_result(
+        if role == WorkerRole.SECURITY:
+            default_result = worker_result(
                 role,
                 [ToolCall("get_ci_status"), ToolCall("get_branch_diff")],
             )
-            if role == WorkerRole.SECURITY
-            else worker_result(role)
-        )
+        elif role == WorkerRole.DEVELOPER:
+            default_result = worker_result(
+                role,
+                [
+                    ToolCall("create_branch"),
+                    ToolCall("create_pull_request", {"title": "RUSA-AI autonomous change"}),
+                ],
+            )
+        else:
+            default_result = worker_result(role)
         workers.append(overrides.get(role, ScriptedWorker(role, [default_result])))
     return AICodeOrchestrator(
         workers=workers,
@@ -305,7 +326,10 @@ def test_orchestrator_checkpoints_while_ci_is_pending_then_resumes():
 
 def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
     developer = ScriptedWorker(WorkerRole.DEVELOPER, [
-        worker_result(WorkerRole.DEVELOPER, [ToolCall("create_branch")]),
+        worker_result(WorkerRole.DEVELOPER, [
+            ToolCall("create_branch"),
+            ToolCall("create_pull_request", {"title": "RUSA-AI repair"}),
+        ]),
         worker_result(WorkerRole.DEVELOPER, [ToolCall(
             "write_file", {"path": "rusa_agents/fix.py", "content": "fixed"}
         )]),
@@ -702,3 +726,43 @@ def test_agent_control_plane_modifications_require_human_review(path):
     )
     assert decision.allowed is False
     assert decision.requires_approval is True
+
+
+def test_security_worker_review_only_mode_does_not_call_tools():
+    response = json.dumps({
+        "summary": "Reviewed the exact diff and CI evidence",
+        "tool_calls": [],
+        "blockers": [],
+        "risk": "low",
+        "criteria_results": {"Tests pass": True, "Security review passes": True},
+    })
+    provider = FakeProvider(response)
+    worker = AgentWorker(WorkerRole.SECURITY, provider)
+    result = asyncio.run(worker.run(make_task(), [], review_only=True))
+    assert result.tool_calls == ()
+    assert "review-only" in provider.last_system.lower()
+    assert "changed-file patch" in provider.last_system.lower()
+
+
+def test_orchestrator_revalidates_commit_after_security_review():
+    class ChangesAtFinalCiTools(FakeTools):
+        def __init__(self):
+            super().__init__(["passed"])
+            self.ci_reads = 0
+
+        async def execute(self, task, call):
+            result = await super().execute(task, call)
+            if call.name == "get_ci_status":
+                self.ci_reads += 1
+                if self.ci_reads >= 3:
+                    return ToolResult(
+                        name=result.name,
+                        success=True,
+                        data={**result.data, "head_sha": "c" * 40},
+                        evidence={"source": "github_check_runs_api", "head_sha": "c" * 40},
+                    )
+            return result
+
+    record = asyncio.run(make_orchestrator(ChangesAtFinalCiTools()).run(make_task()))
+    assert record.state == TaskState.WAITING_EXTERNAL
+    assert record.stage_index == 3
