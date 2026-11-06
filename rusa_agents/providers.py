@@ -66,6 +66,7 @@ class OpenAICompatibleProvider:
         self.request_count += 1
         self.last_usage = None
         usage_recorded = False
+        usage_accounted = False
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
                 response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
@@ -89,13 +90,15 @@ class OpenAICompatibleProvider:
                             self.usage_totals[key] += value
                         self.usage_calls += 1
                         usage_recorded = True
+                        usage_accounted = True
                 if not usage_recorded:
                     self.usage_missing_calls += 1
+                    usage_accounted = True
                 content = data["choices"][0]["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
                     raise ModelProviderError("Model provider returned empty content")
                 return content.strip()
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            if not usage_recorded:
+            if not usage_accounted:
                 self.usage_missing_calls += 1
             raise ModelProviderError("Model provider request failed or returned an invalid response") from exc
