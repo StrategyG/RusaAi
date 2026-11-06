@@ -86,6 +86,8 @@ class DockerSandbox:
                 )
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
+        if not DOCKER_BIN:
+            return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:
             raise ToolDenied(f"Unknown validation profile: {profile}")
         workspace = workspace.resolve(strict=True)
@@ -143,7 +145,7 @@ class DockerSandbox:
                     copy_function=bounded_copy,
                 )
                 for directory, _, filenames in os.walk(snapshot):
-                    os.chmod(directory, 0o555)  # nosec B103 - sanitized snapshot is intentionally read-only for sandbox execution  # nosec B103 - intentionally read-only sandbox snapshot  # nosec B103 - read/traverse only; Docker bind mount is read-only
+                    os.chmod(directory, 0o555)  # nosec B103 - read/traverse only; snapshot is mounted read-only in Docker
                     for filename in filenames:
                         path = Path(directory) / filename
                         if not path.is_symlink():
@@ -164,7 +166,7 @@ class DockerSandbox:
                 f"--memory={self.memory_limit}",
                 f"--memory-swap={self.memory_limit}",
                 f"--cpus={self.cpu_limit}",
-                "--tmpfs", "/run/rusa-tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - container-only ephemeral tmpfs  # nosec B108 - private ephemeral container tmpfs
+                "--tmpfs", "/run/rusa-tmp:rw,noexec,nosuid,size=256m",  # nosec B108 - private ephemeral container tmpfs
                 "--mount", f"type=bind,src={snapshot},dst=/workspace,readonly",
                 "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--env", "TMPDIR=/run/rusa-tmp",
