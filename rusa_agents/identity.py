@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """Database-backed user identity, Argon2 passwords, JWT access tokens and rotating refresh sessions."""
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import app  # noqa: E402
+from app import app  # noqa: E402, I001
 
 
 ADMIN_ID = str(uuid.uuid4())

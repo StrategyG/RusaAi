@@ -16,7 +16,17 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import jsonschema
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from jsonschema import FormatChecker
@@ -352,7 +362,7 @@ def get_current_user(
 
 
 def require_admin(
-    user: dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ) -> dict[str, Any]:
     if user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required")
@@ -1117,14 +1127,14 @@ def logout(
 
 
 @app.get("/v1/auth/me")
-def current_user_profile(user: dict[str, Any] = Depends(get_current_user)):
+def current_user_profile(user: dict[str, Any] = Depends(get_current_user)):  # noqa: B008
     return {"user": user}
 
 
 @app.get("/v1/ui/overview")
 def workspace_overview(
     http_request: Request,
-    user: dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ):
     queue = getattr(http_request.app.state, "task_queue", None)
     agent_enabled = os.getenv("RUSA_AGENT_ENABLED", "false").lower() == "true"
@@ -1156,7 +1166,7 @@ def list_my_agent_tasks(
     http_request: Request,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    user: dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),  # noqa: B008
 ):
     if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
         raise HTTPException(status_code=503, detail="Agent task processing is disabled")
@@ -1176,7 +1186,7 @@ def list_my_agent_tasks(
 @app.get("/v1/admin/overview")
 def admin_overview(
     http_request: Request,
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     queue = getattr(http_request.app.state, "task_queue", None)
     agent_enabled = os.getenv("RUSA_AGENT_ENABLED", "false").lower() == "true"
@@ -1208,7 +1218,7 @@ def admin_list_users(
     http_request: Request,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     identity = _identity_store(http_request)
     return {
@@ -1223,7 +1233,7 @@ def admin_list_users(
 def admin_create_user(
     request: AdminUserCreateRequest,
     http_request: Request,
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     identity = _identity_store(http_request)
     try:
@@ -1248,7 +1258,7 @@ def admin_update_user(
     user_id: uuid.UUID,
     request: AdminUserUpdateRequest,
     http_request: Request,
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     if request.role is None and request.is_active is None:
         raise HTTPException(status_code=422, detail="At least one user field must be updated")
@@ -1272,7 +1282,7 @@ def admin_list_tasks(
     http_request: Request,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
         raise HTTPException(status_code=503, detail="Agent task processing is disabled")
@@ -1293,7 +1303,7 @@ def admin_list_tasks(
 def admin_retry_task(
     task_id: uuid.UUID,
     http_request: Request,
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
@@ -1313,7 +1323,7 @@ def admin_retry_task(
 def admin_cancel_task(
     task_id: uuid.UUID,
     http_request: Request,
-    admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),  # noqa: B008
 ):
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
