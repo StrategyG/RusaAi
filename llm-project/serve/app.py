@@ -153,7 +153,6 @@ async def lifespan(application: FastAPI):
     application.state.task_policy_audit = None
     application.state.inference_admission = _new_inference_admission_controller()
     local_backend = None
-    local_backend = None
     try:
         local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH")
         if local_model_path:
