@@ -72,3 +72,64 @@ class SQLiteMemory:
         item = dict(row)
         item["payload"] = json.loads(item["payload"])
         return item
+
+
+class PostgresMemory:
+    """Shared tenant-aware memory for multi-worker production deployments."""
+
+    def __init__(self, dsn: str):
+        if not dsn:
+            raise ValueError("PostgreSQL DSN is required")
+        self.dsn = dsn
+
+    def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Install psycopg to use PostgresMemory") from exc
+        return psycopg.connect(self.dsn)
+
+    def initialize(self) -> None:
+        with self._connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS aicode_memory (
+                    tenant_id TEXT NOT NULL,
+                    task_id UUID NOT NULL,
+                    repository TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, task_id)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_aicode_memory_tenant_repo
+                ON aicode_memory(tenant_id, repository)
+            """)
+
+    def save(self, task_id: str, repository: str, state: str,
+             payload: dict[str, Any], tenant_id: str = "default") -> None:
+        if not tenant_id:
+            raise ValueError("tenant_id is required")
+        with self._connect() as conn:
+            conn.execute("""
+                INSERT INTO aicode_memory(tenant_id, task_id, repository, state, payload)
+                VALUES (%s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (tenant_id, task_id) DO UPDATE SET
+                    repository=EXCLUDED.repository, state=EXCLUDED.state,
+                    payload=EXCLUDED.payload, updated_at=NOW()
+            """, (tenant_id, task_id, repository, state, json.dumps(payload, ensure_ascii=False)))
+
+    def get(self, task_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("""
+                SELECT tenant_id, task_id::text, repository, state, payload, updated_at
+                FROM aicode_memory WHERE task_id=%s AND tenant_id=%s
+            """, (task_id, tenant_id)).fetchone()
+        if row is None:
+            return None
+        payload = row[4] if isinstance(row[4], dict) else json.loads(row[4])
+        return {
+            "tenant_id": row[0], "task_id": row[1], "repository": row[2],
+            "state": row[3], "payload": payload, "updated_at": row[5].isoformat(),
+        }
