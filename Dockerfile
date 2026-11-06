@@ -1,12 +1,17 @@
 FROM python:3.11-slim AS builder
 
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /build
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN python -m pip install --no-cache-dir --prefix=/install \
+    --index-url "${PYTORCH_INDEX_URL}" \
+    --extra-index-url https://pypi.org/simple \
+    -r requirements.txt
 
 FROM python:3.11-slim AS runtime
 
