@@ -224,3 +224,14 @@ Use a TLS reverse proxy/API gateway in production. Enforce distributed rate limi
 ## 10. Production status boundary
 
 This implementation is an enterprise-oriented runtime foundation, not a claim that the full RUSA-AI product is production-certified. A real provider, GitHub token with minimum repository permissions, PostgreSQL instance, model endpoint, model evaluation dataset, and target deployment environment must be configured and tested. A green CI pipeline proves code checks for the commit; it does not prove model quality, capacity, security certification, or production SLOs.
+
+
+## 11. Runtime hardening and evidence integrity
+
+The autonomous runtime persists a fenced task checkpoint after each orchestration stage and completed worker result. Checkpoint writes are accepted only while the caller owns the current unexpired lease token; a stale worker cannot overwrite newer progress. Queue readiness and worker health checks fail closed unless forced row-level security and the expected tenant policy are present on both task and memory tables.
+
+The GitHub gateway binds each task to a deterministic tenant/task work-branch namespace, enforces per-tenant repository allowlists, redacts credential-like material from repository reads and diffs, paginates check-run evidence with bounded page counts, and produces a bounded base-to-work-branch diff for security review. Security review is read-only and must review the complete diff. After the review, the orchestrator re-reads the diff and CI status and requires the exact same base and head commit SHAs, closing the review-time time-of-check/time-of-use window.
+
+The agent API bounds request bytes and applies a total body-intake timeout, including chunked requests without Content-Length. CI is enabled for pull requests targeting any branch so stacked development PRs receive checks; Compose interpolation is validated in CI.
+
+These controls strengthen the implementation but do not replace production controls such as branch protection, secret rotation, external immutable audit retention, load/soak tests, disaster-recovery drills, and a versioned real-model evaluation benchmark.
