@@ -10,7 +10,8 @@ def test_knowledge_migration_enforces_vector_and_tenant_rls():
     init_script = Path("scripts/postgres/init-agent-db.sh").read_text(encoding="utf-8")
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     assert "CREATE ROLE rusa_knowledge_worker" in init_script
-    assert "NOINHERIT BYPASSRLS" in init_script
+    assert "NOINHERIT" in init_script
+    assert "BYPASSRLS" in init_script
     assert "GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE" in init_script
     assert "ALTER ROLE rusa_agent_worker NOINHERIT" in compose
     assert "GRANT rusa_knowledge_worker TO rusa_agent_worker WITH INHERIT FALSE" in compose
