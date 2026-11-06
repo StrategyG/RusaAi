@@ -161,7 +161,7 @@ jobs:
           exit 1
       - name: Run inference API container
         run: |
-          docker run -d --restart unless-stopped --name rusa-ai-ci \
+          docker run -d --init --restart unless-stopped --name rusa-ai-ci \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
             rusa-ai:${{ github.sha }}
@@ -177,7 +177,7 @@ jobs:
           exit 1
       - name: Verify inference process crash recovery
         run: |
-          docker kill --signal=KILL rusa-ai-ci || true
+          docker exec rusa-ai-ci python -c 'import os, signal; me = os.getpid(); pids = [int(item) for item in os.listdir("/proc") if item.isdigit() and int(item) > 1 and int(item) != me]; app_pid = next((pid for pid in pids if b"uvicorn" in open(f"/proc/{pid}/cmdline", "rb").read()), None); assert app_pid is not None, "uvicorn process not found"; os.kill(app_pid, signal.SIGKILL)' || true
           for attempt in $(seq 1 30); do
             restart_count="$(docker inspect --format '{{.RestartCount}}' rusa-ai-ci)"
             if [ "$restart_count" -ge 1 ] && curl --fail --silent --max-time 3 http://127.0.0.1:8000/health/live; then
