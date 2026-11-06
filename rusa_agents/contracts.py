@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -78,6 +79,22 @@ class CodingTask:
     task_id: str = field(default_factory=lambda: str(uuid4()))
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def has_tenant_scoped_work_branch(self) -> bool:
+        """Verify that the isolated work branch is bound to this tenant and task key."""
+        tenant_slug = re.sub(
+            r"[^A-Za-z0-9_.-]+", "-", self.tenant_id
+        ).strip(".-_")[:24] or "tenant"
+        identity = self.idempotency_key or self.task_id
+        digest = hashlib.sha256(
+            f"{self.tenant_id}:{identity}".encode("utf-8")
+        ).hexdigest()[:12]
+        prefix = f"rusa-agent/{tenant_slug}/"
+        if not self.repository.work_branch.startswith(prefix):
+            return False
+        tail = self.repository.work_branch[len(prefix):]
+        suffix = f"-{digest}"
+        return "/" not in tail and len(tail) > len(suffix) and tail.endswith(suffix)
 
     def __post_init__(self) -> None:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", self.tenant_id):
