@@ -5,6 +5,9 @@ from rusa_agents.config import RuntimeConfig
 
 def test_production_config_requires_security_and_runtime_controls(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_WORKER_DATABASE_URL", "postgresql://rusa_worker_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_USER", "rusa_api_runtime_login")
     monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://runtime:secret@db/rusa?sslmode=verify-full")
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_API_KEYS", '{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":"tenant-a"}')
@@ -23,6 +26,9 @@ def test_production_config_requires_security_and_runtime_controls(monkeypatch):
 
 def test_production_config_rejects_mutable_sandbox_tag(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_WORKER_DATABASE_URL", "postgresql://rusa_worker_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_USER", "rusa_api_runtime_login")
     monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://db/rusa?sslmode=require")
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_API_KEYS", '{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":"tenant-a"}')
@@ -47,7 +53,12 @@ def test_config_rejects_malformed_tenant_mapping(monkeypatch):
 
 def test_production_config_requires_tls_for_database_and_model(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://runtime:secret@db/rusa")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_WORKER_DATABASE_URL", "postgresql://rusa_worker_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_USER", "rusa_api_runtime_login")
+    monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://runtime:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa")
+
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_API_KEYS", '{"' + "a" * 40 + '":"tenant-a"}')
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
@@ -64,6 +75,9 @@ def test_production_config_requires_tls_for_database_and_model(monkeypatch):
 
 def test_production_config_rejects_invalid_sandbox_digest(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_WORKER_DATABASE_URL", "postgresql://rusa_worker_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_USER", "rusa_api_runtime_login")
     monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://db/rusa?sslmode=require")
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_API_KEYS", '{"' + "a" * 40 + '":"tenant-a"}')
@@ -100,6 +114,9 @@ def test_aicode_kill_switch_rejects_ambiguous_values(monkeypatch):
 
 def test_production_config_rejects_public_placeholder_secrets(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_API_DATABASE_URL", "postgresql://rusa_api_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_WORKER_DATABASE_URL", "postgresql://rusa_worker_runtime_login:secret@db/rusa?sslmode=verify-full")
+    monkeypatch.setenv("RUSA_API_DATABASE_USER", "rusa_api_runtime_login")
     monkeypatch.setenv("RUSA_DATABASE_URL", "postgresql://runtime:secret@db/rusa?sslmode=verify-full")
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "AT_LEAST_32_RANDOM_UTF8_BYTES")
     monkeypatch.setenv("RUSA_API_KEYS", '{"' + "a" * 40 + '":"tenant-a"}')
