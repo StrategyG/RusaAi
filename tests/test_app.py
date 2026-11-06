@@ -465,8 +465,6 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
     assert response.status_code == 404
 
 
-
-
 def test_aicode_task_intake_is_idempotent_for_client_retries(monkeypatch):
     class IdempotentQueue:
         def __init__(self):
