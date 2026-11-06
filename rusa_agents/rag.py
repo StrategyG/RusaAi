@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 from sqlalchemy import text
 
+from .security import redact_sensitive_data
 from .storage import Database
 
 
@@ -181,6 +182,9 @@ class RAGService:
             raise ValueError("tenant, source, title, and content are required")
         if len(content) > 2_000_000:
             raise ValueError("Document exceeds the 2 MB ingestion limit")
+        content = redact_sensitive_data(content)
+        title = redact_sensitive_data(title)
+        metadata = redact_sensitive_data(metadata or {})
         chunks = self._chunks(content)
         embeddings = await self.embeddings.embed_documents(chunks)
         if len(embeddings) != len(chunks):
@@ -190,7 +194,7 @@ class RAGService:
             chunk_id = hashlib.sha256(f"{tenant_id}:{source_id}:{index}:{chunk}".encode("utf-8")).hexdigest()
             records.append({
                 "chunk_id": chunk_id, "title": title[:500], "text": chunk,
-                "metadata": {**(metadata or {}), "chunk_index": index}, "embedding": embedding,
+                "metadata": {**metadata, "chunk_index": index}, "embedding": embedding,
             })
         await self.index.upsert(tenant_id, source_id, records)
         return len(records)
