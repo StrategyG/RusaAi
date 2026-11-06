@@ -4,7 +4,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: rusa-ai:local
     restart: unless-stopped
     init: true
     ports:
@@ -70,7 +69,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    image: rusa-agent-runtime:local
     command: ["uvicorn", "rusa_agents.api:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
     restart: unless-stopped
     init: true
@@ -100,6 +98,7 @@ services:
         max-file: "3"
 
   rusa-agent-worker:
+    image: ${RUSA_AGENT_IMAGE:-rusa-agent-runtime:local}
     build:
       context: .
       dockerfile: Dockerfile.worker
