@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${CI:-}" != "true" ]]; then
+  echo "This destructive Compose smoke test is CI-only." >&2
+  exit 2
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -10,7 +15,7 @@ if [[ ! -f .env ]]; then
   created_env=1
 fi
 
-compose=(docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability)
+compose=(docker compose -p "rusa-observability-smoke-${GITHUB_RUN_ID:-local}" -f docker-compose.yml -f docker-compose.observability.yml --profile observability)
 
 cleanup() {
   "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
