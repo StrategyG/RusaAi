@@ -78,27 +78,8 @@ class PostgresTaskQueue:
                 USING (tenant_id = current_setting('rusa.tenant_id', true))
                 WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))
             """)
-            # The API only enqueues and reads tasks. It must not mutate or delete them.
-            connection.execute("""
-                DO $rusa$
-                BEGIN
-                    IF EXISTS (
-                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
-                    ) THEN
-                        EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE rusa_agent_tasks FROM rusa_agent_api';
-                        EXECUTE 'GRANT SELECT, INSERT ON TABLE rusa_agent_tasks TO rusa_agent_api';
-                    END IF;
-                    IF EXISTS (
-                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_worker'
-                    ) AND EXISTS (
-                        SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
-                    ) THEN
-                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM rusa_agent_api';
-                        EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE USAGE, SELECT ON SEQUENCES FROM rusa_agent_api';
-                    END IF;
-                END
-                $rusa$
-            """)
+            # API grants are provisioned by configure_api_permissions() in the one-shot migration.
+            # Worker startup must not reset the tenant API's task lifecycle privileges.
 
 
     def configure_api_permissions(self) -> None:
