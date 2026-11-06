@@ -11,7 +11,9 @@ from rusa_agents.contracts import TaskCreate
 from rusa_agents.storage import Database, utcnow
 from rusa_agents.worker import AgentRuntime
 
+from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import TaskStatus
+from rusa_agents.evaluation import AgentEvaluator, _percentile
 from rusa_agents.policy import AutonomyPolicy
 from rusa_agents.storage import TaskRow
 from rusa_agents.tools import ToolRegistry
@@ -148,3 +150,70 @@ async def test_worker_crash_recovery_is_deterministic(database, registry):
     recovered = await runtime.get_task("tenant-benchmark", task_id)
     assert recovered["status"] == TaskStatus.QUEUED.value
     assert recovered["attempts"] == 1
+
+
+
+def test_percentile_uses_nearest_rank_and_handles_empty_samples():
+    assert _percentile([], 95) is None
+    assert _percentile([10.0, 20.0, 30.0, 40.0], 50) == 20.0
+    assert _percentile([10.0, 20.0, 30.0, 40.0], 95) == 40.0
+
+
+@pytest.mark.asyncio
+async def test_policy_accuracy_requires_independent_labeled_decisions(database):
+    audit = AuditLog(database)
+    await audit.record(
+        "tenant-policy-metrics",
+        "case-allow",
+        "benchmark",
+        "policy.benchmark_decision",
+        {
+            "expected_allowed": True,
+            "actual_allowed": True,
+            "expected_requires_approval": False,
+            "actual_requires_approval": False,
+        },
+    )
+    await audit.record(
+        "tenant-policy-metrics",
+        "case-false-allow",
+        "benchmark",
+        "policy.benchmark_decision",
+        {
+            "expected_allowed": False,
+            "actual_allowed": True,
+            "expected_requires_approval": False,
+            "actual_requires_approval": False,
+        },
+    )
+    await audit.record(
+        "tenant-policy-metrics",
+        "case-runtime",
+        "worker-1",
+        "policy.decision",
+        {
+            "tool": "github.write_file",
+            "allowed": True,
+            "requires_approval": False,
+            "policy_version": "rusa-autonomy-policy-v1",
+        },
+    )
+
+    metrics = await AgentEvaluator(database).metrics("tenant-policy-metrics")
+    assert metrics["policy_decision_accuracy"] == 0.5
+    assert metrics["policy_decision_sample_size"] == 2
+    assert metrics["false_allow_count"] == 1
+    assert metrics["false_deny_count"] == 0
+    assert metrics["policy_decision_count"] == 1
+    assert metrics["policy_version"] == "rusa-autonomy-policy-v1"
+    assert metrics["cost_per_task"] is None
+    assert "cost_per_task" in metrics["unmeasured_metrics"]
+
+
+@pytest.mark.asyncio
+async def test_policy_metrics_remain_unmeasured_without_labeled_cases(database):
+    metrics = await AgentEvaluator(database).metrics("tenant-no-policy-labels")
+    assert metrics["policy_decision_accuracy"] is None
+    assert metrics["policy_decision_sample_size"] == 0
+    assert metrics["false_allow_count"] is None
+    assert metrics["false_deny_count"] is None
