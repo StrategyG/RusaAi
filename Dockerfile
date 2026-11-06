@@ -5,8 +5,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /build
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY requirements.txt requirements-vllm.txt .
+ARG RUSA_INSTALL_VLLM=0
+RUN python -m pip install --no-cache-dir --prefix=/install -r requirements.txt \
+    && if [ "$RUSA_INSTALL_VLLM" = "1" ]; then python -m pip install --no-cache-dir --prefix=/install "vllm>=0.10,<1"; fi
 
 FROM python:3.11-slim AS runtime
 
