@@ -1,6 +1,8 @@
 """Hierarchical orchestrator with strict state and evidence gates."""
 from __future__ import annotations
 
+import asyncio
+
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
 from .memory import SQLiteMemory
@@ -42,7 +44,7 @@ class AICodeOrchestrator:
             raise ValueError("task tenant_id cannot be empty")
         return tenant_id
 
-    def _persist(self, record: TaskRecord) -> None:
+    async def _persist(self, record: TaskRecord) -> None:
         payload = {
             "objective": record.task.objective,
             "acceptance_criteria": record.task.acceptance_criteria,
@@ -59,12 +61,25 @@ class AICodeOrchestrator:
             ],
             "errors": record.errors,
         }
-        self.memory.save(
+        await asyncio.to_thread(
+            self.memory.save,
             record.task.task_id,
             record.task.repository.full_name,
             record.state.value,
             payload,
             tenant_id=self._tenant_id(record.task),
+        )
+
+    async def _audit(
+        self, event: str, task: CodingTask, actor: str, details: dict
+    ) -> None:
+        await asyncio.to_thread(
+            self.audit.record,
+            event,
+            task.task_id,
+            actor,
+            details,
+            tenant_id=self._tenant_id(task),
         )
 
     @staticmethod
@@ -98,22 +113,21 @@ class AICodeOrchestrator:
 
     async def run(self, task: CodingTask) -> TaskRecord:
         record = TaskRecord(task=task)
-        tenant_id = self._tenant_id(task)
-        self.audit.record(
-            "task.received", task.task_id, "aicode-master",
-            {"repository": task.repository.full_name}, tenant_id=tenant_id,
-        )
         try:
+            await self._audit(
+                "task.received", task, "aicode-master",
+                {"repository": task.repository.full_name},
+            )
             record.transition(TaskState.OBSERVING)
-            self._persist(record)
+            await self._persist(record)
             record.transition(TaskState.PLANNING)
-            self._persist(record)
+            await self._persist(record)
             if not self.policy.evaluate("repo_read").allowed:
                 record.errors.append("Repository read denied by policy")
                 record.transition(TaskState.BLOCKED)
                 return record
             record.transition(TaskState.EXECUTING)
-            self._persist(record)
+            await self._persist(record)
             for role in self.PIPELINE:
                 action = "workspace_write" if role == WorkerRole.DEVELOPER else "repo_read"
                 decision = self.policy.evaluate(action)
@@ -123,19 +137,18 @@ class AICodeOrchestrator:
                     break
                 result = await self.workers[role].run(task, list(record.results))
                 record.results.append(result)
-                self.audit.record(
-                    "worker.completed", task.task_id, role.value,
+                await self._audit(
+                    "worker.completed", task, role.value,
                     {"success": result.success, "summary": result.summary[:500]},
-                    tenant_id=tenant_id,
                 )
-                self._persist(record)
+                await self._persist(record)
                 if not result.success or result.blockers:
                     record.errors.extend(result.blockers or [role.value + " worker failed"])
                     record.transition(TaskState.BLOCKED)
                     break
             if record.state == TaskState.EXECUTING:
                 record.transition(TaskState.VERIFYING)
-                self._persist(record)
+                await self._persist(record)
                 evidence_result = self._verify_evidence(record)
                 if evidence_result is True:
                     record.transition(TaskState.SUCCEEDED)
@@ -147,15 +160,11 @@ class AICodeOrchestrator:
             record.errors.append(type(exc).__name__ + ": " + str(exc))
             if record.state not in {TaskState.FAILED, TaskState.BLOCKED, TaskState.CANCELLED}:
                 record.transition(TaskState.FAILED)
-            self.audit.record(
-                "task.failed", task.task_id, "aicode-master",
-                {"error": str(exc)}, tenant_id=tenant_id,
-            )
+            await self._audit("task.failed", task, "aicode-master", {"error": str(exc)})
         finally:
-            self._persist(record)
-            self.audit.record(
-                "task.finished", task.task_id, "aicode-master",
+            await self._persist(record)
+            await self._audit(
+                "task.finished", task, "aicode-master",
                 {"state": record.state.value, "errors": record.errors},
-                tenant_id=tenant_id,
             )
         return record
