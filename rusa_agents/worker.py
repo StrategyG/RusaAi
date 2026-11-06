@@ -749,11 +749,7 @@ class AgentRuntime:
             task_id,
             self.worker_id,
             "task.finished",
-            {
-                "status": state,
-                "error": error,
-                "final_answer": final_answer if target == TaskStatus.SUCCEEDED else None,
-            },
+            {"status": state, "error": error},
         )
         await self._publish(
             tenant_id,
@@ -761,7 +757,11 @@ class AgentRuntime:
             WorkerRole.SUPERVISOR,
             WorkerRole.SUPERVISOR,
             "task.result" if target == TaskStatus.SUCCEEDED else "task.blocked",
-            {"status": state, "error": error},
+            {
+                "status": state,
+                "error": error,
+                "final_answer": final_answer if target == TaskStatus.SUCCEEDED else None,
+            },
         )
 
     async def _fail(self, task_id: str, error: str) -> None:
