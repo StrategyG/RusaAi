@@ -32,47 +32,105 @@ def valid_envelope():
     }
 
 
-def test_valid_envelope_is_accepted(valid_envelope):
+def validate(envelope):
     with TestClient(serve.app) as client:
-        response = client.post("/v1/validate-task", json={"envelope": valid_envelope})
+        return client.post("/v1/validate-task", json={"envelope": envelope})
+
+
+def test_valid_envelope_is_accepted(valid_envelope):
+    response = validate(valid_envelope)
+
     assert response.status_code == 200
     assert response.json() == {"valid": True, "errors": []}
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "expected"),
+    ("field", "value"),
     [
-        ("task_id", "not-a-uuid", "task_id: has an invalid format"),
-        ("created_at", "yesterday", "created_at: has an invalid format"),
+        ("task_id", "not-a-uuid"),
+        ("created_at", "yesterday"),
     ],
 )
-def test_format_constraints_are_enforced(valid_envelope, field, value, expected):
+def test_uuid_and_date_time_formats_are_enforced(valid_envelope, field, value):
     valid_envelope[field] = value
-    with TestClient(serve.app) as client:
-        response = client.post("/v1/validate-task", json={"envelope": valid_envelope})
+
+    response = validate(valid_envelope)
+
     assert response.status_code == 200
     assert response.json()["valid"] is False
-    assert expected in response.json()["errors"]
+    assert any("invalid" not in error and "format" in error for error in response.json()["errors"])
 
 
-def test_required_field_error_names_missing_field(valid_envelope):
+def test_uri_format_is_enforced(valid_envelope):
+    valid_envelope["evidence"] = [{"kind": "commit", "uri": "not a uri"}]
+
+    response = validate(valid_envelope)
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "$.evidence[0].uri: must use the uri format" in response.json()["errors"]
+
+
+def test_required_errors_identify_every_missing_field(valid_envelope):
     del valid_envelope["task_id"]
-    with TestClient(serve.app) as client:
-        response = client.post("/v1/validate-task", json={"envelope": valid_envelope})
-    assert response.json()["errors"] == ["$.task_id: is required"]
+    del valid_envelope["message_id"]
+
+    response = validate(valid_envelope)
+
+    assert response.status_code == 200
+    assert set(response.json()["errors"]) == {
+        "$.message_id: is required",
+        "$.task_id: is required",
+    }
+
+
+def test_nested_required_error_uses_json_path(valid_envelope):
+    del valid_envelope["task"]["objective"]
+
+    response = validate(valid_envelope)
+
+    assert "$.task.objective: is required" in response.json()["errors"]
+
+
+def test_errors_do_not_echo_submitted_values(valid_envelope):
+    valid_envelope["unexpected"] = "do-not-return-this-secret"
+
+    response = validate(valid_envelope)
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "do-not-return-this-secret" not in response.text
+    assert "$: contains an unsupported field" in response.json()["errors"]
 
 
 def test_missing_schema_fails_startup(monkeypatch, tmp_path):
     monkeypatch.setattr(serve, "SCHEMA_PATH", tmp_path / "missing.json")
+
     with pytest.raises(RuntimeError, match="Unable to load valid A2A"):
         with TestClient(serve.app):
             pass
 
 
-def test_invalid_schema_fails_startup(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "schema_text",
+    [
+        "{invalid-json",
+        json.dumps({"type": "not-a-json-schema-type"}),
+        json.dumps(
+            {
+                "$schema": "https://json-schema.org/draft/2019-09/schema",
+                "type": "object",
+            }
+        ),
+    ],
+)
+def test_corrupt_or_wrong_draft_schema_fails_startup(
+    monkeypatch, tmp_path, schema_text
+):
     schema_path = tmp_path / "invalid.json"
-    schema_path.write_text(json.dumps({"type": "not-a-json-schema-type"}))
+    schema_path.write_text(schema_text, encoding="utf-8")
     monkeypatch.setattr(serve, "SCHEMA_PATH", schema_path)
+
     with pytest.raises(RuntimeError, match="Unable to load valid A2A"):
         with TestClient(serve.app):
             pass
