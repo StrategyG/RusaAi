@@ -5,7 +5,7 @@ import asyncio
 import logging
 import os
 import socket
-from typing import Any
+from typing import Any, Coroutine
 
 from .audit import PostgresAuditLog
 from .autonomous import AutonomousCodeWorker
@@ -65,8 +65,12 @@ class AICodeRuntime:
             metadata={"tenant_id": job.tenant_id},
         )
 
-    async def _build_orchestrator(self, task: CodingTask, tenant_id: str) -> tuple[AICodeOrchestrator, str]:
-        workspace = await asyncio.to_thread(self.workspace_manager.create, task, tenant_id)
+    async def _build_orchestrator(
+        self, task: CodingTask, tenant_id: str
+    ) -> tuple[AICodeOrchestrator, str]:
+        workspace = await asyncio.to_thread(
+            self.workspace_manager.create, task, tenant_id
+        )
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=DockerSandbox(image=self.config.sandbox_image),
@@ -79,6 +83,31 @@ class AICodeRuntime:
             AICodeOrchestrator(workers=workers, memory=self.memory, audit=self.audit),
             str(workspace),
         )
+
+    async def _await_with_lease(
+        self, operation: Coroutine, lost_lease: asyncio.Event
+    ) -> Any:
+        operation_task = asyncio.create_task(operation)
+        lease_watch = asyncio.create_task(lost_lease.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {operation_task, lease_watch},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if lease_watch in done and lost_lease.is_set():
+                operation_task.cancel()
+                try:
+                    await operation_task
+                except asyncio.CancelledError:
+                    pass
+                raise RuntimeError("Worker lost its task lease; operation cancelled")
+            return await operation_task
+        finally:
+            lease_watch.cancel()
+            try:
+                await lease_watch
+            except asyncio.CancelledError:
+                pass
 
     async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
         while True:
@@ -96,6 +125,19 @@ class AICodeRuntime:
                 logger.error("Lease lost for job %s", job.id)
                 return
 
+    async def _await_human_review(self, job: Job, task: CodingTask, reason: str) -> None:
+        await asyncio.to_thread(
+            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, reason
+        )
+        await asyncio.to_thread(
+            self.audit.record,
+            "task.awaiting_approval",
+            task.task_id,
+            self.worker_id,
+            {"reason": reason[:2000]},
+            tenant_id=job.tenant_id,
+        )
+
     async def run_once(self) -> bool:
         job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
         if job is None:
@@ -109,36 +151,20 @@ class AICodeRuntime:
                 raise PermissionError("Tenant is not authorized for this repository")
             if self.config.environment == "production" and not allowed_repositories:
                 raise PermissionError("Tenant has no configured repository permissions")
+
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
-            execution = asyncio.create_task(
-                asyncio.wait_for(orchestrator.run(task), timeout=task_timeout)
+            if not 60 <= task_timeout <= 86400:
+                raise ValueError("RUSA_TASK_TIMEOUT_SECONDS must be between 60 and 86400")
+            record = await self._await_with_lease(
+                asyncio.wait_for(orchestrator.run(task), timeout=task_timeout),
+                lost_lease,
             )
-            lease_watch = asyncio.create_task(lost_lease.wait())
-            done, _ = await asyncio.wait(
-                {execution, lease_watch}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if lease_watch in done and lost_lease.is_set():
-                execution.cancel()
-                try:
-                    await execution
-                except asyncio.CancelledError:
-                    pass
-                raise RuntimeError("Worker lost its task lease; execution was cancelled")
-            lease_watch.cancel()
-            try:
-                await lease_watch
-            except asyncio.CancelledError:
-                pass
-            record = await execution
-            if lost_lease.is_set():
-                raise RuntimeError("Worker lost its task lease; refusing to publish")
             if record.state == TaskState.AWAITING_APPROVAL:
-                await asyncio.to_thread(
-                    self.queue.await_approval, job.id, job.tenant_id, self.worker_id,
-                    "; ".join(record.errors) or "Human intervention required",
+                await self._await_human_review(
+                    job, task, "; ".join(record.errors) or "Human intervention required"
                 )
                 return True
             if record.state != TaskState.SUCCEEDED:
@@ -148,32 +174,53 @@ class AICodeRuntime:
                 )
                 return True
 
-            commit_sha = await asyncio.to_thread(
-                self.publisher.commit_and_push,
-                workspace, task.repository.full_name,
-                task.repository.work_branch,
-                f"feat(aicode): {task.objective[:120]}",
-            )
-            if lost_lease.is_set():
-                raise RuntimeError("Worker lost its task lease before PR creation")
-            pr_url = await self.publisher.create_or_get_draft_pr(
-                task.repository.full_name,
-                task.repository.work_branch,
-                task.repository.base_branch,
-                f"AICode: {task.objective[:180]}",
-                (
-                    "## Autonomous implementation\n\n"
-                    f"Task ID: {task.task_id}\n\n"
-                    f"Workspace commit: {commit_sha}\n\n"
-                    "Acceptance criteria:\n" +
-                    "\n".join(f"- {item}" for item in task.acceptance_criteria) +
-                    "\n\nAutomated test and security evidence is recorded in the task audit trail. "
-                    "This pull request is draft and requires human review before merge."
+            commit_sha = await self._await_with_lease(
+                asyncio.to_thread(
+                    self.publisher.commit_and_push,
+                    workspace,
+                    task.repository.full_name,
+                    task.repository.work_branch,
+                    f"feat(aicode): {task.objective[:120]}",
                 ),
+                lost_lease,
             )
-            self.audit.record(
-                "pull_request.created", task.task_id, self.worker_id,
-                {"pull_request_url": pr_url, "commit_sha": commit_sha},
+            pr_url = await self._await_with_lease(
+                self.publisher.create_or_get_draft_pr(
+                    task.repository.full_name,
+                    task.repository.work_branch,
+                    task.repository.base_branch,
+                    f"AICode: {task.objective[:180]}",
+                    (
+                        "## Autonomous implementation\n\n"
+                        f"Task ID: {task.task_id}\n\n"
+                        f"Workspace commit: {commit_sha}\n\n"
+                        "Acceptance criteria:\n" +
+                        "\n".join(f"- {item}" for item in task.acceptance_criteria) +
+                        "\n\nAutomated test and security evidence is recorded in the task audit trail. "
+                        "This pull request is draft and requires human review before merge."
+                    ),
+                ),
+                lost_lease,
+            )
+            ci_timeout = int(os.getenv("RUSA_CI_TIMEOUT_SECONDS", "900"))
+            ci_poll = int(os.getenv("RUSA_CI_POLL_SECONDS", "15"))
+            ci_ok, ci_reason = await self._await_with_lease(
+                self.publisher.wait_for_ci(
+                    task.repository.full_name, commit_sha,
+                    timeout_seconds=ci_timeout, poll_seconds=ci_poll,
+                ),
+                lost_lease,
+            )
+            if not ci_ok:
+                await self._await_human_review(job, task, ci_reason)
+                return True
+
+            await asyncio.to_thread(
+                self.audit.record,
+                "ci.verified",
+                task.task_id,
+                self.worker_id,
+                {"commit_sha": commit_sha, "pull_request_url": pr_url, "result": ci_reason},
                 tenant_id=job.tenant_id,
             )
             completed = await asyncio.to_thread(
@@ -201,7 +248,9 @@ class AICodeRuntime:
                 pass
         return True
 
-    async def run_forever(self, poll_seconds: float = 2.0, stop_event: asyncio.Event | None = None) -> None:
+    async def run_forever(
+        self, poll_seconds: float = 2.0, stop_event: asyncio.Event | None = None
+    ) -> None:
         stop_event = stop_event or asyncio.Event()
         while not stop_event.is_set():
             processed = await self.run_once()
