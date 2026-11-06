@@ -84,7 +84,7 @@ jobs:
           VALUES (1, 'encrypted-restore-drill-ok');
           SQL
           psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE rusa_restore_test'
-          scripts/postgres/restore_drill.sh
+          bash scripts/postgres/restore_drill.sh
           restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT value FROM public.rusa_drill_probe WHERE id=1')"
           test "$restored_value" = "encrypted-restore-drill-ok"
           psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE rusa_restore_test'
