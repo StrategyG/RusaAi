@@ -47,6 +47,14 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        env:
+          RUSA_API_KEY: ci-only-test-key-123456789012345678901234567890
+          RUSA_MODEL_DIR: ./models/rusa-ai
+          RUSA_MODEL_MANIFEST_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
       - name: Build image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Run container
