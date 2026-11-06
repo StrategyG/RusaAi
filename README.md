@@ -1,127 +1,201 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI currently provides a FastAPI service for health checks and A2A task-envelope validation, plus a chat-completions API contract. The model architecture file is a blueprint, not an executable inference implementation.
 
----
+> **Production scope:** The API and schema-validation service can be built and smoke-tested as a container. Actual model inference and autonomous-agent execution are **not production-ready on this branch**: no inference backend or agent worker runtime is connected. In production, chat requests fail closed with HTTP 503 until an inference backend is integrated. The development mock is explicitly opt-in and prohibited in production.
 
-## Key Features & Architecture
+## Repository layout
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
-
----
-
-## Repository Structure
-
-```
+```text
 RusaAi/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml               # Automated CI workflow (linting, tests, docker)
-│   ├── ISSUE_TEMPLATE/           # GitHub issue templates for agent tasks
-│   └── copilot-instructions.md   # AI collaboration & safety guidelines
-├── docs/                         # Architecture & A2A integration documentation
+├── .github/workflows/ci.yml
 ├── llm-project/
-│   ├── configs/                 # YAML configurations (model, training, inference)
-│   │   ├── model.yaml
-│   │   ├── training.yaml
-│   │   └── inference.yaml
-│   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
-│   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
-├── schemas/
-│   └── a2a/
-│       └── task-envelope.schema.json # Task payload validation schema
-├── .env.example                  # Environment configuration template
-├── Dockerfile                    # Production multi-stage Docker container
-├── docker-compose.yml            # Container orchestration config
-├── pyproject.toml                # Project metadata & build tool configuration
-├── requirements.txt              # Production Python dependencies
-└── README.md                     # Comprehensive project documentation
+│   ├── configs/inference.yaml
+│   ├── model/blueprint.py
+│   └── serve/app.py
+├── schemas/a2a/task-envelope.schema.json
+├── tests/test_app.py
+├── .dockerignore
+├── .env.example
+├── .gitignore
+├── Dockerfile
+├── pytest.ini
+├── requirements-dev.txt
+├── requirements.txt
+└── README.md
 ```
 
----
+## Requirements
 
-## Quick Start & Local Setup
+- Python 3.12
+- pip
+- Docker Engine (only for container builds/runs)
 
-### 1. Prerequisites
-- Python 3.10 or higher
-- Docker & Docker Compose (optional for containerized deployment)
+## Local setup
 
-### 2. Environment Setup
 ```bash
-# Clone the repository
-git clone StrategyG/RusaAi
+git clone https://github.com/StrategyG/RusaAi.git
 cd RusaAi
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Linux/macOS
+python3.12 -m venv .venv
+source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Windows PowerShell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and set your secrets:
+The runtime dependencies are intentionally limited to FastAPI, Uvicorn, Pydantic, and JSON Schema. PyTorch is not installed because this branch does not contain an executable model runtime. Test and lint tools are installed separately through `requirements-dev.txt`.
+
+## Environment configuration
+
+The application reads environment variables from the process. It does not automatically load `.env`.
+
 ```bash
+# Linux/macOS
 cp .env.example .env
+set -a
+. ./.env
+set +a
+
+# Windows PowerShell (the app does not import .env automatically)
+$env:ENVIRONMENT = "development"
+$env:RUSA_ENABLE_MOCK_INFERENCE = "true"
 ```
 
----
+The example file enables the development-only mock response. To enable API-key authentication locally, set a key before starting the server:
 
-## Running the Application
-
-### Running Locally with Uvicorn
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+# Linux/macOS
+export RUSA_API_KEY="$(openssl rand -hex 32)"
+
+# Windows PowerShell
+$env:RUSA_API_KEY = (python -c "import secrets; print(secrets.token_hex(32))").Trim()
 ```
 
-### Running with Docker & Docker Compose
+| Variable | Behavior |
+| --- | --- |
+| `ENVIRONMENT` | Defaults to `development`. Use `production` for production startup checks. |
+| `RUSA_API_KEY` | Optional in development/test. If set, both POST API endpoints require the matching `X-API-Key`. In production it is mandatory and must contain at least 32 characters. |
+| `RUSA_ENABLE_MOCK_INFERENCE` | Defaults to disabled. When set to `true`, returns a clearly labeled deterministic mock only outside production. Startup fails if enabled in production. |
+| `LOG_LEVEL` | Python logging level; defaults to `INFO`. |
+
+`GET /health` remains unauthenticated for liveness probes. Never commit `.env` or put real secrets in source control.
+
+## Run the API locally
+
+From the repository root:
+
 ```bash
-# Build and start container
-docker-compose up --build -d
-
-# Verify server status
-curl localhost:8000/health
+uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000 --reload
 ```
 
----
+The `--app-dir` option is required because `llm-project` contains a hyphen and is not a valid Python package identifier.
 
-## Running Tests
+### Verify health
 
-Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+curl --fail http://127.0.0.1:8000/health
 ```
 
----
+The liveness response reports `"status": "healthy"`. It does not claim that model inference is ready.
 
-## API Endpoints
+### Send an authenticated chat request
 
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check and system metadata |
-| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completion inference endpoint |
-| `/v1/validate-task` | `POST` | Validates agent task envelope payload against JSON Schema |
+When `RUSA_API_KEY` is configured, use the same value in the `X-API-Key` header:
 
----
+```bash
+curl --include http://127.0.0.1:8000/v1/chat/completions \
+  --header 'Content-Type: application/json' \
+  --header "X-API-Key: ${RUSA_API_KEY}" \
+  --data '{
+    "model": "rusa-ai-v1",
+    "messages": [{"role": "user", "content": "Hello RUSA"}]
+  }'
+```
 
-## Security & Governance
+With `RUSA_ENABLE_MOCK_INFERENCE=true` in development, this returns a response labeled `[DEVELOPMENT MOCK ONLY]`. With the mock disabled and no inference backend configured, the authenticated request returns HTTP 503. This is intentional: the service does not fabricate production model output.
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
+### Validate an A2A task
 
----
+`POST /v1/validate-task` validates the `envelope` against `schemas/a2a/task-envelope.schema.json`. The schema is loaded and checked during application startup; a missing or malformed schema prevents startup. Validation uses Draft 2020-12 and checks declared formats, including UUID and date-time. The endpoint returns at most ten actionable validation errors without echoing submitted field values.
+
+When `RUSA_API_KEY` is set, this endpoint also requires `X-API-Key`.
+
+## Docker
+
+Build from the repository root:
+
+```bash
+docker build --pull -t rusa-ai:local .
+```
+
+The image runs as a non-root user and defaults to `ENVIRONMENT=production`. Supply a strong API key:
+
+```bash
+export RUSA_API_KEY="$(openssl rand -hex 32)"
+docker run --rm --name rusa-ai \
+  --publish 8000:8000 \
+  --env ENVIRONMENT=production \
+  --env RUSA_API_KEY="$RUSA_API_KEY" \
+  rusa-ai:local
+```
+
+Check the container:
+
+```bash
+curl --fail http://127.0.0.1:8000/health
+```
+
+The container health check verifies API liveness only. There is no `docker-compose.yml` in this repository; use the Docker commands above.
+
+## Tests and lint
+
+Run from the repository root:
+
+```bash
+python -m pytest tests/ -v
+python -m flake8 llm-project/serve tests --count --select=E9,F63,F7,F82 --show-source --statistics
+```
+
+The CI workflow at `.github/workflows/ci.yml` runs lint, compilation, pytest, container build, and a container smoke test. Lint errors are not ignored.
+
+## API endpoints
+
+| Method | Path | Authentication | Behavior |
+| --- | --- | --- | --- |
+| GET | `/health` | None | Liveness; returns `status: healthy` |
+| POST | `/v1/chat/completions` | `X-API-Key` when configured | Development mock only when explicitly enabled; otherwise HTTP 503 until an inference backend is integrated |
+| POST | `/v1/validate-task` | `X-API-Key` when configured | Validates an A2A envelope against the startup-loaded JSON Schema |
+
+The request model accepts `stream`, but Server-Sent Events are not implemented. A request with `stream: true` returns HTTP 501 rather than silently returning a non-streaming response.
+
+## Runtime and production readiness
+
+| Component | Status on this branch |
+| --- | --- |
+| FastAPI/Uvicorn API | Implemented |
+| API-key authentication | Implemented; mandatory in production |
+| A2A schema validation | Implemented; startup-validated Draft 2020-12 schema with format checking |
+| Container | Multi-stage build, non-root runtime, health check |
+| CI | Lint, tests, container build and smoke test |
+| Chat inference | **Not implemented**; no real inference backend is configured |
+| Model | Blueprint only; `ProjectBlueprint.status` defaults to `PLANNED` |
+| Agent workers/orchestration | Not implemented |
+| SSE streaming | Not implemented |
+
+This branch is suitable for deploying the API/schema-validation scaffold after CI passes. It is **not** a production model-serving or autonomous-agent release until a real inference backend and the agent runtime are implemented, integrated, and tested.
+
+### Deployment controls not included
+
+- API-key authentication uses one shared service secret; there is no per-user identity, RBAC, or tenant isolation in this branch.
+- There is no built-in distributed rate limiting, TLS termination, or external secret-manager integration.
+- Before any public deployment, place the service behind a trusted TLS ingress/API gateway, apply rate limits, manage and rotate the key through a secret manager, and enforce network access controls. Do not expose the container port directly to the public internet.
 
 ## License
-This project is licensed under the MIT License.
+
+No `LICENSE` file is currently present in the repository. Do not assume MIT redistribution rights until the repository owner adds an explicit license.
