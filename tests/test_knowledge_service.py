@@ -27,9 +27,11 @@ class FakeStore:
 class FakeEmbeddings:
     def __init__(self):
         self.inputs = []
+        self.batches = []
 
     def embed(self, texts):
         self.inputs.extend(texts)
+        self.batches.append(len(texts))
         return [[0.1, 0.2, 0.3] for _ in texts]
 
 
@@ -91,3 +93,21 @@ def test_ingestion_blocks_high_confidence_credentials_before_embedding():
         raise AssertionError("credential-bearing document was ingested")
     assert embeddings.inputs == []
     assert store.ingested is None
+
+
+
+def test_ingest_text_batches_large_documents_with_provider_limit():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    result = service.ingest_text(
+        tenant_id="tenant-a",
+        collection="agent",
+        source_uri="file:///large-guide.txt",
+        title="Large Guide",
+        content="x" * 90_000,
+    )
+    assert result["chunk_count"] > 64
+    assert len(embeddings.batches) >= 2
+    assert max(embeddings.batches) <= 64
+    assert len(store.ingested["embeddings"]) == result["chunk_count"]
