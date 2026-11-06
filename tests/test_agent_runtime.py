@@ -972,3 +972,63 @@ async def test_audit_chain_verifies_and_detects_tampering(database):
         await session.commit()
 
     assert await audit.verify_chain("tenant-a") is False
+
+
+@pytest.mark.asyncio
+async def test_evaluation_metrics_are_tenant_scoped_and_evidence_based(database, registry):
+    from rusa_agents.evaluation import AgentEvaluator
+    from rusa_agents.audit import AuditLog
+
+    runtime = AgentRuntime(database, FakeProvider(), registry)
+    first = await runtime.submit(
+        "tenant-metrics",
+        "metrics-task-001",
+        make_task(work_branch="feature/metrics-one").model_dump(),
+    )
+    second = await runtime.submit(
+        "tenant-metrics",
+        "metrics-task-002",
+        make_task(work_branch="feature/metrics-two").model_dump(),
+    )
+    third = await runtime.submit(
+        "tenant-metrics",
+        "metrics-task-003",
+        make_task(work_branch="feature/metrics-three").model_dump(),
+    )
+
+    async with database.session() as session:
+        row1 = await session.scalar(select(TaskRow).where(TaskRow.id == first))
+        row2 = await session.scalar(select(TaskRow).where(TaskRow.id == second))
+        row1.status = TaskStatus.SUCCEEDED.value
+        row1.plan = {"steps": [{"tool": "github.list_files"}]}
+        row1.tool_results = [
+            {"tool": "agent.review_diff", "result": {"approved": True}},
+        ]
+        row1.result = {"final_answer": {"citations": ["[doc#1]", "[doc#2]"]}}
+        row2.status = TaskStatus.FAILED.value
+        row2.attempts = 2
+        row2.plan = {"steps": [{"tool": "github.list_files"}]}
+        row2.tool_results = [
+            {"tool": "agent.review_diff", "result": {"approved": False, "human_override": True}},
+        ]
+        await session.commit()
+
+    await AuditLog(database).record(
+        "tenant-metrics",
+        second,
+        "reviewer",
+        "task.awaiting_approval",
+        {"reason": "reviewer_rejected_diff"},
+    )
+    metrics = await AgentEvaluator(database).metrics("tenant-metrics", limit=100)
+
+    assert metrics["sample_size"] == 3
+    assert metrics["completion_rate"] == pytest.approx(2 / 3, rel=1e-3)
+    assert metrics["success_rate"] == pytest.approx(1 / 2, rel=1e-3)
+    assert metrics["retry_rate"] == pytest.approx(1 / 3, rel=1e-3)
+    assert metrics["validated_plan_rate"] == pytest.approx(2 / 3, rel=1e-3)
+    assert metrics["reviewer_approval_rate"] == pytest.approx(1 / 2, rel=1e-3)
+    assert metrics["human_override_count"] == 1
+    assert metrics["reviewer_rejection_count"] == 1
+    assert metrics["citation_validation_rate"] == 1.0
+    assert metrics["latency_ms_p50"] is not None
