@@ -11,7 +11,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError
 
 
-_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "devops"
+_REPOSITORY_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "devops"
+_PACKAGED_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 _SCHEMA_FILES = {
     "agent_task": "agent-task.schema.json",
     "agent_result": "agent-result.schema.json",
@@ -30,7 +31,9 @@ def _validator(contract_name: str) -> Draft202012Validator:
     except KeyError as exc:
         raise ValueError(f"unknown DevOps contract: {contract_name}") from exc
 
-    schema_path = _SCHEMA_DIR / filename
+    repository_path = _REPOSITORY_SCHEMA_DIR / filename
+    packaged_path = _PACKAGED_SCHEMA_DIR / filename
+    schema_path = repository_path if repository_path.is_file() else packaged_path
     try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
