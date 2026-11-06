@@ -197,7 +197,7 @@ class WorkspaceToolGateway:
         if any(PurePosixPath(part).suffix.lower() in self.PROTECTED_SUFFIXES for part in candidate.parts):
             raise ToolDenied("Access to private-key and certificate files is prohibited")
         normalized = candidate.as_posix()
-        if any(normalized.startswith(prefix) for prefix in self.PROTECTED_PREFIXES):
+        if any(normalized.lower().startswith(prefix.lower()) for prefix in self.PROTECTED_PREFIXES):
             raise ToolDenied("CI workflow files require a separate human-reviewed change")
         target = self.workspace.joinpath(*candidate.parts)
         current = self.workspace
@@ -235,7 +235,7 @@ class WorkspaceToolGateway:
             target.name.lower() in self.PROTECTED_WRITE_NAMES
             or target.name.lower().startswith(("requirements", "dockerfile."))
             or PurePosixPath(relative).suffix.lower() in self.PROTECTED_SUFFIXES
-            or any(relative.startswith(prefix) for prefix in self.PROTECTED_WRITE_PREFIXES)
+            or any(relative.lower().startswith(prefix.lower()) for prefix in self.PROTECTED_WRITE_PREFIXES)
         ):
             raise ToolDenied("Dependency, deployment, schema, and migration files require human review")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -273,7 +273,7 @@ class WorkspaceToolGateway:
                 continue
             if PurePosixPath(rel).suffix.lower() in self.PROTECTED_SUFFIXES:
                 continue
-            if any(rel.startswith(prefix) for prefix in self.PROTECTED_PREFIXES):
+            if any(rel.lower().startswith(prefix.lower()) for prefix in self.PROTECTED_PREFIXES):
                 continue
             if item.is_file() and not item.is_symlink():
                 files.append(rel)
