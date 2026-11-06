@@ -43,6 +43,26 @@ groups:
           summary: "Agent task failure rate exceeds 10 percent"
           description: "Agent execution failures are elevated over the last five minutes."
 
+      - alert: AgentWorkerTargetDown
+        expr: up{job="rusa-agent-worker"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: rusa-agent-worker
+        annotations:
+          summary: "Agent worker metrics target is down"
+          description: "Check worker process health and the agent-worker Prometheus target file."
+
+      - alert: AgentAPITargetDown
+        expr: up{job="rusa-agent-api"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: rusa-agent-api
+        annotations:
+          summary: "Agent API metrics target is down"
+          description: "Check the agent API profile and the agent-api Prometheus target file."
+
       - alert: AgentQueueBacklog
         expr: max(rusa_agent_queue_depth{state="queued"}) > 50
         for: 10m
@@ -107,6 +127,16 @@ groups:
 
   - name: rusa-gpu
     rules:
+      - alert: GPUExporterDown
+        expr: up{job="nvidia-dcgm"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: gpu
+        annotations:
+          summary: "NVIDIA DCGM exporter target is down"
+          description: "Check the GPU profile, NVIDIA driver, Container Toolkit, and gpu target file."
+
       - alert: GPUUtilizationSaturated
         expr: DCGM_FI_DEV_GPU_UTIL > 95
         for: 15m
@@ -126,6 +156,18 @@ groups:
         annotations:
           summary: "GPU memory utilization is above 90 percent"
           description: "Review model size, batch size, and concurrent inference allocation."
+
+  - name: rusa-mcp
+    rules:
+      - alert: MCPServiceTargetDown
+        expr: up{job="rusa-mcp"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: rusa-mcp
+        annotations:
+          summary: "MCP metrics target is down"
+          description: "Check the knowledge profile and the mcp Prometheus target file."
 
   - name: rusa-retrieval
     rules:
