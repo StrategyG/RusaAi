@@ -1,30 +1,84 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-trixie AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build
+
+# Install application dependencies with patched build tooling. This stage is
+# discarded; the runtime starts from a clean Debian image so vulnerable
+# setuptools metadata in the upstream Python image layers cannot survive.
+COPY requirements-rag-mcp.txt ./
+RUN python -m pip install --no-cache-dir --upgrade \
+      "pip>=25.3" "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip install --no-cache-dir -r requirements-rag-mcp.txt \
+    && python -m pip install --no-cache-dir --upgrade \
+      "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip check \
+    && python -m pip uninstall -y setuptools wheel jaraco.context \
+    && python -m pip uninstall -y pip \
+    && rm -rf /usr/local/lib/python3.11/ensurepip \
+    && find /usr/local/lib/python3.11 -type d \\( \
+         -name 'setuptools-*.dist-info' -o -name 'wheel-*.dist-info' \
+         -o -name 'pip-*.dist-info' -o -name 'jaraco.context-*.dist-info' \
+       \\) -prune -exec rm -rf '{}' + \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
+    && python - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        installed = version(package)
+    except PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package}=={installed} remains in MCP runtime")
+PY
+
+FROM debian:trixie-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    LD_LIBRARY_PATH=/usr/local/lib
 
 WORKDIR /app
 
-COPY requirements-rag-mcp.txt ./
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates libexpat1 libffi8 libssl3t64 libbz2-1.0 liblzma5 \
+      libsqlite3-0 libreadline8t64 libncursesw6 libgdbm6t64 \
+      libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --no-cache-dir --upgrade "pip>=25.3" "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && python -m pip install --no-cache-dir -r requirements-rag-mcp.txt \
-    && python -m pip install --no-cache-dir --upgrade "setuptools>=84.1.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && python -c "import setuptools, wheel; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (84, 1); assert tuple(map(int, wheel.__version__.split('.')[:2])) >= (0, 46)" \
-    && rm -rf /usr/local/lib/python3.11/ensurepip \
-    && find /usr/local/lib/python3.11 -type d -name "setuptools-70.3.0.dist-info" -prune -exec rm -rf "{}" + \
-    && find / -type f -name METADATA -exec sh -c 'if grep -qi "^Name: setuptools$" "$1"; then echo "SETUPTOOLS_METADATA=$1"; grep -E "^(Name|Version):" "$1"; fi' _ "{}" \; \
+    && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
+    && ldconfig \
     && groupadd --system --gid 10001 rusa \
     && useradd --system --uid 10001 --gid rusa --home-dir /nonexistent --shell /usr/sbin/nologin rusa
 
+COPY --from=builder /usr/local /usr/local
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
+
+RUN ldd /usr/local/bin/python3.11 | tee /tmp/python-ldd \
+    && ! grep -q "not found" /tmp/python-ldd \
+    && python - <<'PY'
+from importlib import import_module, metadata
+
+for package in ("pip", "setuptools", "wheel", "jaraco.context"):
+    try:
+        metadata.version(package)
+    except metadata.PackageNotFoundError:
+        continue
+    raise SystemExit(f"Build-only package {package} remains in MCP runtime")
+
+for module in ("bs4", "httpx", "mcp", "psycopg_pool", "pypdf", "docx", "uvicorn"):
+    import_module(module)
+print("MCP runtime imports verified; build tooling is absent.")
+PY
 
 USER 10001:10001
 EXPOSE 8002
