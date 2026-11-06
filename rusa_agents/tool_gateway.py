@@ -49,7 +49,7 @@ class DockerSandbox:
         "pytest": ["python", "-m", "pytest", "-q"],
         "compile": ["python", "-m", "compileall", "-q", "rusa_agents", "llm-project/serve", "tests"],
         "ruff": ["ruff", "check", "rusa_agents", "tests", "llm-project/serve"],
-        "bandit": ["bandit", "-q", "-r", "rusa_agents"],
+        "bandit": ["bandit", "-q", "-r", "rusa_agents", "llm-project/serve"],
     }
 
     def __init__(
