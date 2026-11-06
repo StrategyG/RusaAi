@@ -42,7 +42,7 @@ def set_inference_provider(provider: InferenceProvider | None) -> None:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     config = RuntimeConfig.from_env()
-    config.validate()
+    config.validate_api()
     application.state.config = config
     application.state.queue = None
     if config.model_base_url:
