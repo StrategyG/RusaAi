@@ -113,12 +113,20 @@ class RuntimeConfig:
         errors: list[str] = []
         if not value:
             return [f"{variable} is required"]
-        parsed = urlparse(value)
+        try:
+            parsed = urlparse(value)
+            hostname = parsed.hostname
+            username = parsed.username
+            password = parsed.password
+        except ValueError:
+            return [f"{variable} is not a valid PostgreSQL URL"]
         if parsed.scheme not in {"postgres", "postgresql"}:
             errors.append(f"{variable} must use PostgreSQL")
-        if parsed.username != expected_user:
+        if not hostname or not parsed.path.strip("/"):
+            errors.append(f"{variable} must include a database host and database name")
+        if username != expected_user:
             errors.append(f"{variable} must authenticate as {expected_user}")
-        if cls._looks_placeholder(parsed.hostname) or cls._looks_placeholder(parsed.password):
+        if cls._looks_placeholder(hostname) or cls._looks_placeholder(password):
             errors.append(f"{variable} must not contain example host/password placeholders")
         ssl_modes = parse_qs(parsed.query).get("sslmode", [])
         if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
@@ -173,6 +181,9 @@ class RuntimeConfig:
             missing.append("API keys must not contain example placeholders")
         if any(not tenant.strip() for tenant in self.api_keys.values()):
             missing.append("non-empty API-key tenant mappings")
+        unmapped_tenants = set(self.api_keys.values()) - set(self.tenant_repositories)
+        if unmapped_tenants:
+            missing.append("every API-key tenant must have a repository allowlist")
         if not self.metrics_api_key:
             missing.append("RUSA_METRICS_API_KEY")
         elif len(self.metrics_api_key.encode("utf-8")) < 32 or self._looks_placeholder(self.metrics_api_key):
