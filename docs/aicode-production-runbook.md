@@ -23,6 +23,7 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_lease_fencing.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 ```
 
 The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, and forced row-level security (RLS). Apply migrations 001, 002, 003 task-results, and 004 tenant-RLS in that order. The API and worker fail closed if the expected columns, RLS flags, or required policies are missing.
@@ -299,10 +300,10 @@ These controls limit in-process concurrency and repair attempts; they do not aut
 
 The current code still requires independent verification before it can be certified production-ready:
 
-- Database row-level security and separate API/worker database identities are not yet enforced by the current runtime schema; tenant filters in application queries are not a substitute for database RLS.
+- Database RLS and separate API/worker database identities are implemented through migration 004 and fail-closed startup checks. Before certification, execute adversarial cross-tenant tests against the production login roles and verify grants and policies on the target PostgreSQL instance.
 - The current `docker-compose.yml` uses the bootstrap PostgreSQL account `rusa` for both API and worker connections. Treat this compose profile as development-only; do not use it as a production credential model.
 - The runtime still uses the custom PostgreSQL lease queue rather than Temporal. Agent manager dispatch is currently in-process (no external A2A transport), and the workspace tool gateway is not yet exposed through an MCP server/client implementation.
-- Production rollout requires a reviewed least-privilege database role split, tenant RLS policies, TLS-enabled database URLs, and a migration/rollback plan. The Compose syntax check does not certify these controls.
+- Production rollout still requires independent verification of the least-privilege role split, tenant RLS policies, TLS-enabled database URLs, and a migration/rollback plan. The Compose syntax check does not certify these controls.
 - Semantic/vector memory (pgvector) and model-generated dynamic DAG planning remain unimplemented. The current runtime now has repository, engineering, and quality managers, a deterministic dependency DAG, parallel QA dispatch, and a bounded repair loop. It does not yet autoscale worker replicas.
 - Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
 - Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
