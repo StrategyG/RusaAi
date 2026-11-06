@@ -11,7 +11,6 @@ import os
 import re
 from typing import Any
 from urllib.parse import urlparse
-from uuid import uuid4
 
 import httpx
 import jsonschema
