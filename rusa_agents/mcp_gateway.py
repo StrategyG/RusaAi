@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from typing import Any
 
 from .contracts import CodingTask, ToolCall, ToolResult
-from rusa_mcp.client import MCPToolClient
+from rusa_mcp.client import MCPToolClient, validate_server_url
 
 KNOWLEDGE_TOOLS = frozenset({"search_knowledge", "get_document", "list_collections"})
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -24,6 +24,7 @@ class MCPKnowledgeGateway:
     ) -> None:
         if not server_url:
             raise ValueError("MCP server URL is required")
+        validate_server_url(server_url)
         if not tenant_tokens:
             raise ValueError("per-tenant MCP bearer tokens are required")
         if any(
