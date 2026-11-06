@@ -13,7 +13,7 @@ from .contracts import WorkerRole, TaskState
 from .github import GitHubToolGateway
 from .memory import PostgresMemoryStore
 from .rag_memory import CompositeMemoryReader
-from .mcp_gateway import MCPKnowledgeGateway
+from .mcp_gateway import KNOWLEDGE_TOOLS, LocalKnowledgeGateway, MCPKnowledgeGateway
 from .tool_router import CompositeToolGateway
 from rusa_knowledge.service import KnowledgeService
 from .orchestrator import AICodeOrchestrator
@@ -257,16 +257,19 @@ def build_worker() -> QueueWorker:
     )
 
     memory_reader: Any = memory
+    knowledge_service = None
+    knowledge_collection = os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent")
     rag_enabled = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
     if rag_enabled:
         knowledge_service = KnowledgeService.from_env(check_ready=True)
         memory_reader = CompositeMemoryReader(
             memory,
             knowledge_service,
-            collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+            collection=knowledge_collection,
         )
 
     tools: Any = github
+    enabled_tools = set(AgentWorker.TOOL_NAMES) - set(KNOWLEDGE_TOOLS)
     mcp_server_url = os.getenv("RUSA_MCP_SERVER_URL", "").strip()
     tenant_tokens_raw = os.getenv("RUSA_MCP_TENANT_TOKENS", "").strip()
     if mcp_server_url:
@@ -285,8 +288,11 @@ def build_worker() -> QueueWorker:
             if item.strip()
         }
         unauthorized_tenants = set(tenant_tokens) - set(tenant_repositories)
+        missing_tenants = set(tenant_repositories) - set(tenant_tokens)
         if unauthorized_tenants:
             raise RuntimeError("RUSA_MCP_TENANT_TOKENS contains tenants outside the repository allowlist")
+        if missing_tenants:
+            raise RuntimeError("RUSA_MCP_TENANT_TOKENS must include every configured repository tenant")
         internal_http_hosts = {
             item.strip().lower()
             for item in os.getenv("RUSA_MCP_INTERNAL_HTTP_HOSTS", "").split(",")
@@ -299,10 +305,23 @@ def build_worker() -> QueueWorker:
             allow_http_hosts=internal_http_hosts,
         )
         tools = CompositeToolGateway(github, mcp_gateway)
+        enabled_tools = set(AgentWorker.TOOL_NAMES)
     elif tenant_tokens_raw:
         raise RuntimeError("RUSA_MCP_TENANT_TOKENS requires RUSA_MCP_SERVER_URL")
+    elif knowledge_service is not None:
+        tools = CompositeToolGateway(
+            github,
+            LocalKnowledgeGateway(
+                knowledge_service,
+                default_collection=knowledge_collection,
+            ),
+        )
+        enabled_tools = set(AgentWorker.TOOL_NAMES)
 
-    workers = [AgentWorker(role, provider, memory_reader) for role in WorkerRole]
+    workers = [
+        AgentWorker(role, provider, memory_reader, enabled_tools=enabled_tools)
+        for role in WorkerRole
+    ]
     orchestrator = AICodeOrchestrator(
         workers=workers,
         tools=tools,
