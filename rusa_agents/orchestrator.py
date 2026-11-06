@@ -81,7 +81,15 @@ class AICodeOrchestrator:
             parsed = urlsplit(source)
         except ValueError:
             return False
-        if parsed.scheme != "https" or parsed.hostname != "github.com" or parsed.username:
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "github.com"
+            or parsed.username
+            or parsed.password
+            or parsed.port not in {None, 443}
+            or parsed.query
+            or parsed.fragment
+        ):
             return False
         path = parsed.path.rstrip("/")
         prefix = f"/{repository}/"

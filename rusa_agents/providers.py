@@ -31,8 +31,13 @@ class OpenAICompatibleProvider:
             if isinstance(host, str) and host.strip()
         }
         if parsed.hostname.lower().rstrip(".") not in local_hosts:
-            if parsed.hostname.lower().rstrip(".") not in normalized_hosts:
-                raise ValueError("remote provider host must be explicitly allowlisted")
+            provider_origin = parsed.hostname.lower().rstrip(".")
+            if parsed.port is not None:
+                provider_origin = f"{provider_origin}:{parsed.port}"
+            if provider_origin not in normalized_hosts:
+                raise ValueError(
+                    "remote provider host and port must be explicitly allowlisted"
+                )
         if not model.strip():
             raise ValueError("provider model must not be empty")
         if not 1 <= timeout_seconds <= 300:

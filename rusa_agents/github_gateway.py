@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import re
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -71,22 +72,33 @@ class GitHubRepositoryGateway:
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            response = await client.request(
+            async with client.stream(
                 method,
                 path,
                 params=params,
                 json=json_body,
-            )
-        if response.status_code >= 400:
-            raise GitHubAPIError(
-                response.status_code,
-                f"GitHub API request failed with HTTP {response.status_code}",
-            )
-        if len(response.content) > 2_000_000:
-            raise GitHubAPIError(502, "GitHub API response exceeded the configured size limit")
-        if not response.content:
+            ) as response:
+                if response.status_code >= 400:
+                    raise GitHubAPIError(
+                        response.status_code,
+                        f"GitHub API request failed with HTTP {response.status_code}",
+                    )
+                chunks = []
+                total_bytes = 0
+                async for chunk in response.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if total_bytes > 2_000_000:
+                        raise GitHubAPIError(
+                            502,
+                            "GitHub API response exceeded the configured size limit",
+                        )
+                    chunks.append(chunk)
+        if not chunks:
             return {}
-        return response.json()
+        try:
+            return json.loads(b"".join(chunks))
+        except json.JSONDecodeError as exc:
+            raise GitHubAPIError(502, "GitHub API returned invalid JSON") from exc
 
     @staticmethod
     def validate_path(path: str) -> str:

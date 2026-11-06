@@ -474,3 +474,29 @@ def test_github_gateway_blocks_nested_environment_and_secret_files():
     )
     for path in sensitive_paths:
         assert GitHubToolGateway.is_sensitive_path(path), path
+
+
+
+def test_provider_allowlist_binds_nonstandard_ports():
+    with pytest.raises(ValueError, match="host and port"):
+        OpenAICompatibleProvider(
+            "https://provider.example:8443/v1",
+            "model",
+            allowed_hosts={"provider.example"},
+        )
+    provider = OpenAICompatibleProvider(
+        "https://provider.example:8443/v1",
+        "model",
+        allowed_hosts={"provider.example:8443"},
+    )
+    assert provider.endpoint.startswith("https://provider.example:8443/")
+
+
+def test_orchestrator_rejects_ci_evidence_with_nonstandard_github_port(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        make_workers(quality_source="https://github.com:444/StrategyG/RusaAi/actions/runs/123"),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(make_task()))
+    assert record.state == TaskState.BLOCKED
