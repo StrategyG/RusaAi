@@ -49,7 +49,24 @@ async def build_tooling(database: Database) -> tuple[ToolRegistry, MCPGateway, R
                 ]
             }
 
-        tools.register("rag.search", rag_search)
+        tools.register(
+            "rag.search",
+            rag_search,
+            "Retrieve tenant-scoped relevant document chunks with source citations.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 4000},
+                    "top_k": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "allowed_source_ids": {
+                        "type": ["array", "null"],
+                        "items": {"type": "string", "minLength": 1, "maxLength": 255},
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        )
 
     return tools, mcp_gateway, rag_service
 
