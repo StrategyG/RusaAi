@@ -68,7 +68,7 @@ class PostgresTaskQueue:
                 """, (["aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"],)).fetchall()
                 states = {row[0]: (row[1], row[2]) for row in protected}
                 if set(states) != {"aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"}:
-                    raise RuntimeError("Production RLS migration is incomplete; apply migrations/003_aicode_tenant_rls.sql")
+                    raise RuntimeError("Production RLS migration is incomplete; apply migrations/004_aicode_tenant_rls.sql")
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
                 policies = conn.execute("""
@@ -76,17 +76,17 @@ class PostgresTaskQueue:
                     WHERE schemaname='public' AND policyname = ANY(%s)
                 """, ([
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_all",
+                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
                     "aicode_audit_worker_all",
                 ],)).fetchall()
                 policy_names = {row[1] for row in policies}
                 required_policies = {
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_all",
+                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
                     "aicode_audit_worker_all",
                 }
                 if not required_policies.issubset(policy_names):
-                    raise RuntimeError("Production tenant RLS policies are missing; apply migrations/003_aicode_tenant_rls.sql")
+                    raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
                 return
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS aicode_jobs (
