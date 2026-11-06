@@ -32,6 +32,7 @@ def make_task(tenant_id, key, objective="PostgreSQL queue integration test"):
 
 
 def clean_test_rows():
+    PostgresMemoryStore(DSN).initialize()
     with psycopg.connect(DSN) as connection:
         connection.execute(
             "DELETE FROM rusa_agent_tasks WHERE tenant_id LIKE 'rusa-test-%'"
