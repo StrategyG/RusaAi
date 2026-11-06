@@ -29,8 +29,95 @@ logging.basicConfig(
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = REPOSITORY_ROOT / "schemas" / "a2a" / "task-envelope.schema.json"
 MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", "1048576"))
+MAX_INPUT_TOKENS = int(os.getenv("RUSA_MAX_INPUT_TOKENS", "8192"))
+if MAX_REQUEST_BYTES < 1 or MAX_INPUT_TOKENS < 1:
+    raise RuntimeError("request byte and input token limits must be positive")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+
+class RequestBodyLimitMiddleware:
+    """Buffer and cap all HTTP request bodies, including chunked requests."""
+
+    def __init__(self, app, max_body_bytes: int):
+        if max_body_bytes < 1:
+            raise ValueError("max_body_bytes must be positive")
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = uuid.uuid4().hex
+        headers = dict(scope.get("headers", []))
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                response = JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"detail": "Invalid Content-Length header"},
+                    headers={
+                        "X-Request-ID": request_id,
+                        "X-Content-Type-Options": "nosniff",
+                        "Cache-Control": "no-store",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+            if declared_size < 0 or declared_size > self.max_body_bytes:
+                response = JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": "Request body exceeds the configured size limit"},
+                    headers={
+                        "X-Request-ID": request_id,
+                        "X-Content-Type-Options": "nosniff",
+                        "Cache-Control": "no-store",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_body_bytes:
+                response = JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": "Request body exceeds the configured size limit"},
+                    headers={
+                        "X-Request-ID": request_id,
+                        "X-Content-Type-Options": "nosniff",
+                        "Cache-Control": "no-store",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        body_sent = False
+
+        async def replay_receive():
+            nonlocal body_sent
+            if not body_sent:
+                body_sent = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
+class InferenceInputError(ValueError):
+    """Raised when a prompt cannot fit the configured model context window."""
 
 
 class ChatMessage(BaseModel):
@@ -178,6 +265,20 @@ class TransformersBackend:
                 for key, value in encoded.items()
             }
             prompt_tokens = int(encoded["input_ids"].shape[-1])
+            if prompt_tokens > MAX_INPUT_TOKENS:
+                raise InferenceInputError(
+                    f"Prompt exceeds the configured {MAX_INPUT_TOKENS}-token input limit"
+                )
+            model_config = getattr(self.model, "config", None)
+            context_limit = getattr(model_config, "max_position_embeddings", None)
+            if (
+                isinstance(context_limit, int)
+                and context_limit > 0
+                and prompt_tokens + max_new_tokens > context_limit
+            ):
+                raise InferenceInputError(
+                    "Prompt plus requested completion exceeds the model context window"
+                )
 
             generation_args: dict[str, Any] = {
                 "max_new_tokens": max_new_tokens,
@@ -312,6 +413,10 @@ app = FastAPI(
     openapi_url="/openapi.json" if environment != "production" else None,
     lifespan=lifespan,
 )
+app.add_middleware(
+    RequestBodyLimitMiddleware,
+    max_body_bytes=MAX_REQUEST_BYTES,
+)
 
 
 @app.middleware("http")
@@ -327,13 +432,21 @@ async def request_context_middleware(request: Request, call_next):
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content={"detail": "Invalid Content-Length header"},
-                headers={"X-Request-ID": request_id},
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-Content-Type-Options": "nosniff",
+                    "Cache-Control": "no-store",
+                },
             )
         if request_size > MAX_REQUEST_BYTES:
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={"detail": "Request body exceeds the configured size limit"},
-                headers={"X-Request-ID": request_id},
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-Content-Type-Options": "nosniff",
+                    "Cache-Control": "no-store",
+                },
             )
 
     response = await call_next(request)
@@ -360,7 +473,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                 "request_id": request_id,
             }
         },
-        headers={"X-Request-ID": request_id},
+        headers={
+            "X-Request-ID": request_id,
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
     )
 
 
@@ -432,6 +549,11 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
             temperature=request.temperature,
             top_p=request.top_p,
         )
+    except InferenceInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         request_id = getattr(http_request.state, "request_id", "unknown")
         logger.exception("Inference failed request_id=%s", request_id)

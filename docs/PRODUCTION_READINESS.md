@@ -16,7 +16,7 @@ This ledger distinguishes the API serving foundation from the complete model and
 - Local Transformers loading uses on-disk files only and disables remote custom code.
 - A2A validation uses the schema-declared JSON Schema draft and format checks.
 - Liveness and readiness are separate.
-- Request IDs, basic security headers, a content-length guard, and generic internal error responses are added.
+- Request IDs, basic security headers, an ASGI request-body cap (including chunked bodies), model input-token/context limits, and generic internal error responses are added.
 - Docker runtime uses the correct Python import path, non-root identity, and a liveness healthcheck.
 - CI gates lint, compile, tests, dependency audit, image build, and container liveness.
 - AICode contracts, fail-closed policy, tenant-scoped single-instance memory, HMAC audit, worker orchestration, evidence gate, GitHub gateway, and constrained Docker/gVisor sandbox adapters have been added.
@@ -25,7 +25,7 @@ This ledger distinguishes the API serving foundation from the complete model and
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| API foundation | CI, schema/auth tests, container smoke test | Passed on commit f81be2e; re-run required after later changes |
+| API foundation | CI, schema/auth tests, body-size/context tests, container smoke test | Passed on commit f81be2e; current hardening changes pending CI |
 | GitHub gateway | Mock API tests, token scope review, staging read/write/PR verification | Pending current CI and staging |
 | Sandbox | Rootless daemon, gVisor runtime, pinned image, timeout/cleanup tests | Code added; live runtime not verified |
 | Worker tool loop | Typed tool-call loop connected to gateway and sandbox | Not implemented |

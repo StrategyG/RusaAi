@@ -14,6 +14,7 @@ services:
       RUSA_MODEL_NAME: \${RUSA_MODEL_NAME:-rusa-ai-v1}
       RUSA_MODEL_PATH: /models
       RUSA_MAX_REQUEST_BYTES: \${RUSA_MAX_REQUEST_BYTES:-1048576}
+      RUSA_MAX_INPUT_TOKENS: \${RUSA_MAX_INPUT_TOKENS:-8192}
       TASK_ENVELOPE_SCHEMA_PATH: /app/schemas/a2a/task-envelope.schema.json
     volumes:
       - type: bind

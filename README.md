@@ -13,7 +13,7 @@ The complete RUSA-AI product is NOT production-ready yet. This repository does n
 - OpenAI-style non-streaming chat completion response with token usage.
 - A2A task-envelope validation using the schema-declared JSON Schema draft and format checks.
 - Separate liveness and readiness endpoints.
-- Request IDs, response security headers, request content-length guard, non-root container, and hardened Compose example.
+- Request IDs, response security headers, request-body limits including chunked bodies, model input-token/context limits, non-root container, and hardened Compose example.
 - CI for lint, compile, tests, dependency audit, container build, and liveness smoke test.
 
 Mock model responses are intentionally not supported. Inference returns HTTP 503 until a real local model is loaded. Streaming returns HTTP 501 until implemented.

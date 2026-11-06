@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import uuid
@@ -10,7 +11,12 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import GenerationResult, app, _load_task_validator  # noqa: E402
+from app import (  # noqa: E402
+    GenerationResult,
+    RequestBodyLimitMiddleware,
+    app,
+    _load_task_validator,
+)
 
 TEST_API_KEY = "test-key-that-is-long-enough-for-production-policy-123"
 
@@ -76,6 +82,43 @@ def valid_envelope():
             "human_approval_required": ["merge", "deploy"],
         },
     }
+
+
+def test_chunked_request_body_limit_is_enforced():
+    messages = [
+        {"type": "http.request", "body": b"1234", "more_body": True},
+        {"type": "http.request", "body": b"5678", "more_body": False},
+    ]
+    sent = []
+
+    async def inner_app(scope, receive, send):
+        await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    async def receive():
+        return messages.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/test",
+        "raw_path": b"/test",
+        "query_string": b"",
+        "headers": [],
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 12345),
+    }
+    middleware = RequestBodyLimitMiddleware(inner_app, max_body_bytes=5)
+    asyncio.run(middleware(scope, receive, send))
+    response_start = next(item for item in sent if item["type"] == "http.response.start")
+    assert response_start["status"] == 413
 
 
 def test_liveness_endpoint_is_public(client):
