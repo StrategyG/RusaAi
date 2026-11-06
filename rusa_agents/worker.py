@@ -242,7 +242,11 @@ class QueueWorker:
                     logger.exception("agent maintenance failed")
                 next_maintenance = loop.time() + self.maintenance_interval_seconds
 
-            processed = await self.run_once()
+            try:
+                processed = await self.run_once()
+            except Exception:
+                logger.exception("agent queue poll failed; worker will retry")
+                processed = False
             if not processed:
                 try:
                     await asyncio.wait_for(
