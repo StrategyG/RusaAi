@@ -1083,12 +1083,14 @@ def test_sensitive_text_redaction_covers_credentials_and_private_keys():
         'api_key = "private-value-123456"\n'
         'token = "generic-token-value-123456"\n'
         'password: "strong-password-value"\n'
+        'Authorization: Bearer very-long-bearer-secret-value-1234567890\n'
         + private_key
     )
     redacted = redact_sensitive_text(value)
     assert "private-value-123456" not in redacted
     assert "generic-token-value-123456" not in redacted
     assert "strong-password-value" not in redacted
+    assert "very-long-bearer-secret-value-1234567890" not in redacted
     assert "secret-material" not in redacted
     assert "[REDACTED" in redacted
 
