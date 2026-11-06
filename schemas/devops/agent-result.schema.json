@@ -112,7 +112,43 @@
     },
     {
       "if": { "properties": { "status": { "enum": ["failed", "blocked"] } }, "required": ["status"] },
-      "then": { "properties": { "output": { "properties": { "findings": { "minItems": 1 } } } }
+      "then": { "properties": { "output": { "properties": { "findings": { "minItems": 1 } } } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "plan" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_plan_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "code" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_code_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "build" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_build_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "test" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_test_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "release" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_release_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "deploy" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_deploy_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "operate" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_operate_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "monitor" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_monitor_agent" } } }
+    },
+    {
+      "if": { "properties": { "stage": { "const": "security_guard" } }, "required": ["stage"] },
+      "then": { "properties": { "agent_id": { "const": "rusa_security_guard_agent" } } }
     }
   ]
 }
