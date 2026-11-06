@@ -228,6 +228,7 @@ def build_worker() -> QueueWorker:
         allowed_repositories=allowed_repositories,
         max_response_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_RESPONSE_BYTES", "4000000")),
         max_file_bytes=int(os.getenv("RUSA_AGENT_GITHUB_MAX_FILE_BYTES", "1000000")),
+        max_diff_files=int(os.getenv("RUSA_AGENT_GITHUB_MAX_DIFF_FILES", "20")),
     )
     audit = HMACAuditLog(
         os.getenv("RUSA_AGENT_AUDIT_PATH", "/var/lib/rusa-agent/audit.jsonl"),
