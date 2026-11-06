@@ -44,5 +44,7 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
         metadata_json = json.dumps(metadata, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError("document metadata must be JSON-serializable") from exc
+    if len(metadata_json.encode("utf-8")) > 16_384:
+        raise ValueError("document metadata exceeds 16 KiB")
     reject_credential_material("\n".join((source_uri, title, metadata_json)))
     return metadata_json
