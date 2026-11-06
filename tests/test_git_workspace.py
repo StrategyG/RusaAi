@@ -124,6 +124,8 @@ def test_publisher_filters_deployment_configuration_paths(tmp_path):
     git("init", cwd=repository)
     files = [
         "src/app.py",
+        ".envrc",
+        ".direnv/config",
         "Dockerfile.worker",
         "docker-compose.override.yml",
         "compose.yaml",

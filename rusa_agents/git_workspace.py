@@ -14,7 +14,7 @@ from .contracts import CodingTask
 
 GIT_BIN = shutil.which("git")
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
-BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
+BLOCKED_PATH_PARTS = {".git", ".env", ".direnv", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {
     ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der",
     ".ppk", ".tfstate", ".tfvars", ".env",
@@ -25,7 +25,14 @@ def _is_env_file_name(name: str) -> bool:
     lowered = name.lower()
     if lowered == ".env.example":
         return False
-    return lowered == ".env" or lowered.startswith(".env.") or ".env." in lowered or lowered.endswith(".env")
+    return (
+        lowered == ".envrc"
+        or lowered.startswith(".envrc.")
+        or lowered == ".env"
+        or lowered.startswith(".env.")
+        or ".env." in lowered
+        or lowered.endswith(".env")
+    )
 
 BLOCKED_WRITE_NAMES = {
     ".env.example", ".gitignore", ".dockerignore", "requirements.txt",

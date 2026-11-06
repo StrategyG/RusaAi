@@ -28,7 +28,14 @@ def _is_env_file_name(name: str) -> bool:
     lowered = name.lower()
     if lowered == ".env.example":
         return False
-    return lowered == ".env" or lowered.startswith(".env.") or ".env." in lowered or lowered.endswith(".env")
+    return (
+        lowered == ".envrc"
+        or lowered.startswith(".envrc.")
+        or lowered == ".env"
+        or lowered.startswith(".env.")
+        or ".env." in lowered
+        or lowered.endswith(".env")
+    )
 
 
 class ToolDenied(PermissionError):
@@ -223,7 +230,7 @@ class DockerSandbox:
 
         sensitive_parts = {
             ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
-            ".azure", ".rusa-ai", ".terraform", ".venv", "venv", "node_modules",
+            ".azure", ".direnv", ".rusa-ai", ".terraform", ".venv", "venv", "node_modules",
         }
         sensitive_names = {
             ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
@@ -366,7 +373,7 @@ class WorkspaceToolGateway:
 
     PROTECTED_PARTS = {
         ".git", ".env", ".env.local", ".env.production", ".secrets",
-        ".ssh", ".aws", ".azure", "secrets", "credentials",
+        ".ssh", ".aws", ".azure", ".direnv", "secrets", "credentials",
         ".gitattributes", ".gitmodules", ".lfsconfig",
         ".terraform", ".venv", "venv", "node_modules",
         "__pycache__", ".pytest_cache", ".ruff_cache",

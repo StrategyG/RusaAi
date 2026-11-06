@@ -159,7 +159,7 @@ def test_protected_deployment_paths(tmp_path, path):
 
 @pytest.mark.parametrize(
     "name",
-    [".env.production", "config.env", "app.env.local", "production.env", "secrets.yaml"],
+    [".env.production", ".envrc", ".envrc.local", "config.env", "app.env.local", "production.env", "secrets.yaml"],
 )
 def test_gateway_blocks_env_suffix_files(tmp_path, name):
     (tmp_path / name).write_text("SENSITIVE=value")
@@ -176,6 +176,9 @@ def test_sandbox_snapshot_excludes_non_hidden_env_files(tmp_path, monkeypatch):
     (workspace / "app.py").write_text("print('safe')")
     (workspace / "production.env").write_text("SECRET=do-not-copy")
     (workspace / "config.env.local").write_text("TOKEN=do-not-copy")
+    (workspace / ".envrc").write_text("TOKEN=do-not-copy")
+    (workspace / ".direnv").mkdir()
+    (workspace / ".direnv" / "secrets").write_text("TOKEN=do-not-copy")
     (workspace / "secrets.yaml").write_text("password: do-not-copy")
 
     def fake_bounded(self, command, timeout_seconds, env, max_output_bytes):
@@ -183,6 +186,8 @@ def test_sandbox_snapshot_excludes_non_hidden_env_files(tmp_path, monkeypatch):
         snapshot = Path(mount.split("src=", 1)[1].split(",dst=", 1)[0])
         assert not (snapshot / "production.env").exists()
         assert not (snapshot / "config.env.local").exists()
+        assert not (snapshot / ".envrc").exists()
+        assert not (snapshot / ".direnv").exists()
         assert not (snapshot / "secrets.yaml").exists()
         return 0, "passed", "completed", 6
 
