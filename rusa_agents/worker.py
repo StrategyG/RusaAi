@@ -7,6 +7,7 @@ import os
 import signal
 import socket
 import uuid
+from typing import Any
 
 from .audit import HMACAuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
