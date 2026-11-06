@@ -13,6 +13,7 @@ def test_tenant_tokens_are_stored_as_hashes_and_resolve_to_one_tenant():
     assert key_hashes == {digest: "tenant-a"}
     assert server._tenant_for_token(token, key_hashes) == "tenant-a"
     assert server._tenant_for_token("different-token", key_hashes) is None
+    assert server._tenant_for_token("short", key_hashes) is None
 
 
 def test_tenant_key_configuration_rejects_invalid_entries():
