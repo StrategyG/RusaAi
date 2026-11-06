@@ -967,3 +967,33 @@ def test_orchestrator_blocks_diff_with_detected_secret_material():
     ).run(make_task()))
     assert record.state == TaskState.BLOCKED
     assert "potential secret material" in record.errors[-1]
+
+
+def test_task_checkpoint_omits_raw_file_write_content_and_bounds_file_reads():
+    task = make_task()
+    record = TaskRecord(task=task)
+    record.worker_results.append(WorkerResult(
+        role=WorkerRole.DEVELOPER,
+        summary="Wrote a repository file",
+        tool_calls=(ToolCall(
+            "write_file",
+            {"path": "src/generated.py", "content": "x" * 10000},
+        ),),
+        tool_results=(ToolResult(
+            name="read_file",
+            success=True,
+            data={"path": "src/generated.py", "content": "y" * 10000},
+        ),),
+        criteria_results={"Tests pass": True, "Security review passes": True},
+    ))
+    checkpoint = record.to_dict()
+    call_args = checkpoint["worker_results"][0]["tool_calls"][0]["arguments"]
+    read_data = checkpoint["worker_results"][0]["tool_results"][0]["data"]
+
+    assert "content" not in call_args
+    assert call_args["content_omitted"] is True
+    assert call_args["content_sha256"]
+    assert read_data["content"]["truncated"] is True
+    assert len(read_data["content"]["preview"]) == 6000
+    restored = TaskRecord.from_dict(checkpoint)
+    assert restored.worker_results[0].tool_calls[0].arguments["content_omitted"] is True
