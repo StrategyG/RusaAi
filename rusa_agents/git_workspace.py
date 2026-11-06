@@ -4,13 +4,15 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .contracts import CodingTask
 
+GIT_BIN = shutil.which("git")
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
 BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
 BLOCKED_SUFFIXES = {
@@ -61,9 +63,13 @@ class GitWorkspaceManager:
         }
         if extra_env:
             env.update(extra_env)
+        if not GIT_BIN:
+            raise RuntimeError("Git executable is unavailable in the worker image")
         if args and args[0] == "git":
-            args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
-        return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+            args = [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
+        return subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
+            args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120
+        )
 
     def refresh(self, repository: str, base_branch: str) -> None:
         owner, repo = repository.split("/", 1)
@@ -202,14 +208,20 @@ class GitHubPublisher:
         }
         if env:
             base_env.update(env)
+        if not GIT_BIN:
+            raise RuntimeError("Git executable is unavailable in the worker image")
         if args and args[0] == "git":
-            args = ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
-        return subprocess.run(args, cwd=cwd, env=base_env, capture_output=True, text=True, timeout=180)
+            args = [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
+        return subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
+            args, cwd=cwd, env=base_env, capture_output=True, text=True, timeout=180
+        )
 
     @staticmethod
     def _safe_changed_paths(workspace: Path) -> list[str]:
-        result = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+        if not GIT_BIN:
+            return []
+        result = subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
+            [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
              "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
             capture_output=True, timeout=30, check=False,
             env={
