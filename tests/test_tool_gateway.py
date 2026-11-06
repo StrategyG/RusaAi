@@ -62,6 +62,9 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         mount = next(item for item in command if item.startswith("type=bind,src="))
         snapshot = mount.split("src=", 1)[1].split(",dst=", 1)[0]
         snapshot_path = Path(snapshot)
+        assert mount.endswith(",readonly")
+        assert snapshot_path.stat().st_mode & 0o777 == 0o555
+        assert (snapshot_path / "src.py").stat().st_mode & 0o777 == 0o444
         assert (snapshot_path / "src.py").is_file()
         assert not (snapshot_path / ".env").exists()
         assert not (snapshot_path / ".git").exists()
