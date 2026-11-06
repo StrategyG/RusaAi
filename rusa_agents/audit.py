@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from .storage import AuditRow, Database
 
 
