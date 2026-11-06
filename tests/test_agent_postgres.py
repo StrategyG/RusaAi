@@ -196,6 +196,8 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
     first = queue.claim("worker-one", lease_seconds=60)
     assert first is not None and first["task_id"] == task_id
     assert queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+    assert queue.owns_lease(tenant_id, task_id, "worker-one") is True
+    assert queue.owns_lease(tenant_id, task_id, "worker-two") is False
 
     with psycopg.connect(DSN) as connection:
         connection.execute("""
@@ -208,6 +210,8 @@ def test_postgres_queue_lease_heartbeat_and_stale_owner_fencing():
     assert second is not None and second["task_id"] == task_id
     assert second["lease_owner"] == "worker-two"
     assert not queue.heartbeat(tenant_id, task_id, "worker-one", lease_seconds=60)
+    assert queue.owns_lease(tenant_id, task_id, "worker-one") is False
+    assert queue.owns_lease(tenant_id, task_id, "worker-two") is True
     stale_record = TaskRecord(task=task)
     stale_record.transition(TaskState.OBSERVING)
     assert not queue.checkpoint(tenant_id, task_id, "worker-one", stale_record)
