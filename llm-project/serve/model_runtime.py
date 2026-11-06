@@ -173,6 +173,18 @@ def verify_model_artifact(
             raise ModelArtifactError(f"Model artifact checksum mismatch: {relative_name}")
         verified.add(relative_path.as_posix())
 
+    # The loader may inspect any file in the directory. Reject unmanifested files
+    # and symlinks so an extra checkpoint shard cannot bypass the pinned manifest.
+    for candidate in root.rglob("*"):
+        if candidate == manifest_path or ".cache" in candidate.relative_to(root).parts:
+            continue
+        if candidate.is_symlink():
+            raise ModelArtifactError("Model directories must not contain symlinks")
+        if candidate.is_file():
+            relative_name = candidate.relative_to(root).as_posix()
+            if relative_name not in verified:
+                raise ModelArtifactError(f"Unmanifested model artifact file: {relative_name}")
+
     if "config.json" not in verified:
         raise ModelArtifactError("Model artifact must contain a checksummed config.json")
     if not any(name in verified for name in _REQUIRED_TOKENIZER_FILES):
