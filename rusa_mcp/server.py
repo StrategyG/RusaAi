@@ -223,7 +223,12 @@ class TenantAuthMiddleware:
 
 _transport_security = TransportSecuritySettings(allowed_hosts=_allowed_hosts())
 app = TenantAuthMiddleware(
-    mcp.streamable_http_app(transport_security=_transport_security)
+    mcp.streamable_http_app(
+        transport_security=_transport_security,
+        stateless_http=True,
+        json_response=True,
+        max_request_body_size=128 * 1024,
+    )
 )
 
 
