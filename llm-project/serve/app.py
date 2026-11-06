@@ -175,7 +175,7 @@ async def lifespan(application: FastAPI):
                 tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE", "1")),
                 gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION", "0.9")),
             )
-        except (ValueError, RuntimeError, OSError) as exc:
+        except (ImportError, ValueError, RuntimeError, OSError) as exc:
             set_inference_provider(None)
             raise RuntimeError("Configured local model runtime failed closed during startup") from exc
         set_inference_provider(LocalModelInferenceProvider(local_backend))
