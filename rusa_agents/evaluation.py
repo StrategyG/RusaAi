@@ -193,9 +193,7 @@ class AgentEvaluator:
             ),
             "false_allow_count": false_allow_count if policy_sample_size else None,
             "false_deny_count": false_deny_count if policy_sample_size else None,
-            "policy_unlabeled_decision_count": max(
-                0, policy_decision_count - policy_sample_size
-            ),
+            "policy_unlabeled_decision_count": policy_decision_count,
             "model_name": model_name,
             "model_revision": model_revision,
             "model_name_samples": sorted(observed_model_names),
@@ -221,6 +219,7 @@ class AgentEvaluator:
             ),
             "unmeasured_metrics": [
                 "cost_per_task",
+                "provider_token_usage",
                 *(
                     ["policy_decision_accuracy"]
                     if not policy_sample_size
@@ -238,7 +237,7 @@ class AgentEvaluator:
                 "Latency uses nearest-rank p50/p95 over terminal tasks; latency_sample_size is explicit.",
                 "Policy accuracy uses only labeled policy.benchmark_decision audit events; production decisions without independent labels are not treated as correct by assumption.",
                 "Policy decisions are audited with tool name, outcome, approval requirement, and policy version; no tool arguments or payloads are recorded.",
-                "Cost is not inferred from prompt length; provider usage and pricing must be persisted per task before cost_per_task can be measured.",
+                "Cost is not inferred from prompt length; operational cost requires provider usage and pricing persisted per task. The repeated benchmark runner can measure per-task usage deltas sequentially when the provider reports them.",
                 "Model name and revision are drawn from task-start audit events or deployment environment; null means not configured or not observed.",
             ],
         }
