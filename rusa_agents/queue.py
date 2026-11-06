@@ -724,7 +724,7 @@ class PostgresTaskQueue:
                     ) AS oldest_queued_age_seconds
                 FROM public.rusa_agent_tasks
                 WHERE tenant_id=%s
-                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                  AND (%s::text IS NULL OR payload->'metadata'->>'user_id'=%s)
                 """,
                 (tenant_id, user_id, user_id),
             ).fetchone()
@@ -749,7 +749,7 @@ class PostgresTaskQueue:
                        last_error, created_at, updated_at
                 FROM public.rusa_agent_tasks
                 WHERE tenant_id=%s AND status='failed'
-                  AND (%s IS NULL OR payload->'metadata'->>'user_id'=%s)
+                  AND (%s::text IS NULL OR payload->'metadata'->>'user_id'=%s)
                 ORDER BY updated_at DESC, task_id
                 LIMIT %s
                 """,
