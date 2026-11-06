@@ -156,8 +156,36 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     from rusa_agents.audit import PostgresTaskPolicyAudit
     from rusa_agents.queue import PostgresTaskQueue
 
-    api_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_api_runtime")
-    worker_dsn = psycopg.conninfo.make_conninfo(DSN, options="-c role=rusa_worker_runtime")
+    from psycopg import sql
+
+    api_password = "test-api-" + uuid4().hex
+    worker_password = "test-worker-" + uuid4().hex
+    with connect() as admin:
+        for role_name, group_name, password in (
+            ("rusa_api_login", "rusa_api_runtime", api_password),
+            ("rusa_worker_login", "rusa_worker_runtime", worker_password),
+        ):
+            admin.execute(
+                sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role_name))
+            )
+            admin.execute(
+                sql.SQL(
+                    "CREATE ROLE {} LOGIN INHERIT NOSUPERUSER NOBYPASSRLS "
+                    "NOCREATEDB NOCREATEROLE PASSWORD {}"
+                ).format(sql.Identifier(role_name), sql.Literal(password))
+            )
+            admin.execute(
+                sql.SQL(
+                    "GRANT {} TO {} WITH ADMIN FALSE, INHERIT TRUE, SET TRUE"
+                ).format(sql.Identifier(group_name), sql.Identifier(role_name))
+            )
+
+    api_dsn = psycopg.conninfo.make_conninfo(
+        DSN, user="rusa_api_login", password=api_password
+    )
+    worker_dsn = psycopg.conninfo.make_conninfo(
+        DSN, user="rusa_worker_login", password=worker_password
+    )
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     key_a = "tenant-a-integration-key-000000000000000000000000"
@@ -196,9 +224,11 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
 
     with psycopg.connect(api_dsn) as conn:
         assert conn.execute(
-            """SELECT current_user, rolsuper, rolbypassrls, row_security_active('aicode_jobs')
+            """SELECT current_user, rolsuper, rolbypassrls,
+                      row_security_active('aicode_jobs'),
+                      pg_has_role(current_user, 'rusa_api_runtime', 'member')
                FROM pg_roles WHERE rolname=current_user"""
-        ).fetchone() == ("rusa_api_runtime", False, False, True)
+        ).fetchone() == ("rusa_api_login", False, False, True, True)
         conn.execute("SELECT set_config('rusa.tenant_id', 'audit-a', true)")
         assert conn.execute("SELECT 1 FROM aicode_jobs WHERE task_id=%s", (task_id,)).fetchone() is None
         assert conn.execute(
@@ -214,6 +244,14 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     assert client.post(f"{path}/retry", headers=api_a).status_code == 409
     assert client.get(path, headers=api_b).json()["status"] == "failed"
     assert client.post(f"{path}/retry", headers=api_b).status_code == 202
+
+    with psycopg.connect(worker_dsn) as conn:
+        assert conn.execute(
+            """SELECT current_user, rolsuper, rolbypassrls,
+                      row_security_active('aicode_jobs'),
+                      pg_has_role(current_user, 'rusa_worker_runtime', 'member')
+               FROM pg_roles WHERE rolname=current_user"""
+        ).fetchone() == ("rusa_worker_login", False, False, True, True)
 
     worker = PostgresTaskQueue(worker_dsn)
     job = worker.claim("policy-test-worker")
