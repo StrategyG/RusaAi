@@ -118,6 +118,7 @@ class GitWorkspaceManager:
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
         self.refresh(task.repository.full_name)
+        self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
             raise ValueError("Repository mirror must be a valid bare Git repository")
