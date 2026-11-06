@@ -66,30 +66,35 @@ jobs:
           SOURCE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_test
           RESTORE_DATABASE_URL: postgresql://rusa_test:rusa_test_password@127.0.0.1:5432/rusa_restore_test
           RESTORE_CONFIRM_DATABASE: rusa_restore_test
-          BACKUP_DIR: ${{ runner.temp }}/rusa-agent-backups
-          BACKUP_AGE_IDENTITY_FILE: ${{ runner.temp }}/rusa-backup-identity.txt
         run: |
-          sudo apt-get update
-          sudo apt-get install -y age postgresql-client
-          pg_dump --version
-          pg_restore --version
-          mkdir -p "$BACKUP_DIR"
-          age-keygen -o "$BACKUP_AGE_IDENTITY_FILE"
-          export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
-              id INTEGER PRIMARY KEY,
-              value TEXT NOT NULL
-          );
-          TRUNCATE public.rusa_drill_probe;
-          INSERT INTO public.rusa_drill_probe (id, value)
-          VALUES (1, 'encrypted-restore-drill-ok');
-          SQL
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE rusa_restore_test'
-          bash scripts/postgres/restore_drill.sh
-          restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT value FROM public.rusa_drill_probe WHERE id=1')"
-          test "$restored_value" = "encrypted-restore-drill-ok"
-          psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE rusa_restore_test'
+          mkdir -p "$RUNNER_TEMP/rusa-agent-backups" "$RUNNER_TEMP/rusa-backup-drill"
+          docker build --pull -f Dockerfile.backup -t rusa-agent-db-backup:dr .
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -v "$RUNNER_TEMP/rusa-agent-backups:/backups" \
+            -v "$RUNNER_TEMP/rusa-backup-drill:/drill" \
+            -e SOURCE_DATABASE_URL \
+            -e RESTORE_DATABASE_URL \
+            -e RESTORE_CONFIRM_DATABASE \
+            -e BACKUP_DIR=/backups \
+            -e BACKUP_AGE_IDENTITY_FILE=/drill/age-identity.txt \
+            --entrypoint bash rusa-agent-db-backup:dr -euo pipefail -c '
+              age-keygen -o "$BACKUP_AGE_IDENTITY_FILE" 2>/dev/null
+              export BACKUP_AGE_RECIPIENT="$(age-keygen -y "$BACKUP_AGE_IDENTITY_FILE")"
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+              CREATE TABLE IF NOT EXISTS public.rusa_drill_probe (
+                  id INTEGER PRIMARY KEY,
+                  value TEXT NOT NULL
+              );
+              TRUNCATE public.rusa_drill_probe;
+              INSERT INTO public.rusa_drill_probe (id, value)
+              VALUES (1, 'encrypted-restore-drill-ok');
+              SQL
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE rusa_restore_test"
+              bash /app/scripts/postgres/restore_drill.sh
+              restored_value="$(psql "$RESTORE_DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "SELECT value FROM public.rusa_drill_probe WHERE id=1")"
+              test "$restored_value" = "encrypted-restore-drill-ok"
+              psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE rusa_restore_test"
+            '
       - name: Audit production dependencies
         run: |
           pip-audit -r requirements.txt
