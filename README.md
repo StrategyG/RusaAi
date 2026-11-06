@@ -4,7 +4,7 @@ RUSA-AI is an AI model and agent platform under active development. The reposito
 
 ## Verified implementation boundary
 
-The enterprise agent runtime includes a hierarchical supervisor, durable task workers, a reviewer/approval gate, tenant-scoped memory and messages, a JSON Schema-validated tool registry, GitHub tools, an MCP Streamable HTTP gateway, and a pgvector RAG pipeline. The system is still NOT production-certified until the release gates in docs/PRODUCTION_READINESS.md and docs/PRODUCTION_READINESS_AGENT.md have objective evidence.
+The enterprise agent runtime includes a hierarchical supervisor, durable task workers, a reviewer/approval gate, evidence-grounded final synthesis with citation validation, tenant-scoped memory and messages, a JSON Schema-validated tool registry, GitHub tools, an MCP Streamable HTTP gateway, and a pgvector RAG pipeline. The system is still NOT production-certified until the release gates in docs/PRODUCTION_READINESS.md and docs/PRODUCTION_READINESS_AGENT.md have objective evidence.
 
 No trained RUSA-AI foundation-model weights are included. Model inference requires a compatible local model artifact. Agent planning requires the local RUSA model-serving endpoint or another OpenAI-compatible chat endpoint. Semantic RAG requires an OpenAI-compatible embeddings endpoint that returns exactly 384-dimensional vectors.
 
