@@ -3,7 +3,7 @@
 This module deliberately exposes named operations, never arbitrary shell execution.
 The workspace is a staging checkout. The Docker sandbox is the execution boundary.
 """
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import os
 import shutil
