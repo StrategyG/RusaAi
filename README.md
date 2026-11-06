@@ -34,7 +34,7 @@ The optional knowledge plane adds document ingestion, 1,536-dimensional embeddin
 - The existing specialist workers can consume RAG results alongside episodic memory when RUSA_RAG_ENABLED=true; MCP tools can be enabled with RUSA_MCP_SERVER_URL.
 - The service is optional and does not make the full product production-certified. Apply migration 005, configure a real embedding provider, set tenant credentials, and complete retrieval/security evaluation before production.
 
-Install the optional runtime dependencies with python -m pip install -r requirements-rag-mcp.txt in Python 3.11+. Apply migrations/005_rag_knowledge_pgvector.sql using a migration identity, then ingest a local file with python -m rusa_knowledge.cli ingest --file ./docs/guide.pdf --tenant-id tenant-a --collection agent.
+Install the optional runtime dependencies with python -m pip install -r requirements-rag-mcp.txt in Python 3.11+. For Docker Compose deployments, run the explicit one-shot migration with docker compose --profile migrate run --rm rusa-knowledge-migrate; it waits for PostgreSQL and applies migration 005 as the database owner. The migration service is opt-in and does not run on ordinary application startup. For an existing database, verify the restricted roles and privileges before applying it. Then ingest a local file with python -m rusa_knowledge.cli ingest --file ./docs/guide.pdf --tenant-id tenant-a --collection agent.
 
 Start the MCP service with docker compose --profile knowledge up --build rusa-mcp. Configure RUSA_MCP_TENANT_KEYS as a JSON map from SHA-256 bearer-token digests to tenant IDs; configure the corresponding plaintext tokens only in the agent worker secret store.
 
