@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - staging
+      - "integration/staging-baseline-*"
   workflow_dispatch:
     inputs:
       deployment_mode:

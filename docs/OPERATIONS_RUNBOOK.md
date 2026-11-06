@@ -96,9 +96,9 @@ Workers claim jobs using PostgreSQL row locks and leases. SIGTERM/SIGINT cancels
 
 ## 4. Staging image publication and deployment
 
-The repository provides a GitHub Actions workflow at `.github/workflows/deploy-staging.yml`. It supports two controlled entry points: a push to the dedicated `staging` branch, or manual dispatch with an explicit `deploy` choice. The workflow file must be present on the default branch for the manual Actions UI entry point to be available. The push entry point becomes active when the workflow is present on the `staging` branch.
+The repository provides a GitHub Actions workflow at `.github/workflows/deploy-staging.yml`. It supports two controlled entry points: a push to the dedicated `staging` branch or an `integration/staging-baseline-*` branch, or manual dispatch with an explicit `deploy` choice. The workflow file must be present on the default branch for the manual Actions UI entry point to be available. The push entry point becomes active when the workflow is present on the selected staging integration branch.
 
-1. Create the `staging` environment and configure required reviewers/approval rules before enabling deployment. Protect the `staging` branch with pull-request reviews, required CI checks, and no force pushes; do not deploy directly from a developer feature branch.
+1. Create the `staging` environment and configure required reviewers/approval rules before enabling deployment. Protect the selected `staging` or `integration/staging-baseline-*` branch with pull-request reviews, required CI checks, and no force pushes; do not deploy directly from a developer feature branch.
 2. Add environment variables `STAGING_APP_DIR` (absolute path on the host), `GHCR_PULL_USER`, and optionally `STAGING_URL`.
 3. Add environment secrets `STAGING_HOST`, `STAGING_USER`, `STAGING_SSH_PRIVATE_KEY`, `STAGING_KNOWN_HOSTS`, and `GHCR_PULL_TOKEN`. The registry token should be read-only (`read:packages`); the deploy SSH account should only manage this staging application's directory and Compose project.
 4. Prepare the host directory and a host-managed `.env` file. Never copy secrets from GitHub Actions into the repository. Configure PostgreSQL, a valid model artifact directory, auth/bootstrap secrets, provider allowlists, and a least-privilege GitHub token as required.

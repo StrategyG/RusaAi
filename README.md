@@ -99,7 +99,7 @@ For local frontend development, install dependencies in apps/web and run npm run
 
 ## Staging deployment
 
-A GitHub Actions workflow can publish immutable API/model, agent-worker, and web images to GHCR and deploy them to a protected staging environment. It supports a protected `staging` branch push (with environment approval) and manual dispatch after the workflow is available on the default branch. Configure branch protection, required environment reviewers, host/SSH secrets, a read-only GHCR pull token, and a host-managed `.env` before deployment. Start with `build-only` to publish and inspect images without touching a server. See [the operations runbook](docs/OPERATIONS_RUNBOOK.md#4-staging-image-publication-and-deployment).
+A GitHub Actions workflow can publish immutable API/model, agent-worker, and web images to GHCR and deploy them to a protected staging environment. It supports a protected `staging` or `integration/staging-baseline-*` branch push (with environment approval) and manual dispatch after the workflow is available on the default branch. Configure branch protection, required environment reviewers, host/SSH secrets, a read-only GHCR pull token, and a host-managed `.env` before deployment. Start with `build-only` to publish and inspect images without touching a server. See [the operations runbook](docs/OPERATIONS_RUNBOOK.md#4-staging-image-publication-and-deployment).
 
 ## Agent worker
 
