@@ -81,7 +81,7 @@ do
 done
 ```
 
-Migration 007 creates the tenant-scoped vector store and the ingestion role. Migration 008 creates a separate read-only role, moves autonomous retrieval away from the write-capable ingestion role, and grants SELECT only. Do not run application containers as the migration owner or a PostgreSQL superuser.
+Migration 007 creates the tenant-scoped vector store and the ingestion role. Migration 008 creates a separate read-only role, moves autonomous retrieval away from the write-capable ingestion role, grants SELECT only, and revokes the legacy knowledge-table SELECT grants from the API runtime role. Do not run application containers as the migration owner or a PostgreSQL superuser.
 
 Create separate login identities after the migrations. Generate unique passwords in a secret manager; never paste passwords into source control:
 
@@ -93,7 +93,7 @@ GRANT rusa_knowledge_reader TO rusa_mcp_login WITH INHERIT FALSE;
 GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login, rusa_mcp_login;
 ```
 
-Use `rusa_api_login` only for the API DSN, `rusa_worker_login` only for the worker DSN, and `rusa_mcp_login` only for the MCP DSN. The worker runtime may assume the reader role for retrieval; it must not retain membership in the write-capable ingestion role after migration 008. Use the ingestion role only for a separately controlled document-ingestion job.
+Use `rusa_api_login` only for the API DSN, `rusa_worker_login` only for the worker DSN, and `rusa_mcp_login` only for the MCP DSN. The worker runtime may assume the reader role for retrieval; it must not retain membership in the write-capable ingestion role after migration 008. The API runtime role has no direct access to the knowledge tables. Use the ingestion role only for a separately controlled document-ingestion job.
 
 The database must enforce TLS with certificate verification. Prefer a private database network. Confirm role memberships, RLS flags/policies, SELECT-only MCP grants, and cross-tenant isolation using the repository PostgreSQL integration tests before enabling tenant traffic.
 
