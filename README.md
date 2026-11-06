@@ -2,7 +2,7 @@
 
 RUSA-AI is an AI and autonomous-agent platform under active development. The repository currently contains a FastAPI inference gateway, a tenant-scoped coding-agent runtime, PostgreSQL task/lease controls, and A2A task validation.
 
-**Model status:** `llm-project/model/` and `llm-project/configs/model.yaml` describe a planned architecture only. This repository does not contain trained RUSA-AI weights/checkpoints, a verified tokenizer artifact, or a standalone local inference runtime. Chat completions are forwarded to an externally configured OpenAI-compatible HTTPS endpoint (`RUSA_MODEL_BASE_URL`); the API fails closed when no inference backend is configured.
+**Model status:** The repository now includes an optional local Transformers/vLLM runtime with checksum-verified model manifests and bounded streaming. No trained RUSA-AI weights are bundled. Local serving is enabled only when `RUSA_LOCAL_MODEL_PATH` points to a verified local artifact; otherwise chat completions use the configured OpenAI-compatible endpoint (`RUSA_MODEL_BASE_URL`). Production local serving requires a pinned `RUSA_MODEL_MANIFEST_SHA256`.
 
 **Production status:** RUSA-AI is not production-certified. A passing CI run validates only the exact commit and automated checks it executed. Production release still requires approved model/provider artifacts, staging load and soak tests, adversarial tenant-isolation review, backup/restore and rollback drills, monitoring, TLS, secret management, and operator sign-off.
 
@@ -11,13 +11,34 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 ## Key Features & Architecture
 
 - **Model architecture blueprint**: Decoder-only Transformer/MoE design; planned only and not a trained or verified model.
-- **Inference gateway**: FastAPI OpenAI-compatible API that forwards requests to a configured external model endpoint; it does not serve local RUSA-AI weights.
+- **Inference gateway**: FastAPI OpenAI-compatible API with an optional checksum-verified local Transformers/vLLM backend and external OpenAI-compatible provider support.
+- **Knowledge retrieval**: Optional tenant-scoped PostgreSQL/pgvector ingestion and hybrid retrieval, with offline Recall@K, MRR, and NDCG@K evaluation.
+- **Knowledge MCP**: Separate read-only, bearer-authenticated MCP service for tenant-scoped search and document access.
 - **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
 - **A2A task validation**: Versioned JSON Schema validation for agent task envelopes.
 - **Security and reliability controls**: API-key authentication, RBAC, tenant-aware data access, rate limiting, non-root containers, and audit events; production effectiveness still requires deployment-level verification.
 - **CI quality gates**: Lint, tests, static security analysis, container builds, and vulnerability scanning.
 
 ---
+
+## Optional local model runtime
+
+Install the local inference dependencies with `pip install -e ".[model]"`.
+For vLLM, use the separately managed `requirements-vllm.txt` on a compatible
+CUDA/Linux environment. Create and verify a model manifest with
+`scripts/create_model_manifest.py`, then configure `RUSA_LOCAL_MODEL_PATH`.
+Production deployments must pin the manifest digest with
+`RUSA_MODEL_MANIFEST_SHA256`. Model weights are not downloaded automatically.
+See `docs/INFERENCE_OPERATIONS.md`.
+
+## Optional RAG and MCP
+
+The tenant-scoped knowledge service and read-only MCP endpoint are independently
+deployable. Install `requirements-rag-mcp.txt`, apply
+`migrations/005_rag_knowledge_pgvector.sql` to a PostgreSQL database with
+pgvector, and configure restricted database credentials and per-tenant MCP
+bearer-token hashes. The `rusa-knowledge` CLI supports ingestion, readiness,
+and retrieval evaluation. See `docs/RAG_MCP_OPERATIONS.md`.
 
 ## Repository Structure
 
