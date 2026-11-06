@@ -59,7 +59,9 @@ export async function refreshSession(): Promise<AuthSession | null> {
 
 async function refreshAccessToken(): Promise<boolean> {
   const session = await refreshSession();
-  if (session) return true;
+  // A concurrent login may supersede a refresh that was already in flight.
+  // In that case, keep the newly issued access token and retry the request.
+  if (session || accessToken) return true;
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("rusa:session-expired"));
   }
