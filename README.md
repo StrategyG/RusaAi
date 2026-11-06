@@ -1,83 +1,68 @@
 # RUSA-AI
 
-RUSA-AI is an AI model and agent platform under active development. This repository currently provides an API serving foundation, an A2A task-envelope contract, a local Transformers adapter, and engineering scaffolding.
+RUSA-AI is an AI model and agent platform under active development. The repository provides an authenticated local-model inference API, A2A task validation, and an enterprise hierarchical coding-agent runtime.
 
 ## Verified scope and status
 
-The complete RUSA-AI product is NOT production-ready yet. This repository does not currently contain trained RUSA-AI model weights, a verified training pipeline, a deployed multi-agent runtime, persistent memory/RAG, or production benchmark evidence. The serving API can load a compatible local causal language model, but the model artifact must be supplied and evaluated separately.
+The complete RUSA-AI product is not production-certified until a real model artifact, provider, GitHub credential, PostgreSQL deployment, target hardware benchmarks, security review, and operational release gates are supplied and verified. The repository does not claim trained model weights or measured production SLOs.
 
-## Serving foundation
+## Enterprise AICode Agent
 
-- FastAPI serving API with mandatory API-key authentication that fails closed when misconfigured.
-- Local-only Hugging Face Transformers loading. Model files must already exist on disk; remote code execution and implicit downloads are disabled.
-- OpenAI-style non-streaming chat completion response with token usage.
-- A2A task-envelope validation using the schema-declared JSON Schema draft and format checks.
-- Separate liveness and readiness endpoints.
-- Request IDs, response security headers, request content-length guard, non-root container, and hardened Compose example.
-- CI for lint, compile, tests, dependency audit, container build, and liveness smoke test.
+The agent control plane is a separate service from model inference. It uses a hierarchical master orchestrator and six specialist workers: Analyst, Architect, Developer, Debugger, Tester, and Security.
 
-Mock model responses are intentionally not supported. Inference returns HTTP 503 until a real local model is loaded. Streaming returns HTTP 501 until implemented.
+Capabilities within the allowlist:
+- Read and list regular text files in the task repository.
+- Create or reuse an isolated work branch.
+- Write approved repository files on that branch.
+- Open or reuse a draft pull request.
+- Read GitHub Actions checks and perform bounded repair cycles.
+- Persist tenant-scoped task state, episodic memory, and audit evidence.
+
+The agent does not expose arbitrary shell execution, unrestricted network access, secret retrieval, force push, merge, deployment, release, permission changes, or workflow changes. GitHub Actions provides the isolated test/build execution environment. Human review and protected-branch controls govern merge and release.
+
+See [Enterprise Agent Architecture](docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md) and [Security and Operations](docs/architecture/SECURITY_AND_OPERATIONS.md).
 
 ## Repository layout
 
 - llm-project/model/: model architecture blueprint; not trained weights.
-- llm-project/serve/: API and local inference adapter.
-- schemas/a2a/: A2A task envelope JSON Schema.
-- tests/: API, authentication, readiness, and schema tests.
-- docs/: architecture, integration, and production-readiness documentation.
+- llm-project/serve/: inference API and local Transformers adapter.
+- rusa_agents/: contracts, policy, provider, GitHub tools, queue, memory, audit, orchestrator, task API, and worker process.
+- schemas/a2a/: A2A task-envelope JSON Schema.
+- docs/architecture/: agent architecture, worker contract, and security/operations model.
+- tests/: API, contract, policy, orchestration, and security regression tests.
 
 ## Requirements
 
 - Python 3.11 for the supported container and CI baseline.
-- A compatible local causal language model directory with a tokenizer chat template.
-- Adequate RAM/VRAM for the selected model.
-- A random API key of at least 32 characters.
-- Docker Compose is optional.
+- A compatible local causal language model directory for the inference API.
+- A structured-output-capable OpenAI-compatible model provider for the agent workers.
+- PostgreSQL 16 or compatible for task queue and memory.
+- A repository-scoped GitHub App or fine-grained token with minimum contents, pull-request, checks, and metadata permissions.
+- Docker Compose is optional for local orchestration.
 
 ## Local setup
 
 1. Create and activate a Python virtual environment.
-2. Install production dependencies with: python -m pip install -r requirements.txt
-3. Install development dependencies with: python -m pip install -r requirements-dev.txt
-4. Copy .env.example to .env, generate a real secret, and set RUSA_MODEL_PATH to a local model directory.
-5. Run: uvicorn app:app --app-dir llm-project/serve --host 127.0.0.1 --port 8000
+2. Install dependencies: python -m pip install -r requirements-dev.txt
+3. Copy .env.example to .env and generate unique secrets. Do not commit .env.
+4. Configure RUSA_MODEL_PATH and RUSA_MODEL_DIR for the inference API.
+5. Configure the agent database password, per-tenant API key map, provider, GitHub token, and audit HMAC key.
+6. Start the services with docker compose up --build -d.
 
-The API deliberately reports not-ready and returns HTTP 503 for inference until a valid local model is loaded. It never returns fabricated model output.
-
-## Docker Compose
-
-Set RUSA_API_KEY to a random secret and RUSA_MODEL_DIR to the directory containing model files. Then run docker compose up --build -d. The model directory is mounted read-only at /models.
-
-The container runs as UID/GID 10001, drops Linux capabilities, uses a read-only root filesystem under Compose, and exposes port 8000. Put it behind a TLS-terminating reverse proxy or gateway. Configure distributed rate limiting, request timeouts, and connection limits at that gateway; an in-process limiter is not sufficient across replicas.
-
-## Health endpoints
-
-- GET /health/live: process liveness; does not imply that a model is loaded.
-- GET /health: backward-compatible liveness endpoint.
-- GET /health/ready: returns HTTP 200 only when a model, API-key configuration, and task schema are available.
-
-## API endpoints
-
-- POST /v1/chat/completions: requires X-API-Key; accepts non-streaming chat requests.
-- POST /v1/validate-task: requires X-API-Key; validates an A2A envelope. Missing or invalid schema configuration fails closed with HTTP 503.
+The inference API reports not-ready and returns HTTP 503 until a real local model is loaded. The agent API accepts tasks at POST /v1/agent/tasks and returns task status at GET /v1/agent/tasks/{task_id}. Both require X-API-Key; the agent API also requires X-Tenant-ID and validates the key against RUSA_AGENT_TENANT_KEYS. Set Idempotency-Key on task submission to prevent duplicate tasks.
 
 ## Quality gates
 
-Run ruff check llm-project/serve tests, python -m compileall -q llm-project tests, pytest -q, and pip-audit -r requirements.txt.
+Run:
+- ruff check llm-project/serve rusa_agents tests
+- python -m compileall -q llm-project rusa_agents tests
+- pytest -q
+- pip-audit -r requirements.txt -r requirements-agent.txt
 
-A green CI run validates the serving foundation. It does not prove model quality, model capacity, multi-agent correctness, or production SLOs.
+CI also builds both the inference API image and the agent runtime image, then smoke-tests the inference API container.
 
-## Production acceptance checklist
+## Production acceptance
 
-- [ ] Licensed model artifact, revision, checksum, tokenizer, and chat template are recorded.
-- [ ] Model correctness, p50/p95 latency, throughput, RAM/VRAM, and context limits are benchmarked on target hardware.
-- [ ] A suitable high-throughput serving strategy is selected. The current Transformers adapter serializes generation in one process and is a baseline adapter.
-- [ ] Streaming is implemented and tested if required.
-- [ ] Distributed rate limiting, TLS, ingress body limits, timeouts, and network policy are configured at the gateway.
-- [ ] Secret rotation, access audit, backup/restore, incident response, and rollback are tested.
-- [ ] Multi-agent orchestration, queueing, idempotency, retries, cancellation, and worker isolation are implemented and tested.
-- [ ] Persistent memory/RAG includes tenant isolation, data provenance, retention, and deletion controls.
-- [ ] Evaluation, safety, prompt-injection, tool authorization, and adversarial tests meet documented thresholds.
-- [ ] Staging soak test, canary rollout, monitoring, alerting, and operational runbook are approved.
+A green CI run validates code checks for that commit. It does not prove model quality, model capacity, multi-tenant isolation under production load, security certification, or production SLOs. Before release, configure TLS and distributed rate limiting at an API gateway, egress allowlists, secret rotation, PostgreSQL encryption/backups/PITR, immutable remote audit retention, tenant isolation tests, prompt-injection red-team tests, staging soak tests, monitoring, alerting, rollback, and human approval for merge/deployment.
 
-See docs/PRODUCTION_READINESS.md for the evidence ledger and remaining release gates.
+See docs/architecture/RUSA_AI_ENTERPRISE_AGENT.md for the complete architecture and acceptance model.
