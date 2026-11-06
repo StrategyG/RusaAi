@@ -67,6 +67,7 @@ services:
     environment:
       RUSA_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       DOCKER_HOST: unix:///run/docker.sock
+      RUSA_METRICS_BIND: 0.0.0.0
     volumes:
       - ${RUSA_DOCKER_SOCKET:?Set RUSA_DOCKER_SOCKET to a dedicated rootless Docker socket}:/run/docker.sock
       - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
