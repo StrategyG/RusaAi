@@ -83,6 +83,17 @@ class DockerSandbox:
             raise RuntimeError(f"Docker daemon is unavailable: {info.stderr[-1000:]}")
         if require_rootless and "rootless" not in info.stdout.lower():
             raise RuntimeError("Production Docker daemon must run in rootless mode")
+        if require_rootless:
+            try:
+                docker_gid = int(os.getenv("RUSA_DOCKER_GID", ""))
+            except ValueError as exc:
+                raise RuntimeError("Production RUSA_DOCKER_GID must be a valid numeric group ID") from exc
+            if not 1 <= docker_gid <= 65535:
+                raise RuntimeError("Production RUSA_DOCKER_GID must be between 1 and 65535")
+            if docker_gid not in os.getgroups() and docker_gid != os.getgid():
+                raise RuntimeError(
+                    "Worker process is not a member of the rootless Docker socket group"
+                )
         if require_image:
             inspected = subprocess.run(  # nosec B603 - fixed argv and absolute Docker executable
                 [DOCKER_BIN, "image", "inspect", self.image],
@@ -154,6 +165,12 @@ class DockerSandbox:
         with tempfile.TemporaryDirectory(prefix=".rusa-sandbox-", dir=workspace.parent) as temp_root:
             snapshot = Path(temp_root) / "workspace"
             try:
+                # Rootless Docker runs as a host user. Make the temporary parent
+                # traversable by the socket group while keeping the snapshot read-only.
+                os.chmod(temp_root, 0o750)
+                docker_gid = os.getenv("RUSA_DOCKER_GID")
+                if docker_gid:
+                    os.chown(temp_root, -1, int(docker_gid))
                 shutil.copytree(
                     workspace, snapshot, symlinks=True, ignore=ignore_sensitive,
                     copy_function=bounded_copy,
