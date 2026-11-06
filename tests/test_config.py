@@ -128,3 +128,13 @@ def test_production_api_rejects_unmapped_api_key_tenant(monkeypatch):
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-b":["StrategyG/RusaAi"]}')
     with pytest.raises(RuntimeError, match="repository allowlist"):
         RuntimeConfig.from_env().validate_api()
+
+
+def test_production_api_rejects_tls_without_hostname_verification(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_API_DATABASE_URL",
+        "postgresql://rusa_api_login:secret@db/rusa?sslmode=require",
+    )
+    with pytest.raises(RuntimeError, match="sslmode=verify-full"):
+        RuntimeConfig.from_env().validate_api()
