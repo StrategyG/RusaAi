@@ -17,16 +17,21 @@ from rusa_agents.workers import AgentWorker
 
 
 def make_task() -> CodingTask:
+    task_id = "agent-test-task-001"
+    idempotency_key = "test-idempotency-key"
     return CodingTask(
         tenant_id="tenant-a",
         objective="Improve repository quality",
         repository=RepositoryTarget(
             full_name="StrategyG/RusaAi",
             base_branch="main",
-            work_branch="feature/agent-test",
+            work_branch=CodingTask.expected_work_branch_for(
+                "tenant-a", idempotency_key, task_id,
+            ),
         ),
         acceptance_criteria=("Tests pass", "Security review passes"),
-        idempotency_key="test-idempotency-key",
+        idempotency_key=idempotency_key,
+        task_id=task_id,
     )
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import os
@@ -267,15 +266,9 @@ def create_task(
             work_branch=body.work_branch,
         )
         task_id_seed = uuid.uuid4().hex
-        tenant_slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", tenant_id).strip(".-_")[:24] or "tenant"
-        branch_hint = re.sub(
-            r"[^A-Za-z0-9_.-]+", "-", body.work_branch.rsplit("/", 1)[-1]
-        ).strip(".-_")[:32] or "task"
-        branch_identity = idempotency_key or task_id_seed
-        branch_digest = hashlib.sha256(
-            f"{tenant_id}:{branch_identity}".encode("utf-8")
-        ).hexdigest()[:12]
-        work_branch = f"rusa-agent/{tenant_slug}/{branch_hint}-{branch_digest}"
+        work_branch = CodingTask.expected_work_branch_for(
+            tenant_id, idempotency_key or "", task_id_seed,
+        )
         task = CodingTask(
             task_id=task_id_seed,
             tenant_id=tenant_id,
