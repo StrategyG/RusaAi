@@ -96,7 +96,7 @@ def test_agent_api_requires_authentication(monkeypatch):
 
 def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Add regression tests",
         "repository": "StrategyG/RusaAi",
@@ -122,7 +122,7 @@ def test_agent_api_submits_and_reads_only_own_tenant_task(monkeypatch):
 
 def test_agent_api_rejects_invalid_branch_target(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Change repository",
         "repository": "StrategyG/RusaAi",
@@ -137,7 +137,7 @@ def test_agent_api_rejects_invalid_branch_target(monkeypatch):
 
 def test_agent_api_rejects_repository_outside_allowlist(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Inspect another repository",
         "repository": "some-owner/private-repo",
@@ -146,6 +146,20 @@ def test_agent_api_rejects_repository_outside_allowlist(monkeypatch):
     with TestClient(api.app) as client:
         response = client.post("/v1/agent/tasks", headers=headers, json=body)
     assert response.status_code == 403
+
+
+def test_agent_api_requires_idempotency_key(monkeypatch):
+    configure_api(monkeypatch)
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    body = {
+        "objective": "Submission without idempotency key",
+        "repository": "StrategyG/RusaAi",
+        "acceptance_criteria": ["Duplicate submissions are safe"],
+    }
+    with TestClient(api.app) as client:
+        response = client.post("/v1/agent/tasks", headers=headers, json=body)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Idempotency-Key header is required"
 
 
 def test_agent_api_idempotency_reuses_task_id(monkeypatch):
@@ -201,7 +215,7 @@ def test_agent_api_rejects_unmapped_tenant_key(monkeypatch):
 def test_agent_api_enforces_request_size_limit(monkeypatch):
     configure_api(monkeypatch)
     monkeypatch.setattr(api, "MAX_AGENT_REQUEST_BYTES", 16)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     with TestClient(api.app) as client:
         response = client.post(
             "/v1/agent/tasks",
@@ -213,7 +227,7 @@ def test_agent_api_enforces_request_size_limit(monkeypatch):
 
 def test_agent_api_rejects_repository_assigned_to_another_tenant(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "b" * 48, "X-Tenant-ID": "tenant-b"}
+    headers = {"X-API-Key": "b" * 48, "X-Tenant-ID": "tenant-b", "Idempotency-Key": "test-request-key-b"}
     body = {
         "objective": "Inspect a globally allowed but unassigned repository",
         "repository": "StrategyG/RusaAi",
@@ -226,7 +240,7 @@ def test_agent_api_rejects_repository_assigned_to_another_tenant(monkeypatch):
 
 def test_agent_api_maps_queue_outage_to_retryable_503(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     with TestClient(api.app) as client:
         client.app.state.queue.get = lambda tenant_id, task_id: (_ for _ in ()).throw(
             RuntimeError("database unavailable")
@@ -239,7 +253,7 @@ def test_agent_api_maps_queue_outage_to_retryable_503(monkeypatch):
 
 def test_agent_api_cancels_task_and_is_idempotent_for_own_tenant(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Cancel this task",
         "repository": "StrategyG/RusaAi",
@@ -262,7 +276,7 @@ def test_agent_api_cancels_task_and_is_idempotent_for_own_tenant(monkeypatch):
 
 def test_agent_api_retries_only_failed_tasks(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Retry a failed task",
         "repository": "StrategyG/RusaAi",
@@ -283,7 +297,7 @@ def test_agent_api_retries_only_failed_tasks(monkeypatch):
 
 def test_agent_api_does_not_cancel_terminal_task(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Terminal task",
         "repository": "StrategyG/RusaAi",
@@ -299,7 +313,7 @@ def test_agent_api_does_not_cancel_terminal_task(monkeypatch):
 
 def test_agent_api_cancels_task_awaiting_human_approval(monkeypatch):
     configure_api(monkeypatch)
-    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a"}
+    headers = {"X-API-Key": "a" * 48, "X-Tenant-ID": "tenant-a", "Idempotency-Key": "test-request-key"}
     body = {
         "objective": "Cancel a task awaiting approval",
         "repository": "StrategyG/RusaAi",
