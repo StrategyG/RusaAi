@@ -143,7 +143,7 @@ class PostgresTaskQueue:
                     FROM pg_roles
                     WHERE rolname = ANY(%s)
                 """, (["rusa_api_runtime", "rusa_worker_runtime"],)).fetchall()
-                role_flags = {row[0]: (row[1], row[2], row[3]) for row in roles}
+                role_flags = {row[0]: tuple(row[1:]) for row in roles}
                 if set(role_flags) != {"rusa_api_runtime", "rusa_worker_runtime"}:
                     raise RuntimeError("Separate API/worker database role groups are missing")
                 if any(any(flags) for flags in role_flags.values()):
