@@ -2,7 +2,6 @@
 from __future__ import annotations
 import asyncio
 import json
-from dataclasses import asdict
 from .audit import AuditLog
 from .contracts import CodingTask,TaskRecord,TaskState,WorkerResult,WorkerRole
 from .memory import SQLiteMemory
