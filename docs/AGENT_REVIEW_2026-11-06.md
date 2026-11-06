@@ -1,46 +1,47 @@
-# Agent runtime review — 2026-11-06
+# RUSA-AI agent production-readiness review — 2026-11-06
 
-Task: RUSA-REVIEW-20261106. Scope: StrategyG/RusaAi, PR #7 baseline
-8c242a214f8e5ed9de9f85672c9e080954b75436. Acceptance: reproduce defects,
-fix them without weakening security gates, and run regression checks.
+Repository: StrategyG/RusaAi  
+Working branch: fix/agent-validation-review  
+Stacked pull requests: #7 (hierarchical agent runtime) and #8 (runtime hardening).  
+Review objective: close the highest-risk gaps without weakening autonomy boundaries.
 
-## Verified findings and changes
+## Implemented in this review revision
 
-- High: environment-file variants such as `.env.production` and nested
-  `config/.env.local` passed the repository path policy. Deny `.env` and
-  `.env.*` components at every depth, including case variants; reject case
-  variants of `.git` as well. Gateway tests prove rejection before network access.
-- High: GitHub check-runs reads retrieve only 100 records. Previously a successful
-  first page could be reported as all checks successful despite omitted checks.
-  Require an integer total_count matching the returned result count; the
-  orchestrator waits on incomplete evidence. This intentionally fails closed;
-  repositories with more than 100 checks need bounded pagination in a follow-up.
-- Medium: the required container job name was singular, but CI publishes the
-  plural name. Match the actual workflow and add a contract regression test.
-- Test defect: the audit-integrity regression never reached the audit check
-  because its tester supplied no CI evidence. Provide successful CI evidence
-  so the test actually exercises rejection of invalid audit integrity.
+| Area | Change | Regression evidence added |
+|---|---|---|
+| Worker leases | Unique worker identity, heartbeat, lease expiry, fenced checkpoint/retry/acknowledgement | PostgreSQL stale-owner test |
+| Retry correctness | Failed retry clears terminal checkpoint so the next attempt can restart instead of replaying a terminal FAILED state | Queue behavior and worker integration path |
+| Idempotency | Duplicate key must match the same semantic payload; generated task ID and timestamp are normalized | PostgreSQL duplicate/conflict test |
+| Tenant isolation | RLS readiness checks for task and memory tables; memory insert sets tenant context | PostgreSQL RLS and readiness tests |
+| Repository scope | Exact owner/name allowlist enforced at API and GitHub gateway | API and gateway regression tests |
+| Branch isolation | Server-derived branch is unique to tenant plus idempotency identity; arbitrary branch reuse rejected | Task contract and API tests |
+| HTTP intake | Actual streamed body bytes bounded before JSON parsing; request timeout remains 15 seconds | Chunked body and replay tests |
+| External responses | GitHub and provider bodies are streamed with byte limits | Adapter limits and configuration |
+| CI completeness | Bounded check-run pagination, stable total count, unique run IDs, complete-set validation | Incomplete check result tests |
+| Security review | Security worker must inspect branch diff and fresh CI evidence | Orchestrator tests |
+| Commit freshness | Tester CI, Security CI, and Security diff must identify the same head SHA | Changed-head regression |
+| CI triggers | Pull-request checks now run for stacked PRs regardless of target branch | Workflow contract test |
 
-## Evidence and limitations
+## Current test status
 
-Before fixes, focused runtime tests: 9 failed, 30 passed (including eight
-new regression failures and the existing audit test failure).
-After fixes: `python -m pytest -q`: 60 passed, 3 skipped.
-`python -m ruff check llm-project/serve rusa_agents tests`: passed.
-`python -m compileall -q llm-project rusa_agents tests`: passed.
+The earlier review revision recorded 60 passed and 3 skipped, with PostgreSQL integration tests skipped locally because no RUSA_TEST_DATABASE_URL was configured. That result applies to the earlier commit, not automatically to the changes in this revision.
 
-Local runtime: Python 3.12. PostgreSQL tests were skipped because
-RUSA_TEST_DATABASE_URL is not configured. Docker is not installed locally;
-remote CI must validate PostgreSQL and container builds. Dependency security
-scans, real model quality, load/soak tests, deployment and recovery drills were
-not performed in this review. No production deployment or main-branch merge.
+This revision adds or updates regression tests for the new controls. It must be validated by the GitHub Actions run on the latest branch head. A test authored but not executed is not evidence of a passing test.
 
-## Remaining release blockers
+## Verification still required
 
-Main still contains the earlier mock-serving baseline; existing hardening and
-agent PRs must be reconciled and reviewed before merge. This patch targets PR
-#7's branch and does not certify the entire product as production-ready.
-The follow-up design refinement adds streamed-body byte limits and a 15-second
-body intake timeout; see architecture section 11 for the updated evidence ledger. Provider/GitHub response
-resource limits and CI evidence identity/freshness deserve further adversarial
-review. Live infrastructure and model evaluation evidence remain required.
+- [ ] GitHub Actions test job passes on the current branch head.
+- [ ] PostgreSQL integration tests execute against the CI PostgreSQL service, not skip.
+- [ ] Both container images build; inference API smoke test passes.
+- [ ] Docker Compose validation succeeds with generated secrets and a real model directory.
+- [ ] Live GitHub App/token permissions match the allowlist and can read checks, create branches, write contents, and open draft PRs.
+- [ ] Live provider returns valid structured JSON under configured response and timeout limits.
+- [ ] Multi-worker chaos test proves heartbeat, lease expiry, stale-owner rejection, and idempotent replay.
+- [ ] Prompt-injection, secret scanning, dependency, and repository-diff security tests pass.
+- [ ] TLS gateway, distributed rate limits, egress allowlists, PostgreSQL TLS/encryption/PITR, and immutable audit export are configured.
+- [ ] Staging load/soak, incident response, restore, and rollback drills are approved.
+- [ ] Model evaluation dataset and quality/safety acceptance thresholds are defined and met.
+
+## Production decision
+
+NOT YET CERTIFIED PRODUCTION-READY. The repository now has stronger code-level controls, but a production decision requires the verification evidence above. No merge to main, deployment, release, or live credential configuration is implied by this review.
