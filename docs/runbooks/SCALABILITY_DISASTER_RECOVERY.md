@@ -43,6 +43,16 @@ The current worker has one in-flight task per replica. Theoretical service rate 
 
 Use measured task duration and peak arrival rate to size the pool. Keep sustained utilization below the approved target and reserve headroom for retries, maintenance, and provider latency. CPU-only autoscaling is insufficient for GPU inference; use queue age/depth and GPU memory/utilization metrics when the model-serving pool is introduced.
 
+A repeatable queue-only benchmark is available:
+
+```bash
+RUSA_AGENT_API_DATABASE_URL='postgresql://...' \
+RUSA_AGENT_DATABASE_URL='postgresql://...' \
+python scripts/postgres/queue_capacity_benchmark.py --tasks 500 --workers 8
+```
+
+It reports enqueue/claim throughput and p95 claim latency using synthetic tenant-scoped tasks, then deletes only those synthetic rows. It does not execute agent tools or model inference. Run it in staging with production-like database sizing; use a separate end-to-end load test to measure provider/GPU throughput.
+
 ## 3. Queue backpressure
 
 `RUSA_AGENT_MAX_OUTSTANDING_PER_TENANT` sets the maximum number of non-terminal tasks for one tenant. The default is 1,000.
