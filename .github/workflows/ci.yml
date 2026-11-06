@@ -37,9 +37,11 @@ jobs:
       - name: Compile
         run: python -m compileall -q llm-project tests
       - name: Test
-        run: pytest -q
+        run: PYTHONPATH=. python -m pytest -q
       - name: Audit production dependencies
         run: pip-audit -r requirements.txt
+      - name: Audit agent dependencies
+        run: pip-audit -r requirements-agent.txt
 
   container:
     name: Build and smoke-test container
