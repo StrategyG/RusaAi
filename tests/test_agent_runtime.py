@@ -17,16 +17,20 @@ from rusa_agents.workers import AgentWorker
 
 
 def make_task() -> CodingTask:
+    task_id = "test-task-id"
+    key = "test-idempotency-key"
+    branch = CodingTask.expected_work_branch_for("tenant-a", key, task_id)
     return CodingTask(
         tenant_id="tenant-a",
         objective="Improve repository quality",
         repository=RepositoryTarget(
             full_name="StrategyG/RusaAi",
             base_branch="main",
-            work_branch="feature/agent-test",
+            work_branch=branch,
         ),
         acceptance_criteria=("Tests pass", "Security review passes"),
-        idempotency_key="test-idempotency-key",
+        idempotency_key=key,
+        task_id=task_id,
     )
 
 
@@ -54,31 +58,68 @@ class ScriptedWorker:
 
 
 class FakeTools:
-    def __init__(self, ci_outcomes: list[str] | None = None) -> None:
+    def __init__(self, ci_outcomes: list[str] | None = None, head_shas: list[str] | None = None) -> None:
         self.ci_outcomes = deque(ci_outcomes or ["passed"])
+        self.head_shas = deque(head_shas or ["a" * 40])
         self.calls = []
 
     async def execute(self, task, call):
         self.calls.append((call.name, dict(call.arguments)))
         if call.name == "get_ci_status":
             outcome = self.ci_outcomes.popleft() if self.ci_outcomes else "passed"
-            checks = []
-            for name in (
-                "Lint, test, and audit dependencies",
-                "Build and smoke-test containers",
-            ):
-                checks.append({
-                    "name": name,
+            sha = self.head_shas.popleft() if self.head_shas else "a" * 40
+            checks = [
+                {
+                    "name": "Lint, test, and audit dependencies",
                     "status": "completed" if outcome != "pending" else "in_progress",
                     "conclusion": "success" if outcome == "passed" else (
                         "failure" if outcome == "failed" else None
                     ),
-                })
+                },
+                {
+                    "name": "Build and smoke-test containers",
+                    "status": "completed" if outcome != "pending" else "in_progress",
+                    "conclusion": "success" if outcome == "passed" else (
+                        "failure" if outcome == "failed" else None
+                    ),
+                },
+            ]
             return ToolResult(
                 name=call.name,
                 success=True,
-                data={"head_sha": "a" * 40, "checks": checks, "checks_complete": True, "all_checks_success": outcome == "passed"},
-                evidence={"source": "github_check_runs_api", "head_sha": "a" * 40},
+                data={
+                    "head_sha": sha,
+                    "checks": checks,
+                    "checks_complete": True,
+                    "total_count": len(checks),
+                    "all_checks_success": outcome == "passed",
+                },
+                evidence={"source": "github_check_runs_api", "head_sha": sha},
+            )
+        if call.name == "get_branch_diff":
+            sha = self.head_shas[0] if self.head_shas else "a" * 40
+            return ToolResult(
+                name=call.name,
+                success=True,
+                data={
+                    "base_sha": "b" * 40,
+                    "head_sha": sha,
+                    "changed_files": 1,
+                    "files": [{"path": "rusa_agents/example.py", "patch": "@@ -1 +1 @@\n+safe"}],
+                    "diff_complete": True,
+                },
+                evidence={"source": "github_compare_api", "head_sha": sha},
+            )
+        if call.name == "create_pull_request":
+            return ToolResult(
+                name=call.name,
+                success=True,
+                data={
+                    "number": 123,
+                    "url": "https://github.com/StrategyG/RusaAi/pull/123",
+                    "draft": True,
+                },
+                evidence={"source": "github_pull_requests_api"},
             )
         return ToolResult(
             name=call.name,
@@ -115,7 +156,21 @@ def make_orchestrator(tools, overrides=None, audit=None):
     overrides = overrides or {}
     workers = []
     for role in WorkerRole:
-        workers.append(overrides.get(role, ScriptedWorker(role, [worker_result(role)])))
+        if role in overrides:
+            workers.append(overrides[role])
+        elif role == WorkerRole.DEVELOPER:
+            workers.append(ScriptedWorker(role, [
+                worker_result(role, [ToolCall("create_pull_request", {"title": "Task PR"})])
+            ]))
+        elif role == WorkerRole.SECURITY:
+            workers.append(ScriptedWorker(role, [
+                worker_result(role, [
+                    ToolCall("get_ci_status"),
+                    ToolCall("get_branch_diff"),
+                ])
+            ]))
+        else:
+            workers.append(ScriptedWorker(role, [worker_result(role)]))
     return AICodeOrchestrator(
         workers=workers,
         tools=tools,
@@ -131,6 +186,21 @@ def test_task_contract_round_trip_preserves_tenant_and_repository():
     assert restored.task_id == task.task_id
     assert restored.tenant_id == task.tenant_id
     assert restored.repository.full_name == task.repository.full_name
+    assert restored.repository.work_branch == task.expected_work_branch()
+
+
+def test_task_contract_rejects_non_isolated_branch():
+    with pytest.raises(ValueError, match="tenant-scoped"):
+        CodingTask(
+            tenant_id="tenant-a",
+            objective="Change repository",
+            repository=RepositoryTarget(
+                full_name="StrategyG/RusaAi",
+                base_branch="main",
+                work_branch="feature/shared-branch",
+            ),
+            acceptance_criteria=("Tests pass",),
+        )
 
 
 def test_repository_target_rejects_writes_to_base_branch():
@@ -230,7 +300,24 @@ def test_worker_contract_requires_exact_acceptance_criteria():
         asyncio.run(worker.run(make_task(), []))
 
 
-def test_orchestrator_completes_only_with_ci_and_security_evidence():
+def test_security_worker_is_instructed_to_review_diff_and_ci():
+    provider = FakeProvider(json.dumps({
+        "summary": "Security review",
+        "tool_calls": [
+            {"name": "get_ci_status", "arguments": {}},
+            {"name": "get_branch_diff", "arguments": {}},
+        ],
+        "blockers": [],
+        "risk": "low",
+        "criteria_results": {"Tests pass": True, "Security review passes": True},
+    }))
+    worker = AgentWorker(WorkerRole.SECURITY, provider)
+    result = asyncio.run(worker.run(make_task(), []))
+    assert {call.name for call in result.tool_calls} == {"get_ci_status", "get_branch_diff"}
+    assert "MUST call get_branch_diff and get_ci_status" in provider.last_system
+
+
+def test_orchestrator_completes_only_with_ci_and_same_sha_security_evidence():
     developer = ScriptedWorker(WorkerRole.DEVELOPER, [worker_result(
         WorkerRole.DEVELOPER,
         [
@@ -242,10 +329,20 @@ def test_orchestrator_completes_only_with_ci_and_security_evidence():
     tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
         WorkerRole.TESTER, [ToolCall("get_ci_status")]
     )])
-    orchestrator = make_orchestrator(FakeTools(["passed"]), {
-        WorkerRole.DEVELOPER: developer,
-        WorkerRole.TESTER: tester,
-    })
+    security = ScriptedWorker(WorkerRole.SECURITY, [worker_result(
+        WorkerRole.SECURITY, [
+            ToolCall("get_ci_status"),
+            ToolCall("get_branch_diff"),
+        ]
+    )])
+    orchestrator = make_orchestrator(
+        FakeTools(["passed", "passed"]),
+        {
+            WorkerRole.DEVELOPER: developer,
+            WorkerRole.TESTER: tester,
+            WorkerRole.SECURITY: security,
+        },
+    )
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.SUCCEEDED
     assert record.stage_index == 7
@@ -256,7 +353,7 @@ def test_orchestrator_checkpoints_while_ci_is_pending_then_resumes():
         worker_result(WorkerRole.TESTER, [ToolCall("get_ci_status")]),
         worker_result(WorkerRole.TESTER, [ToolCall("get_ci_status")]),
     ])
-    tools = FakeTools(["pending", "passed"])
+    tools = FakeTools(["pending", "passed", "passed"])
     orchestrator = make_orchestrator(tools, {WorkerRole.TESTER: tester})
     task = make_task()
     first = asyncio.run(orchestrator.run(task))
@@ -269,10 +366,13 @@ def test_orchestrator_checkpoints_while_ci_is_pending_then_resumes():
 
 def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
     developer = ScriptedWorker(WorkerRole.DEVELOPER, [
-        worker_result(WorkerRole.DEVELOPER, [ToolCall("create_branch")]),
-        worker_result(WorkerRole.DEVELOPER, [ToolCall(
-            "write_file", {"path": "rusa_agents/fix.py", "content": "fixed"}
-        )]),
+        worker_result(WorkerRole.DEVELOPER, [
+            ToolCall("create_branch"),
+            ToolCall("create_pull_request", {"title": "Agent change"}),
+        ]),
+        worker_result(WorkerRole.DEVELOPER, [
+            ToolCall("write_file", {"path": "rusa_agents/fix.py", "content": "fixed"})
+        ]),
     ])
     tester = ScriptedWorker(WorkerRole.TESTER, [
         worker_result(WorkerRole.TESTER, [ToolCall("get_ci_status")]),
@@ -281,7 +381,7 @@ def test_orchestrator_runs_bounded_debug_and_repair_after_failed_ci():
     debugger = ScriptedWorker(WorkerRole.DEBUGGER, [worker_result(
         WorkerRole.DEBUGGER, [ToolCall("get_ci_status")]
     )])
-    tools = FakeTools(["failed", "passed"])
+    tools = FakeTools(["failed", "passed", "passed"])
     orchestrator = make_orchestrator(tools, {
         WorkerRole.DEVELOPER: developer,
         WorkerRole.TESTER: tester,
@@ -318,7 +418,9 @@ def test_orchestrator_blocks_when_audit_integrity_fails():
         WorkerRole.TESTER, [ToolCall("get_ci_status")]
     )])
     orchestrator = make_orchestrator(
-        FakeTools(["passed"]), {WorkerRole.TESTER: tester}, audit=FakeAudit(valid=False)
+        FakeTools(["passed", "passed"]),
+        {WorkerRole.TESTER: tester},
+        audit=FakeAudit(valid=False),
     )
     record = asyncio.run(orchestrator.run(make_task()))
     assert record.state == TaskState.BLOCKED
@@ -364,7 +466,16 @@ def test_provider_allows_https_url():
 
 def test_github_gateway_requires_https():
     with pytest.raises(ValueError):
-        GitHubToolGateway(token="token", api_url="http://api.github.com")
+        GitHubToolGateway(
+            token="token",
+            api_url="http://api.github.com",
+            allowed_repositories={"StrategyG/RusaAi"},
+        )
+
+
+def test_github_gateway_requires_explicit_repository_allowlist():
+    with pytest.raises(ValueError):
+        GitHubToolGateway(token="token", allowed_repositories=set())
 
 
 def test_agent_tools_do_not_expose_merge_or_deployment():
@@ -383,13 +494,16 @@ def test_policy_blocks_nested_secrets_and_git_metadata(path):
 
 @pytest.mark.parametrize("operation", ["read_file", "write_file"])
 def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
-    gateway = GitHubToolGateway(token="test-token")
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
 
     async def no_network(*args, **kwargs):
         pytest.fail("Protected paths must be rejected before a GitHub request")
 
     monkeypatch.setattr(gateway, "_request", no_network)
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError, match="protected or unsafe"):
         asyncio.run(gateway.execute(make_task(), ToolCall(
             operation, {"path": "config/.env.production", "content": "secret"},
         )))
@@ -397,14 +511,22 @@ def test_gateway_rejects_secret_paths_before_network(monkeypatch, operation):
 
 @pytest.mark.parametrize("total_count,expected", [(1, True), (2, False), (None, False)])
 def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, expected):
-    gateway = GitHubToolGateway(token="test-token")
+    gateway = GitHubToolGateway(
+        token="test-token",
+        allowed_repositories={"strategyg/rusaai"},
+    )
 
     async def request(method, path, **kwargs):
         if "/branches/" in path:
             return {"commit": {"sha": "a" * 40}}
         return {
             "total_count": total_count,
-            "check_runs": [{"name": "tests", "status": "completed", "conclusion": "success"}],
+            "check_runs": [{
+                "id": 1,
+                "name": "Lint, test, and audit dependencies",
+                "status": "completed",
+                "conclusion": "success",
+            }],
         }
 
     monkeypatch.setattr(gateway, "_request", request)
@@ -412,23 +534,17 @@ def test_ci_cannot_pass_with_incomplete_check_results(monkeypatch, total_count, 
     assert result.data["all_checks_success"] is expected
 
 
-def test_orchestrator_waits_for_complete_ci_evidence():
+def test_orchestrator_waits_for_complete_and_authentic_ci_evidence():
     orchestrator = make_orchestrator(FakeTools())
     result = asyncio.run(FakeTools().execute(make_task(), ToolCall("get_ci_status")))
     incomplete = ToolResult(
-        name=result.name, success=True,
-        data={**result.data, "checks_complete": False}, evidence=result.evidence,
+        name=result.name,
+        success=True,
+        data={**result.data, "checks_complete": False},
+        evidence=result.evidence,
     )
     assert orchestrator._ci_outcome(incomplete) == "pending"
     assert orchestrator._ci_outcome(result) == "passed"
-
-
-def test_default_required_checks_match_repository_workflow():
-    from pathlib import Path
-
-    workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
-    for name in make_orchestrator(FakeTools()).required_ci_checks:
-        assert f"name: {name}\n" in workflow
 
 
 @pytest.mark.parametrize("tamper", ["sha", "source", "failure"])
@@ -445,22 +561,54 @@ def test_ci_gate_rejects_unverifiable_evidence(tamper):
     assert make_orchestrator(FakeTools())._ci_outcome(result) == "pending"
 
 
-def test_changed_head_after_security_requires_reverification():
-    from dataclasses import replace
-
-    class MovingHeadTools(FakeTools):
-        async def execute(self, task, call):
-            result = await super().execute(task, call)
-            if len(self.calls) > 1:
-                return replace(result, data={**result.data, "head_sha": "b" * 40},
-                               evidence={**result.evidence, "head_sha": "b" * 40})
-            return result
-
+def test_changed_head_after_tester_requires_fresh_ci_and_diff():
     tester = ScriptedWorker(WorkerRole.TESTER, [worker_result(
         WorkerRole.TESTER, [ToolCall("get_ci_status")]
     )])
+    security = ScriptedWorker(WorkerRole.SECURITY, [worker_result(
+        WorkerRole.SECURITY, [
+            ToolCall("get_ci_status"),
+            ToolCall("get_branch_diff"),
+        ]
+    )])
+    tools = FakeTools(
+        ["passed", "passed"],
+        ["a" * 40, "b" * 40],
+    )
     record = asyncio.run(make_orchestrator(
-        MovingHeadTools(), {WorkerRole.TESTER: tester}
+        tools,
+        {WorkerRole.TESTER: tester, WorkerRole.SECURITY: security},
     ).run(make_task()))
     assert record.state == TaskState.WAITING_EXTERNAL
     assert record.stage_index == 3
+
+
+def test_orchestrator_persists_each_checkpoint_and_propagates_checkpoint_failure():
+    checkpoints = []
+
+    async def persist(record):
+        checkpoints.append((record.state.value, record.stage_index))
+
+    task = make_task()
+    record = asyncio.run(make_orchestrator(FakeTools(["passed", "passed"])).run(
+        task, checkpoint_callback=persist,
+    ))
+    assert record.state == TaskState.SUCCEEDED
+    assert any(stage == 3 for _, stage in checkpoints)
+    assert checkpoints[-1] == ("succeeded", 7)
+
+    async def fail_persist(record):
+        raise RuntimeError("database unavailable")
+
+    with pytest.raises(Exception, match="checkpoint"):
+        asyncio.run(make_orchestrator(FakeTools()).run(
+            make_task(), checkpoint_callback=fail_persist,
+        ))
+
+
+def test_default_required_checks_match_repository_workflow():
+    from pathlib import Path
+
+    workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
+    for name in make_orchestrator(FakeTools()).required_ci_checks:
+        assert f"name: {name}\n" in workflow
