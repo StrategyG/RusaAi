@@ -14,13 +14,21 @@ RUN python -m pip install --prefix=/install --no-deps .
 FROM python:3.12-slim AS runner
 
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 appuser
 
 COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser . /app
+
+# Upgrade after copying dependencies so base-image or build-stage tooling cannot
+# reintroduce versions with known packaging vulnerabilities.
+RUN python -m pip install --no-cache-dir --upgrade \
+      pip "setuptools>=78.1.1" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
+    && python -m pip check
 
 USER appuser
 EXPOSE 8000
