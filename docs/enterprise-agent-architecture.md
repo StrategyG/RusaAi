@@ -79,13 +79,14 @@ Approver credentials are separate from tenant API credentials. Merge, deploy, re
 - GET /v1/agent/tasks/{task_id} — tenant-scoped task state and evidence.
 - GET /v1/agent/tasks/{task_id}/messages — agent communication trace.
 - POST /v1/agent/tasks/{task_id}/approve — approval using X-RUSA-Approver-Key.
+- POST /v1/agent/tasks/{task_id}/resume — approver-controlled resume for supported CI/PR blockers.
 - POST /v1/agent/tasks/{task_id}/cancel — request cancellation.
 - /v1/agent/memory/... — tenant-scoped durable key/value memory.
 - /v1/agent/rag/... — tenant-scoped semantic document ingestion, retrieval, and deletion.
 
 ## Evaluation
 
-CI checks lint, compilation, contracts, policy, plan validation, task idempotency, tenant isolation, memory, messaging, lease recovery, MCP allowlists, and RAG retrieval ACL behavior. The production benchmark must additionally report task success, plan validity, tool-call accuracy, policy violation rate, retrieval Recall@k/nDCG, citation precision, CI evidence correctness, latency p50/p95, token/cost per task, and prompt-injection resistance. Every score must identify dataset version, sample size, and evaluator.
+CI checks lint, compilation, contracts, policy, plan validation, task idempotency, tenant isolation, memory, messaging, lease recovery, approver-controlled resume, MCP allowlists, and RAG retrieval ACL behavior. Completion evidence verifies branch, draft PR, and latest-commit CI gates; acceptance criteria are returned for review but are not yet independently evaluated by a dedicated reviewer agent. The production benchmark must additionally report task success, plan validity, tool-call accuracy, policy violation rate, retrieval Recall@k/nDCG, citation precision, CI evidence correctness, latency p50/p95, token/cost per task, and prompt-injection resistance. Every score must identify dataset version, sample size, and evaluator.
 
 ## Production gates
 
