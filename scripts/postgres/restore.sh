@@ -36,6 +36,7 @@ umask 077
 temporary_encrypted=""
 temporary_checksum=""
 temporary_plain="$(mktemp /tmp/rusa-agent-restore.XXXXXX.dump)"
+rm -f "$temporary_plain"
 cleanup() {
     rm -f "$temporary_plain"
     [[ -z "$temporary_encrypted" ]] || rm -f "$temporary_encrypted"
