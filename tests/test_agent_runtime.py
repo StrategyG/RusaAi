@@ -503,3 +503,120 @@ def test_github_tool_path_policy_blocks_secret_material():
     ):
         with pytest.raises(ToolError):
             _assert_safe_file_path(path)
+
+
+class ExecutionProvider:
+    async def complete(self, system_prompt: str, user_prompt: str) -> str:
+        import json
+
+        return json.dumps(
+            {
+                "steps": [
+                    {
+                        "tool": "github.list_files",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "path": "",
+                            "ref": "main",
+                        },
+                        "purpose": "Inspect the repository",
+                    },
+                    {
+                        "tool": "github.create_branch",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "base_branch": "main",
+                            "work_branch": "feature/agent-e2e-test",
+                        },
+                        "purpose": "Create isolated work branch",
+                    },
+                    {
+                        "tool": "github.write_file",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "path": "docs/e2e.md",
+                            "content": "Validated worker execution",
+                            "message": "docs: add e2e validation",
+                            "branch": "feature/agent-e2e-test",
+                        },
+                        "purpose": "Write a test artifact",
+                    },
+                    {
+                        "tool": "github.create_pull_request",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "title": "Agent E2E test",
+                            "body": "Automated worker lifecycle test",
+                            "head": "feature/agent-e2e-test",
+                            "base": "main",
+                        },
+                        "purpose": "Create a draft pull request",
+                    },
+                    {
+                        "tool": "github.get_ci_status",
+                        "arguments": {
+                            "repository": "StrategyG/RusaAi",
+                            "commit_sha": "$latest_write_commit",
+                        },
+                        "purpose": "Verify the latest commit",
+                    },
+                ],
+                "expected_outcome": "All task execution gates pass",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_executes_full_plan_and_verifies_completion(database):
+    async def list_files(**kwargs):
+        return {"entries": [{"name": "README.md", "type": "file"}]}
+
+    async def create_branch(**kwargs):
+        return {"branch": kwargs["work_branch"], "sha": "a" * 40}
+
+    async def write_file(**kwargs):
+        return {"path": kwargs["path"], "commit_sha": "b" * 40}
+
+    async def create_pull_request(**kwargs):
+        return {"number": 42, "draft": True}
+
+    async def get_ci_status(**kwargs):
+        return {
+            "commit_sha": kwargs["commit_sha"],
+            "all_passed": True,
+            "checks": [{"name": "tests", "conclusion": "success"}],
+        }
+
+    tools = ToolRegistry()
+    for name, handler in (
+        ("github.list_files", list_files),
+        ("github.create_branch", create_branch),
+        ("github.write_file", write_file),
+        ("github.create_pull_request", create_pull_request),
+        ("github.get_ci_status", get_ci_status),
+    ):
+        tools.register(name, handler, input_schema={"type": "object"})
+
+    runtime = AgentRuntime(database, ExecutionProvider(), tools)
+    task_id = await runtime.submit(
+        "tenant-e2e",
+        "request-e2e-001",
+        make_task(work_branch="feature/agent-e2e-test").model_dump(),
+    )
+    assert await runtime.run_once() is True
+
+    task = await runtime.get_task("tenant-e2e", task_id)
+    assert task["status"] == TaskStatus.SUCCEEDED.value
+    assert task["cursor"] == 5
+    assert task["result"]["verified"] is True
+    assert task["result"]["acceptance_criteria_evaluated"] is False
+    messages = await runtime.messages.history("tenant-e2e", task_id)
+    assert any(message["message_type"] == "task.progress" for message in messages)
+    assert any(message["message_type"] == "task.result" for message in messages)
+
+
+def test_pgvector_index_enforces_embedding_dimension():
+    from rusa_agents.rag import PostgresVectorIndex
+
+    with pytest.raises(ValueError):
+        PostgresVectorIndex._vector_literal([0.1, 0.2, 0.3])
