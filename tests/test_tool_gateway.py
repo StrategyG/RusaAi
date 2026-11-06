@@ -55,8 +55,11 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     secret_target.write_text("SECRET")
     (workspace / "linked-secret.txt").symlink_to(secret_target)
 
+    captured_command = []
+
     def fake_run(command, **kwargs):
-            mount = next(item for item in command if item.startswith("type=bind,src="))
+        captured_command.extend(command)
+        mount = next(item for item in command if item.startswith("type=bind,src="))
         snapshot = mount.split("src=", 1)[1].split(",dst=", 1)[0]
         snapshot_path = Path(snapshot)
         assert (snapshot_path / "src.py").is_file()
@@ -74,7 +77,6 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     assert result.ok
     assert result.evidence["profile"] == "pytest"
     assert "PYTHONPYCACHEPREFIX=/tmp/pycache" in captured_command
-
 
 def test_gateway_rejects_credential_like_files(tmp_path):
     gateway = WorkspaceToolGateway(tmp_path)
