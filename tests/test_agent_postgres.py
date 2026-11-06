@@ -400,8 +400,8 @@ def test_postgres_queue_and_memory_readiness_require_forced_tenant_rls():
     queue = PostgresTaskQueue(DSN)
     memory = PostgresMemoryStore(DSN)
     queue.initialize()
-    queue.configure_api_permissions()
     memory.initialize()
+    queue.configure_api_permissions()
     assert queue.check_ready() is True
     assert memory.check_ready() is True
 
@@ -409,6 +409,7 @@ def test_postgres_queue_and_memory_readiness_require_forced_tenant_rls():
 def test_postgres_queue_readiness_requires_lease_token_column():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
+    PostgresMemoryStore(DSN).initialize()
     queue.configure_api_permissions()
     with psycopg.connect(DSN) as connection:
         connection.execute("ALTER TABLE rusa_agent_tasks DROP COLUMN lease_token")
@@ -440,8 +441,8 @@ def test_postgres_memory_redacts_secrets_before_persistence():
 def test_postgres_queue_cancel_revokes_active_lease_and_rejects_stale_worker():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
-    queue.configure_api_permissions()
     clean_test_rows()
+    queue.configure_api_permissions()
     tenant_id = f"rusa-test-cancel-{uuid4().hex}"
     task = make_task(tenant_id, f"cancel-{uuid4().hex}")
     task_id = queue.enqueue(task)
@@ -476,8 +477,8 @@ def test_postgres_queue_cancel_revokes_active_lease_and_rejects_stale_worker():
 def test_postgres_queue_requeues_only_failed_tasks_for_the_same_tenant():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
-    queue.configure_api_permissions()
     clean_test_rows()
+    queue.configure_api_permissions()
     tenant_id = f"rusa-test-requeue-{uuid4().hex}"
     task = make_task(tenant_id, f"requeue-{uuid4().hex}")
     task_id = queue.enqueue(task)
@@ -512,8 +513,8 @@ def test_postgres_queue_requeues_only_failed_tasks_for_the_same_tenant():
 def test_postgres_queue_can_cancel_task_waiting_for_human_approval():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
-    queue.configure_api_permissions()
     clean_test_rows()
+    queue.configure_api_permissions()
     tenant_id = f"rusa-test-approval-cancel-{uuid4().hex}"
     task = make_task(tenant_id, f"approval-cancel-{uuid4().hex}")
     task_id = queue.enqueue(task)
