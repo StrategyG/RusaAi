@@ -49,7 +49,7 @@ The current remediation branch adds the following controls; each remains unverif
 - API, worker, and sandbox images are published to GHCR by digest; the exact published digests are rescanned, keylessly signed with GitHub OIDC/Cosign, and given build-provenance attestations and SBOMs.
 - A release manifest records the three immutable image digests.
 - Production deployment is a separate manual workflow gated by the GitHub `production` environment. It verifies signatures against the exact release workflow identity before using SSH with pinned host keys.
-- The deployment script requires existing digest-pinned rollback images, updates the API/worker/sandbox digest set, pulls the sandbox image through the dedicated rootless Docker socket, waits for API and worker health, and restores the prior image set if candidate health checks fail.
+- The deployment script requires existing digest-pinned rollback images and `RUSA_AICODE_ENABLED=false`; operators must drain active tasks before deployment. It updates the API/worker/sandbox digest set, pulls the sandbox image through the dedicated rootless Docker socket, waits for API and worker health, and restores the prior image set if candidate health checks fail.
 - Manual rollback is serialized with deployment and uses the previous environment snapshot.
 
 These workflows do not provision a production host, configure GitHub environment reviewers, create registry credentials, apply database migrations, or deploy anything automatically when this document is updated.
