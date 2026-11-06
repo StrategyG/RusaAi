@@ -346,5 +346,5 @@ class AICodeRuntime:
             if not processed:
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
