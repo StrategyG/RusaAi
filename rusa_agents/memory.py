@@ -56,7 +56,7 @@ class PostgresMemoryStore:
             """)
             # The API has no memory endpoint and receives no memory-table or sequence access.
             connection.execute("""
-                DO $
+                DO $rusa$
                 BEGIN
                     IF EXISTS (
                         SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
@@ -65,7 +65,7 @@ class PostgresMemoryStore:
                         EXECUTE 'REVOKE ALL PRIVILEGES ON SEQUENCE rusa_agent_memory_memory_id_seq FROM rusa_agent_api';
                     END IF;
                 END
-                $
+                $rusa$
             """)
 
     def check_ready(self) -> bool:

@@ -80,7 +80,7 @@ class PostgresTaskQueue:
             """)
             # The API only enqueues and reads tasks. It must not mutate or delete them.
             connection.execute("""
-                DO $
+                DO $rusa$
                 BEGIN
                     IF EXISTS (
                         SELECT 1 FROM pg_roles WHERE rolname = 'rusa_agent_api'
@@ -97,7 +97,7 @@ class PostgresTaskQueue:
                         EXECUTE 'ALTER DEFAULT PRIVILEGES FOR ROLE rusa_agent_worker IN SCHEMA public REVOKE USAGE, SELECT ON SEQUENCES FROM rusa_agent_api';
                     END IF;
                 END
-                $
+                $rusa$
             """)
 
     def check_ready(self) -> bool:

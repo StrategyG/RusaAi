@@ -126,7 +126,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
 
     with psycopg.connect(DSN) as connection:
         connection.execute("""
-            DO $
+            DO $rusa$
             BEGIN
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_roles WHERE rolname='rusa_agent_api'
@@ -134,7 +134,7 @@ def test_postgres_api_role_has_minimal_task_access_and_tenant_rls():
                     CREATE ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOBYPASSRLS;
                 END IF;
             END
-            $
+            $rusa$
         """)
         connection.execute(
             "ALTER ROLE rusa_agent_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
