@@ -949,3 +949,25 @@ async def test_synthesis_requires_citations_to_exist_in_rag_evidence():
     invalid = HierarchicalOrchestrator(CitationProvider("[invented#source]"), ToolRegistry())
     with pytest.raises(PlanRejected):
         await invalid.synthesize(task, evidence)
+
+
+@pytest.mark.asyncio
+async def test_audit_chain_verifies_and_detects_tampering(database):
+    from rusa_agents.audit import AuditLog
+
+    audit = AuditLog(database)
+    await audit.record("tenant-a", "task-a", "worker-1", "task.started", {"attempt": 1})
+    await audit.record("tenant-a", "task-a", "worker-1", "tool.completed", {"tool": "github.read_file"})
+    assert await audit.verify_chain("tenant-a") is True
+
+    async with database.session() as session:
+        row = await session.scalar(
+            select(AuditRow).where(
+                AuditRow.tenant_id == "tenant-a",
+                AuditRow.sequence == 1,
+            )
+        )
+        row.details = {"attempt": 999}
+        await session.commit()
+
+    assert await audit.verify_chain("tenant-a") is False
