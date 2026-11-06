@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         app,
-        host=os.getenv("RUSA_MCP_HOST", "0.0.0.0"),
+        host=os.getenv("RUSA_MCP_HOST", "0.0.0.0"),  # nosec B104 - isolated container; ingress and network policy control exposure
         port=int(os.getenv("RUSA_MCP_PORT", "8002")),
         log_level=os.getenv("LOG_LEVEL", "info").lower(),
     )
