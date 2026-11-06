@@ -43,6 +43,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "003_aicode_task_results.sql",
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
+        "006_aicode_client_idempotency.sql",
     ]
 
 
