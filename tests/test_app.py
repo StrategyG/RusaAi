@@ -319,6 +319,40 @@ def test_a2a_format_constraints_are_enforced(
     assert expected_message in response.json()["errors"]
 
 
+@pytest.mark.parametrize(
+    "invalid_timestamp",
+    ["2026-11-06T10:00:00", "2026-02-30T10:00:00Z", "2026-11-06T10:00:00+25:00"],
+)
+def test_a2a_rejects_non_rfc3339_timestamps(client, invalid_timestamp):
+    envelope = valid_envelope()
+    envelope["created_at"] = invalid_timestamp
+
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": envelope},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "created_at: must be a valid date-time value" in response.json()["errors"]
+
+
+def test_a2a_rejects_invalid_absolute_uri(client):
+    envelope = valid_envelope()
+    envelope["evidence"] = [{"kind": "artifact", "uri": "not a uri"}]
+
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        json={"envelope": envelope},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert "evidence.0.uri: must be a valid uri value" in response.json()["errors"]
+
+
 def test_a2a_validation_errors_do_not_echo_submitted_values(client):
     envelope = valid_envelope()
     envelope["task_id"] = "private-invalid-value"
