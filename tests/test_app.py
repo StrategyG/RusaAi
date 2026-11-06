@@ -225,3 +225,21 @@ def test_a2a_validation_requires_api_key(client):
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 401
+
+
+
+def test_inference_api_rejects_oversized_chunked_body_before_json_parsing(
+    client, monkeypatch
+):
+    monkeypatch.setattr("app.MAX_REQUEST_BYTES", 1024)
+    chunks = iter([
+        b'{"envelope":"' + b"a" * 700,
+        b"a" * 700 + b'"}',
+    ])
+    response = client.post(
+        "/v1/validate-task",
+        headers=auth_headers(),
+        content=chunks,
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Request body exceeds the configured size limit"
