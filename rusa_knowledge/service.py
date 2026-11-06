@@ -124,6 +124,8 @@ class KnowledgeService:
         validate_scope(tenant_id, collection)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise ValueError("limit must be an integer between 1 and 20")
         reject_credential_material(query)
         vector = self.embeddings.embed([query])[0]
         return self.store.search(
