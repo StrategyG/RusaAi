@@ -129,3 +129,29 @@ def test_worker_queue_role_can_claim_across_tenants_but_api_cannot():
                     "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
                     (str(uuid4()), "rls-worker-a", '{"objective":"worker cannot enqueue"}'),
                 )
+
+
+
+def test_production_queue_readiness_uses_separate_login_roles(monkeypatch):
+    from rusa_agents.queue import PostgresTaskQueue
+
+    api_dsn = os.getenv("RUSA_API_DATABASE_URL")
+    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL")
+    if not api_dsn or not worker_dsn:
+        pytest.skip("Separate API/worker database login DSNs are not configured")
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    PostgresTaskQueue(api_dsn).initialize()
+    PostgresTaskQueue(worker_dsn).initialize()
+
+
+def test_runtime_role_groups_are_non_login_non_bypass():
+    with connect() as conn:
+        rows = conn.execute("""
+            SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+            FROM pg_roles
+            WHERE rolname = ANY(%s)
+        """, (["rusa_api_runtime", "rusa_worker_runtime"],)).fetchall()
+
+    assert {row[0] for row in rows} == {"rusa_api_runtime", "rusa_worker_runtime"}
+    assert all(row[1] is False and row[2] is False and row[3] is False for row in rows)
