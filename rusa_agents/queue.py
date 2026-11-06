@@ -29,17 +29,17 @@ class PostgresTaskQueue:
         self.dsn = dsn
 
     def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Install the PostgreSQL runtime dependencies to use PostgresTaskQueue") from exc
+        return psycopg.connect(self.dsn)
 
     @staticmethod
     def _set_tenant(conn, tenant_id: str) -> None:
         if not tenant_id or not tenant_id.strip():
             raise ValueError("tenant_id is required for tenant-scoped database access")
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
-        try:
-            import psycopg
-        except ImportError as exc:
-            raise RuntimeError("Install the PostgreSQL runtime dependencies to use PostgresTaskQueue") from exc
-        return psycopg.connect(self.dsn)
 
     def initialize(self) -> None:
         with self._connect() as conn:
