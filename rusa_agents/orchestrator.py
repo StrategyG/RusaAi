@@ -76,6 +76,17 @@ class AICodeOrchestrator:
             tenant_id=record.task.tenant_id,
         )
 
+    async def _persist_async(self, record: TaskRecord) -> None:
+        await asyncio.to_thread(self._persist, record)
+
+    async def _record_async(
+        self,
+        event: str,
+        record: TaskRecord,
+        details: dict[str, Any],
+    ) -> None:
+        await asyncio.to_thread(self._record, event, record, details)
+
     @staticmethod
     def _valid_source(source: str, repository: str, kind: str) -> bool:
         try:
@@ -177,20 +188,20 @@ class AICodeOrchestrator:
         self._record("task.received", record, {"repository": task.repository.full_name})
         try:
             record.transition(TaskState.OBSERVING)
-            self._persist(record)
+            await self._persist_async(record)
             record.transition(TaskState.PLANNING)
-            self._persist(record)
+            await self._persist_async(record)
             if not self.policy.evaluate("repo.read").allowed:
                 record.errors.append("repository read denied by autonomy policy")
                 record.transition(TaskState.BLOCKED)
                 return record
 
             record.transition(TaskState.EXECUTING)
-            self._persist(record)
+            await self._persist_async(record)
             for role in self.PIPELINE:
                 result = await self.workers[role].run(task, list(record.results))
                 record.results.append(result)
-                self._record(
+                await self._record_async(
                     "worker.completed",
                     record,
                     {
@@ -200,7 +211,7 @@ class AICodeOrchestrator:
                         "blockers": result.blockers,
                     },
                 )
-                self._persist(record)
+                await self._persist_async(record)
                 if not result.success or result.blockers:
                     record.errors.extend(result.blockers or [f"{role.value} worker failed"])
                     record.transition(TaskState.BLOCKED)
@@ -208,7 +219,7 @@ class AICodeOrchestrator:
 
             if record.state == TaskState.EXECUTING:
                 record.transition(TaskState.VERIFYING)
-                self._persist(record)
+                await self._persist_async(record)
                 verified, evidence_errors = self._verify_completion(record)
                 if verified:
                     record.transition(TaskState.SUCCEEDED)
@@ -224,7 +235,7 @@ class AICodeOrchestrator:
                 TaskState.CANCELLED,
             }:
                 record.transition(TaskState.CANCELLED)
-            self._record("task.cancelled", record, {"state": record.state.value})
+            await self._record_async("task.cancelled", record, {"state": record.state.value})
             raise
         except Exception as exc:
             record.errors.append(f"{type(exc).__name__}: {str(exc)[:1000]}")
@@ -235,10 +246,10 @@ class AICodeOrchestrator:
                 TaskState.SUCCEEDED,
             }:
                 record.transition(TaskState.FAILED)
-            self._record("task.failed", record, {"error_type": type(exc).__name__})
+            await self._record_async("task.failed", record, {"error_type": type(exc).__name__})
         finally:
-            self._persist(record)
-            self._record(
+            await self._persist_async(record)
+            await self._record_async(
                 "task.finished",
                 record,
                 {"state": record.state.value, "errors": record.errors},
