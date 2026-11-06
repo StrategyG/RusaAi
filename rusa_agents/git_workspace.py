@@ -9,8 +9,6 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
 from .contracts import CodingTask
 
 
@@ -319,6 +317,8 @@ class GitHubPublisher:
         return sha
 
     async def create_or_get_draft_pr(self, repository: str, branch: str, base: str, title: str, body: str) -> str:
+        import httpx
+
         owner = repository.split("/", 1)[0]
         headers = {
             "Accept": "application/vnd.github+json",
@@ -353,6 +353,7 @@ class GitHubPublisher:
     ) -> tuple[bool, str]:
         """Wait for the required PR CI jobs; missing or failed evidence never passes."""
         import asyncio
+        import httpx
 
         required = {"Test, lint, and security", "Build production image"}
         deadline = asyncio.get_running_loop().time() + timeout_seconds
