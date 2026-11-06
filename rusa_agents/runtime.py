@@ -91,7 +91,13 @@ class AICodeRuntime:
             for role in AICodeOrchestrator.PIPELINE
         ]
         return (
-            AICodeOrchestrator(workers=workers, memory=self.memory, audit=self.audit),
+            AICodeOrchestrator(
+                workers=workers,
+                memory=self.memory,
+                audit=self.audit,
+                max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
+                max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
+            ),
             str(workspace),
         )
 
