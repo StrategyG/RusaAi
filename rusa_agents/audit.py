@@ -6,7 +6,7 @@ import hmac
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -119,7 +119,7 @@ class AuditLog:
                     for line in stream:
                         previous = json.loads(line)["record_hash"]
             row = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "event": event,
                 "task_id": task_id,
                 "tenant_id": tenant_id,
@@ -213,7 +213,7 @@ class PostgresAuditLog:
             ).fetchone()
             previous = previous_row[0] if previous_row else "GENESIS"
             row = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "event": event, "task_id": task_id, "tenant_id": tenant_id,
                 "actor": actor, "details": safe_details, "previous_hash": previous,
             }
