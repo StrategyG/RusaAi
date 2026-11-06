@@ -86,8 +86,10 @@ class PostgresVectorIndex:
     def _vector_literal(cls, embedding: list[float]) -> str:
         if len(embedding) != cls.DIMENSIONS:
             raise ValueError("Embedding dimension does not match pgvector schema")
-        if any(not isinstance(value, (int, float)) for value in embedding):
-            raise ValueError("Embedding contains a non-numeric value")
+        import math
+
+        if any(not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in embedding):
+            raise ValueError("Embedding contains a non-finite or non-numeric value")
         return "[" + ",".join(f"{float(value):.8f}" for value in embedding) + "]"
 
     async def upsert(self, tenant_id: str, source_id: str, chunks: list[dict[str, Any]]) -> None:
@@ -104,6 +106,10 @@ class PostgresVectorIndex:
                           metadata_json = EXCLUDED.metadata_json, embedding = EXCLUDED.embedding
         """)
         async with self.database.engine.begin() as connection:
+            await connection.execute(
+                text("DELETE FROM agent_documents WHERE tenant_id = :tenant_id AND source_id = :source_id"),
+                {"tenant_id": tenant_id, "source_id": source_id},
+            )
             for chunk in chunks:
                 await connection.execute(statement, {
                     "id": str(uuid4()), "tenant_id": tenant_id, "source_id": source_id,
