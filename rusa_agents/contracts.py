@@ -84,7 +84,7 @@ class TaskRecord:
         TaskState.PLANNING: {TaskState.EXECUTING, TaskState.BLOCKED, TaskState.FAILED},
         TaskState.EXECUTING: {TaskState.VERIFYING, TaskState.BLOCKED, TaskState.FAILED},
         TaskState.VERIFYING: {
-            TaskState.SUCCEEDED, TaskState.AWAITING_APPROVAL,
+            TaskState.EXECUTING, TaskState.SUCCEEDED, TaskState.AWAITING_APPROVAL,
             TaskState.BLOCKED, TaskState.FAILED,
         },
         TaskState.AWAITING_APPROVAL: {
