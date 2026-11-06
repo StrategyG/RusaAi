@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import sys
 import uuid
@@ -37,6 +39,7 @@ class FakeBackend:
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("RUSA_API_KEY", TEST_API_KEY)
+    monkeypatch.delenv("RUSA_API_KEY_TENANTS_JSON", raising=False)
     monkeypatch.setenv("RUSA_AGENT_ENABLED", "false")
     monkeypatch.setenv("RUSA_TENANT_ID", "default")
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -49,6 +52,7 @@ def client(monkeypatch):
         app.state.backend = FakeBackend()
         yield test_client
         app.state.backend = None
+        app.state.task_queue = None
 
     _load_task_validator.cache_clear()
 
@@ -340,3 +344,54 @@ def test_agent_task_status_returns_404_for_unknown_task(client, monkeypatch):
         headers=auth_headers(),
     )
     assert response.status_code == 404
+
+
+
+def test_api_key_hash_map_scopes_agent_tasks_to_authenticated_tenant(client, monkeypatch):
+    tenant_key = "tenant-specific-test-api-key-that-is-longer-than-32-chars"
+    tenant_hash = hashlib.sha256(tenant_key.encode("utf-8")).hexdigest()
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "RUSA_API_KEY_TENANTS_JSON",
+        json.dumps({tenant_hash: "tenant-acme"}),
+    )
+    monkeypatch.setenv("RUSA_AGENT_ENABLED", "true")
+
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, tenant_id, task_id, payload, idempotency_key):
+            self.calls.append((tenant_id, payload["tenant_id"]))
+            return {"task_id": task_id, "state": "queued"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={
+            "X-API-Key": tenant_key,
+            "Idempotency-Key": "tenant-acme-key-01",
+        },
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 202
+    assert queue.calls == [("tenant-acme", "tenant-acme")]
+
+
+def test_invalid_api_key_tenant_map_fails_closed(client, monkeypatch):
+    monkeypatch.setenv("RUSA_API_KEY_TENANTS_JSON", "{not-json")
+    response = client.post(
+        "/v1/chat/completions",
+        headers=auth_headers(),
+        json={"messages": [{"role": "user", "content": "Hello RUSA"}]},
+    )
+    assert response.status_code == 503
+
+
+def test_chunked_or_oversized_request_body_is_rejected(client):
+    response = client.post(
+        "/v1/validate-task",
+        content=b"x" * (1024 * 1024 + 1),
+    )
+    assert response.status_code == 413

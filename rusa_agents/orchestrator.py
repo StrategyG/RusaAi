@@ -1,8 +1,10 @@
-"""Hierarchical orchestrator with verified CI evidence gates."""
+"""Hierarchical orchestrator with commit-bound, source-verified CI evidence gates."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerRole
@@ -25,8 +27,8 @@ class AICodeOrchestrator:
         self,
         workers: list[AgentWorker],
         policy: AutonomyPolicy | None = None,
-        memory: SQLiteMemory | None = None,
-        audit: AuditLog | None = None,
+        memory: Any | None = None,
+        audit: Any | None = None,
     ) -> None:
         self.workers = {worker.role: worker for worker in workers}
         self.policy = policy or AutonomyPolicy()
@@ -35,7 +37,8 @@ class AICodeOrchestrator:
         missing = set(self.PIPELINE) - set(self.workers)
         if missing:
             raise ValueError(
-                "missing required workers: " + ", ".join(role.value for role in sorted(missing, key=lambda x: x.value))
+                "missing required workers: "
+                + ", ".join(role.value for role in sorted(missing, key=lambda x: x.value))
             )
 
     def _persist(self, record: TaskRecord) -> None:
@@ -73,16 +76,92 @@ class AICodeOrchestrator:
         )
 
     @staticmethod
-    def _has_successful_check(results, role: WorkerRole, terms: tuple[str, ...]) -> bool:
+    def _valid_source(source: str, repository: str, kind: str) -> bool:
+        try:
+            parsed = urlsplit(source)
+        except ValueError:
+            return False
+        if parsed.scheme != "https" or parsed.hostname != "github.com" or parsed.username:
+            return False
+        path = parsed.path.rstrip("/")
+        prefix = f"/{repository}/"
+        if not path.startswith(prefix):
+            return False
+        if kind == "pull_request":
+            return bool(re.fullmatch(re.escape(prefix) + r"pull/[1-9][0-9]*", path))
+        return any(segment in path for segment in ("/runs/", "/actions/", "/checks/"))
+
+    @classmethod
+    def _evidence_shas(
+        cls,
+        results,
+        role: WorkerRole,
+        repository: str,
+        *,
+        kind: str,
+        name_terms: tuple[str, ...] = (),
+        status: str,
+    ) -> set[str]:
         worker_result = next((item for item in results if item.role == role), None)
         if worker_result is None:
-            return False
-        return any(
-            evidence.kind == "ci_check"
-            and evidence.status == "success"
-            and any(term in evidence.name.lower() for term in terms)
-            for evidence in worker_result.evidence
+            return set()
+        matches = set()
+        for evidence in worker_result.evidence:
+            if evidence.kind != kind or evidence.status != status:
+                continue
+            if name_terms and not any(term in evidence.name.lower() for term in name_terms):
+                continue
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", evidence.sha):
+                continue
+            if not cls._valid_source(evidence.source, repository, kind):
+                continue
+            matches.add(evidence.sha.lower())
+        return matches
+
+    def _verify_completion(self, record: TaskRecord) -> tuple[bool, list[str]]:
+        repository = record.task.repository.full_name
+        errors: list[str] = []
+        pull_request_shas = self._evidence_shas(
+            record.results,
+            WorkerRole.DEVELOPER,
+            repository,
+            kind="pull_request",
+            status="draft",
         )
+        quality_shas = self._evidence_shas(
+            record.results,
+            WorkerRole.TESTER,
+            repository,
+            kind="ci_check",
+            name_terms=("quality", "test"),
+            status="success",
+        )
+        security_shas = self._evidence_shas(
+            record.results,
+            WorkerRole.SECURITY,
+            repository,
+            kind="ci_check",
+            name_terms=("security", "audit"),
+            status="success",
+        )
+        if len(pull_request_shas) != 1:
+            errors.append("missing or ambiguous verified draft pull-request evidence")
+        if len(quality_shas) != 1:
+            errors.append("missing or ambiguous successful quality/test evidence")
+        if len(security_shas) != 1:
+            errors.append("missing or ambiguous successful security/audit evidence")
+        if (
+            len(pull_request_shas) == 1
+            and len(quality_shas) == 1
+            and len(security_shas) == 1
+            and pull_request_shas == quality_shas == security_shas
+        ):
+            return True, []
+        if pull_request_shas and quality_shas and pull_request_shas != quality_shas:
+            errors.append("quality/test evidence is not bound to the draft PR head SHA")
+        if pull_request_shas and security_shas and pull_request_shas != security_shas:
+            errors.append("security/audit evidence is not bound to the draft PR head SHA")
+        return False, errors
 
     async def run(self, task: CodingTask) -> TaskRecord:
         record = TaskRecord(task=task)
@@ -121,23 +200,11 @@ class AICodeOrchestrator:
             if record.state == TaskState.EXECUTING:
                 record.transition(TaskState.VERIFYING)
                 self._persist(record)
-                quality_ok = self._has_successful_check(
-                    record.results,
-                    WorkerRole.TESTER,
-                    ("quality", "test"),
-                )
-                security_ok = self._has_successful_check(
-                    record.results,
-                    WorkerRole.SECURITY,
-                    ("security", "audit"),
-                )
-                if not quality_ok:
-                    record.errors.append("missing successful CI quality/test evidence")
-                if not security_ok:
-                    record.errors.append("missing successful CI security/audit evidence")
-                if quality_ok and security_ok:
+                verified, evidence_errors = self._verify_completion(record)
+                if verified:
                     record.transition(TaskState.SUCCEEDED)
                 else:
+                    record.errors.extend(evidence_errors)
                     record.transition(TaskState.BLOCKED)
         except Exception as exc:
             record.errors.append(f"{type(exc).__name__}: {str(exc)[:1000]}")

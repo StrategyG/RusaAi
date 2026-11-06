@@ -10,7 +10,7 @@ import asyncio
 import base64
 import re
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -31,11 +31,22 @@ class GitHubRepositoryGateway:
         api_url: str = "https://api.github.com",
         timeout_seconds: float = 30,
     ) -> None:
+        parsed = urlsplit(api_url)
         if not token or len(token) < 20:
             raise ValueError("a GitHub token with repository permissions is required")
-        if not api_url.startswith("https://"):
-            raise ValueError("GitHub API must use HTTPS")
-        self.api_url = api_url.rstrip("/")
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "api.github.com"
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.port not in {None, 443}
+        ):
+            raise ValueError("GitHub API URL must be the official HTTPS api.github.com endpoint")
+        if not 1 <= timeout_seconds <= 120:
+            raise ValueError("GitHub timeout must be between 1 and 120 seconds")
+        self.api_url = "https://api.github.com"
         self.token = token
         self.timeout = httpx.Timeout(connect=5, read=timeout_seconds, write=30, pool=5)
 
@@ -133,19 +144,24 @@ class GitHubRepositoryGateway:
         work_branch: str,
     ) -> dict[str, Any]:
         base = await self.get_branch(repository, base_branch)
+        base_sha = base["commit"]["sha"]
         try:
             return await self._request(
                 "POST",
                 f"/repos/{repository}/git/refs",
                 json_body={
                     "ref": f"refs/heads/{work_branch}",
-                    "sha": base["commit"]["sha"],
+                    "sha": base_sha,
                 },
             )
         except GitHubAPIError as exc:
             if exc.status_code != 422:
                 raise
             existing = await self.get_branch(repository, work_branch)
+            if existing["commit"]["sha"] != base_sha:
+                raise RuntimeError(
+                    "work branch already exists with a different head; refusing to reuse it"
+                ) from exc
             return {"ref": f"refs/heads/{work_branch}", "object": existing["commit"]}
 
     async def write_file(
@@ -210,12 +226,17 @@ class GitHubRepositoryGateway:
     async def get_check_runs(self, repository: str, branch: str) -> tuple[str, list[dict[str, Any]]]:
         branch_data = await self.get_branch(repository, branch)
         sha = branch_data["commit"]["sha"]
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            raise RuntimeError("GitHub returned an invalid commit SHA")
         result = await self._request(
             "GET",
             f"/repos/{repository}/commits/{sha}/check-runs",
             params={"per_page": 100},
         )
-        return sha, result.get("check_runs", [])
+        checks = result.get("check_runs", [])
+        if result.get("total_count", len(checks)) > len(checks):
+            raise RuntimeError("CI check pagination is incomplete; refusing partial evidence")
+        return sha, checks
 
 
 class GitHubToolGateway:
@@ -415,14 +436,26 @@ class GitHubToolGateway:
                     str(arguments["title"]),
                     str(arguments.get("body", "")),
                 )
+                url = str(data.get("html_url", ""))
+                head_sha = str(data.get("head", {}).get("sha", ""))
+                if data.get("draft") is not True or not re.fullmatch(r"[0-9a-fA-F]{40}", head_sha):
+                    raise RuntimeError("GitHub did not confirm a draft PR with a full head SHA")
+                evidence = ToolEvidence(
+                    kind="pull_request",
+                    name="draft_pull_request",
+                    status="draft",
+                    source=url,
+                    sha=head_sha,
+                )
                 return {
                     "ok": True,
                     "data": {
                         "number": data.get("number"),
-                        "html_url": data.get("html_url"),
-                        "draft": data.get("draft", True),
+                        "html_url": url,
+                        "draft": True,
                     },
-                    "artifacts": [data.get("html_url", "")],
+                    "evidence": [evidence.__dict__],
+                    "artifacts": [url],
                 }
             if action == "ci.wait_for_checks":
                 wait_seconds = int(arguments.get("wait_seconds", 300))
@@ -448,8 +481,11 @@ class GitHubToolGateway:
                     ).__dict__
                     for item in checks
                 ]
+                completed = bool(checks) and all(
+                    item.get("status") == "completed" for item in checks
+                )
                 return {
-                    "ok": bool(checks),
+                    "ok": completed,
                     "data": {
                         "sha": sha,
                         "checks": [
@@ -462,7 +498,7 @@ class GitHubToolGateway:
                         ],
                     },
                     "evidence": evidence,
-                    "error": None if checks else "no CI check runs were found for the work branch",
+                    "error": None if completed else "CI checks are missing or still pending",
                 }
         except (KeyError, TypeError, ValueError, PermissionError, GitHubAPIError, RuntimeError) as exc:
             return {"ok": False, "error": str(exc)}

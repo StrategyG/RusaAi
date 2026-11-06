@@ -13,7 +13,7 @@ from rusa_agents.contracts import (
     WorkerResult,
     WorkerRole,
 )
-from rusa_agents.github_gateway import GitHubRepositoryGateway, GitHubToolGateway
+from rusa_agents.github_gateway import GitHubAPIError, GitHubRepositoryGateway, GitHubToolGateway
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
@@ -135,13 +135,54 @@ class StubWorker:
         )
 
 
-def make_workers(with_evidence=True):
-    quality = [ToolEvidence("ci_check", "Quality / Tests", "success")] if with_evidence else []
-    security = [ToolEvidence("ci_check", "Security / Dependency audit", "success")] if with_evidence else []
+VALID_COMMIT_SHA = "a" * 40
+CI_SOURCE = "https://github.com/StrategyG/RusaAi/runs/123456"
+
+
+def make_workers(with_evidence=True, security_sha=VALID_COMMIT_SHA, quality_source=CI_SOURCE):
+    pull_request = (
+        [
+            ToolEvidence(
+                "pull_request",
+                "draft_pull_request",
+                "draft",
+                "https://github.com/StrategyG/RusaAi/pull/123",
+                VALID_COMMIT_SHA,
+            )
+        ]
+        if with_evidence
+        else []
+    )
+    quality = (
+        [
+            ToolEvidence(
+                "ci_check",
+                "Quality / Tests",
+                "success",
+                quality_source,
+                VALID_COMMIT_SHA,
+            )
+        ]
+        if with_evidence
+        else []
+    )
+    security = (
+        [
+            ToolEvidence(
+                "ci_check",
+                "Security / Dependency audit",
+                "success",
+                CI_SOURCE,
+                security_sha,
+            )
+        ]
+        if with_evidence
+        else []
+    )
     return [
         StubWorker(WorkerRole.ANALYST),
         StubWorker(WorkerRole.ARCHITECT),
-        StubWorker(WorkerRole.DEVELOPER),
+        StubWorker(WorkerRole.DEVELOPER, pull_request),
         StubWorker(WorkerRole.DEBUGGER),
         StubWorker(WorkerRole.TESTER, quality),
         StubWorker(WorkerRole.SECURITY, security),
@@ -252,3 +293,53 @@ def test_github_gateway_redacts_common_secret_formats():
 def test_github_gateway_rejects_control_characters_in_paths():
     with pytest.raises(ValueError, match="path is invalid"):
         GitHubRepositoryGateway.validate_path("src\x00secret.py")
+
+
+
+def test_orchestrator_rejects_ci_evidence_from_different_commits(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        make_workers(security_sha="b" * 40),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(make_task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("not bound" in error for error in record.errors)
+
+
+def test_orchestrator_rejects_non_github_ci_evidence_sources(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        make_workers(quality_source="https://attacker.example/StrategyG/RusaAi/runs/123"),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(make_task()))
+    assert record.state == TaskState.BLOCKED
+
+
+def test_github_gateway_rejects_non_official_api_host():
+    with pytest.raises(ValueError, match="api.github.com"):
+        GitHubRepositoryGateway("x" * 40, api_url="https://attacker.example")
+
+
+def test_github_gateway_refuses_to_reuse_a_diverged_work_branch(monkeypatch):
+    gateway = GitHubRepositoryGateway("x" * 40)
+
+    async def fake_request(method, path, **kwargs):
+        if method == "GET" and path.endswith("/branches/main"):
+            return {"commit": {"sha": "a" * 40}}
+        if method == "POST":
+            raise GitHubAPIError(422, "reference already exists")
+        if method == "GET" and path.endswith("/branches/feature%2Faicode-test"):
+            return {"commit": {"sha": "b" * 40}}
+        raise AssertionError(f"unexpected GitHub request: {method} {path}")
+
+    monkeypatch.setattr(gateway, "_request", fake_request)
+    with pytest.raises(RuntimeError, match="different head"):
+        asyncio.run(
+            gateway.create_branch(
+                "StrategyG/RusaAi",
+                "main",
+                "feature/aicode-test",
+            )
+        )

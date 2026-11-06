@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
+import re
 import logging
 import os
 import threading
@@ -31,6 +33,8 @@ logging.basicConfig(
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = REPOSITORY_ROOT / "schemas" / "a2a" / "task-envelope.schema.json"
 MAX_REQUEST_BYTES = int(os.getenv("RUSA_MAX_REQUEST_BYTES", "1048576"))
+if not 1024 <= MAX_REQUEST_BYTES <= 16 * 1024 * 1024:
+    raise ValueError("RUSA_MAX_REQUEST_BYTES must be between 1024 and 16777216")
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
@@ -269,13 +273,68 @@ def get_task_validator() -> jsonschema.protocols.Validator:
         ) from exc
 
 
+def _load_api_key_tenants() -> dict[str, str] | None:
+    raw = os.getenv("RUSA_API_KEY_TENANTS_JSON")
+    if raw is None:
+        return None
+    try:
+        mapping = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("RUSA_API_KEY_TENANTS_JSON must contain valid JSON") from exc
+    if not isinstance(mapping, dict) or not mapping:
+        raise ValueError("RUSA_API_KEY_TENANTS_JSON must be a non-empty object")
+    validated: dict[str, str] = {}
+    for key_hash, tenant_id in mapping.items():
+        if not isinstance(key_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", key_hash):
+            raise ValueError("tenant API-key map keys must be SHA-256 hex digests")
+        if not isinstance(tenant_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
+            raise ValueError("tenant IDs must contain 1 to 128 safe characters")
+        validated[key_hash.lower()] = tenant_id
+    return validated
+
+
 def authentication_is_configured() -> bool:
-    return len(os.getenv("RUSA_API_KEY", "")) >= 32
+    try:
+        mapping = _load_api_key_tenants()
+    except ValueError:
+        return False
+    if mapping is not None:
+        return bool(mapping)
+    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
+    return len(os.getenv("RUSA_API_KEY", "")) >= 32 and bool(
+        re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id)
+    )
 
 
 def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
+    try:
+        tenant_mapping = _load_api_key_tenants()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service tenant authentication is not configured correctly",
+        ) from exc
+
+    if tenant_mapping is not None:
+        if not tenant_mapping:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service tenant authentication is not configured correctly",
+            )
+        if api_key:
+            supplied_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+            for expected_hash, tenant_id in tenant_mapping.items():
+                if hmac.compare_digest(supplied_hash, expected_hash):
+                    return tenant_id
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+
     expected_key = os.getenv("RUSA_API_KEY", "")
-    if len(expected_key) < 32:
+    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
+    if len(expected_key) < 32 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", tenant_id):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service authentication is not configured correctly",
@@ -289,7 +348,7 @@ def verify_api_key(api_key: str | None = Depends(api_key_header)) -> str:
             detail="Invalid or missing API key",
             headers={"WWW-Authenticate": "ApiKey"},
         )
-    return api_key
+    return tenant_id
 
 
 @asynccontextmanager
@@ -339,33 +398,96 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def request_context_middleware(request: Request, call_next):
-    request_id = uuid.uuid4().hex
-    request.state.request_id = request_id
+class _RequestTooLarge(Exception):
+    pass
 
-    content_length = request.headers.get("content-length")
-    if content_length:
+
+class RequestSizeLimitMiddleware:
+    """Enforce body limits for both Content-Length and streamed/chunked requests."""
+
+    def __init__(self, application, max_bytes: int) -> None:
+        self.application = application
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.application(scope, receive, send)
+            return
+
+        request_id = uuid.uuid4().hex
+        scope.setdefault("state", {})["request_id"] = request_id
+        request_headers = dict(scope.get("headers", []))
+        content_length = request_headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = -1
+            if declared_size < 0:
+                response = JSONResponse(
+                    status_code=400,
+                    content={"detail": "Invalid Content-Length header"},
+                    headers={"X-Request-ID": request_id},
+                )
+                await response(scope, receive, send)
+                return
+            if declared_size > self.max_bytes:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body exceeds the configured size limit"},
+                    headers={"X-Request-ID": request_id},
+                )
+                await response(scope, receive, send)
+                return
+
+        received_bytes = 0
+
+        async def limited_receive():
+            nonlocal received_bytes
+            message = await receive()
+            if message["type"] == "http.request":
+                received_bytes += len(message.get("body", b""))
+                if received_bytes > self.max_bytes:
+                    raise _RequestTooLarge
+            return message
+
+        async def secured_send(message):
+            if message["type"] == "http.response.start":
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() not in {
+                        b"x-request-id",
+                        b"x-content-type-options",
+                        b"cache-control",
+                    }
+                ]
+                headers.extend(
+                    [
+                        (b"x-request-id", request_id.encode("ascii")),
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"cache-control", b"no-store"),
+                    ]
+                )
+                message["headers"] = headers
+            await send(message)
+
         try:
-            request_size = int(content_length)
-        except ValueError:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Invalid Content-Length header"},
-                headers={"X-Request-ID": request_id},
-            )
-        if request_size > MAX_REQUEST_BYTES:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            await self.application(scope, limited_receive, secured_send)
+        except _RequestTooLarge:
+            response = JSONResponse(
+                status_code=413,
                 content={"detail": "Request body exceeds the configured size limit"},
-                headers={"X-Request-ID": request_id},
+                headers={
+                    "X-Request-ID": request_id,
+                    "X-Content-Type-Options": "nosniff",
+                    "Cache-Control": "no-store",
+                },
             )
+            await response(scope, receive, send)
 
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "no-store"
-    return response
+
+app.add_middleware(RequestSizeLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
 
 
 @app.exception_handler(Exception)
@@ -490,11 +612,12 @@ def chat_completions(request: ChatCompletionRequest, http_request: Request):
     )
 
 
-@app.post("/v1/agent/tasks", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(verify_api_key)])
+@app.post("/v1/agent/tasks", status_code=status.HTTP_202_ACCEPTED)
 def submit_agent_task(
     request: AgentTaskSubmission,
     http_request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=128),
+    tenant_id: str = Depends(verify_api_key),
 ):
     """Validate and enqueue one idempotent coding-agent task."""
     if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
@@ -520,9 +643,8 @@ def submit_agent_task(
             "base_branch": task["base_branch"],
             "work_branch": task["work_branch"],
         },
-        "tenant_id": os.getenv("RUSA_TENANT_ID", "default"),
+        "tenant_id": tenant_id,
     }
-    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
     try:
         result = queue.enqueue(tenant_id, envelope["task_id"], payload, idempotency_key)
     except ValueError as exc:
@@ -533,14 +655,17 @@ def submit_agent_task(
     return {"task_id": result["task_id"], "state": result["state"]}
 
 
-@app.get("/v1/agent/tasks/{task_id}", dependencies=[Depends(verify_api_key)])
-def get_agent_task(task_id: uuid.UUID, http_request: Request):
+@app.get("/v1/agent/tasks/{task_id}")
+def get_agent_task(
+    task_id: uuid.UUID,
+    http_request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
     if os.getenv("RUSA_AGENT_ENABLED", "false").lower() != "true":
         raise HTTPException(status_code=503, detail="AICode task processing is disabled")
     queue = getattr(http_request.app.state, "task_queue", None)
     if queue is None:
         raise HTTPException(status_code=503, detail="Agent task queue is not configured")
-    tenant_id = os.getenv("RUSA_TENANT_ID", "default")
     record = queue.get(tenant_id, str(task_id))
     if record is None:
         raise HTTPException(status_code=404, detail="Agent task was not found")
