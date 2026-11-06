@@ -9,8 +9,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-from uuid import uuid4
 from dataclasses import dataclass
+from uuid import uuid4
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -180,7 +180,11 @@ class WorkspaceToolGateway:
         candidate = PurePosixPath(raw_path)
         if candidate.is_absolute() or ".." in candidate.parts or "\\" in raw_path:
             raise ToolDenied("Absolute paths, traversal, and backslashes are prohibited")
-        if any(part.lower() in self.PROTECTED_PARTS for part in candidate.parts):
+        if any(
+            part.lower() in self.PROTECTED_PARTS
+            or (part.lower().startswith(".env") and part.lower() != ".env.example")
+            for part in candidate.parts
+        ):
             raise ToolDenied("Access to protected paths is prohibited")
         if any(part.lower() in self.PROTECTED_NAMES for part in candidate.parts):
             raise ToolDenied("Access to credential-like files is prohibited")
@@ -198,7 +202,11 @@ class WorkspaceToolGateway:
         resolved = target.resolve(strict=False)
         if resolved != self.workspace and self.workspace not in resolved.parents:
             raise ToolDenied("Path escapes the assigned workspace")
-        if any(part.lower() in self.PROTECTED_PARTS for part in resolved.relative_to(self.workspace).parts):
+        if any(
+            part.lower() in self.PROTECTED_PARTS
+            or (part.lower().startswith(".env") and part.lower() != ".env.example")
+            for part in resolved.relative_to(self.workspace).parts
+        ):
             raise ToolDenied("Resolved path points to protected content")
         return target
 
