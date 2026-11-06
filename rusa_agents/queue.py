@@ -24,7 +24,7 @@ class PostgresTaskQueue:
         self.dsn = dsn
 
     def initialize(self) -> None:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute("SELECT pg_advisory_xact_lock(99101001)")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS rusa_agent_tasks (
@@ -71,7 +71,7 @@ class PostgresTaskQueue:
             """)
 
     def check_ready(self) -> bool:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute("""
                 SELECT c.relrowsecurity, c.relforcerowsecurity,
                        EXISTS (
@@ -106,7 +106,7 @@ class PostgresTaskQueue:
             raise ValueError("max_attempts must be between 1 and 10")
         key = task.idempotency_key or task.task_id
         payload = task.to_dict()
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute(
                 "SELECT set_config('rusa.tenant_id', %s, true)",
                 (task.tenant_id,),
@@ -147,7 +147,7 @@ class PostgresTaskQueue:
         if not worker_id or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", worker_id):
             raise ValueError("worker_id must be a valid identifier of at most 128 characters")
         self._validate_lease(lease_seconds)
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             with connection.transaction():
                 connection.execute("""
                     UPDATE rusa_agent_tasks
@@ -215,7 +215,7 @@ class PostgresTaskQueue:
         lease_seconds: int = 300,
     ) -> bool:
         self._validate_lease(lease_seconds)
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET lease_until=now() + (%s * interval '1 second'),
@@ -230,7 +230,7 @@ class PostgresTaskQueue:
     def owns_lease(self, tenant_id: str, task_id: str, worker_id: str) -> bool:
         if not worker_id:
             return False
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             row = connection.execute(
                 """
                 SELECT EXISTS (
@@ -252,7 +252,7 @@ class PostgresTaskQueue:
     ) -> bool:
         if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
             raise ValueError("checkpoint identity does not match its queue envelope")
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET result=%s::jsonb, updated_at=now()
@@ -282,7 +282,7 @@ class PostgresTaskQueue:
             else record.state.value
         )
         delay = 30 if record.state == TaskState.WAITING_EXTERNAL else 0
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=%s,
@@ -316,7 +316,7 @@ class PostgresTaskQueue:
         delay_seconds: int = 10,
     ) -> bool:
         delay = min(300, max(1, delay_seconds))
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
                 SET status=CASE
@@ -336,7 +336,7 @@ class PostgresTaskQueue:
         return cursor.rowcount == 1
 
     def get(self, tenant_id: str, task_id: str) -> dict[str, Any] | None:
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             connection.execute(
                 "SELECT set_config('rusa.tenant_id', %s, true)",
                 (tenant_id,),
@@ -361,7 +361,7 @@ class PostgresTaskQueue:
     def purge_terminal(self, retention_days: int = 30) -> int:
         if not 1 <= retention_days <= 3650:
             raise ValueError("retention_days must be between 1 and 3650")
-        with self._psycopg.connect(self.dsn) as connection:
+        with self._psycopg.connect(self.dsn, connect_timeout=5) as connection:
             cursor = connection.execute("""
                 DELETE FROM rusa_agent_tasks
                 WHERE status IN ('succeeded', 'blocked', 'failed', 'cancelled')
