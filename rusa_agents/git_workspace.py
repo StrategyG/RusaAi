@@ -99,6 +99,25 @@ class GitWorkspaceManager:
             raise RuntimeError(f"Could not create feature worktree: {created.stderr[-3000:]}")
         return workspace
 
+    def cleanup(self, task: CodingTask, tenant_id: str) -> None:
+        owner, repo = task.repository.full_name.split("/", 1)
+        mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
+        tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]
+        workspace = (self.workspace_root / tenant_key / task.task_id).resolve()
+        if self.mirror_root not in mirror.parents or self.workspace_root not in workspace.parents:
+            raise ValueError("Cleanup path escaped configured roots")
+        if not workspace.exists():
+            return
+        current = self._run(["git", "-C", str(workspace), "branch", "--show-current"])
+        if current.returncode or current.stdout.strip() != task.repository.work_branch:
+            raise RuntimeError("Refusing to clean a workspace on an unexpected branch")
+        removed = self._run([
+            "git", "--git-dir", str(mirror), "worktree", "remove", "--force", str(workspace)
+        ])
+        if removed.returncode:
+            raise RuntimeError(f"Git worktree cleanup failed: {removed.stderr[-2000:]}")
+        self._run(["git", "--git-dir", str(mirror), "branch", "-D", task.repository.work_branch])
+
 
 class GitHubPublisher:
     """Commits only safe workspace changes, pushes one feature branch, and opens a draft PR."""
