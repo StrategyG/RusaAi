@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -117,18 +118,28 @@ class PostgresTaskQueue:
         idempotency_key: str,
         max_attempts: int = 3,
     ) -> dict[str, Any]:
-        if not tenant_id or len(tenant_id) > 128:
-            raise ValueError("tenant_id must contain 1 to 128 characters")
-        if not 8 <= len(idempotency_key) <= 128:
+        if not isinstance(tenant_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.:-]{1,128}", tenant_id
+        ):
+            raise ValueError("tenant_id must contain 1 to 128 safe characters")
+        if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 128:
             raise ValueError("idempotency_key must contain 8 to 128 characters")
         if not isinstance(payload, dict):
             raise ValueError("task payload must be a JSON object")
         if not 1 <= max_attempts <= 20:
             raise ValueError("max_attempts must be between 1 and 20")
         try:
-            UUID(task_id)
-        except ValueError as exc:
+            normalized_task_id = str(UUID(task_id))
+        except (ValueError, TypeError, AttributeError) as exc:
             raise ValueError("task_id must be a UUID") from exc
+        payload_task_id = payload.get("task_id")
+        if payload_task_id is not None:
+            try:
+                normalized_payload_task_id = str(UUID(payload_task_id))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("payload task_id must be a UUID") from exc
+            if normalized_payload_task_id != normalized_task_id:
+                raise ValueError("payload task_id must match the queue task_id")
 
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         with self._connect() as db:

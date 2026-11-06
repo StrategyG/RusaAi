@@ -448,3 +448,16 @@ def test_provider_host_allowlist_is_case_insensitive():
         allowed_hosts={"provider.example"},
     )
     assert provider.endpoint.endswith("/chat/completions")
+
+
+
+def test_github_gateway_protects_nested_codeowners_and_ci_files():
+    protected_paths = (
+        "docs/CODEOWNERS",
+        ".gitlab-ci.yml",
+        ".circleci/config.yml",
+        "service/Dockerfile",
+        "deploy/compose.yaml",
+    )
+    for path in protected_paths:
+        assert GitHubToolGateway.is_protected_write_path(path), path

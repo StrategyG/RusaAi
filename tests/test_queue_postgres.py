@@ -113,3 +113,26 @@ def test_queue_rejects_invalid_lease_duration(queue_and_tenant):
     queue, _ = queue_and_tenant
     with pytest.raises(ValueError, match="lease_seconds"):
         queue.claim("worker-a", lease_seconds=1)
+
+
+
+def test_queue_rejects_payload_task_id_mismatch(queue_and_tenant):
+    queue, tenant = queue_and_tenant
+    with pytest.raises(ValueError, match="must match"):
+        queue.enqueue(
+            tenant,
+            str(uuid.uuid4()),
+            {"task_id": str(uuid.uuid4()), "objective": "mismatch"},
+            "payload-task-id-key",
+        )
+
+
+def test_queue_rejects_unsafe_tenant_identifiers(queue_and_tenant):
+    queue, _ = queue_and_tenant
+    with pytest.raises(ValueError, match="safe characters"):
+        queue.enqueue(
+            "tenant/other",
+            str(uuid.uuid4()),
+            {"objective": "unsafe tenant"},
+            "unsafe-tenant-key",
+        )

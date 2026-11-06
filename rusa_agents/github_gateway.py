@@ -267,15 +267,39 @@ class GitHubToolGateway:
     }
     PROTECTED_WRITE_PATHS = (
         ".github/",
+        ".circleci/",
+        ".buildkite/",
+        ".azure-pipelines/",
+        ".devcontainer/",
         ".env",
         "Dockerfile",
         "docker-compose.yml",
+        "compose.yml",
+        "compose.yaml",
         "requirements",
         "pyproject.toml",
-        "CODEOWNERS",
         "poetry.lock",
         "uv.lock",
         "Pipfile.lock",
+    )
+    PROTECTED_WRITE_NAMES = frozenset(
+        {
+            "codeowners",
+            ".gitlab-ci.yml",
+            "azure-pipelines.yml",
+            "jenkinsfile",
+            "dockerfile",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+            "compose.yml",
+            "compose.yaml",
+            "pyproject.toml",
+            "poetry.lock",
+            "uv.lock",
+            "pipfile.lock",
+            "setup.py",
+            "setup.cfg",
+        }
     )
     SENSITIVE_NAMES = frozenset(
         {
@@ -314,8 +338,10 @@ class GitHubToolGateway:
     @classmethod
     def is_protected_write_path(cls, path: str) -> bool:
         normalized = path.lower()
+        basename = normalized.rsplit("/", 1)[-1]
         return (
-            normalized == ".github"
+            basename in cls.PROTECTED_WRITE_NAMES
+            or normalized == ".github"
             or any(
                 normalized == protected.lower()
                 or normalized.startswith(protected.lower())
