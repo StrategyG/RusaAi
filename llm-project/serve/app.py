@@ -240,7 +240,10 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
         if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
         return os.getenv("RUSA_DEFAULT_TENANT", "development")
-    if not api_key or len(api_key.encode("utf-8")) < 32:
+    if not api_key or (
+        (config.api_key_principals or config.environment == "production")
+        and len(api_key.encode("utf-8")) < 32
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
 
     supplied_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
