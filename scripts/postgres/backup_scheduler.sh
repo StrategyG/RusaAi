@@ -29,7 +29,7 @@ trap 'shutdown_requested=true; echo "Shutdown requested; allowing the active bac
 
 while [[ "$shutdown_requested" != "true" ]]; do
     cycle_started="$(date +%s)"
-    if "$script_dir/backup.sh"; then
+    if bash "$script_dir/backup.sh"; then
         elapsed="$(( $(date +%s) - cycle_started ))"
         delay="$(( interval_seconds - elapsed ))"
         (( delay > 0 )) || delay=1
