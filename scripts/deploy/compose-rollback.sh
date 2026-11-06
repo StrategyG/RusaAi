@@ -41,6 +41,40 @@ compose() {
   docker compose --env-file "$ENV_FILE" --file "$COMPOSE_FILE" "$@"
 }
 
+wait_for_migration() {
+  local services migration_id state exit_code attempt
+  services="$(compose config --services)"
+  if ! grep -Fxq "rusa-agent-migrate" <<< "$services"; then
+    return 0
+  fi
+
+  for ((attempt = 0; attempt < 180; attempt++)); do
+    migration_id="$(compose ps --all --quiet rusa-agent-migrate)"
+    if [[ -n "$migration_id" ]]; then
+      state="$(docker inspect --format '{{.State.Status}}' "$migration_id")"
+      if [[ "$state" == "exited" ]]; then
+        exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$migration_id")"
+        if [[ "$exit_code" == "0" ]]; then
+          return 0
+        fi
+        echo "PostgreSQL migration service exited with status $exit_code." >&2
+        compose logs --tail 100 rusa-agent-migrate >&2 || true
+        return 1
+      fi
+      if [[ "$state" == "dead" ]]; then
+        echo "PostgreSQL migration service entered the dead state." >&2
+        compose logs --tail 100 rusa-agent-migrate >&2 || true
+        return 1
+      fi
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for the PostgreSQL migration service to complete." >&2
+  compose logs --tail 100 rusa-agent-migrate >&2 || true
+  return 1
+}
+
 health_check() {
   local port agent_port retries retry_delay
   port="$(awk -F= '$1 == "RUSA_PORT" { value=$2 } END { print value }' "$ENV_FILE")"
@@ -65,7 +99,7 @@ health_check() {
 cp -p "$ENV_FILE" "$CURRENT_FILE"
 cp -p "$BACKUP_FILE" "$ENV_FILE"
 
-if compose pull && compose up -d --no-build --remove-orphans --wait --wait-timeout 180 && health_check; then
+if compose pull && compose up -d --no-build --remove-orphans && wait_for_migration && health_check; then
   mv "$CURRENT_FILE" "$BACKUP_FILE"
   chmod 600 "$ENV_FILE" "$BACKUP_FILE"
   echo "Rollback completed. The environment that was rolled back from is retained as the next rollback snapshot."
@@ -76,5 +110,7 @@ echo "Rollback target failed health checks; restoring the previously active conf
 cp -p "$CURRENT_FILE" "$ENV_FILE"
 rm -f "$CURRENT_FILE"
 compose pull || true
-compose up -d --no-build --remove-orphans --wait --wait-timeout 180 || true
+compose up -d --no-build --remove-orphans || true
+wait_for_migration || true
+health_check || true
 exit 2
