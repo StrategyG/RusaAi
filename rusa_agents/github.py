@@ -1,4 +1,4 @@
-"""Least-privilege GitHub adapter with repository scoping and bounded evidence reads."""
+"""Least-privilege GitHub adapter with repository and tenant scoping."""
 
 from __future__ import annotations
 
@@ -16,31 +16,10 @@ from .policy import AutonomyPolicy
 
 
 _SECRET_PATTERNS = (
-    (
-        re.compile(
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
-        ),
-        "[REDACTED PRIVATE KEY]",
-    ),
-    (
-        re.compile(
-            r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"
-        ),
-        "[REDACTED TOKEN]",
-    ),
-    (
-        re.compile(
-            r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)"
-            r"(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
-        ),
-        r"\1\2[REDACTED]",
-    ),
-    (
-        re.compile(
-            r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"
-        ),
-        "[REDACTED JWT]",
-    ),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "[REDACTED PRIVATE KEY]"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b"), "[REDACTED TOKEN]"),
+    (re.compile(r"(?i)(api[_-]?key|client[_-]?secret|password|access[_-]?token)(\s*[:=]\s*)(""[^""]*""|'[^']*'|[^\s,;]+)"), r"\1\2[REDACTED]"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"), "[REDACTED JWT]"),
 )
 
 
@@ -56,6 +35,7 @@ class GitHubToolGateway:
         *,
         token: str,
         allowed_repositories: set[str],
+        tenant_repositories: dict[str, set[str]] | None = None,
         api_url: str = "https://api.github.com",
         timeout_seconds: float = 20.0,
         max_response_bytes: int = 4_000_000,
@@ -80,6 +60,22 @@ class GitHubToolGateway:
             for item in repositories
         ):
             raise ValueError("an explicit owner/name repository allowlist is required")
+        normalized_tenant_map = None
+        if tenant_repositories is not None:
+            if not tenant_repositories:
+                raise ValueError("tenant repository mapping cannot be empty")
+            normalized_tenant_map = {}
+            for tenant_id, values in tenant_repositories.items():
+                if (
+                    not isinstance(tenant_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tenant_id)
+                    or not values
+                ):
+                    raise ValueError("tenant repository mapping contains an invalid entry")
+                normalized = {item.strip().lower() for item in values if item.strip()}
+                if not normalized or not normalized.issubset(repositories):
+                    raise ValueError("tenant repositories must be a subset of the global allowlist")
+                normalized_tenant_map[tenant_id] = normalized
         if (
             timeout_seconds <= 0 or max_response_bytes < 1024 or max_file_bytes < 1024
             or not 1 <= max_check_pages <= 10 or not 1 <= max_diff_pages <= 3
@@ -90,6 +86,7 @@ class GitHubToolGateway:
         self.api_url = api_url.rstrip("/")
         self.token = token
         self.allowed_repositories = repositories
+        self.tenant_repositories = normalized_tenant_map
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
         self.max_response_bytes = max_response_bytes
         self.max_file_bytes = max_file_bytes
@@ -100,8 +97,13 @@ class GitHubToolGateway:
         self.max_diff_chars = max_diff_chars
 
     def _validate_task(self, task: CodingTask) -> None:
-        if task.repository.full_name.lower() not in self.allowed_repositories:
+        repository = task.repository.full_name.lower()
+        if repository not in self.allowed_repositories:
             raise PermissionError("repository is not in the configured GitHub allowlist")
+        if self.tenant_repositories is not None:
+            tenant_allowed = self.tenant_repositories.get(task.tenant_id, set())
+            if repository not in tenant_allowed:
+                raise PermissionError("repository is not assigned to this tenant")
         if task.repository.work_branch != task.expected_work_branch():
             raise PermissionError("task work branch is outside its tenant-scoped namespace")
 
@@ -381,6 +383,7 @@ class GitHubToolGateway:
         checks_complete = (
             total_count <= self.max_check_pages * 100
             and len(all_runs) == total_count
+            and len(run_ids) == len(all_runs)
             and len(run_ids) == len(set(run_ids))
         )
         checks = [
