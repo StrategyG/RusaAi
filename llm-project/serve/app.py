@@ -12,8 +12,8 @@ from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.security import APIKeyHeader
 from fastapi.responses import Response
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field, field_validator
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -94,11 +94,6 @@ async def collect_request_metrics(request: Request, call_next):
         API_REQUEST_DURATION.labels(request.method, route_name).observe(
             time.perf_counter() - started
         )
-
-
-@app.get("/metrics", dependencies=[Depends(verify_api_key)])
-def metrics_endpoint():
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 class ChatMessage(BaseModel):
@@ -227,6 +222,11 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
                 headers={"Retry-After": str(retry_after)},
             )
     return tenant_id
+
+
+@app.get("/metrics", dependencies=[Depends(verify_api_key)])
+def metrics_endpoint():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health", status_code=status.HTTP_200_OK)
