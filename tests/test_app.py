@@ -225,3 +225,45 @@ def test_a2a_validation_requires_api_key(client):
         json={"envelope": valid_envelope()},
     )
     assert response.status_code == 401
+
+
+def test_agent_task_submission_is_authenticated_and_idempotent(client):
+    class FakeQueue:
+        def __init__(self):
+            self.calls = []
+
+        def enqueue(self, tenant_id, task_id, payload, idempotency_key):
+            self.calls.append((tenant_id, task_id, payload, idempotency_key))
+            return {"task_id": task_id, "state": "queued"}
+
+    queue = FakeQueue()
+    app.state.task_queue = queue
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0001"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 202
+    assert response.json()["state"] == "queued"
+    assert len(queue.calls) == 1
+    assert queue.calls[0][0] == "default"
+    assert queue.calls[0][3] == "task-key-0001"
+
+
+def test_agent_task_submission_requires_authentication(client):
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={"Idempotency-Key": "task-key-0002"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 401
+
+
+def test_agent_task_submission_fails_closed_without_queue(client):
+    app.state.task_queue = None
+    response = client.post(
+        "/v1/agent/tasks",
+        headers={**auth_headers(), "Idempotency-Key": "task-key-0003"},
+        json={"envelope": valid_envelope()},
+    )
+    assert response.status_code == 503
