@@ -47,6 +47,12 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     (workspace / ".env").write_text("SECRET=never-copy")
     (workspace / ".git").mkdir()
     (workspace / ".git" / "config").write_text("credential=private")
+    (workspace / "private.pem").write_text("PRIVATE KEY")
+    (workspace / "id_rsa").write_text("PRIVATE KEY")
+    (workspace / ".npmrc").write_text("//registry.invalid/:_authToken=secret")
+    secret_target = workspace / "outside-secret.txt"
+    secret_target.write_text("SECRET")
+    (workspace / "linked-secret.txt").symlink_to(secret_target)
 
     def fake_run(command, **kwargs):
         mount = next(item for item in command if item.startswith("type=bind,src="))
@@ -55,6 +61,10 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         assert (snapshot_path / "src.py").is_file()
         assert not (snapshot_path / ".env").exists()
         assert not (snapshot_path / ".git").exists()
+        assert not (snapshot_path / "private.pem").exists()
+        assert not (snapshot_path / "id_rsa").exists()
+        assert not (snapshot_path / ".npmrc").exists()
+        assert not (snapshot_path / "linked-secret.txt").exists()
         return subprocess.CompletedProcess(command, 0, stdout="passed", stderr="")
 
     monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
