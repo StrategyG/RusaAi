@@ -180,6 +180,17 @@ async def ready(request: Request) -> dict[str, Any]:
     return {"status": "ready", "checks": checks}
 
 
+@app.get("/v1/agent/tools")
+async def list_agent_tools(
+    tenant: str = Depends(tenant_dependency),
+    runtime: AgentRuntime = Depends(runtime_dependency),
+) -> dict[str, Any]:
+    return {
+        "tools": runtime.tools.describe(),
+        "internal_tools": sorted(runtime.orchestrator.INTERNAL_TOOLS),
+    }
+
+
 @app.post("/v1/agent/tasks", status_code=202)
 async def create_task(
     payload: TaskCreate,
