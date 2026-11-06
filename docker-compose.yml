@@ -325,7 +325,7 @@ services:
       context: .
       dockerfile: Dockerfile.backup
     image: rusa-agent-db-backup:local
-    command: ["/app/scripts/postgres/backup.sh"]
+    command: ["bash", "/app/scripts/postgres/backup.sh"]
     restart: "no"
     environment:
       DATABASE_URL: postgresql://rusa_agent_owner:${RUSA_AGENT_DB_PASSWORD:?Set RUSA_AGENT_DB_PASSWORD in .env}@rusa-agent-db:5432/rusa_agent
@@ -363,7 +363,7 @@ services:
       context: .
       dockerfile: Dockerfile.backup
     image: rusa-agent-db-backup:local
-    command: ["/app/scripts/postgres/backup_scheduler.sh"]
+    command: ["bash", "/app/scripts/postgres/backup_scheduler.sh"]
     restart: unless-stopped
     stop_grace_period: 180s
     environment:
