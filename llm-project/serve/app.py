@@ -44,6 +44,44 @@ class InferenceProvider(Protocol):
     ) -> AsyncIterator[InferenceStreamEvent]: ...
 
 
+class LocalModelInferenceProvider:
+    """Adapt the verified local runtime to the API's existing provider contract."""
+
+    def __init__(self, backend: Any):
+        self.backend = backend
+
+    async def check_ready(self) -> bool:
+        return self.backend is not None
+
+    async def complete(self, messages: list[dict[str, str]], **parameters: Any) -> str:
+        result = await self.backend.generate(
+            messages,
+            max_new_tokens=parameters["max_tokens"],
+            temperature=parameters["temperature"],
+            top_p=parameters["top_p"],
+        )
+        return result.content
+
+    async def stream(
+        self, messages: list[dict[str, str]], **parameters: Any
+    ) -> AsyncIterator[InferenceStreamEvent]:
+        async for event in self.backend.stream(
+            messages,
+            max_new_tokens=parameters["max_tokens"],
+            temperature=parameters["temperature"],
+            top_p=parameters["top_p"],
+        ):
+            yield InferenceStreamEvent(
+                content=event.delta or None,
+                finish_reason=event.finish_reason,
+                prompt_tokens=event.prompt_tokens or None,
+                completion_tokens=event.completion_tokens or None,
+            )
+
+    async def close(self) -> None:
+        await self.backend.close()
+
+
 class InferenceAdmissionController:
     """Bound active inference and the number/time of requests waiting for capacity."""
 
@@ -114,7 +152,34 @@ async def lifespan(application: FastAPI):
     application.state.rate_limiter = None
     application.state.task_policy_audit = None
     application.state.inference_admission = _new_inference_admission_controller()
-    if config.model_base_url:
+    local_backend = None
+    local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH")
+    if local_model_path:
+        from model_runtime import load_inference_backend, verify_model_artifact
+
+        try:
+            max_model_len = int(os.getenv("RUSA_MODEL_MAX_LENGTH", "4096"))
+            manifest_digest = os.getenv("RUSA_MODEL_MANIFEST_SHA256")
+            verified = verify_model_artifact(
+                local_model_path,
+                expected_manifest_sha256=manifest_digest,
+                require_pinned_manifest=config.environment == "production",
+            )
+            local_backend = load_inference_backend(
+                str(verified.root),
+                backend_name=os.getenv("RUSA_INFERENCE_BACKEND", "transformers"),
+                timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS", "120")),
+                max_model_len=max_model_len,
+                max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS", "8")),
+                max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS", "8192")),
+                tensor_parallel_size=int(os.getenv("RUSA_VLLM_TENSOR_PARALLEL_SIZE", "1")),
+                gpu_memory_utilization=float(os.getenv("RUSA_VLLM_GPU_MEMORY_UTILIZATION", "0.9")),
+            )
+        except (ValueError, RuntimeError, OSError) as exc:
+            set_inference_provider(None)
+            raise RuntimeError("Configured local model runtime failed closed during startup") from exc
+        set_inference_provider(LocalModelInferenceProvider(local_backend))
+    elif config.model_base_url:
         set_inference_provider(
             OpenAIChatInferenceProvider(
                 config.model_base_url,
@@ -135,8 +200,12 @@ async def lifespan(application: FastAPI):
         if config.environment == "production":
             task_policy_audit.verify_ready("rusa_api_runtime")
         application.state.task_policy_audit = task_policy_audit
-    yield
-    set_inference_provider(None)
+    try:
+        yield
+    finally:
+        if local_backend is not None:
+            await local_backend.close()
+        set_inference_provider(None)
 
 
 app = FastAPI(
