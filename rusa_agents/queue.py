@@ -76,11 +76,23 @@ class PostgresTaskQueue:
             """)
 
     def check_ready(self) -> bool:
+        """Fail closed unless forced tenant RLS and its tenant policy are active."""
         with self._psycopg.connect(self.dsn) as connection:
-            row = connection.execute(
-                "SELECT to_regclass('public.rusa_agent_tasks')"
-            ).fetchone()
-        return bool(row and row[0])
+            row = connection.execute("""
+                SELECT c.relrowsecurity, c.relforcerowsecurity,
+                       EXISTS (
+                           SELECT 1 FROM pg_policies
+                           WHERE schemaname='public'
+                             AND tablename='rusa_agent_tasks'
+                             AND policyname='rusa_agent_tenant_isolation'
+                             AND COALESCE(qual, '') LIKE '%rusa.tenant_id%'
+                             AND COALESCE(with_check, '') LIKE '%rusa.tenant_id%'
+                       )
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid=c.relnamespace
+                WHERE n.nspname='public' AND c.relname='rusa_agent_tasks'
+            """).fetchone()
+        return bool(row and row[0] and row[1] and row[2])
 
     @staticmethod
     def _normalized_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -184,6 +196,8 @@ class PostgresTaskQueue:
     ) -> bool:
         if record.task.tenant_id != tenant_id or record.task.task_id != task_id:
             raise ValueError("checkpoint identity does not match its queue envelope")
+        if not lease_token:
+            raise ValueError("lease_token is required for checkpoint persistence")
         with self._psycopg.connect(self.dsn) as connection:
             cursor = connection.execute("""
                 UPDATE rusa_agent_tasks
