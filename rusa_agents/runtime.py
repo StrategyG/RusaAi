@@ -137,7 +137,7 @@ class AICodeRuntime:
 
     async def _await_human_review(self, job: Job, task: CodingTask, reason: str) -> None:
         updated = await asyncio.to_thread(
-            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, reason
+            self.queue.await_approval, job.id, job.tenant_id, self.worker_id, job.lease_token, reason
         )
         if not updated:
             raise RuntimeError("Queue rejected awaiting-approval transition because the lease was lost")
