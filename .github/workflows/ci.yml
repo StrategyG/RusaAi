@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rusa-ai-ci-\${{ github.workflow }}-\${{ github.ref }}
+  group: rusa-ai-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,13 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build --pull -t rusa-ai:\${{ github.sha }} .
+        run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Run container
         run: |
           docker run -d --name rusa-ai-ci \
             -p 127.0.0.1:8000:8000 \
             -e RUSA_API_KEY=ci-only-test-key-123456789012345678901234567890 \
-            rusa-ai:\${{ github.sha }}
+            rusa-ai:${{ github.sha }}
       - name: Verify liveness
         run: |
           for attempt in $(seq 1 20); do
