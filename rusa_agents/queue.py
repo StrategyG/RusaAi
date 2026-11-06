@@ -59,6 +59,18 @@ class PostgresTaskQueue:
                         "Production queue lease fencing is not installed; "
                         "apply migrations/002_aicode_lease_fencing.sql"
                     )
+                result_column = conn.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='aicode_jobs'
+                          AND column_name='result'
+                    )
+                """).fetchone()
+                if not result_column or not result_column[0]:
+                    raise RuntimeError(
+                        "Production task result storage is not installed; "
+                        "apply migrations/004_aicode_task_results.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
@@ -75,15 +87,15 @@ class PostgresTaskQueue:
                     SELECT tablename, policyname FROM pg_policies
                     WHERE schemaname='public' AND policyname = ANY(%s)
                 """, ([
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
+                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_all",
+                    "aicode_audit_worker_only",
                 ],)).fetchall()
                 policy_names = {row[1] for row in policies}
                 required_policies = {
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_all",
+                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_all",
+                    "aicode_audit_worker_only",
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
@@ -193,30 +205,47 @@ class PostgresTaskQueue:
         return cur.rowcount == 1
 
     def complete(
-        self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        result: dict[str, Any] | None = None,
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs SET status='succeeded', lease_owner=NULL,
-                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
+                UPDATE aicode_jobs SET status='succeeded', result=%s::jsonb,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
-            """, (job_id, tenant_id, worker_id, lease_token))
+            """, (
+                json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                job_id, tenant_id, worker_id, lease_token,
+            ))
         return cur.rowcount == 1
 
     def await_approval(
-        self, job_id: int, tenant_id: str, worker_id: str,
-        lease_token: str, reason: str,
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        reason: str,
+        result: dict[str, Any] | None = None,
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs SET status='awaiting_approval', lease_owner=NULL,
-                    lease_until=NULL, lease_token=NULL, last_error=%s, updated_at=NOW()
+                UPDATE aicode_jobs SET status='awaiting_approval', result=%s::jsonb,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                    last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
-            """, (reason[:4000], job_id, tenant_id, worker_id, lease_token))
+            """, (
+                json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                reason[:4000], job_id, tenant_id, worker_id, lease_token,
+            ))
         return cur.rowcount == 1
 
     def fail(
