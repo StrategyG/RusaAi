@@ -1,16 +1,21 @@
 # RUSA-AI
 
-Production-ready architecture, serving infrastructure, model blueprint, and execution engine for **RUSA-AI** — an independent, high-performance Large Language Model platform featuring Mixture-of-Experts (MoE), agent task envelope schema validation, and secure API serving.
+RUSA-AI is an AI and autonomous-agent platform under active development. The repository currently contains a FastAPI inference gateway, a tenant-scoped coding-agent runtime, PostgreSQL task/lease controls, and A2A task validation.
+
+**Model status:** `llm-project/model/` and `llm-project/configs/model.yaml` describe a planned architecture only. This repository does not contain trained RUSA-AI weights/checkpoints, a verified tokenizer artifact, or a standalone local inference runtime. Chat completions are forwarded to an externally configured OpenAI-compatible HTTPS endpoint (`RUSA_MODEL_BASE_URL`); the API fails closed when no inference backend is configured.
+
+**Production status:** RUSA-AI is not production-certified. A passing CI run validates only the exact commit and automated checks it executed. Production release still requires approved model/provider artifacts, staging load and soak tests, adversarial tenant-isolation review, backup/restore and rollback drills, monitoring, TLS, secret management, and operator sign-off.
 
 ---
 
 ## Key Features & Architecture
 
-- **Independent Model Blueprint**: Decoder-only transformer architecture with 96 layers, 12,288 hidden size, 64 MoE experts (2 active per token), and RoPE positional embeddings.
-- **Production API Serving**: FastAPI-powered inference backend supporting OpenAI-compatible `/v1/chat/completions`, task validation `/v1/validate-task`, and health telemetry (`/health`).
-- **Agent-to-Agent (A2A) Schema**: Versioned JSON Schema validation (`schemas/a2a/task-envelope.schema.json`) for agent task payloads and autonomous workflows.
-- **Enterprise Security & Reliability**: API Key authentication (`X-API-Key`), rate limiting, robust exception handling, non-root Docker runtime, and environment configuration.
-- **Automated CI/CD**: Complete GitHub Actions workflow for linting, testing, container builds, and security scans.
+- **Model architecture blueprint**: Decoder-only Transformer/MoE design; planned only and not a trained or verified model.
+- **Inference gateway**: FastAPI OpenAI-compatible API that forwards requests to a configured external model endpoint; it does not serve local RUSA-AI weights.
+- **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
+- **A2A task validation**: Versioned JSON Schema validation for agent task envelopes.
+- **Security and reliability controls**: API-key authentication, RBAC, tenant-aware data access, rate limiting, non-root containers, and audit events; production effectiveness still requires deployment-level verification.
+- **CI quality gates**: Lint, tests, static security analysis, container builds, and vulnerability scanning.
 
 ---
 
@@ -82,7 +87,7 @@ cp .env.example .env
 
 ### Running Locally with Uvicorn
 ```bash
-uvicorn llm-project.serve.app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app:app --app-dir llm-project/serve --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Running with Docker & Docker Compose
@@ -100,7 +105,7 @@ curl localhost:8000/health
 
 Execute the automated test suite using pytest:
 ```bash
-pytest llm-project/tests/ -v
+pytest -q
 ```
 
 ---
@@ -117,9 +122,10 @@ pytest llm-project/tests/ -v
 
 ## Security & Governance
 
-- **API Authorization**: Configure `RUSA_API_KEY` in environment to enforce header authentication.
-- **Non-Root Execution**: Container runs under dedicated non-root user `appuser` (UID 10001).
-- **Input Validation**: Strictly enforced Pydantic request models & JSON schema validation.
+- **API Authorization**: Production uses tenant-bound, hashed API-key principals and role checks. Do not use development-only legacy key mappings in production.
+- **Non-Root Execution**: Production API container runs under a dedicated non-root user (UID 10001).
+- **Input Validation**: Pydantic request validation, bounded request bodies, and fail-closed A2A JSON Schema validation.
+- **Deployment boundary**: Application controls must be combined with TLS ingress, secret-manager integration, database hardening, network/egress controls, and verified tenant-isolation tests.
 
 ---
 
@@ -176,4 +182,4 @@ Production deployment requires managed PostgreSQL, tenant repository allowlists,
 ---
 
 ## License
-This project is licensed under the MIT License.
+No `LICENSE` file is currently present in this repository. Licensing is therefore unresolved; confirm the intended terms with the repository owner and commit the corresponding license file before redistribution.
