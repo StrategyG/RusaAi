@@ -51,6 +51,21 @@ class PostgresTaskQueue:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     @staticmethod
+    def _lock_execution_control(conn, job_id: int, tenant_id: str):
+        """Serialize terminal task transitions with cancellation without blocking publishers."""
+        return conn.execute(
+            """
+            SELECT control.cancel_requested_at
+            FROM public.aicode_job_controls AS control
+            JOIN public.aicode_jobs AS job
+              ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
+            WHERE job.id=%s AND job.tenant_id=%s
+            FOR UPDATE OF control
+            """,
+            (job_id, tenant_id),
+        ).fetchone()
+
+    @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
@@ -137,16 +152,32 @@ class PostgresTaskQueue:
                         "Production task result storage is not installed; "
                         "apply migrations/003_aicode_task_results.sql"
                     )
+                control_table = conn.execute(
+                    "SELECT to_regclass('public.aicode_job_controls')"
+                ).fetchone()
+                if not control_table or control_table[0] is None:
+                    raise RuntimeError(
+                        "Production cancellation control is missing; "
+                        "apply migrations/007_aicode_job_controls.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
                     JOIN pg_namespace AS n ON n.oid=c.relnamespace
                     WHERE n.nspname='public'
                       AND c.relname = ANY(%s)
-                """, (["aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"],)).fetchall()
+                """, ([
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
+                ],)).fetchall()
                 states = {row[0]: (row[1], row[2]) for row in protected}
-                if set(states) != {"aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"}:
-                    raise RuntimeError("Production RLS migration is incomplete; apply migrations/004_aicode_tenant_rls.sql")
+                if set(states) != {
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
+                }:
+                    raise RuntimeError(
+                        "Production RLS migration is incomplete; apply migrations/007_aicode_job_controls.sql"
+                    )
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
                 policies = conn.execute("""
@@ -154,12 +185,14 @@ class PostgresTaskQueue:
                     WHERE schemaname='public' AND policyname = ANY(%s)
                 """, ([
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
+                    "aicode_job_controls_api_tenant", "aicode_job_controls_worker_read",
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
                     "aicode_audit_worker_only",
                 ],)).fetchall()
                 policy_names = {row[1] for row in policies}
                 required_policies = {
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
+                    "aicode_job_controls_api_tenant", "aicode_job_controls_worker_read",
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
                     "aicode_audit_worker_only",
                 }
@@ -243,6 +276,24 @@ class PostgresTaskQueue:
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_tenant
                 ON aicode_jobs(tenant_id, created_at DESC)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS aicode_job_controls (
+                    tenant_id TEXT NOT NULL,
+                    task_id UUID NOT NULL,
+                    cancel_epoch BIGINT NOT NULL DEFAULT 0 CHECK (cancel_epoch >= 0),
+                    cancel_requested_at TIMESTAMPTZ,
+                    requested_by TEXT,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, task_id),
+                    FOREIGN KEY (tenant_id, task_id)
+                        REFERENCES aicode_jobs(tenant_id, task_id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("""
+                INSERT INTO aicode_job_controls (tenant_id, task_id)
+                SELECT tenant_id, task_id FROM aicode_jobs
+                ON CONFLICT (tenant_id, task_id) DO NOTHING
+            """)
 
     def ping(self) -> bool:
         """Return database connectivity without exposing application data."""
@@ -271,6 +322,15 @@ class PostgresTaskQueue:
                 ON CONFLICT (tenant_id, task_id) DO NOTHING
                 RETURNING id
             """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
+            if row is not None:
+                conn.execute(
+                    """
+                    INSERT INTO public.aicode_job_controls (tenant_id, task_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (tenant_id, task_id) DO NOTHING
+                    """,
+                    (tenant_id, task_id),
+                )
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.create",
                 "allow" if row is not None else "deny",
@@ -326,6 +386,14 @@ class PostgresTaskQueue:
                 ),
             ).fetchone()
             if inserted is not None:
+                conn.execute(
+                    """
+                    INSERT INTO public.aicode_job_controls (tenant_id, task_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (tenant_id, task_id) DO NOTHING
+                    """,
+                    (tenant_id, task_id),
+                )
                 self._record_policy_event(
                     conn, tenant_id, task_id, audit_actor, "task.create", "allow"
                 )
@@ -364,19 +432,47 @@ class PostgresTaskQueue:
         lease_token = str(uuid4())
         with self._connect() as conn:
             conn.execute("""
+                WITH cancelled AS (
+                    SELECT job.id
+                    FROM public.aicode_jobs AS job
+                    JOIN public.aicode_job_controls AS control
+                      ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                    WHERE control.cancel_requested_at IS NOT NULL
+                      AND (
+                          job.status IN ('queued', 'awaiting_approval')
+                          OR (job.status='running' AND job.lease_until < NOW())
+                      )
+                    FOR UPDATE OF job SKIP LOCKED
+                )
+                UPDATE public.aicode_jobs AS job
+                SET status='cancelled', lease_owner=NULL, lease_until=NULL,
+                    lease_token=NULL, updated_at=NOW()
+                FROM cancelled
+                WHERE job.id=cancelled.id
+            """)
+            conn.execute("""
                 UPDATE aicode_jobs
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
                 WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
             """)
             row = conn.execute("""
                 WITH candidate AS (
-                    SELECT id FROM aicode_jobs
-                    WHERE attempts < max_attempts
-                      AND ((status='queued' AND available_at <= NOW())
-                        OR (status='running' AND lease_until < NOW()))
-                    ORDER BY priority DESC, created_at ASC
-                    FOR UPDATE SKIP LOCKED
+                    SELECT job.id FROM public.aicode_jobs AS job
+                    JOIN public.aicode_job_controls AS control
+                      ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                    WHERE control.cancel_requested_at IS NULL
+                      AND job.attempts < job.max_attempts
+                      AND ((job.status='queued' AND job.available_at <= NOW())
+                        OR (job.status='running' AND job.lease_until < NOW()))
+                    ORDER BY job.priority DESC, job.created_at ASC
+                    FOR UPDATE OF job SKIP LOCKED
                     LIMIT 1
                 )
                 UPDATE aicode_jobs AS job
@@ -406,6 +502,12 @@ class PostgresTaskQueue:
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
             """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
@@ -446,6 +548,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
                   AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 FOR UPDATE
                 """,
                 (job_id, tenant_id, worker_id, lease_token),
@@ -498,6 +606,9 @@ class PostgresTaskQueue:
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='succeeded', result=%s::jsonb,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
@@ -520,6 +631,9 @@ class PostgresTaskQueue:
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='awaiting_approval', result=%s::jsonb,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
@@ -533,21 +647,38 @@ class PostgresTaskQueue:
         return cur.rowcount == 1
 
     def fail(
-        self, job_id: int, tenant_id: str, worker_id: str,
-        lease_token: str, error: str, retry_delay_seconds: int = 30,
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        error: str,
+        retry_delay_seconds: int = 30,
+        *,
+        retryable: bool = True,
     ) -> bool:
+        """Fail a lease-owned task, retrying only when the caller classifies it as transient."""
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs
-                SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
-                    available_at=NOW() + (%s * INTERVAL '1 second'),
+                SET status=CASE
+                        WHEN NOT %s OR attempts >= max_attempts THEN 'failed'
+                        ELSE 'queued'
+                    END,
+                    available_at=CASE
+                        WHEN NOT %s OR attempts >= max_attempts THEN NOW()
+                        ELSE NOW() + (%s * INTERVAL '1 second')
+                    END,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (
-                max(0, retry_delay_seconds), error[:4000],
+                retryable, retryable, max(0, retry_delay_seconds), error[:4000],
                 job_id, tenant_id, worker_id, lease_token,
             ))
         return cur.rowcount == 1
@@ -580,6 +711,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND task_id=%s AND tenant_id=%s
                   AND lease_owner=%s AND lease_token=%s::uuid
                   AND status='running' AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 FOR UPDATE
                 """,
                 (job_id, task_id, tenant_id, worker_id, lease_token),
@@ -605,9 +742,58 @@ class PostgresTaskQueue:
                     WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                       AND lease_token=%s::uuid AND status='running'
                       AND lease_until > NOW()
+                      AND NOT EXISTS (
+                          SELECT 1 FROM public.aicode_job_controls AS control
+                          WHERE control.tenant_id=aicode_jobs.tenant_id
+                            AND control.task_id=aicode_jobs.task_id
+                            AND control.cancel_requested_at IS NOT NULL
+                      )
                 )
             """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
         return bool(row and row[0])
+
+    def is_cancel_requested(self, task_id: str, tenant_id: str) -> bool:
+        """Read the independent cancellation control row without waiting on a job publication lock."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM public.aicode_job_controls
+                    WHERE tenant_id=%s AND task_id=%s
+                      AND cancel_requested_at IS NOT NULL
+                )
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+        return bool(row and row[0])
+
+    def mark_cancelled(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+    ) -> bool:
+        """Acknowledge cancellation after the active operation has stopped or been fenced."""
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is None:
+                return False
+            cur = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET status='cancelled', lease_owner=NULL, lease_until=NULL,
+                    lease_token=NULL, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                """,
+                (job_id, tenant_id, worker_id, lease_token),
+            )
+        return cur.rowcount == 1
 
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
@@ -635,19 +821,62 @@ class PostgresTaskQueue:
     def cancel(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
+        """Persist cancellation intent independently from the row locked during publication.
+
+        Running workers observe this control row through the heartbeat/control poll.
+        The API therefore does not wait for a bounded external publish to release the job row.
+        """
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            cur = conn.execute("""
-                UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
-                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
-            """, (task_id, tenant_id))
+            control = conn.execute(
+                """
+                SELECT control.cancel_requested_at, job.status
+                FROM public.aicode_job_controls AS control
+                JOIN public.aicode_jobs AS job
+                  ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
+                WHERE control.tenant_id=%s AND control.task_id=%s
+                FOR UPDATE OF control
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+            if control is None or control[1] in {"succeeded", "failed"}:
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.cancel", "deny"
+                )
+                return False
+
+            if control[0] is None:
+                conn.execute(
+                    """
+                    UPDATE public.aicode_job_controls
+                    SET cancel_epoch=cancel_epoch+1,
+                        cancel_requested_at=NOW(),
+                        requested_by=%s,
+                        updated_at=NOW()
+                    WHERE tenant_id=%s AND task_id=%s
+                    """,
+                    (audit_actor, tenant_id, task_id),
+                )
+
+            if control[1] in {"queued", "awaiting_approval"}:
+                conn.execute(
+                    """
+                    UPDATE public.aicode_jobs
+                    SET status='cancelled', lease_owner=NULL, lease_until=NULL,
+                        lease_token=NULL, updated_at=NOW()
+                    WHERE tenant_id=%s AND task_id=%s
+                      AND status IN ('queued', 'awaiting_approval')
+                    """,
+                    (tenant_id, task_id),
+                )
+
             self._record_policy_event(
-                conn, tenant_id, task_id, audit_actor, "task.cancel",
-                "allow" if cur.rowcount == 1 else "deny",
+                conn, tenant_id, task_id, audit_actor, "task.cancel", "allow"
             )
-        return cur.rowcount == 1
+        return True
 
     def get(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
@@ -656,9 +885,14 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
-                SELECT task_id::text, tenant_id, payload, result, status, attempts,
-                       max_attempts, last_error, created_at, updated_at
-                FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s
+                SELECT job.task_id::text, job.tenant_id, job.payload, job.result,
+                       job.status, job.attempts, job.max_attempts, job.last_error,
+                       job.created_at, job.updated_at,
+                       (control.cancel_requested_at IS NOT NULL)
+                FROM public.aicode_jobs AS job
+                LEFT JOIN public.aicode_job_controls AS control
+                  ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                WHERE job.task_id=%s AND job.tenant_id=%s
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.read",
@@ -675,4 +909,5 @@ class PostgresTaskQueue:
             "result": result, "status": row[4], "attempts": row[5],
             "max_attempts": row[6], "last_error": row[7],
             "created_at": row[8].isoformat(), "updated_at": row[9].isoformat(),
+            "cancel_requested": bool(row[10]),
         }
