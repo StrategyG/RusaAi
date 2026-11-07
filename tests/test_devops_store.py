@@ -81,6 +81,8 @@ def _cleanup(tenant_id: str) -> None:
     import psycopg
 
     with psycopg.connect(DSN) as conn:
+        conn.execute("DELETE FROM public.devops_task_rpc_receipts WHERE tenant_id=%s", (tenant_id,))
+        conn.execute("DELETE FROM public.devops_run_cancellations WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_event_outbox WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_tasks WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_workflows WHERE tenant_id=%s", (tenant_id,))
@@ -291,6 +293,7 @@ def test_durable_tables_force_rls_and_have_separate_relay_role():
                 "devops_event_outbox",
                 "devops_event_inbox",
                 "devops_run_cancellations",
+                "devops_task_rpc_receipts",
             ],),
         ).fetchall()
         roles = conn.execute(
@@ -301,7 +304,7 @@ def test_durable_tables_force_rls_and_have_separate_relay_role():
             (["rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"],),
         ).fetchall()
 
-    assert len(rows) == 5
+    assert len(rows) == 6
     assert all(enabled and forced for _, enabled, forced in rows)
     assert {name for name, *_ in roles} == {
         "rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"
