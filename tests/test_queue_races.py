@@ -266,8 +266,8 @@ def test_queue_control_operations_respect_row_lock_timeout(operation):
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "lock timeout"})
-        job = queue.claim(f"lock-timeout-{operation}-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
+        worker_id = f"lock-timeout-{operation}-worker"
+        job_id, lease_token = claim_specific_task(task_id, tenant, worker_id)
 
         if operation == "retry":
             with psycopg.connect(DSN) as connection:
@@ -297,7 +297,7 @@ def test_queue_control_operations_respect_row_lock_timeout(operation):
                     queue.retry(task_id, tenant, audit_actor="api:lock-timeout-test")
                 else:
                     queue.heartbeat(
-                        job.id, tenant, job.lease_owner, job.lease_token, lease_seconds=30
+                        job_id, tenant, worker_id, lease_token, lease_seconds=30
                     )
             elapsed = time.monotonic() - started
             assert 1.0 <= elapsed < 5.0
