@@ -39,6 +39,11 @@ class AutonomousCodeWorker:
         },
     }
 
+    REQUIRED_CHECKS = {
+        WorkerRole.TESTER: frozenset({"pytest"}),
+        WorkerRole.SECURITY: frozenset({"bandit", "ruff", "compile"}),
+    }
+
     def __init__(
         self,
         role: WorkerRole,
@@ -89,6 +94,7 @@ class AutonomousCodeWorker:
         artifacts: list[str] = []
         evidence: dict[str, Any] = {}
         last_message = ""
+        successful_actions = 0
         for step in range(self.max_steps):
             system_prompt = (
                 f"You are the {self.role.value} worker in RUSA-AI AICode. "
@@ -158,23 +164,121 @@ class AutonomousCodeWorker:
                         success=False, artifacts=artifacts, evidence=evidence,
                         blockers=[str(exc)],
                     )
-                if action["name"] == "write_file" and result.ok:
-                    artifacts.append(str(action.get("arguments", {}).get("path", "")))
+
                 if action["name"] == "run_check":
                     profile = action.get("arguments", {}).get("profile", "unknown")
-                    evidence[f"check:{profile}"] = result.evidence or {"output": result.output[-2000:]}
-                    if not result.ok:
-                        transcript.append(f"TOOL FAILURE {profile}: {result.output[-4000:]}")
-                    else:
-                        transcript.append(f"TOOL PASS {profile}: {result.evidence}")
+                    check_evidence = result.evidence
+                    if (
+                        not isinstance(check_evidence, dict)
+                        or check_evidence.get("profile") != profile
+                        or type(check_evidence.get("exit_code")) is not int
+                    ):
+                        return WorkerResult(
+                            role=self.role,
+                            summary=f"Validation profile '{profile}' returned unverifiable evidence.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=[f"Validation profile '{profile}' did not return its exact profile and integer exit code."],
+                        )
+                    evidence[f"check:{profile}"] = dict(check_evidence)
+                    if not result.ok or check_evidence["exit_code"] != 0:
+                        return WorkerResult(
+                            role=self.role,
+                            summary=f"Validation profile '{profile}' failed.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=[f"Validation profile '{profile}' did not pass."],
+                        )
+                    transcript.append(f"TOOL PASS {profile}: {check_evidence}")
                 else:
+                    if not result.ok:
+                        return WorkerResult(
+                            role=self.role,
+                            summary=f"Tool '{action['name']}' failed.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=[f"Tool '{action['name']}' returned an unsuccessful result: {result.output[:500]}"],
+                        )
                     transcript.append(
-                        f"TOOL {action['name']} (ok={result.ok}): {result.output[:4000]}"
+                        f"TOOL {action['name']} (ok=true): {result.output[:4000]}"
                     )
+
+                successful_actions += 1
+                if action["name"] == "write_file":
+                    artifacts.append(str(action.get("arguments", {}).get("path", "")))
+
             if response["done"]:
+                if successful_actions == 0:
+                    return WorkerResult(
+                        role=self.role,
+                        summary=last_message or "Worker reported completion without executing a tool.",
+                        success=False,
+                        artifacts=artifacts,
+                        evidence=evidence,
+                        blockers=["Worker cannot report success without at least one successful tool operation."],
+                    )
+
+                required_profiles = self.REQUIRED_CHECKS.get(self.role, frozenset())
+                completed_profiles = {
+                    key.removeprefix("check:") for key in evidence
+                    if key.startswith("check:")
+                }
+                missing_profiles = required_profiles - completed_profiles
+                if missing_profiles:
+                    missing = ", ".join(sorted(missing_profiles))
+                    return WorkerResult(
+                        role=self.role,
+                        summary=last_message or "Required validation evidence is missing.",
+                        success=False,
+                        artifacts=artifacts,
+                        evidence=evidence,
+                        blockers=[f"Worker cannot report success without passing required profiles: {missing}."],
+                    )
+
+                if self.role == WorkerRole.DEVELOPER:
+                    if not artifacts:
+                        return WorkerResult(
+                            role=self.role,
+                            summary=last_message or "Developer did not write any workspace artifact.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=["Developer completion requires at least one successful write_file operation."],
+                        )
+                    try:
+                        diff_result = await asyncio.to_thread(self.gateway.git_diff)
+                    except (AttributeError, OSError, ValueError) as exc:
+                        return WorkerResult(
+                            role=self.role,
+                            summary="Could not verify the developer workspace diff.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=[f"Workspace diff verification failed: {exc}"],
+                        )
+                    if not diff_result.ok or not diff_result.output.strip():
+                        return WorkerResult(
+                            role=self.role,
+                            summary="Developer reported completion but no workspace diff was verified.",
+                            success=False,
+                            artifacts=artifacts,
+                            evidence=evidence,
+                            blockers=["Developer completion requires a non-empty Git diff."],
+                        )
+                    evidence["workspace_diff"] = {
+                        "present": True,
+                        "characters": len(diff_result.output),
+                    }
+
                 return WorkerResult(
-                    role=self.role, summary=last_message, success=True,
-                    artifacts=artifacts, evidence={**evidence, **response.get("evidence", {})},
+                    role=self.role,
+                    summary=last_message,
+                    success=True,
+                    artifacts=artifacts,
+                    evidence=evidence,
                 )
         return WorkerResult(
             role=self.role,
