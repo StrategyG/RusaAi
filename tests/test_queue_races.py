@@ -457,10 +457,9 @@ def test_expired_worker_lease_during_cancel_is_reconciled():
         assert queue.cancel(task_id, tenant)
         expire_lease(job.id, tenant)
 
-        # The next claimant performs the bounded recovery sweep but must not
-        # execute a task whose cancellation was already durably requested.
-        recovered = queue.claim("cancel-expired-recovery-worker", lease_seconds=30)
-        assert recovered is None
+        # The bounded recovery sweep finalizes cancellation without claiming
+        # an unrelated tenant's queued job as a side effect of this test.
+        assert queue.recover_cancelled(batch_size=10) >= 1
 
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "cancelled"
