@@ -166,3 +166,15 @@ def test_autonomous_worker_does_not_clear_failure_for_a_different_action_argumen
     assert result.failure_kind == "tool"
     assert len(result.blockers) == 1
     assert "missing.py" in result.blockers[0]
+
+
+def test_autonomous_worker_does_not_report_unchanged_write_as_artifact():
+    gateway = StubGateway([ToolResult(True, "No changes required", {"changed": False})])
+    provider = StubProvider(json.dumps({
+        "message": "No changes needed",
+        "actions": [{"name": "write_file", "arguments": {"path": "src/main.py", "content": "same"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.DEVELOPER, provider, gateway).run(make_task(), []))
+    assert result.success
+    assert result.artifacts == []
