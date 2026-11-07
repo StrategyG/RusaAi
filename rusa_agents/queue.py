@@ -841,6 +841,10 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"{tenant_id}:{task_id}",),
+            )
             row = conn.execute("""
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, manual_retry_count=manual_retry_count+1,
@@ -849,6 +853,12 @@ class PostgresTaskQueue:
                 WHERE task_id=%s AND tenant_id=%s
                   AND status IN ('awaiting_approval', 'failed')
                   AND manual_retry_count < max_manual_retries
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
