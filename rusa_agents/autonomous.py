@@ -65,8 +65,8 @@ class AutonomousCodeWorker:
             raise ValueError("max_actions_per_step must be between 1 and 16")
         if type(max_output_chars) is not int or not 1000 <= max_output_chars <= 50000:
             raise ValueError("max_output_chars must be between 1000 and 50000")
-        if type(max_tool_retries) is not int or not 0 <= max_tool_retries <= 3:
-            raise ValueError("max_tool_retries must be between 0 and 3")
+        if type(max_tool_retries) is not int or not 0 <= max_tool_retries <= 2:
+            raise ValueError("max_tool_retries must be between 0 and 2")
         for name, value in (
             ("retry_base_delay_seconds", retry_base_delay_seconds),
             ("retry_max_delay_seconds", retry_max_delay_seconds),
