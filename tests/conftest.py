@@ -12,6 +12,12 @@ if str(SERVE_PATH) not in sys.path:
     sys.path.insert(0, str(SERVE_PATH))
 
 
+@pytest.fixture(autouse=True)
+def explicit_development_environment(monkeypatch):
+    """Tests opt into development mode instead of relying on runtime defaults."""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+
+
 @pytest.fixture(scope="session", autouse=True)
 def apply_postgres_migrations_for_integration_suite():
     """Apply the complete ordered schema before any PostgreSQL integration test."""
