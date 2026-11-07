@@ -373,3 +373,15 @@ def test_publisher_refuses_to_publish_an_empty_task_branch(tmp_path):
             "empty task",
             "main",
         )
+
+
+def test_publisher_rejects_unsafe_publication_target_before_git_access(tmp_path):
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="safe task feature branches"):
+        publisher.commit_and_push(
+            str(tmp_path / "missing-worktree"),
+            "StrategyG/RusaAi",
+            "../main",
+            "unsafe",
+            "main",
+        )
