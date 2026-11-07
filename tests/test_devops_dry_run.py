@@ -148,16 +148,13 @@ def test_monitor_feedback_creates_a_causally_linked_new_plan_request():
 
 
 def test_result_with_wrong_source_commit_blocks_the_workflow():
-    class WrongCommitBuildAgent(SyntheticDevOpsAgent):
-        def run(self, task):
-            result = super().run(task)
-            if task["stage"] == "build":
-                result["audit"]["source_commit"] = "c" * 40
-            return result
-
     orchestrator = DevOpsDryRunOrchestrator(
         approval_refs=_approval_refs(),
-        agents={AGENT_BY_STAGE["build"]: WrongCommitBuildAgent()},
+        agents={
+            AGENT_BY_STAGE["build"]: SyntheticDevOpsAgent(
+                source_commit_by_stage={"build": "c" * 40}
+            )
+        },
     )
     report = _run(orchestrator)
 
@@ -167,3 +164,14 @@ def test_result_with_wrong_source_commit_blocks_the_workflow():
         task["stage"] == "test" and task["agent_id"] == AGENT_BY_STAGE["test"]
         for task in report.tasks
     )
+
+def test_dry_run_rejects_non_synthetic_agent_implementations():
+    class ExternalAgent:
+        def run(self, task):
+            raise AssertionError("external agents must never be invoked in dry-run")
+
+    with pytest.raises(TypeError, match="SyntheticDevOpsAgent fixtures only"):
+        DevOpsDryRunOrchestrator(
+            agents={AGENT_BY_STAGE["plan"]: ExternalAgent()}
+        )
+
