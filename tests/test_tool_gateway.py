@@ -182,4 +182,8 @@ def test_developer_can_add_new_qa_test_file(tmp_path):
         "tests/test_new_feature.py", "def test_new_feature():\n    assert True\n", WorkerRole.DEVELOPER
     )
     assert result.ok
+    updated = gateway.write_file(
+        "tests/test_new_feature.py", "def test_new_feature():\\n    assert 2 == 2\\n", WorkerRole.DEVELOPER
+    )
+    assert updated.ok
     assert (tmp_path / "tests" / "test_new_feature.py").is_file()
