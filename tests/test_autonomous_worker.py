@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import pytest
+
 from rusa_agents.autonomous import AutonomousCodeWorker
 from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.tool_gateway import ToolResult
@@ -178,3 +180,10 @@ def test_autonomous_worker_does_not_report_unchanged_write_as_artifact():
     result = asyncio.run(AutonomousCodeWorker(WorkerRole.DEVELOPER, provider, gateway).run(make_task(), []))
     assert result.success
     assert result.artifacts == []
+
+
+def test_autonomous_worker_caps_tool_retries_at_two():
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        AutonomousCodeWorker(
+            WorkerRole.ANALYST, StubProvider("{}"), StubGateway(), max_tool_retries=3
+        )
