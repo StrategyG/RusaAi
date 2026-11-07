@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import aio_pika
@@ -46,7 +47,7 @@ def _task_request(
         "payload": {
             "capability": capability,
             "input_ref": "artifact://test/input",
-            "deadline_at": "2026-11-08T00:10:00Z",
+            "deadline_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
             "idempotency_key": "test-run/task/1",
             "priority": priority,
         },
@@ -444,3 +445,62 @@ async def test_mtls_connection_rejects_plaintext_amqp_url():
             certificate_file="/missing/client.pem",
             private_key_file="/missing/client.key",
         )
+
+@pytest.mark.asyncio
+async def test_consumer_rejects_expired_task_before_handler():
+    signer, verifier = _signing_pair()
+    event = _task_request()
+    event["payload"]["deadline_at"] = (
+        datetime.now(timezone.utc) - timedelta(seconds=1)
+    ).isoformat()
+    message = _FakeIncomingMessage(event, signer)
+    called = False
+
+    def handler(_event):
+        nonlocal called
+        called = True
+
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=handler,
+    )
+    assert await consumer.handle_message(message) == "rejected"
+    assert message.actions == [("reject", False)]
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_consumer_rejects_oversized_command_body():
+    signer, verifier = _signing_pair()
+    message = _FakeIncomingMessage(_task_request(), signer)
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: pytest.fail("oversized message reached handler"),
+        max_message_bytes=64,
+    )
+    assert await consumer.handle_message(message) == "rejected"
+    assert message.actions == [("reject", False)]
+
+
+@pytest.mark.asyncio
+async def test_consumer_requires_explicit_control_queue_permission():
+    signer, verifier = _signing_pair()
+    event = _cancel_request()
+    message = _FakeIncomingMessage(event, signer)
+    message.routing_key = "control.p0"
+    message.headers["x-rusa-routing-key"] = "control.p0"
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+    )
+    assert await consumer.handle_message(message) == "acked"
+
