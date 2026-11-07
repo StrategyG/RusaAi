@@ -191,7 +191,11 @@ class GitWorkspaceManager:
 class GitHubPublisher:
     """Commits only safe workspace changes, pushes one feature branch, and opens a draft PR."""
 
-    REQUIRED_CI_CHECKS = frozenset({"Test, lint, and security", "Build, test, and scan production images"})
+    REQUIRED_CI_CHECKS = frozenset({
+        "Test, lint, and security",
+        "Build, test, and scan production images",
+        "RAG and MCP integration tests",
+    })
     GITHUB_ACTIONS_APP_ID = 15368
 
     def __init__(self, github_token: str | None = None):
