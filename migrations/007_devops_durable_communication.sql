@@ -73,7 +73,10 @@ CREATE TABLE IF NOT EXISTS public.devops_event_outbox (
     last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     UNIQUE (tenant_id, message_id),
-    CHECK ((status = 'publishing') = (lease_token IS NOT NULL AND lease_until IS NOT NULL))
+    CHECK (
+        (status = 'publishing' AND lease_token IS NOT NULL AND lease_until IS NOT NULL)
+        OR (status <> 'publishing' AND lease_token IS NULL AND lease_until IS NULL)
+    )
 );
 CREATE INDEX IF NOT EXISTS idx_devops_outbox_pending
     ON public.devops_event_outbox(destination, available_at, outbox_id)
@@ -146,8 +149,10 @@ CREATE POLICY devops_outbox_tenant ON public.devops_event_outbox
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
 DROP POLICY IF EXISTS devops_outbox_relay ON public.devops_event_outbox;
-CREATE POLICY devops_outbox_relay ON public.devops_event_outbox
-    FOR SELECT, UPDATE TO rusa_relay_runtime USING (true) WITH CHECK (true);
+CREATE POLICY devops_outbox_relay_select ON public.devops_event_outbox
+    FOR SELECT TO rusa_relay_runtime USING (true);
+CREATE POLICY devops_outbox_relay_update ON public.devops_event_outbox
+    FOR UPDATE TO rusa_relay_runtime USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS devops_inbox_worker_tenant ON public.devops_event_inbox;
 CREATE POLICY devops_inbox_worker_tenant ON public.devops_event_inbox
@@ -155,9 +160,11 @@ CREATE POLICY devops_inbox_worker_tenant ON public.devops_event_inbox
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
 DROP POLICY IF EXISTS devops_event_log_worker_tenant ON public.devops_event_log;
-CREATE POLICY devops_event_log_worker_tenant ON public.devops_event_log
-    FOR SELECT, INSERT TO rusa_worker_runtime
-    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
+CREATE POLICY devops_event_log_worker_select ON public.devops_event_log
+    FOR SELECT TO rusa_worker_runtime
+    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+CREATE POLICY devops_event_log_worker_insert ON public.devops_event_log
+    FOR INSERT TO rusa_worker_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
 -- Runtime roles may append but never mutate or delete canonical event history.
