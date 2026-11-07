@@ -278,7 +278,7 @@ def evaluate_certification(
     tenant = checks["tenant_isolation"]
     if tenant["negative_cases"] < 1:
         holds.append("Tenant-isolation negative test coverage is missing.")
-    if tenant["cross_tenant_reads"] != 0 or tenant["cross_tenant_writes"] != 0:
+    if tenant["unauthorized_cross_tenant_reads"] != 0 or tenant["unauthorized_cross_tenant_writes"] != 0:
         failures.append("Unauthorized cross-tenant reads or writes were observed.")
     if tenant["unauthorized_accesses"] != 0:
         failures.append("At least one unauthorized tenant access was observed.")
