@@ -1,23 +1,23 @@
 # RUSA-AI LLM Project Blueprint
 
-This directory contains a concrete implementation skeleton for the high-level architecture discussed earlier. It is intentionally a blueprint scaffold, not a claim that a trained or deployed model already exists.
+This directory is a planning scaffold. It does not contain a trained RUSA-AI model, implemented tokenizer or training pipeline, or validated model architecture.
 
-Status: PLANNED -> IMPLEMENTED (skeleton only)
+Status: PLANNED (scaffold only; serving adapters are implemented separately)
 
 ## Structure
 
-- `data/`: data acquisition, cleaning, deduplication, and quality gates
-- `tokenizer/`: tokenizer training and validation
-- `model/`: model architecture components
-- `train/`: pretraining, SFT, RL, checkpointing
-- `eval/`: benchmarks, safety tests, and red teaming
-- `serve/`: serving APIs, batching, quantization, runtime adaptation
-- `tools/`: tool-use and agent integration
-- `configs/`: model and runtime configuration
+- `data/`: planned only; README scaffold, no ingestion pipeline
+- `tokenizer/`: planned only; no tokenizer trainer or vocabulary artifact
+- `model/`: metadata-only blueprint; no neural-network implementation or weights
+- `train/`: planned only; no pretraining, SFT, RL, or checkpoint pipeline
+- `eval/`: planned only; no model benchmark or safety-evaluation harness
+- `serve/`: implemented FastAPI gateway and optional Transformers/vLLM adapters
+- `tools/`: planned only; agent tool execution lives in `rusa_agents/`
+- `configs/`: example configuration files, not evidence of trained model settings
 
 ## Model summary
 
-The active blueprint is a decoder-only transformer with MoE, GQA, RoPE, RMSNorm, and SwiGLU. This is a design contract for a future implementation, not a proof of a trained model.
+The blueprint currently records no approved layer count, hidden size, context window, modality, or MoE configuration. These values remain unset until a model architecture is implemented and supported by evidence. The optional inference runtime can load an externally supplied compatible artifact; it does not create or train RUSA-AI weights.
 
 ## Validation rule
 
