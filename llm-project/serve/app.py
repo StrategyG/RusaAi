@@ -639,9 +639,19 @@ def list_models():
     config = getattr(app.state, "config", None) or RuntimeConfig.from_env()
     if inference_provider is None:
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
+    backend_kind = (
+        "local_model_runtime"
+        if isinstance(inference_provider, LocalModelInferenceProvider)
+        else "openai_compatible_provider"
+    )
     return {
         "object": "list",
-        "data": [{"id": config.model_name, "object": "model", "owned_by": "rusa-ai"}],
+        "data": [{
+            "id": config.model_name,
+            "object": "model",
+            "owned_by": "rusa-ai-gateway",
+            "backend": backend_kind,
+        }],
     }
 
 
