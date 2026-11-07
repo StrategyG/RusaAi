@@ -11,10 +11,12 @@ old_api="ghcr.io/strategyg/rusa-ai-api@sha256:$(printf 'a%.0s' {1..64})"
 old_worker="ghcr.io/strategyg/rusa-ai-worker@sha256:$(printf 'a%.0s' {1..64})"
 old_sandbox="ghcr.io/strategyg/rusa-ai-sandbox@sha256:$(printf 'a%.0s' {1..64})"
 old_mcp="ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:$(printf 'a%.0s' {1..64})"
+old_qa_sandbox="$old_sandbox"
 new_api="ghcr.io/strategyg/rusa-ai-api@sha256:$(printf 'b%.0s' {1..64})"
 new_worker="ghcr.io/strategyg/rusa-ai-worker@sha256:$(printf 'b%.0s' {1..64})"
 new_sandbox="ghcr.io/strategyg/rusa-ai-sandbox@sha256:$(printf 'b%.0s' {1..64})"
 new_mcp="ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:$(printf 'b%.0s' {1..64})"
+new_qa_sandbox="$new_sandbox"
 
 make_case() {
   local dir="$1"
@@ -25,7 +27,9 @@ RUSA_API_IMAGE=$old_api
 RUSA_WORKER_IMAGE=$old_worker
 RUSA_SANDBOX_IMAGE=$old_sandbox
 RUSA_MCP_IMAGE=$old_mcp
+RUSA_QA_SANDBOX_IMAGE=$old_qa_sandbox
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
+RUSA_QA_DOCKER_SOCKET=/run/user/1002/docker.sock
 RUSA_AICODE_ENABLED=false
 RUSA_RAG_ENABLED=false
 RUSA_API_DATABASE_URL=postgresql://api:secret@db.example/rusa?sslmode=verify-full
@@ -81,9 +85,10 @@ grep -Fx "RUSA_API_IMAGE=$new_api" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_WORKER_IMAGE=$new_worker" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_SANDBOX_IMAGE=$new_sandbox" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_MCP_IMAGE=$new_mcp" "$success_dir/.env" >/dev/null
+grep -Fx "RUSA_QA_SANDBOX_IMAGE=$new_qa_sandbox" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_API_IMAGE=$old_api" "$success_dir/.env.previous" >/dev/null
 grep -Fx "RUSA_MCP_IMAGE=$old_mcp" "$success_dir/.env.previous" >/dev/null
-echo "PASS: immutable deployment updates all four images and retains rollback snapshot"
+echo "PASS: immutable deployment updates service images and both sandbox daemons, retaining rollback snapshot"
 
 (
   cd "$success_dir"
@@ -97,7 +102,8 @@ grep -Fx "RUSA_API_IMAGE=$old_api" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_WORKER_IMAGE=$old_worker" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_SANDBOX_IMAGE=$old_sandbox" "$success_dir/.env" >/dev/null
 grep -Fx "RUSA_MCP_IMAGE=$old_mcp" "$success_dir/.env" >/dev/null
-echo "PASS: manual rollback restores the previous four-image set"
+grep -Fx "RUSA_QA_SANDBOX_IMAGE=$old_qa_sandbox" "$success_dir/.env" >/dev/null
+echo "PASS: manual rollback restores the previous image set and QA sandbox digest"
 
 failure_dir="$tmp_root/failure"
 make_case "$failure_dir"
@@ -109,6 +115,7 @@ grep -Fx "RUSA_API_IMAGE=$old_api" "$failure_dir/.env" >/dev/null
 grep -Fx "RUSA_WORKER_IMAGE=$old_worker" "$failure_dir/.env" >/dev/null
 grep -Fx "RUSA_SANDBOX_IMAGE=$old_sandbox" "$failure_dir/.env" >/dev/null
 grep -Fx "RUSA_MCP_IMAGE=$old_mcp" "$failure_dir/.env" >/dev/null
+grep -Fx "RUSA_QA_SANDBOX_IMAGE=$old_qa_sandbox" "$failure_dir/.env" >/dev/null
 echo "PASS: unhealthy candidate automatically restores the previous healthy image set"
 
 rag_dir="$tmp_root/rag-enabled"
