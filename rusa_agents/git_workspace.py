@@ -441,6 +441,7 @@ class GitHubPublisher:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             async def find_existing() -> str | None:
                 closed_match: str | None = None
+                legacy_branch_match: str | None = None
                 for page in range(1, 11):
                     response = await client.get(
                         f"https://api.github.com/repos/{repository}/pulls",
@@ -472,10 +473,14 @@ class GitHubPublisher:
                             )
                         )
                         matches_branch = head_ref == branch and base_ref == base
-                        if matches_task or (not task_id and matches_branch):
+                        if matches_branch:
                             if item.get("state") == "open":
                                 return item.get("html_url")
                             closed_match = item.get("html_url") or closed_match
+                        elif matches_task:
+                            # A legacy per-lease PR cannot be assumed to contain the
+                            # stable publication branch's current commit.
+                            legacy_branch_match = item.get("html_url") or legacy_branch_match
                     if len(items) < 100:
                         break
                 else:
@@ -485,6 +490,11 @@ class GitHubPublisher:
                 if closed_match:
                     raise ValueError(
                         "A previous pull request for this task is closed; manual reconciliation is required"
+                    )
+                if legacy_branch_match:
+                    raise ValueError(
+                        "A previous task pull request uses a lease-specific branch; "
+                        "manual reconciliation is required before publishing to the stable task branch"
                     )
                 return None
 
