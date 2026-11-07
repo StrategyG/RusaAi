@@ -30,6 +30,11 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert "SELECT tablename, policyname, roles, cmd, qual, with_check" in queue
     assert "required_policy_specs" in queue
     assert "current_setting('rusa.tenant_id'" in queue
+    for column in (
+        "tenant_id", "task_id", "cancel_epoch", "cancel_requested_at",
+        "requested_by", "updated_at",
+    ):
+        assert f'"{column}"' in queue
     assert all(
         f"CREATE POLICY {name}" in migration
         for name in {
