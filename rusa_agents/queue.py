@@ -99,7 +99,14 @@ class PostgresTaskQueue:
             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
             (f"{tenant_id}:{canonical_task_id}",),
         )
-        return canonical_task_id
+        control = conn.execute(
+            """
+            SELECT 1 FROM public.aicode_job_controls
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, canonical_task_id),
+        ).fetchone()
+        return canonical_task_id if control is not None else None
 
     @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
