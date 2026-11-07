@@ -477,8 +477,18 @@ class PostgresTaskQueue:
                     FOR UPDATE OF job SKIP LOCKED
                 )
                 UPDATE public.aicode_jobs AS job
-                SET status='cancelled', lease_owner=NULL, lease_until=NULL,
-                    lease_token=NULL, updated_at=NOW()
+                SET status='cancelled',
+                    result=CASE
+                        WHEN job.status='running' THEN jsonb_build_object(
+                            'side_effects', jsonb_build_object(
+                                'reconciliation_required', true
+                            ),
+                            'reason', 'worker_lease_expired_during_cancellation'
+                        )
+                        ELSE job.result
+                    END,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                    updated_at=NOW()
                 FROM cancelled
                 WHERE job.id=cancelled.id
             """)
