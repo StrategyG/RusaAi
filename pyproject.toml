@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 rusa-knowledge = "rusa_knowledge.cli:main"
+rusa-devops-grpc = "rusa_agents.devops.grpc_server:main"
 
 [project.optional-dependencies]
 dev = [
