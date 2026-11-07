@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
-    && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
+    && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt -r requirements-messaging.txt
 COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
 ARG RUSA_INSTALL_LOCAL_MODEL=0
@@ -55,6 +55,7 @@ for package in ("pip", "setuptools", "wheel", "jaraco.context"):
 for module in (
     "fastapi", "uvicorn", "pydantic", "jsonschema",
     "httpx", "psycopg", "prometheus_client", "rusa_agents",
+    "rusa_agents.devops.rabbitmq", "rusa_agents.devops.kafka",
 ):
     import_module(module)
 print("API runtime imports verified; build tooling is absent.")
