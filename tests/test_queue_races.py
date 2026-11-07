@@ -433,9 +433,13 @@ def test_cancel_approval_paused_task_flags_existing_draft_pr_for_reconciliation(
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "cancelled"
         assert current["result"]["pull_request_url"] == pr_url
+        assert current["result"]["side_effects"]["git_publication_cleanup"] == (
+            "reconciliation_required"
+        )
         assert current["result"]["side_effects"]["pull_request_cleanup"] == (
             "reconciliation_required"
         )
+        assert current["result"]["side_effects"]["reconciliation_required"] is True
         assert current["result"]["cancellation_reconciliation"]["required"] is True
     finally:
         remove_task(task_id, tenant)
@@ -471,6 +475,12 @@ def test_expired_worker_lease_during_cancel_is_reconciled():
             "reconciliation_required"
         )
         assert current["result"]["side_effects"]["pull_request_creation"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["git_publication_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["pull_request_cleanup"] == (
             "reconciliation_required"
         )
         assert current["result"]["cancellation_reconciliation"]["required"] is True
