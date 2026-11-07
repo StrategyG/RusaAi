@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
     CodingTask,
@@ -13,7 +14,6 @@ from rusa_agents.evidence import EvidenceAttestor
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
-
 
 TEST_EVIDENCE_KEY = "qa-test-attestation-key-" + "x" * 32
 TEST_TASK_ID = "00000000-0000-4000-8000-000000000001"
