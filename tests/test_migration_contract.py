@@ -8,13 +8,13 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
     migration = Path("migrations/004_aicode_tenant_rls.sql").read_text(encoding="utf-8")
-    controls_migration = Path("migrations/007_aicode_job_controls.sql").read_text(encoding="utf-8")
+    controls_migration = Path("migrations/008_aicode_job_controls.sql").read_text(encoding="utf-8")
     audit_migration = Path("migrations/005_aicode_task_policy_audit.sql").read_text(encoding="utf-8")
     required = {
         "aicode_jobs_api_tenant",
@@ -65,7 +65,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
-        "007_aicode_job_controls.sql",
+        "008_aicode_job_controls.sql",
     ]
 
 
