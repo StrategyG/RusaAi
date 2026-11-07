@@ -161,7 +161,7 @@ class PostgresTaskQueue:
                 if not retry_columns or not retry_columns[0]:
                     raise RuntimeError(
                         "Production bounded manual retry policy is missing; "
-                        "apply migrations/007_aicode_job_controls.sql"
+                        "apply migrations/008_aicode_job_controls.sql"
                     )
                 result_column = conn.execute("""
                     SELECT EXISTS (
@@ -181,7 +181,7 @@ class PostgresTaskQueue:
                 if not control_table or control_table[0] is None:
                     raise RuntimeError(
                         "Production cancellation control is missing; "
-                        "apply migrations/007_aicode_job_controls.sql"
+                        "apply migrations/008_aicode_job_controls.sql"
                     )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
@@ -199,7 +199,7 @@ class PostgresTaskQueue:
                     "aicode_memory", "aicode_audit_events",
                 }:
                     raise RuntimeError(
-                        "Production RLS migration is incomplete; apply migrations/007_aicode_job_controls.sql"
+                        "Production RLS migration is incomplete; apply migrations/008_aicode_job_controls.sql"
                     )
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
@@ -222,7 +222,7 @@ class PostgresTaskQueue:
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError(
                         "Production tenant/cancellation RLS policies are missing; "
-                        "apply migrations/007_aicode_job_controls.sql"
+                        "apply migrations/008_aicode_job_controls.sql"
                     )
 
                 roles = conn.execute("""
