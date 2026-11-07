@@ -12,6 +12,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
@@ -193,16 +194,23 @@ class DevOpsDryRunOrchestrator:
         self.policy_version = policy_version
         self.environment = environment
         self.approval_refs = dict(approval_refs or {})
-        self.agents: dict[str, SyntheticDevOpsAgent] = {
+        agents_by_id: dict[str, SyntheticDevOpsAgent] = {
             **{agent_id: SyntheticDevOpsAgent() for agent_id in AGENT_BY_STAGE.values()},
             SECURITY_GUARD_ID: SyntheticDevOpsAgent(),
         }
         for agent_id, agent in (agents or {}).items():
-            if agent_id not in self.agents:
+            if agent_id not in agents_by_id:
                 raise ValueError(f"unknown dry-run agent identity: {agent_id}")
             if type(agent) is not SyntheticDevOpsAgent:
                 raise TypeError("dry-run accepts SyntheticDevOpsAgent fixtures only")
-            self.agents[agent_id] = agent
+            agents_by_id[agent_id] = agent
+        self.agents: Mapping[str, SyntheticDevOpsAgent] = MappingProxyType(agents_by_id)
+
+    def _run_agent(self, agent_id: str, task: dict[str, Any]) -> dict[str, Any]:
+        agent = self.agents[agent_id]
+        if type(agent) is not SyntheticDevOpsAgent:
+            raise TypeError("dry-run accepts SyntheticDevOpsAgent fixtures only")
+        return agent.run(task)
 
     def _task(
         self,
@@ -450,7 +458,7 @@ class DevOpsDryRunOrchestrator:
             report.tasks.append(task)
             try:
                 validate_agent_task(task)
-                result = self.agents[task["agent_id"]].run(task)
+                result = self._run_agent(task["agent_id"], task)
                 validate_agent_result_for_task(task, result)
             except Exception as exc:
                 report.status = "blocked"
@@ -628,7 +636,7 @@ class DevOpsDryRunOrchestrator:
             report.tasks.append(security_task)
             try:
                 validate_agent_task(security_task)
-                security_result = self.agents[SECURITY_GUARD_ID].run(security_task)
+                security_result = self._run_agent(SECURITY_GUARD_ID, security_task)
                 validate_agent_result_for_task(security_task, security_result)
             except Exception as exc:
                 report.status = "blocked"
