@@ -412,6 +412,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code="approval_required",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
@@ -457,6 +458,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code="contract_or_agent_failure",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
@@ -486,6 +488,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code="approval_required",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
@@ -516,6 +519,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code=f"{stage}_{result['status']}",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
@@ -572,6 +576,9 @@ class DevOpsDryRunOrchestrator:
                 agent_id=SECURITY_GUARD_ID,
                 objective=f"Read-only security and policy review of the {stage} evidence.",
                 task_input=security_input,
+                approval_required=stage in {"release", "deploy"},
+                approval_scope=[stage] if stage in {"release", "deploy"} else [],
+                approval_ref=self.approval_refs.get(stage),
             )
             report.tasks.append(security_task)
             try:
@@ -587,6 +594,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code="security_review_invalid",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
@@ -618,6 +626,7 @@ class DevOpsDryRunOrchestrator:
                     traceparent=traceparent,
                     stage=stage,
                     reason_code="security_guard_blocked",
+                    state_version=len(report.events) + 1,
                 ))
                 return report
 
