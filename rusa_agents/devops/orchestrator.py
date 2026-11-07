@@ -15,7 +15,6 @@ from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from .contracts import (
-    ContractValidationError,
     validate_agent_result_for_task,
     validate_agent_task,
     validate_workflow_event,
