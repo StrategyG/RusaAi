@@ -177,8 +177,8 @@ class PostgresWorkflowControlStore:
             """
             SELECT t.task_id, t.run_id, t.tenant_id, t.agent_id, t.stage,
                    t.attempt, t.status, t.state_version, t.lease_epoch,
-                   t.deadline_at, t.task, t.result, t.lease_owner, t.lease_until,
-                   t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
+                   t.deadline_at, t.task, t.result, t.lease_owner, t.lease_claim_id,
+                   t.lease_until, t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
             FROM public.devops_tasks AS t
             JOIN public.devops_workflows AS w
               ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
@@ -202,11 +202,12 @@ class PostgresWorkflowControlStore:
             "task": row[10],
             "result": row[11],
             "lease_owner": row[12],
-            "lease_until": row[13],
-            "heartbeat_at": row[14],
-            "side_effect": row[15],
-            "run_status": row[16],
-            "cancel_epoch": row[17],
+            "lease_claim_id": row[13],
+            "lease_until": row[14],
+            "heartbeat_at": row[15],
+            "side_effect": row[16],
+            "run_status": row[17],
+            "cancel_epoch": row[18],
         }
 
     @staticmethod
@@ -352,9 +353,12 @@ class PostgresWorkflowControlStore:
         task_id: str,
         attempt: int,
         worker_id: str,
+        claim_id: str,
         traceparent: str,
     ) -> dict[str, Any]:
         _validate_traceparent(traceparent)
+        if not isinstance(claim_id, str) or not 1 <= len(claim_id) <= 128:
+            raise ValueError("claim_id must contain 1..128 characters")
         with self._connect(self.worker_dsn) as conn:
             self._prepare(conn, tenant_id)
             workflow = self._workflow_row(conn, tenant_id, run_id, lock=True)
@@ -374,6 +378,7 @@ class PostgresWorkflowControlStore:
             if (
                 task["status"] in {"accepted", "running"}
                 and task["lease_owner"] == worker_id
+                and task["lease_claim_id"] == claim_id
                 and lease_until is not None
                 and lease_until > now
             ):
@@ -392,6 +397,7 @@ class PostgresWorkflowControlStore:
                 SET status='accepted',
                     lease_epoch=lease_epoch + 1,
                     lease_owner=%s,
+                    lease_claim_id=%s,
                     lease_until=clock_timestamp() + (%s * INTERVAL '1 second'),
                     heartbeat_at=clock_timestamp(),
                     state_version=state_version + 1,
@@ -401,6 +407,7 @@ class PostgresWorkflowControlStore:
                 """,
                 (
                     worker_id,
+                    claim_id,
                     self.lease_seconds,
                     tenant_id,
                     run_id,
@@ -502,9 +509,12 @@ class PostgresWorkflowControlStore:
         attempt: int,
         lease_epoch: int,
         worker_id: str,
+        claim_id: str,
         traceparent: str,
     ) -> dict[str, Any]:
         _validate_traceparent(traceparent)
+        if not isinstance(claim_id, str) or not 1 <= len(claim_id) <= 128:
+            raise ValueError("claim_id must contain 1..128 characters")
         with self._connect(self.worker_dsn) as conn:
             self._prepare(conn, tenant_id)
             workflow = self._workflow_row(conn, tenant_id, run_id, lock=True)
@@ -517,6 +527,7 @@ class PostgresWorkflowControlStore:
                 and task["attempt"] == attempt
                 and task["lease_epoch"] == lease_epoch
                 and task["lease_owner"] == worker_id
+                and task["lease_claim_id"] == claim_id
                 and task["status"] in {"accepted", "running"}
                 and workflow["status"] in {"queued", "running"}
                 and lease_until is not None
@@ -544,7 +555,7 @@ class PostgresWorkflowControlStore:
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND lease_owner=%s
-                  AND lease_until > clock_timestamp()
+                  AND lease_claim_id=%s AND lease_until > clock_timestamp()
                 RETURNING lease_until
                 """,
                 (
@@ -555,6 +566,7 @@ class PostgresWorkflowControlStore:
                     attempt,
                     lease_epoch,
                     worker_id,
+                    claim_id,
                 ),
             ).fetchone()
             if updated is None:
@@ -642,8 +654,11 @@ class PostgresWorkflowControlStore:
         message_id: str,
         traceparent: str,
         worker_id: str,
+        claim_id: str,
     ) -> dict[str, Any]:
         _validate_traceparent(traceparent)
+        if not isinstance(claim_id, str) or not 1 <= len(claim_id) <= 128:
+            raise ValueError("claim_id must contain 1..128 characters")
         if not message_id or len(message_id) > 128:
             raise ValueError("message_id must contain 1..128 characters")
         if isinstance(percent, bool) or not 0 <= percent <= 100:
@@ -658,6 +673,7 @@ class PostgresWorkflowControlStore:
             "percent": percent,
             "stage": stage,
             "traceparent": traceparent,
+            "claim_id": claim_id,
         }
         request_hash = _sha256(request_body)
         with self._connect(self.worker_dsn) as conn:
@@ -683,6 +699,7 @@ class PostgresWorkflowControlStore:
                 task["attempt"] == attempt
                 and task["lease_epoch"] == lease_epoch
                 and task["lease_owner"] == worker_id
+                and task["lease_claim_id"] == claim_id
                 and task["state_version"] == expected_state_version
                 and task["status"] in {"accepted", "running"}
                 and workflow["status"] in {"queued", "running"}
@@ -714,6 +731,7 @@ class PostgresWorkflowControlStore:
                 SET status='running', state_version=%s, updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND state_version=%s
+                  AND lease_owner=%s AND lease_claim_id=%s
                 """,
                 (
                     new_version,
@@ -723,6 +741,8 @@ class PostgresWorkflowControlStore:
                     attempt,
                     lease_epoch,
                     expected_state_version,
+                    worker_id,
+                    claim_id,
                 ),
             )
             correlation_id, _ = self._event_context(conn, tenant_id, run_id, task_id)
@@ -776,8 +796,11 @@ class PostgresWorkflowControlStore:
         side_effect: str = "",
         diagnostic_ref: str = "",
         worker_id: str,
+        claim_id: str,
     ) -> dict[str, Any]:
         _validate_traceparent(traceparent)
+        if not isinstance(claim_id, str) or not 1 <= len(claim_id) <= 128:
+            raise ValueError("claim_id must contain 1..128 characters")
         if not message_id or len(message_id) > 128:
             raise ValueError("message_id must contain 1..128 characters")
         request_body = {
@@ -792,6 +815,7 @@ class PostgresWorkflowControlStore:
             "failure_category": failure_category,
             "side_effect": side_effect,
             "diagnostic_ref": diagnostic_ref,
+            "claim_id": claim_id,
         }
         request_hash = _sha256(request_body)
         with self._connect(self.worker_dsn) as conn:
@@ -821,6 +845,7 @@ class PostgresWorkflowControlStore:
                 task["attempt"] != attempt
                 or task["lease_epoch"] != lease_epoch
                 or task["lease_owner"] != worker_id
+                or task["lease_claim_id"] != claim_id
                 or task["state_version"] != expected_state_version
                 or not task_status_allowed
                 or not run_status_allowed
@@ -881,10 +906,12 @@ class PostgresWorkflowControlStore:
                 """
                 UPDATE public.devops_tasks
                 SET status=%s, state_version=%s, result=%s::jsonb,
-                    side_effect=%s, lease_owner=NULL, lease_until=NULL,
+                    side_effect=%s, lease_owner=NULL, lease_claim_id=NULL,
+                    lease_until=NULL,
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND state_version=%s
+                  AND lease_owner=%s AND lease_claim_id=%s
                 """,
                 (
                     task_status,
@@ -897,6 +924,8 @@ class PostgresWorkflowControlStore:
                     attempt,
                     lease_epoch,
                     expected_state_version,
+                    worker_id,
+                    claim_id,
                 ),
             )
             correlation_id, _ = self._event_context(conn, tenant_id, run_id, task_id)
@@ -1274,7 +1303,7 @@ class PostgresWorkflowControlStore:
                         """
                         UPDATE public.devops_tasks
                         SET status='cancelled', state_version=%s, side_effect='NONE',
-                            lease_owner=NULL, lease_until=NULL,
+                            lease_owner=NULL, lease_claim_id=NULL, lease_until=NULL,
                             updated_at=clock_timestamp()
                         WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                         """,
@@ -1310,7 +1339,8 @@ class PostgresWorkflowControlStore:
                         """
                         UPDATE public.devops_tasks
                         SET status='cancel_requested', state_version=%s,
-                            side_effect='UNKNOWN', lease_owner=NULL, lease_until=NULL,
+                            side_effect='UNKNOWN', lease_owner=NULL, lease_claim_id=NULL,
+                            lease_until=NULL,
                             updated_at=clock_timestamp()
                         WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                         """,
