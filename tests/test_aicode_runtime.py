@@ -382,6 +382,11 @@ def test_task_branch_is_tenant_scoped_and_attempt_scoped():
 
     assert first_task.repository.work_branch != retry_task.repository.work_branch
     assert first_task.repository.work_branch != other_task.repository.work_branch
+    assert first_task.metadata["publish_branch"] == retry_task.metadata["publish_branch"]
+    assert first_task.metadata["publish_branch"] != other_task.metadata["publish_branch"]
+    assert first_task.repository.work_branch.startswith(
+        first_task.metadata["publish_branch"] + "-"
+    )
 
 
 def test_retry_delay_uses_bounded_full_jitter():
