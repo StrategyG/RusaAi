@@ -78,6 +78,30 @@ class PostgresTaskQueue:
         ).fetchone()
 
     @staticmethod
+    def _lock_task_control(conn, task_id: str, tenant_id: str) -> str | None:
+        """Acquire the same advisory lock used by worker terminal transitions.
+
+        Resolve the UUID from PostgreSQL first so alternate textual UUID spellings
+        cannot bypass serialization between API cancellation/retry and worker ACKs.
+        """
+        row = conn.execute(
+            """
+            SELECT task_id::text
+            FROM public.aicode_jobs
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, task_id),
+        ).fetchone()
+        if row is None:
+            return None
+        canonical_task_id = row[0]
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:{canonical_task_id}",),
+        )
+        return canonical_task_id
+
+    @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
@@ -885,26 +909,25 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (f"{tenant_id}:{task_id}",),
-            )
-            row = conn.execute("""
-                UPDATE aicode_jobs
-                SET status='queued', attempts=0, manual_retry_count=manual_retry_count+1,
-                    available_at=NOW(), result=NULL, lease_owner=NULL, lease_until=NULL,
-                    lease_token=NULL, last_error=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
-                  AND manual_retry_count < max_manual_retries
-                  AND NOT EXISTS (
-                      SELECT 1 FROM public.aicode_job_controls AS control
-                      WHERE control.tenant_id=aicode_jobs.tenant_id
-                        AND control.task_id=aicode_jobs.task_id
-                        AND control.cancel_requested_at IS NOT NULL
-                  )
-                RETURNING id
-            """, (task_id, tenant_id)).fetchone()
+            canonical_task_id = self._lock_task_control(conn, task_id, tenant_id)
+            row = None
+            if canonical_task_id is not None:
+                row = conn.execute("""
+                    UPDATE aicode_jobs
+                    SET status='queued', attempts=0, manual_retry_count=manual_retry_count+1,
+                        available_at=NOW(), result=NULL, lease_owner=NULL, lease_until=NULL,
+                        lease_token=NULL, last_error=NULL, updated_at=NOW()
+                    WHERE task_id=%s AND tenant_id=%s
+                      AND status IN ('awaiting_approval', 'failed')
+                      AND manual_retry_count < max_manual_retries
+                      AND NOT EXISTS (
+                          SELECT 1 FROM public.aicode_job_controls AS control
+                          WHERE control.tenant_id=aicode_jobs.tenant_id
+                            AND control.task_id=aicode_jobs.task_id
+                            AND control.cancel_requested_at IS NOT NULL
+                      )
+                    RETURNING id
+                """, (canonical_task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.retry",
                 "allow" if row is not None else "deny",
@@ -924,10 +947,12 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (f"{tenant_id}:{task_id}",),
-            )
+            canonical_task_id = self._lock_task_control(conn, task_id, tenant_id)
+            if canonical_task_id is None:
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.cancel", "deny"
+                )
+                return False
             control = conn.execute(
                 """
                 SELECT control.cancel_requested_at, job.status
@@ -936,11 +961,11 @@ class PostgresTaskQueue:
                   ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
                 WHERE control.tenant_id=%s AND control.task_id=%s
                 """,
-                (tenant_id, task_id),
+                (tenant_id, canonical_task_id),
             ).fetchone()
             if control is None or control[1] in {"succeeded", "failed"}:
                 self._record_policy_event(
-                    conn, tenant_id, task_id, audit_actor, "task.cancel", "deny"
+                    conn, tenant_id, canonical_task_id, audit_actor, "task.cancel", "deny"
                 )
                 return False
 
@@ -954,7 +979,7 @@ class PostgresTaskQueue:
                         updated_at=NOW()
                     WHERE tenant_id=%s AND task_id=%s
                     """,
-                    (audit_actor, tenant_id, task_id),
+                    (audit_actor, tenant_id, canonical_task_id),
                 )
 
             if control[1] in {"queued", "awaiting_approval"}:
@@ -966,11 +991,11 @@ class PostgresTaskQueue:
                     WHERE tenant_id=%s AND task_id=%s
                       AND status IN ('queued', 'awaiting_approval')
                     """,
-                    (tenant_id, task_id),
+                    (tenant_id, canonical_task_id),
                 )
 
             self._record_policy_event(
-                conn, tenant_id, task_id, audit_actor, "task.cancel", "allow"
+                conn, tenant_id, canonical_task_id, audit_actor, "task.cancel", "allow"
             )
         return True
 
