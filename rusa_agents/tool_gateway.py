@@ -39,9 +39,9 @@ class DockerSandbox:
 
     PROFILES = {
         "pytest": ["python", "-m", "pytest", "-q"],
-        "compile": ["python", "-m", "compileall", "-q", "rusa_agents", "llm-project/serve", "tests"],
-        "ruff": ["ruff", "check", "rusa_agents", "tests", "llm-project/serve"],
-        "bandit": ["bandit", "-q", "-r", "rusa_agents"],
+        "compile": ["python", "-m", "compileall", "-q", "rusa_agents", "rusa_knowledge", "rusa_mcp", "llm-project/serve", "tests"],
+        "ruff": ["ruff", "check", "rusa_agents", "rusa_knowledge", "rusa_mcp", "tests", "llm-project/serve"],
+        "bandit": ["bandit", "-q", "-r", "rusa_agents", "rusa_knowledge", "rusa_mcp"],
     }
 
     def __init__(
