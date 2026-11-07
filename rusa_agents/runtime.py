@@ -95,7 +95,8 @@ class AICodeRuntime:
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
             task_id=job.task_id,
-            metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
+            metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token,
+                      "attempt": job.attempts},
         )
 
     async def _build_orchestrator(
@@ -110,6 +111,8 @@ class AICodeRuntime:
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+            task_id=task.task_id,
+            attempt=int(task.metadata.get("attempt", 1)),
         )
         workers = [
             AutonomousCodeWorker(role, self.provider, gateway)
