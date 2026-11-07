@@ -1,3 +1,5 @@
+import pytest
+
 from rusa_knowledge.service import KnowledgeService
 
 
@@ -172,3 +174,16 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+
+def test_from_env_requires_explicit_embedding_endpoint(monkeypatch):
+    monkeypatch.setenv(
+        "RUSA_KNOWLEDGE_DATABASE_URL",
+        "postgresql://rusa_knowledge_worker:secret@localhost/knowledge",
+    )
+    monkeypatch.delenv("RUSA_AGENT_DATABASE_URL", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_BASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_EMBEDDING_BASE_URL"):
+        KnowledgeService.from_env(check_ready=False)
