@@ -175,3 +175,19 @@ def test_dry_run_rejects_non_synthetic_agent_implementations():
             agents={AGENT_BY_STAGE["plan"]: ExternalAgent()}
         )
 
+def test_production_deploy_runs_only_with_explicit_approval_reference():
+    orchestrator = DevOpsDryRunOrchestrator(
+        environment="production",
+        approval_refs=_approval_refs(),
+    )
+    report = _run(orchestrator)
+
+    assert report.status == "completed"
+    deploy_tasks = [
+        task for task in report.tasks
+        if task["stage"] == "deploy"
+    ]
+    assert len(deploy_tasks) == 2
+    assert all(task["input"]["environment"] == "production" for task in deploy_tasks)
+    assert all(task["constraints"]["approval_ref"] == _approval_refs()["deploy"] for task in deploy_tasks)
+
