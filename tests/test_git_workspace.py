@@ -1,5 +1,7 @@
+import asyncio
 import subprocess
 
+import httpx
 import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
@@ -305,3 +307,102 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_draft_pr_recovery_finds_task_pr_from_previous_lease(monkeypatch):
+    task_id = "12345678-1234-4234-8234-123456789abc"
+    existing_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/123",
+        "body": f"Task ID: {task_id}",
+        "head": {"ref": "feature/aicode/old-lease"},
+        "base": {"ref": "main"},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [existing_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            self.posts = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, *, headers, params):
+            assert params["state"] == "all"
+            assert params["base"] == "main"
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            self.posts += 1
+            raise AssertionError("recovery must not create a duplicate PR")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            "feature/aicode/new-lease",
+            "main",
+            "Recovered task",
+            f"Task ID: {task_id}\nRUSA-AI-Task-ID: {task_id}",
+        )
+    )
+
+    assert url == existing_pr["html_url"]
+
+
+def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
+    task_id = "abcdefab-cdef-4abc-8def-abcdefabcdef"
+    existing_pr = {
+        "state": "closed",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/124",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {"ref": "feature/aicode/old-lease"},
+        "base": {"ref": "main"},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [existing_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("closed PR must not be duplicated")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="manual reconciliation"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/new-lease",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
