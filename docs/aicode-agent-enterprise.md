@@ -4,7 +4,7 @@
 
 AICode is the autonomous software-engineering subsystem of RUSA-AI. It accepts a scoped coding task, refreshes an authorized Git mirror, creates an isolated feature worktree, delegates work to specialized agents, executes validation in a disposable sandbox, publishes a draft pull request, and waits for required GitHub Actions checks.
 
-The architecture is hierarchical and autonomous within explicit policy boundaries. It is not an unrestricted shell agent.
+The architecture is hierarchical and autonomous within explicit policy boundaries. It is not an unrestricted shell agent. The six roles are scoped worker invocations inside one runtime and may share the configured inference provider and tool gateway; they are not six separately deployed models or microservices.
 
 ### Autonomy boundaries
 
