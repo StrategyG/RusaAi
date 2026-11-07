@@ -465,6 +465,19 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease, cancel_requested)
+
+            def publish_if_not_cancelled() -> str | None:
+                if self.queue.is_cancel_requested(job.task_id, job.tenant_id):
+                    raise TaskCancellationRequested(
+                        "Cancellation was requested before Git publication"
+                    )
+                return self.publisher.commit_and_push(
+                    workspace,
+                    task.repository.full_name,
+                    task.repository.work_branch,
+                    f"feat(aicode): {task.objective[:120]}",
+                )
+
             publication_started = True
             commit_sha = await self._await_with_lease(
                 asyncio.to_thread(
@@ -473,18 +486,7 @@ class AICodeRuntime:
                     job.tenant_id,
                     self.worker_id,
                     job.lease_token,
-                    lambda: (
-                        (_ for _ in ()).throw(
-                            TaskCancellationRequested("Cancellation was requested before Git publication")
-                        )
-                        if self.queue.is_cancel_requested(job.task_id, job.tenant_id)
-                        else self.publisher.commit_and_push(
-                            workspace,
-                            task.repository.full_name,
-                            task.repository.work_branch,
-                            f"feat(aicode): {task.objective[:120]}",
-                        )
-                    ),
+                    publish_if_not_cancelled,
                     lease_seconds=900,
                 ),
                 lost_lease,
