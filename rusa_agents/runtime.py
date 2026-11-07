@@ -8,7 +8,7 @@ import os
 import random
 import socket
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
