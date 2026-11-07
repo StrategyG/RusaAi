@@ -9,6 +9,9 @@ from rusa_agents.contracts import (
     WorkerRole,
 )
 from rusa_agents.evidence import EvidenceAttestor
+from rusa_agents.memory import SQLiteMemory
+from rusa_agents.orchestrator import AICodeOrchestrator
+from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
 TEST_EVIDENCE_KEY = "qa-test-attestation-key-" + "x" * 32
@@ -33,11 +36,6 @@ def _attestation(
         tenant_id=tenant_id,
         worker_role=role.value,
     )
-
-
-from rusa_agents.memory import SQLiteMemory
-from rusa_agents.orchestrator import AICodeOrchestrator
-from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
 class StubWorker:
