@@ -92,4 +92,39 @@ CREATE POLICY devops_cancellations_api_tenant
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+
+-- RPC message receipts make progress/result retries safe across lost responses.
+CREATE TABLE IF NOT EXISTS public.devops_task_rpc_receipts (
+    receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
+    task_id TEXT NOT NULL CHECK (length(task_id) BETWEEN 1 AND 128),
+    method TEXT NOT NULL CHECK (method IN ('ReportTaskProgress', 'ReportTaskResult')),
+    message_id TEXT NOT NULL CHECK (length(message_id) BETWEEN 1 AND 128),
+    request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[a-f0-9]{64}),
+    response JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    UNIQUE (tenant_id, task_id, method, message_id),
+    FOREIGN KEY (tenant_id, task_id)
+        REFERENCES public.devops_tasks(tenant_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devops_task_rpc_receipts_created
+    ON public.devops_task_rpc_receipts(tenant_id, created_at DESC);
+
+GRANT SELECT, INSERT ON public.devops_task_rpc_receipts TO rusa_worker_runtime;
+GRANT USAGE, SELECT ON SEQUENCE public.devops_task_rpc_receipts_receipt_id_seq
+    TO rusa_worker_runtime;
+
+ALTER TABLE public.devops_task_rpc_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.devops_task_rpc_receipts FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS devops_task_rpc_receipts_worker_tenant
+    ON public.devops_task_rpc_receipts;
+CREATE POLICY devops_task_rpc_receipts_worker_tenant
+    ON public.devops_task_rpc_receipts
+    FOR ALL TO rusa_worker_runtime
+    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
+    WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+
+
 COMMIT;
