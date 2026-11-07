@@ -230,11 +230,19 @@ class DockerSandbox:
                         except Exception:
                             execution_allowed = False
                         if not execution_allowed:
-                            process.terminate()
+                            try:
+                                if process.poll() is None:
+                                    process.terminate()
+                            except ProcessLookupError:
+                                pass
                             try:
                                 stdout, stderr = process.communicate(timeout=5)
                             except subprocess.TimeoutExpired:
-                                process.kill()
+                                try:
+                                    if process.poll() is None:
+                                        process.kill()
+                                except ProcessLookupError:
+                                    pass
                                 stdout, stderr = process.communicate()
                             remove_container()
                             return ToolResult(
@@ -250,7 +258,11 @@ class DockerSandbox:
 
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
-                            process.kill()
+                            try:
+                                if process.poll() is None:
+                                    process.kill()
+                            except ProcessLookupError:
+                                pass
                             stdout, stderr = process.communicate()
                             remove_container()
                             return ToolResult(
