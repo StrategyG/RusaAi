@@ -278,7 +278,12 @@ def test_cancel_does_not_wait_for_git_publication_row_lock():
         return "b" * 40
 
     try:
-        assert queue.enqueue(task_id, tenant, {"objective": "cancel while publishing"})
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "cancel while publishing"},
+            priority=2**31 - 1,
+        )
         job = queue.claim("cancel-publish-worker", lease_seconds=30)
         assert job and job.task_id == task_id
 
