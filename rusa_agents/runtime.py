@@ -473,11 +473,17 @@ class AICodeRuntime:
                     job.tenant_id,
                     self.worker_id,
                     job.lease_token,
-                    lambda: self.publisher.commit_and_push(
-                        workspace,
-                        task.repository.full_name,
-                        task.repository.work_branch,
-                        f"feat(aicode): {task.objective[:120]}",
+                    lambda: (
+                        (_ for _ in ()).throw(
+                            TaskCancellationRequested("Cancellation was requested before Git publication")
+                        )
+                        if self.queue.is_cancel_requested(job.task_id, job.tenant_id)
+                        else self.publisher.commit_and_push(
+                            workspace,
+                            task.repository.full_name,
+                            task.repository.work_branch,
+                            f"feat(aicode): {task.objective[:120]}",
+                        )
                     ),
                     lease_seconds=900,
                 ),
