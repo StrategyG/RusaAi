@@ -61,7 +61,9 @@ These controls are implemented in the combined branch and remain unverified unti
 - Image publication is gated by the GitHub `release` environment. Production deployment is a separate manual workflow gated by the GitHub `production` environment.
 - Deployment verifies all four signatures against the exact release workflow identity and uses SSH with pinned host keys.
 - Before deployment, the workflow downloads the signed release's `release-manifest.txt`, verifies the tag/source commit, and requires all four manually supplied digests and image names to match the manifest exactly. The GHCR pull username is validated before it is placed in the remote login command.
-- The host deployment script requires existing digest-pinned rollback targets and `RUSA_AICODE_ENABLED=false`; operators must drain active tasks before deployment/rollback.
+- The host deployment script requires existing digest-pinned rollback targets, matching worker/QA sandbox digests, separate worker and QA rootless Docker sockets, and `RUSA_AICODE_ENABLED=false`; operators must drain active tasks before deployment/rollback.
+- An independent QA service runs as a separate private-network Compose container using the pinned worker image but a separate service identity, Ed25519 signing key, QA-only workspace mount, and dedicated rootless Docker daemon. The worker has only the QA public key and service token; it never receives the private signing key.
+- QA signs the exact candidate Git tree and canonical SHA-256 artifact manifest after fixed pytest, Bandit, Ruff, and compile profiles. The worker verifies the signature and the publisher recomputes the tree/digest immediately before commit and verifies the committed tree afterward.
 - The script updates the API/worker/sandbox/MCP digest set, pulls the sandbox through the dedicated rootless Docker socket, includes the RAG/MCP Compose overlay only when `RUSA_RAG_ENABLED=true`, checks required service health, and restores the previous image set if the candidate fails.
 - Manual rollback is serialized with deployment and uses the previous environment snapshot.
 
@@ -87,6 +89,9 @@ These workflows do not provision a production host, configure GitHub environment
 | Backup and DR | Encrypted off-host backups, PITR policy, restore drill, approved RPO/RTO, infrastructure-loss exercise | Not completed |
 | Observability | Centralized logs, metrics scraping, alert rules, paging test, incident ownership, SLO/error budget | Not completed in target environment |
 | Agentic DevOps lifecycle | Eight specialist agents, durable orchestrator state, validated inter-agent contracts/events, Security Guard, human approval boundaries | Not implemented; Phase 1 contract foundation is a separate draft PR |
+| Independent QA runtime | Separate QA container identity, dedicated rootless daemon, QA-only workspace, signing key injection, staging negative tests and rollback rehearsal | Code and Compose wiring added; deployment not verified |
+| Signed artifact verdict | Ed25519 signature, tenant/task/tree binding, artifact SHA-256, expiry, fixed profiles, pre-commit and post-commit tree verification | Automated regression tests added; exact-head CI not green |
+| PDP/PEP coverage | Deterministic policy decision and enforcement at every external tool/data/publication boundary | Partial; publication gate is enforced, global enforcement remains open |
 | Worker/sandbox egress | Deny-by-default outbound allowlist or controlled egress proxy with negative tests | Open blocker; Compose bridge alone is not isolation |
 | Security review | Independent threat model/penetration test, secret rotation, TLS verification, least-privilege GitHub token review | Pending |
 | Release sign-off | Product owner, SRE/operations, security, and data/model owner approval | Not obtained |
