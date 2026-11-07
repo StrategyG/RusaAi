@@ -30,11 +30,17 @@ def set_worker_environment(monkeypatch):
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_WORKSPACE_ROOT", "/srv/rusa/workspaces")
     monkeypatch.setenv("RUSA_GIT_MIRROR_ROOT", "/srv/rusa/mirrors")
-    monkeypatch.setenv("RUSA_GITHUB_TOKEN", "github_pat_" + "g" * 32)
+    monkeypatch.delenv("RUSA_GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("RUSA_GITHUB_APP_ID", "123456")
+    monkeypatch.setenv("RUSA_GITHUB_APP_PRIVATE_KEY_FILE", "/run/secrets/github-app.pem")
+    monkeypatch.setenv("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON", '{"tenant-a":987654321}')
     monkeypatch.setenv(
         "RUSA_SANDBOX_IMAGE",
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_URL", "https://sandbox.internal:9101")
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_TOKEN", "s" * 48)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_CA_FILE", "/run/secrets/sandbox-ca.crt")
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
 
@@ -131,4 +137,47 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
         '{"' + "a" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["root"]}}',
     )
     with pytest.raises(ValueError, match="roles"):
+        RuntimeConfig.from_env()
+
+
+
+def test_production_worker_rejects_insecure_sandbox_executor_url(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_URL", "http://sandbox.internal:9101")
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_short_sandbox_executor_token(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_TOKEN", "short")
+    with pytest.raises(RuntimeError, match="32 UTF-8 bytes"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_requires_absolute_sandbox_ca_path(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_CA_FILE", "sandbox-ca.crt")
+    with pytest.raises(RuntimeError, match="absolute mounted CA"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+
+def test_production_worker_rejects_shared_github_pat(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_GITHUB_TOKEN", "github_pat_" + "g" * 32)
+    with pytest.raises(RuntimeError, match="RUSA_GITHUB_TOKEN is forbidden"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_requires_installation_for_each_tenant(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON", "{}")
+    with pytest.raises(RuntimeError, match="map every configured tenant"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_github_installation_mapping_rejects_non_positive_ids(monkeypatch):
+    monkeypatch.setenv("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON", '{"tenant-a":0}')
+    with pytest.raises(ValueError, match="positive installation IDs"):
         RuntimeConfig.from_env()

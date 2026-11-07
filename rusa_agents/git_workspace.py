@@ -8,13 +8,21 @@ import shutil
 import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
+from uuid import UUID
 
 from .contracts import CodingTask
 
 GIT_BIN = shutil.which("git")
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
-BLOCKED_PATH_PARTS = {".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws", ".gitattributes", ".gitmodules", ".lfsconfig"}
+BLOCKED_PATH_PARTS = {
+    ".git", ".env", ".secrets", "secrets", "credentials", ".ssh", ".aws",
+    ".azure", ".docker", ".kube", ".gcloud", ".gnupg", ".config",
+    ".terraform", ".venv", "venv", "node_modules", ".git-credentials",
+    "kubeconfig", "application_default_credentials.json", ".dockerconfigjson",
+    ".gitattributes", ".gitmodules", ".lfsconfig",
+}
 BLOCKED_SUFFIXES = {
     ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der",
     ".ppk", ".tfstate", ".tfvars",
@@ -28,6 +36,7 @@ BLOCKED_WRITE_NAMES = {
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
+    ".git-credentials", "kubeconfig", "application_default_credentials.json", ".dockerconfigjson",
 }
 BLOCKED_WRITE_PREFIXES = (
     ".github/", "migrations/", "schemas/", "llm-project/configs/",
@@ -40,11 +49,16 @@ class GitWorkspaceManager:
     """Creates one Git worktree per task from a pre-fetched local bare mirror."""
 
     def __init__(
-        self, mirror_root: str, workspace_root: str, github_token: str | None = None
+        self,
+        mirror_root: str,
+        workspace_root: str,
+        github_token: str | None = None,
+        token_provider: Any | None = None,
     ):
         self.mirror_root = Path(mirror_root).resolve()
         self.workspace_root = Path(workspace_root).resolve()
-        self.github_token = github_token
+        self.github_token = github_token or os.getenv("RUSA_GITHUB_TOKEN")
+        self.token_provider = token_provider
         self.workspace_root.mkdir(parents=True, exist_ok=True)
 
     def _run(
@@ -71,7 +85,9 @@ class GitWorkspaceManager:
             args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120
         )
 
-    def refresh(self, repository: str, base_branch: str) -> None:
+    def refresh(
+        self, repository: str, base_branch: str, tenant_id: str = "default"
+    ) -> None:
         owner, repo = repository.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
@@ -83,13 +99,18 @@ class GitWorkspaceManager:
 
         askpass_path = None
         extra_env: dict[str, str] = {}
+        token = (
+            self.token_provider.token_for(tenant_id, repository)
+            if self.token_provider is not None
+            else self.github_token
+        )
         try:
-            if self.github_token:
+            if token:
                 askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-fetch-askpass-")
                 os.close(askpass_fd)
                 askpass = Path(askpass_name)
                 askpass.write_text(
-                    '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; *) printf "%s" "$GITHUB_TOKEN" ;; esac\n',
+                    '#!/bin/sh\ncase "$1" in *Username*) printf "%s" "x-access-token" ;; *) printf "%s" "$GIT_ACCESS_TOKEN" ;; esac\n',
                     encoding="utf-8",
                 )
                 os.chmod(askpass, 0o700)
@@ -97,7 +118,7 @@ class GitWorkspaceManager:
                 extra_env = {
                     "GIT_ASKPASS": str(askpass),
                     "GIT_ASKPASS_REQUIRE": "force",
-                    "GITHUB_TOKEN": self.github_token,
+                    "GIT_ACCESS_TOKEN": token,
                 }
             fetched = self._run(
                 [
@@ -114,6 +135,12 @@ class GitWorkspaceManager:
                 askpass_path.unlink(missing_ok=True)
 
     def create(self, task: CodingTask, tenant_id: str) -> Path:
+        if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+            raise ValueError("Tenant identity is required and must be at most 128 characters")
+        try:
+            UUID(task.task_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Task ID must be a canonical UUID before workspace creation") from exc
         owner, repo = task.repository.full_name.split("/", 1)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
             raise ValueError("Invalid repository identity")
@@ -128,7 +155,7 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
-        self.refresh(task.repository.full_name, task.repository.base_branch)
+        self.refresh(task.repository.full_name, task.repository.base_branch, tenant_id)
         self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
@@ -166,6 +193,12 @@ class GitWorkspaceManager:
         return workspace
 
     def cleanup(self, task: CodingTask, tenant_id: str) -> None:
+        if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+            raise ValueError("Tenant identity is required and must be at most 128 characters")
+        try:
+            UUID(task.task_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Task ID must be a canonical UUID before workspace cleanup") from exc
         owner, repo = task.repository.full_name.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]
@@ -194,10 +227,26 @@ class GitHubPublisher:
     REQUIRED_CI_CHECKS = frozenset({"Test, lint, and security", "Build, test, and scan production images"})
     GITHUB_ACTIONS_APP_ID = 15368
 
-    def __init__(self, github_token: str | None = None):
+    def __init__(
+        self,
+        github_token: str | None = None,
+        token_provider: Any | None = None,
+    ):
         self.token = github_token or os.getenv("RUSA_GITHUB_TOKEN")
-        if not self.token:
-            raise ValueError("RUSA_GITHUB_TOKEN is required for GitHub publication")
+        self.token_provider = token_provider
+        if not self.token and self.token_provider is None:
+            raise ValueError("GitHub App token provider or development GitHub token is required")
+
+    def _token_for(self, tenant_id: str, repository: str) -> str:
+        if self.token_provider is not None:
+            return self.token_provider.token_for(tenant_id, repository)
+        if self.token:
+            return self.token
+        raise RuntimeError("GitHub credentials are not configured")
+
+    def prepare_token(self, tenant_id: str, repository: str) -> None:
+        """Fetch/cache credentials before entering the queue's fenced publish transaction."""
+        self._token_for(tenant_id, repository)
 
     @staticmethod
     def _run(args: list[str], cwd: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -220,59 +269,87 @@ class GitHubPublisher:
         )
 
     @staticmethod
+    def _is_publishable_path(raw_path: str) -> bool:
+        from pathlib import PurePosixPath
+
+        if not isinstance(raw_path, str) or not raw_path or "\x00" in raw_path:
+            return False
+        if raw_path.startswith("/") or "\\" in raw_path:
+            return False
+        path = PurePosixPath(raw_path)
+        if path.is_absolute() or ".." in path.parts:
+            return False
+        parts = tuple(part.lower() for part in path.parts)
+        if any(
+            part in BLOCKED_PATH_PARTS
+            or (part.startswith(".env") and part != ".env.example")
+            or part in {
+                ".npmrc", ".pypirc", ".netrc", ".git-credentials",
+                "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
+                "credentials.json", "service-account.json", "secrets.json",
+                "token.json", "kubeconfig", "application_default_credentials.json",
+                ".dockerconfigjson",
+            }
+            or PurePosixPath(part).suffix.lower() in BLOCKED_SUFFIXES
+            for part in parts
+        ):
+            return False
+        normalized = "/".join(parts)
+        if any(
+            normalized == prefix.rstrip("/").lower()
+            or normalized.startswith(prefix.lower())
+            for prefix in BLOCKED_WRITE_PREFIXES
+        ):
+            return False
+        if path.name.lower() in BLOCKED_WRITE_NAMES:
+            return False
+        if path.name.lower().startswith(
+            ("requirements", "dockerfile.", "docker-compose.", "compose.")
+        ):
+            return False
+        return True
+
+    @staticmethod
     def _safe_changed_paths(workspace: Path) -> list[str]:
         if not GIT_BIN:
-            return []
-        result = subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
+            raise RuntimeError("Git executable is unavailable; refusing to publish")
+        environment = {
+            "PATH": os.getenv("PATH", "/usr/bin:/bin"),
+            "HOME": tempfile.gettempdir(),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        result = subprocess.run(
             [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-             "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            capture_output=True, timeout=30, check=False,
-            env={
-                "PATH": os.getenv("PATH", "/usr/bin:/bin"),
-                "HOME": tempfile.gettempdir(),
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_LFS_SKIP_SMUDGE": "1",
-            },
+             "-C", str(workspace), "status", "--porcelain=v1", "-z",
+             "--untracked-files=all", "--no-renames"],
+            capture_output=True, timeout=30, check=False, env=environment,
         )
         if result.returncode:
-            raise RuntimeError(result.stderr.decode("utf-8", "replace"))
-        paths = []
+            raise RuntimeError(result.stderr.decode("utf-8", "replace")[-2000:])
+        paths: list[str] = []
         records = result.stdout.split(b"\0")
-        skip_next = False
         for record in records:
             if not record:
                 continue
-            if skip_next:
-                skip_next = False
-                continue
-            status = record[:2].decode("ascii", "replace")
+            if len(record) < 4 or record[2:3] != b" ":
+                raise RuntimeError("Git returned an invalid status record; refusing to publish")
             raw_path = record[3:].decode("utf-8", "surrogateescape")
-            if "R" in status or "C" in status:
-                skip_next = True
-            path = Path(raw_path)
-            parts = {part.lower() for part in path.parts}
-            if (
-                path.is_absolute()
-                or ".." in path.parts
-                or parts.intersection(BLOCKED_PATH_PARTS)
-                or any(part.startswith(".env") and part != ".env.example" for part in parts)
-            ):
-                continue
-            if (
-                path.suffix.lower() in BLOCKED_SUFFIXES
-                or path.name.lower() in {"id_rsa", "id_ed25519"}
-                or path.name.lower() in BLOCKED_WRITE_NAMES
-                or path.name.lower().startswith(("requirements", "dockerfile.", "docker-compose.", "compose."))
-                or any(raw_path.lower().startswith(prefix.lower()) for prefix in BLOCKED_WRITE_PREFIXES)
-            ):
-                continue
-            candidate = (workspace / path).resolve(strict=False)
-            if candidate != workspace and workspace not in candidate.parents:
-                continue
-            if (workspace / path).is_symlink():
-                continue
+            if not GitHubPublisher._is_publishable_path(raw_path):
+                raise RuntimeError(
+                    f"Protected or unsafe path changed: {raw_path!r}; refusing to publish any files"
+                )
+            candidate = workspace / raw_path
+            try:
+                resolved = candidate.resolve(strict=False)
+                if resolved != workspace and workspace not in resolved.parents:
+                    raise RuntimeError("Changed path resolves outside the workspace; refusing to publish")
+                if candidate.is_symlink():
+                    raise RuntimeError("Changed symbolic link is not publishable")
+            except OSError as exc:
+                raise RuntimeError("Could not safely inspect changed path") from exc
             paths.append(raw_path)
         return sorted(set(paths))
 
@@ -294,7 +371,15 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        tenant_id: str = "default",
+    ) -> str | None:
+        token = self._token_for(tenant_id, repository)
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
             raise ValueError("Publishing is restricted to task feature branches")
@@ -311,6 +396,28 @@ class GitHubPublisher:
             added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
+            staged = self._run(
+                ["git", "diff", "--cached", "--name-only", "-z", "--no-renames", "--"],
+                str(root),
+            )
+            if staged.returncode:
+                raise RuntimeError(f"Could not inspect staged paths: {staged.stderr[-2000:]}")
+            staged_paths = [
+                item.decode("utf-8", "surrogateescape")
+                for item in staged.stdout.encode("utf-8", "surrogateescape").split(b"\\0")
+                if item
+            ]
+            unsafe_staged = [
+                path for path in staged_paths
+                if not self._is_publishable_path(path)
+                or (root / path).is_symlink()
+                or root not in (root / path).resolve(strict=False).parents
+            ]
+            if unsafe_staged:
+                raise RuntimeError(
+                    "Protected or unsafe staged paths detected; refusing to commit: "
+                    + ", ".join(repr(path) for path in unsafe_staged[:20])
+                )
             commit = self._run([
                 "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=RUSA-AI",
                 "-c", "user.email=rusa-ai@users.noreply.github.com",
@@ -327,7 +434,7 @@ class GitHubPublisher:
         askpass = Path(askpass_name)
         askpass.write_text(
             "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' 'x-access-token' ;; "
-            "*Password*) printf '%s\\n' \"$RUSA_GITHUB_TOKEN\" ;; esac\n",
+            "*Password*) printf '%s\\n' \"$GIT_ACCESS_TOKEN\" ;; esac\n",
             encoding="utf-8",
         )
         askpass.chmod(0o700)
@@ -335,7 +442,7 @@ class GitHubPublisher:
             pushed = self._run(
                 ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{branch}"],
                 str(root),
-                {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "RUSA_GITHUB_TOKEN": self.token},
+                {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "GIT_ACCESS_TOKEN": token},
             )
         finally:
             askpass.unlink(missing_ok=True)
@@ -343,13 +450,24 @@ class GitHubPublisher:
             raise RuntimeError(f"Git push failed: {pushed.stderr[-3000:]}")
         return sha
 
-    async def create_or_get_draft_pr(self, repository: str, branch: str, base: str, title: str, body: str) -> str:
+    async def create_or_get_draft_pr(
+        self,
+        repository: str,
+        branch: str,
+        base: str,
+        title: str,
+        body: str,
+        tenant_id: str = "default",
+    ) -> str:
+        import asyncio
+
         import httpx
 
+        token = await asyncio.to_thread(self._token_for, tenant_id, repository)
         owner = repository.split("/", 1)[0]
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
@@ -444,6 +562,7 @@ class GitHubPublisher:
         commit_sha: str,
         timeout_seconds: int = 900,
         poll_seconds: int = 15,
+        tenant_id: str = "default",
     ) -> tuple[bool, str]:
         """Wait for complete, trusted CI evidence on the exact commit SHA."""
         import asyncio
@@ -455,10 +574,11 @@ class GitHubPublisher:
         if timeout_seconds <= 0 or poll_seconds <= 0:
             return False, "CI timeout and polling interval must be positive"
 
+        token = await asyncio.to_thread(self._token_for, tenant_id, repository)
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         max_pages = 10

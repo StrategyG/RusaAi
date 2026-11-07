@@ -15,11 +15,20 @@ services:
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_GITHUB_TOKEN: ""
+      RUSA_GITHUB_APP_ID: ""
+      RUSA_GITHUB_APP_PRIVATE_KEY_FILE: ""
+      RUSA_TENANT_GITHUB_INSTALLATIONS_JSON: "{}"
       RUSA_SANDBOX_IMAGE: ""
+      RUSA_SANDBOX_EXECUTOR_TOKEN: ""
+      RUSA_SANDBOX_EXECUTOR_DATABASE_URL: ""
+      RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE: ""
+      RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE: ""
+      RUSA_SANDBOX_EXECUTOR_CA_FILE: ""
       RUSA_WORKSPACE_ROOT: ""
       RUSA_GIT_MIRROR_ROOT: ""
       RUSA_DOCKER_SOCKET: ""
       RUSA_DOCKER_GID: ""
+      DOCKER_HOST: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
@@ -55,9 +64,23 @@ services:
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: "{}"
       RUSA_METRICS_API_KEY: ""
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_GITHUB_APP_ID: ${RUSA_GITHUB_APP_ID:?Set the GitHub App ID}
+      RUSA_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+      RUSA_TENANT_GITHUB_INSTALLATIONS_JSON: ${RUSA_TENANT_GITHUB_INSTALLATIONS_JSON:?Map each tenant to its GitHub App installation ID}
+      RUSA_SANDBOX_EXECUTOR_URL: ${RUSA_SANDBOX_EXECUTOR_URL:-https://sandbox-executor:9101}
+      RUSA_SANDBOX_EXECUTOR_TOKEN: ${RUSA_SANDBOX_EXECUTOR_TOKEN:?Set the worker-to-executor capability secret}
+      RUSA_SANDBOX_EXECUTOR_CA_FILE: /run/secrets/sandbox-executor-ca.crt
+      RUSA_SANDBOX_EXECUTOR_DATABASE_URL: ""
+      RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE: ""
+      RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
+      DOCKER_HOST: ""
+      RUSA_SANDBOX_IMAGE: ${RUSA_SANDBOX_IMAGE:?Set an immutable sandbox image digest}
+      RUSA_WORKSPACE_ROOT: ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
-      DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
     read_only: true
     security_opt: ["no-new-privileges:true"]
@@ -68,11 +91,10 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,size=128m
     volumes:
-      - ${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
       - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
       - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
-    group_add:
-      - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
+      - ${RUSA_GITHUB_APP_PRIVATE_KEY_FILE:?Set the GitHub App private key file}:/run/secrets/github-app.pem:ro
+      - ${RUSA_SANDBOX_EXECUTOR_CA_FILE:?Set the sandbox executor CA certificate}:/run/secrets/sandbox-executor-ca.crt:ro
     expose:
       - "9100"
     healthcheck:
@@ -80,7 +102,63 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    networks: [rusa-internal, rusa-egress]
+    depends_on:
+      sandbox-executor:
+        condition: service_healthy
+    networks: [rusa-internal, rusa-egress, rusa-sandbox]
+
+  sandbox-executor:
+    image: ${RUSA_SANDBOX_EXECUTOR_IMAGE:?Set an immutable sandbox executor image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "rusa_agents.sandbox_executor"]
+    environment:
+      ENVIRONMENT: production
+      RUSA_SANDBOX_EXECUTOR_TOKEN: ${RUSA_SANDBOX_EXECUTOR_TOKEN:?Set the worker-to-executor capability secret}
+      RUSA_SANDBOX_EXECUTOR_DATABASE_URL: ${RUSA_SANDBOX_EXECUTOR_DATABASE_URL:?Set the read-only sandbox lease-verifier DSN}
+      RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE: /run/secrets/server.crt
+      RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE: /run/secrets/server.key
+      RUSA_SANDBOX_EXECUTOR_CA_FILE: /run/secrets/sandbox-executor-ca.crt
+      RUSA_SANDBOX_EXECUTOR_BIND: 0.0.0.0
+      RUSA_SANDBOX_EXECUTOR_PORT: "9101"
+      RUSA_SANDBOX_WORKSPACE_ROOT: ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}
+      RUSA_SANDBOX_SNAPSHOT_ROOT: ${RUSA_SANDBOX_SNAPSHOT_ROOT:?Set a separate writable snapshot root}
+      RUSA_SANDBOX_IMAGE: ${RUSA_SANDBOX_IMAGE:?Set an immutable sandbox image digest}
+      RUSA_SANDBOX_MAX_CONCURRENCY: ${RUSA_SANDBOX_MAX_CONCURRENCY:-2}
+      RUSA_DOCKER_GID: ${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}
+      DOCKER_HOST: unix:///run/docker.sock
+      HOME: /tmp
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - ${RUSA_DOCKER_SOCKET:?Set a dedicated rootless Docker socket}:/run/docker.sock
+      - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}:ro
+      - ${RUSA_SANDBOX_SNAPSHOT_ROOT:?Set RUSA_SANDBOX_SNAPSHOT_ROOT}:${RUSA_SANDBOX_SNAPSHOT_ROOT}
+      - ${RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE:?Set executor TLS certificate}:/run/secrets/server.crt:ro
+      - ${RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE:?Set executor TLS private key}:/run/secrets/server.key:ro
+      - ${RUSA_SANDBOX_EXECUTOR_CA_FILE:?Set executor CA certificate}:/run/secrets/sandbox-executor-ca.crt:ro
+      - ${RUSA_SANDBOX_EXECUTOR_DATABASE_CA_FILE:?Set PostgreSQL CA certificate}:/run/secrets/postgres-ca.crt:ro
+    group_add:
+      - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
+    expose:
+      - "9101"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,ssl,urllib.request; c=ssl.create_default_context(cafile=os.environ['RUSA_SANDBOX_EXECUTOR_CA_FILE']); urllib.request.urlopen('https://sandbox-executor:9101/healthz', context=c, timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-egress, rusa-sandbox]
 
 networks:
   rusa-internal:
@@ -88,3 +166,6 @@ networks:
     internal: true
   rusa-egress:
     driver: bridge
+  rusa-sandbox:
+    driver: bridge
+    internal: true

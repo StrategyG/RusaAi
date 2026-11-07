@@ -237,3 +237,54 @@ def test_postgres_queue_idempotency_key_replays_and_rejects_payload_changes():
                 "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
                 (tenant, key),
             )
+
+
+
+def test_postgres_sandbox_lease_verifier_is_function_only():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = f"tenant-sandbox-{uuid4().hex[:8]}"
+    worker_id = "sandbox-verifier-test"
+    assert queue.enqueue(task_id, tenant_id, {"objective": "sandbox lease test"}, priority=100000)
+    job = queue.claim(worker_id, lease_seconds=60)
+    assert job is not None and job.task_id == task_id
+
+    with psycopg.connect(DSN) as conn:
+        conn.execute("SET LOCAL ROLE rusa_sandbox_runtime")
+        valid = conn.execute(
+            """
+            SELECT public.rusa_verify_sandbox_lease(
+                %s::uuid, %s, %s, %s::uuid
+            )
+            """,
+            (task_id, tenant_id, worker_id, job.lease_token),
+        ).fetchone()
+        invalid = conn.execute(
+            """
+            SELECT public.rusa_verify_sandbox_lease(
+                %s::uuid, %s, %s, %s::uuid
+            )
+            """,
+            (task_id, tenant_id, worker_id, str(uuid4())),
+        ).fetchone()
+        privileges = conn.execute(
+            """
+            SELECT
+                has_function_privilege(
+                    current_user,
+                    'public.rusa_verify_sandbox_lease(uuid,text,text,uuid)',
+                    'EXECUTE'
+                ),
+                has_table_privilege(current_user, 'public.aicode_jobs', 'SELECT'),
+                has_table_privilege(current_user, 'public.aicode_jobs', 'INSERT'),
+                has_table_privilege(current_user, 'public.aicode_jobs', 'UPDATE'),
+                has_table_privilege(current_user, 'public.aicode_jobs', 'DELETE')
+            """
+        ).fetchone()
+        assert privileges == (True, False, False, False, False)
+        assert valid == (True,)
+        assert invalid == (False,)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("SELECT task_id FROM public.aicode_jobs LIMIT 1")
+    assert queue.complete(job.id, job.tenant_id, worker_id, job.lease_token)
