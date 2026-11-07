@@ -95,11 +95,17 @@ class DockerSandbox:
         """Hash the exact source snapshot mounted into the sandbox."""
         digest = hashlib.sha256()
         for path in sorted(snapshot.rglob("*")):
-            if not path.is_file() or path.is_symlink():
+            try:
+                metadata = path.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
                 continue
             relative = path.relative_to(snapshot).as_posix().encode("utf-8")
             digest.update(len(relative).to_bytes(4, "big"))
             digest.update(relative)
+            digest.update(metadata.st_size.to_bytes(8, "big"))
+            digest.update((stat.S_IMODE(metadata.st_mode) & 0o111).to_bytes(2, "big"))
             with path.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                     digest.update(chunk)
