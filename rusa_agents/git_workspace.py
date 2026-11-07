@@ -32,6 +32,17 @@ def _run_bounded_process(
             timeout=timeout_seconds,
         )
 
+    try:
+        initially_allowed = cancellation_check()
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not verify the active task lease before Git execution"
+        ) from exc
+    if not initially_allowed:
+        raise RuntimeError(
+            "Git execution stopped because the task lease was lost or cancelled"
+        )
+
     process = subprocess.Popen(  # nosec B603 - fixed argv, shell=False
         args,
         cwd=cwd,
@@ -64,19 +75,6 @@ def _run_bounded_process(
             except ProcessLookupError:
                 pass
             return process.communicate()
-
-    try:
-        initially_allowed = cancellation_check()
-    except Exception as exc:
-        stop_process()
-        raise RuntimeError(
-            "Could not verify the active task lease before Git execution"
-        ) from exc
-    if not initially_allowed:
-        stop_process()
-        raise RuntimeError(
-            "Git execution stopped because the task lease was lost or cancelled"
-        )
 
     while True:
         try:
