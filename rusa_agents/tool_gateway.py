@@ -5,13 +5,16 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 """
 from __future__ import annotations  # noqa: I001
 
+import hashlib
 import json
 import os
 import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
@@ -85,6 +88,21 @@ class DockerSandbox:
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
 
+    @staticmethod
+    def _snapshot_digest(snapshot: Path) -> str:
+        """Hash the exact source snapshot mounted into the sandbox."""
+        digest = hashlib.sha256()
+        for path in sorted(snapshot.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            relative = path.relative_to(snapshot).as_posix().encode("utf-8")
+            digest.update(len(relative).to_bytes(4, "big"))
+            digest.update(relative)
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        return digest.hexdigest()
+
     def run(self, workspace: Path, profile: str) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
@@ -94,6 +112,9 @@ class DockerSandbox:
         if not workspace.is_dir():
             raise ToolDenied("Sandbox workspace must be a directory")
 
+        execution_id = uuid4().hex
+        started_at = datetime.now(timezone.utc).isoformat()
+        started_clock = time.monotonic()
         totals = [0]
 
         def bounded_copy(source: str, destination: str) -> str:
@@ -154,6 +175,7 @@ class DockerSandbox:
             except (OSError, ToolDenied) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
+            workspace_digest = self._snapshot_digest(snapshot)
             container_name = f"rusa-sandbox-{uuid4().hex}"
             command = [
                 DOCKER_BIN, "run", "--rm", "--name", container_name,
@@ -202,12 +224,22 @@ class DockerSandbox:
                 except (OSError, subprocess.TimeoutExpired):
                     pass
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
-            output = (completed.stdout + "\n" + completed.stderr)[-20000:]
+            full_output = (completed.stdout or "") + "\n" + (completed.stderr or "")
             return ToolResult(
                 completed.returncode == 0,
-                output,
-                {"profile": profile, "exit_code": completed.returncode, "image": self.image,
-                 "snapshot_bytes": totals[0]},
+                full_output[-20000:],
+                {
+                    "profile": profile,
+                    "exit_code": completed.returncode,
+                    "image": self.image,
+                    "snapshot_bytes": totals[0],
+                    "workspace_digest": workspace_digest,
+                    "output_digest": hashlib.sha256(full_output.encode("utf-8", errors="replace")).hexdigest(),
+                    "execution_id": execution_id,
+                    "started_at": started_at,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "duration_seconds": round(time.monotonic() - started_clock, 6),
+                },
             )
 
 
@@ -236,8 +268,16 @@ class WorkspaceToolGateway:
         "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
         "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
     }
+    PROTECTED_WRITE_PATHS = {
+        "rusa_agents/audit.py", "rusa_agents/autonomous.py",
+        "rusa_agents/contracts.py", "rusa_agents/git_workspace.py",
+        "rusa_agents/memory.py", "rusa_agents/orchestrator.py",
+        "rusa_agents/policy.py", "rusa_agents/queue.py",
+        "rusa_agents/runtime.py", "rusa_agents/tool_gateway.py",
+    }
     PROTECTED_WRITE_PREFIXES = (
-        ".github/", "migrations/", "schemas/", "llm-project/configs/",
+        ".github/", "tests/", "test/", "qa/", "rusa_agents/security/",
+        "migrations/", "schemas/", "llm-project/configs/",
         "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
         "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
     )
@@ -250,6 +290,8 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        task_id: str | None = None,
+        attempt: int = 1,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -261,9 +303,15 @@ class WorkspaceToolGateway:
             or not knowledge_tenant_id.strip()
         ):
             raise ValueError("knowledge tenant identity must come from the authenticated task")
+        if task_id is not None and (not isinstance(task_id, str) or not task_id.strip()):
+            raise ValueError("task identity must be a non-empty string")
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError("task attempt must be a positive integer")
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        self.task_id = task_id
+        self.attempt = attempt
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -317,7 +365,8 @@ class WorkspaceToolGateway:
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
         if (
-            target.name.lower() in self.PROTECTED_WRITE_NAMES
+            relative.lower() in self.PROTECTED_WRITE_PATHS
+            or target.name.lower() in self.PROTECTED_WRITE_NAMES
             or target.name.lower().startswith(
                 ("requirements", "dockerfile.", "docker-compose.", "compose.")
             )
@@ -376,7 +425,16 @@ class WorkspaceToolGateway:
         }
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
-        return self.sandbox.run(self.workspace, profile)
+        result = self.sandbox.run(self.workspace, profile)
+        evidence = dict(result.evidence or {})
+        evidence.update({
+            "profile": profile,
+            "worker_role": role.value,
+            "attempt": self.attempt,
+        })
+        if self.task_id is not None:
+            evidence["task_id"] = self.task_id
+        return ToolResult(result.ok, result.output, evidence)
 
     def git_diff(self) -> ToolResult:
         if not GIT_BIN:
