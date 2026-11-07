@@ -398,6 +398,7 @@ class WorkflowControlServicer:
             task_id=request.task_id,
             attempt=request.attempt,
             worker_id=identity.principal,
+            claim_id=request.claim_id,
             traceparent=request.traceparent,
         )
         response = pb.ClaimTaskResponse(
@@ -434,6 +435,7 @@ class WorkflowControlServicer:
             attempt=request.attempt,
             lease_epoch=request.lease_epoch,
             worker_id=identity.principal,
+            claim_id=request.claim_id,
             traceparent=request.traceparent,
         )
         response = pb.HeartbeatTaskResponse(
@@ -473,6 +475,7 @@ class WorkflowControlServicer:
             message_id=request.message_id,
             traceparent=request.traceparent,
             worker_id=identity.principal,
+            claim_id=request.claim_id,
         )
         return pb.ReportTaskProgressResponse(
             accepted=report["accepted"],
@@ -511,6 +514,7 @@ class WorkflowControlServicer:
             side_effect=request.side_effect,
             diagnostic_ref=request.diagnostic_ref,
             worker_id=identity.principal,
+            claim_id=request.claim_id,
         )
         return pb.ReportTaskResultResponse(
             accepted=report["accepted"],
