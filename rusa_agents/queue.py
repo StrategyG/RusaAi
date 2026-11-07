@@ -588,7 +588,8 @@ class PostgresTaskQueue:
         cannot reclaim the task mid-publication. Cancellation intent lives in a separate
         control row and can be committed without waiting for this publication lock. A push
         already in flight when cancellation commits is an external side effect that requires
-        reconciliation; callers must use a stable task branch and publication identity.
+        reconciliation; callers must use a stable task identity in publication metadata even
+        when each lease receives an isolated feature branch.
         """
         if (
             type(job_id) is not int
