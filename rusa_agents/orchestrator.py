@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import re
+from datetime import datetime
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
@@ -254,8 +257,52 @@ class AICodeOrchestrator:
             isinstance(evidence, dict)
             and type(evidence.get("exit_code")) is int
             and evidence.get("exit_code") == 0
-            and evidence.get("profile") in {None, key.removeprefix("check:")}
+            and evidence.get("profile") == key.removeprefix("check:")
         )
+
+    @staticmethod
+    def _valid_check_provenance(
+        evidence: dict, task: CodingTask, worker_role: WorkerRole, profile: str
+    ) -> bool:
+        if evidence.get("profile") != profile:
+            return False
+        if evidence.get("worker_role") != worker_role.value:
+            return False
+        if evidence.get("task_id") != task.task_id:
+            return False
+        if type(evidence.get("attempt")) is not int or evidence["attempt"] < 1:
+            return False
+        if type(evidence.get("exit_code")) is not int:
+            return False
+        for key in ("workspace_digest", "output_digest"):
+            value = evidence.get(key)
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                return False
+        execution_id = evidence.get("execution_id")
+        if not isinstance(execution_id, str) or not re.fullmatch(r"[0-9a-f]{32}", execution_id):
+            return False
+        image = evidence.get("image")
+        if not isinstance(image, str) or not image.strip():
+            return False
+        snapshot_bytes = evidence.get("snapshot_bytes")
+        if type(snapshot_bytes) is not int or snapshot_bytes < 0:
+            return False
+        try:
+            started = datetime.fromisoformat(evidence["started_at"])
+            completed = datetime.fromisoformat(evidence["completed_at"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if started.tzinfo is None or completed.tzinfo is None or completed < started:
+            return False
+        duration = evidence.get("duration_seconds")
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or not math.isfinite(duration)
+            or duration < 0
+        ):
+            return False
+        return True
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
@@ -283,29 +330,32 @@ class AICodeOrchestrator:
                 "Missing mandatory verification evidence: " + ", ".join(missing)
             )
             return None
-        provenance = [
-            worker_result.evidence[key]
-            for worker_result, key in required
-            if isinstance(worker_result.evidence.get(key), dict)
-        ]
-        digests = {
-            item.get("workspace_digest") for item in provenance
-            if item.get("workspace_digest") is not None
-        }
-        task_ids = {
-            item.get("task_id") for item in provenance
-            if item.get("task_id") is not None
-        }
-        attempts = {
-            item.get("attempt") for item in provenance
-            if item.get("attempt") is not None
-        }
-        if len(digests) > 1 or len(task_ids) > 1 or len(attempts) > 1:
-            record.errors.append("Validation evidence provenance does not describe one consistent workspace snapshot.")
-            return False
-        if task_ids and task_ids != {record.task.task_id}:
-            record.errors.append("Validation evidence belongs to a different task.")
-            return False
+        provenance = []
+        for worker_result, key in required:
+            item = worker_result.evidence.get(key)
+            profile = key.removeprefix("check:")
+            if not isinstance(item, dict) or not self._valid_check_provenance(
+                item, record.task, worker_result.role, profile
+            ):
+                record.errors.append(
+                    f"Validation evidence for {key} is missing or has invalid provenance."
+                )
+                return None
+            provenance.append(item)
+        digests = {item["workspace_digest"] for item in provenance}
+        task_ids = {item["task_id"] for item in provenance}
+        attempts = {item["attempt"] for item in provenance}
+        execution_ids = {item["execution_id"] for item in provenance}
+        if (
+            len(digests) != 1
+            or task_ids != {record.task.task_id}
+            or len(attempts) != 1
+            or len(execution_ids) != len(provenance)
+        ):
+            record.errors.append(
+                "Validation evidence does not describe one task attempt and one workspace snapshot."
+            )
+            return None
         failed = [
             key for worker_result, key in required
             if not self._check_passed(worker_result, key)
