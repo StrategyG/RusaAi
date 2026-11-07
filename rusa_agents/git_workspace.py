@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .contracts import CodingTask
+
 
 def _run_bounded_process(
     args: list[str],
@@ -36,8 +38,21 @@ def _run_bounded_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        start_new_session=True,
+        start_new_session=(os.name == "posix"),
     )
+    try:
+        if not cancellation_check():
+            process.terminate()
+            process.communicate(timeout=3)
+            raise RuntimeError(
+                "Git execution stopped because the task lease was lost or cancelled"
+            )
+    except Exception:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+        raise
+
     deadline = time.monotonic() + timeout_seconds
 
     def stop_process() -> tuple[str, str]:
@@ -87,8 +102,6 @@ def _run_bounded_process(
             return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             continue
-
-from .contracts import CodingTask
 
 GIT_BIN = shutil.which("git")
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
