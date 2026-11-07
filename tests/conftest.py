@@ -37,7 +37,7 @@ def apply_postgres_migrations_for_integration_suite():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
-        "007_devops_durable_communication.sql",
+        "008_devops_durable_communication.sql",
     ]
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")
