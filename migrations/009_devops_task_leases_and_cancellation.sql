@@ -84,6 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_devops_cancellations_tenant_created
 GRANT SELECT, INSERT, UPDATE ON public.devops_run_cancellations TO rusa_api_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.devops_run_cancellations_cancellation_id_seq
     TO rusa_api_runtime;
+GRANT SELECT ON public.devops_run_cancellations TO rusa_worker_runtime;
+GRANT UPDATE (status, completed_at) ON public.devops_run_cancellations
+    TO rusa_worker_runtime;
 
 ALTER TABLE public.devops_run_cancellations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devops_run_cancellations FORCE ROW LEVEL SECURITY;
@@ -93,6 +96,21 @@ DROP POLICY IF EXISTS devops_cancellations_api_tenant
 CREATE POLICY devops_cancellations_api_tenant
     ON public.devops_run_cancellations
     FOR ALL TO rusa_api_runtime
+    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
+    WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+
+DROP POLICY IF EXISTS devops_cancellations_worker_tenant
+    ON public.devops_run_cancellations;
+CREATE POLICY devops_cancellations_worker_tenant
+    ON public.devops_run_cancellations
+    FOR SELECT TO rusa_worker_runtime
+    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+
+DROP POLICY IF EXISTS devops_cancellations_worker_update
+    ON public.devops_run_cancellations;
+CREATE POLICY devops_cancellations_worker_update
+    ON public.devops_run_cancellations
+    FOR UPDATE TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
