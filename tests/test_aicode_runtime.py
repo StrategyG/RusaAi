@@ -297,3 +297,88 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+def test_orchestrator_rejects_boolean_exit_code_as_evidence(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {"check:pytest": {"exit_code": False}}
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("check:pytest" in error for error in record.errors)
+
+
+def test_orchestrator_rejects_mixed_workspace_evidence(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {
+        "check:pytest": {"exit_code": 0, "workspace_digest": "a" * 64}
+    }
+    configured[-1].evidence = {
+        "check:bandit": {"exit_code": 0, "workspace_digest": "b" * 64},
+        "check:ruff": {"exit_code": 0, "workspace_digest": "b" * 64},
+        "check:compile": {"exit_code": 0, "workspace_digest": "b" * 64},
+    }
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("provenance" in error for error in record.errors)
+
+
+def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
+    class DiagnosticDeveloper(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.DEVELOPER)
+            self.repair_context = None
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            if self.calls > 1:
+                self.repair_context = next(
+                    (item for item in prior_results if item.failure_kind == "quality_gate"),
+                    None,
+                )
+            return WorkerResult(role=self.role, summary="implemented", success=True)
+
+    class OneFailTester(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.TESTER)
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return WorkerResult(
+                role=self.role, summary="pytest report",
+                success=True, evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+            )
+
+    developer = DiagnosticDeveloper()
+    configured = [
+        StubWorker(WorkerRole.ANALYST), StubWorker(WorkerRole.ARCHITECT),
+        developer, StubWorker(WorkerRole.DEBUGGER), OneFailTester(),
+        StubWorker(WorkerRole.SECURITY, {
+            "check:bandit": {"exit_code": 0},
+            "check:ruff": {"exit_code": 0},
+            "check:compile": {"exit_code": 0},
+        }),
+    ]
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=1,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.SUCCEEDED
+    assert developer.repair_context is not None
+    assert "check:pytest" in " ".join(developer.repair_context.blockers)
