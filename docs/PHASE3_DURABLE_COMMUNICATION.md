@@ -34,7 +34,7 @@ Phase 3 is deliberately split into independently reviewable increments. This PR 
 
 ## Database security
 
-Migration 007_devops_durable_communication.sql creates separate NOLOGIN groups for API, worker, and relay identities. Deployment must provision distinct LOGIN roles as members of exactly one matching group. The relay role is intentionally cross-tenant because it only transports opaque, already-authorized envelopes; it must not invoke tools or read workflow payload references. API and worker workflow access is constrained by forced row-level security using rusa.tenant_id.
+Migration 008_devops_durable_communication.sql creates separate NOLOGIN groups for API, worker, and relay identities. Deployment must provision distinct LOGIN roles as members of exactly one matching group. The relay role is intentionally cross-tenant because it only transports opaque, already-authorized envelopes; it must not invoke tools or read workflow payload references. API and worker workflow access is constrained by forced row-level security using rusa.tenant_id.
 
 The runtime role groups are not login credentials. Do not run the relay with a superuser, migration owner, API login, or worker login. The current migration grants only the relay group access to claim and settle outbox rows.
 
