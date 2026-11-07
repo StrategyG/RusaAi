@@ -27,12 +27,19 @@ class AutonomyPolicy:
     DENIED_ACTIONS = {
         "disable_audit", "exfiltrate_secret", "force_push_main",
     }
+    DEFAULT_ALLOWED_ACTIONS = frozenset({
+        "repo_read", "branch_create", "workspace_write",
+        "test_run", "commit_feature_branch", "pull_request_create", "audit_read",
+    })
 
     def __init__(self, allowed_actions: set[str] | None = None):
-        self.allowed_actions = allowed_actions or {
-            "repo_read", "branch_create", "workspace_write",
-            "test_run", "commit_feature_branch", "pull_request_create", "audit_read",
-        }
+        configured_actions = (
+            self.DEFAULT_ALLOWED_ACTIONS
+            if allowed_actions is None
+            else allowed_actions
+        )
+        # An explicitly empty allowlist must remain empty; never replace it with defaults.
+        self.allowed_actions = frozenset(configured_actions)
 
     def evaluate(
         self, action: str, risk: RiskLevel = RiskLevel.LOW

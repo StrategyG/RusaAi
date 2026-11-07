@@ -65,8 +65,12 @@ class AICodeOrchestrator:
     )
     QUALITY_ROLES = (WorkerRole.TESTER, WorkerRole.SECURITY)
     PIPELINE = PRIMARY_ROLES + QUALITY_ROLES
-    REQUIRED_TEST_EVIDENCE = ("check:pytest",)
-    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile")
+    REQUIRED_TEST_EVIDENCE = {"check:pytest": "pytest"}
+    REQUIRED_SECURITY_EVIDENCE = {
+        "check:bandit": "bandit",
+        "check:ruff": "ruff",
+        "check:compile": "compile",
+    }
 
     def __init__(
         self,
@@ -214,9 +218,22 @@ class AICodeOrchestrator:
         await self._persist(record)
 
     @staticmethod
-    def _check_passed(result: WorkerResult, key: str) -> bool:
+    def _check_passed(
+        result: WorkerResult,
+        key: str,
+        expected_profile: str,
+    ) -> bool:
+        if not isinstance(result.evidence, dict):
+            return False
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        if not isinstance(evidence, dict):
+            return False
+        exit_code = evidence.get("exit_code")
+        return (
+            evidence.get("profile") == expected_profile
+            and type(exit_code) is int
+            and exit_code == 0
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
@@ -231,13 +248,16 @@ class AICodeOrchestrator:
             record.errors.append("Tester or security worker did not produce a result.")
             return None
         required = [
-            (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
+            (tester, key, profile)
+            for key, profile in self.REQUIRED_TEST_EVIDENCE.items()
         ] + [
-            (security, key) for key in self.REQUIRED_SECURITY_EVIDENCE
+            (security, key, profile)
+            for key, profile in self.REQUIRED_SECURITY_EVIDENCE.items()
         ]
         missing = [
-            key for worker_result, key in required
-            if key not in worker_result.evidence
+            key
+            for worker_result, key, _ in required
+            if not isinstance(worker_result.evidence, dict) or key not in worker_result.evidence
         ]
         if missing:
             record.errors.append(
@@ -245,8 +265,9 @@ class AICodeOrchestrator:
             )
             return None
         failed = [
-            key for worker_result, key in required
-            if not self._check_passed(worker_result, key)
+            key
+            for worker_result, key, profile in required
+            if not self._check_passed(worker_result, key, profile)
         ]
         if failed:
             record.errors.append("Validation checks failed: " + ", ".join(failed))

@@ -31,7 +31,7 @@ def task():
 
 
 def workers(with_evidence=True):
-    evidence = {"check:pytest": {"exit_code": 0}} if with_evidence else {}
+    evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}} if with_evidence else {}
     security = {
         "check:bandit": {"exit_code": 0},
         "check:ruff": {"exit_code": 0},
@@ -98,7 +98,7 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
 
 def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     failing = workers()
-    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    failing[-2].evidence = {"check:pytest": {"exit_code": 1, "profile": "pytest"}}
     orchestrator = AICodeOrchestrator(
         failing,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
@@ -115,7 +115,7 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
         def __init__(self, role):
             evidence = {}
             if role == WorkerRole.TESTER:
-                evidence = {"check:pytest": {"exit_code": 0}}
+                evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}}
             elif role == WorkerRole.SECURITY:
                 evidence = {
                     "check:bandit": {"exit_code": 0},
@@ -199,7 +199,7 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
     for role in AICodeOrchestrator.PIPELINE:
         if role == WorkerRole.TESTER:
             evidence_workers.append(
-                ParallelWorker(role, {"check:pytest": {"exit_code": 0}})
+                ParallelWorker(role, {"check:pytest": {"exit_code": 0, "profile": "pytest"}})
             )
         elif role == WorkerRole.SECURITY:
             evidence_workers.append(
@@ -252,7 +252,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0, "profile": "pytest"}},
             )
 
     class CountingSecurity(StubWorker):
