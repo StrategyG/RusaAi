@@ -105,7 +105,7 @@ The gateway exposes only:
 - `git_diff`
 - `run_check`
 
-Path handling rejects traversal, absolute paths, symlinks, environment files, credential names, private-key material, and protected configuration surfaces. File writes are atomic and size-bounded. Existing QA baseline files and platform control-plane modules are write-protected; Developer may create and iteratively edit new task-local tests. A write that leaves file content unchanged is recorded as a no-op and is not counted as a changed artifact.
+Path handling rejects traversal, absolute paths, symlinks, environment files, credential names, private-key material, and protected configuration surfaces. File writes are atomic and size-bounded. Existing QA baseline files and platform control-plane modules (API authentication/runtime, provider configuration, RAG storage/safety, MCP server, queue, audit, policy, and tool gateway) are write-protected; Developer may create and iteratively edit new task-local tests. A write that leaves file content unchanged is recorded as a no-op and is not counted as a changed artifact.
 
 Tool retries are limited to results explicitly marked retryable, with at most two additional attempts and exponential backoff with full jitter. Deterministic tool errors are not retried. Policy and infrastructure failures are escalated rather than sent through a code-repair cycle.
 
