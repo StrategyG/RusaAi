@@ -9,6 +9,7 @@ import subprocess  # nosec B404 - fixed argv only, shell execution is never enab
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import UUID
 
 from .contracts import CodingTask
 
@@ -114,6 +115,12 @@ class GitWorkspaceManager:
                 askpass_path.unlink(missing_ok=True)
 
     def create(self, task: CodingTask, tenant_id: str) -> Path:
+        if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+            raise ValueError("Tenant identity is required and must be at most 128 characters")
+        try:
+            UUID(task.task_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Task ID must be a canonical UUID before workspace creation") from exc
         owner, repo = task.repository.full_name.split("/", 1)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
             raise ValueError("Invalid repository identity")
@@ -166,6 +173,12 @@ class GitWorkspaceManager:
         return workspace
 
     def cleanup(self, task: CodingTask, tenant_id: str) -> None:
+        if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
+            raise ValueError("Tenant identity is required and must be at most 128 characters")
+        try:
+            UUID(task.task_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("Task ID must be a canonical UUID before workspace cleanup") from exc
         owner, repo = task.repository.full_name.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]

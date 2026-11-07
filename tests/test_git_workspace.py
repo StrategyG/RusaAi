@@ -163,7 +163,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
             "StrategyG/RusaAi", "main", "feature/aicode/lease-first"
         ),
         acceptance_criteria=["isolated workspace"],
-        task_id="same-task",
+        task_id="00000000-0000-4000-8000-000000000001",
         metadata={"lease_token": "lease-one"},
     )
     second = CodingTask(
@@ -353,3 +353,16 @@ def test_publisher_blocks_common_credential_paths(path):
 
 def test_publisher_allows_regular_source_files():
     assert GitHubPublisher._is_publishable_path("src/application.py") is True
+
+
+
+def test_workspace_manager_rejects_non_uuid_task_id(tmp_path):
+    manager = GitWorkspaceManager(str(tmp_path / "mirrors"), str(tmp_path / "workspaces"))
+    task = CodingTask(
+        objective="unsafe task id",
+        repository=RepositoryTarget("StrategyG/RusaAi", "main", "feature/aicode/safe"),
+        acceptance_criteria=["must reject path-like task identifiers"],
+        task_id="../other-tenant",
+    )
+    with pytest.raises(ValueError, match="canonical UUID"):
+        manager.create(task, "tenant-a")
