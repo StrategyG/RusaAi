@@ -11,9 +11,9 @@ import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
