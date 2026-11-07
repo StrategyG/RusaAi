@@ -135,9 +135,12 @@ CREATE POLICY devops_outbox_relay_update ON public.devops_event_outbox
     FOR UPDATE TO rusa_relay_runtime USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS devops_inbox_worker_tenant ON public.devops_event_inbox;
-CREATE POLICY devops_inbox_worker_tenant ON public.devops_event_inbox
+CREATE POLICY devops_inbox_worker_insert ON public.devops_event_inbox
     FOR INSERT TO rusa_worker_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+CREATE POLICY devops_inbox_worker_select ON public.devops_event_inbox
+    FOR SELECT TO rusa_worker_runtime
+    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
 -- Runtime roles may append but never mutate or delete canonical event history.
 REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_inbox FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
