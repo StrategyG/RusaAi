@@ -154,7 +154,7 @@ pytest -q
 
 ## AICode Enterprise Coding Agent
 
-RUSA-AI includes an autonomous coding subsystem that operates within tenant-authorized repositories and isolated task branches. It uses a hierarchical master orchestrator with Analyst, Architect, Developer, Debugger, Tester, and Security workers.
+RUSA-AI includes an autonomous coding subsystem that operates within tenant-authorized repositories and isolated task branches. It uses a hierarchical master orchestrator with six role-scoped worker invocations: Analyst, Architect, Developer, Debugger, Tester, and Security. These roles run inside one runtime and may share the configured inference provider and tool gateway; they are not six separately deployed models or microservices.
 
 ### Operating boundaries
 
