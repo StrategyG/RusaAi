@@ -551,8 +551,9 @@ class AICodeRuntime:
                     task,
                     "; ".join(record.errors) or "Human intervention required",
                     {
-                        "branch": task.repository.work_branch,
+                        "branch": task.metadata["publish_branch"],
                         "publish_branch": task.metadata["publish_branch"],
+                        "workspace_branch": task.repository.work_branch,
                         "published": False,
                     },
                 )
@@ -670,6 +671,7 @@ class AICodeRuntime:
                         "pull_request_url": pr_url,
                         "commit_sha": commit_sha,
                         "branch": task.metadata["publish_branch"],
+                        "workspace_branch": task.repository.work_branch,
                     },
                 )
                 outcome = "awaiting_approval"
