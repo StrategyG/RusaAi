@@ -161,3 +161,12 @@ def test_developer_cannot_modify_qa_or_agent_control_plane(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "unsafe = True\n", WorkerRole.DEVELOPER)
+
+
+def test_gateway_marks_unchanged_write_as_noop(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    first = gateway.write_file("src/example.py", "VALUE = 1\n", WorkerRole.DEVELOPER)
+    second = gateway.write_file("src/example.py", "VALUE = 1\n", WorkerRole.DEVELOPER)
+    assert first.evidence["changed"] is True
+    assert second.ok
+    assert second.evidence["changed"] is False
