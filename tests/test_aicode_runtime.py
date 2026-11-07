@@ -402,3 +402,48 @@ def test_worker_polling_recovers_after_transient_database_error(monkeypatch):
     monkeypatch.setattr("rusa_agents.runtime.random.uniform", lambda *_args: 0.0)
     asyncio.run(runtime.run_forever(stop_event=stop_event))
     assert len(calls) == 2
+
+
+
+def test_heartbeat_retries_transient_database_errors(monkeypatch):
+    runtime = object.__new__(AICodeRuntime)
+
+    class FlakyQueue:
+        def __init__(self):
+            self.cancel_checks = 0
+            self.heartbeats = 0
+
+        def is_cancel_requested(self, task_id, tenant_id):
+            self.cancel_checks += 1
+            return self.cancel_checks >= 3
+
+        def heartbeat(self, *args):
+            self.heartbeats += 1
+            if self.heartbeats == 1:
+                raise OSError("temporary connection reset")
+            return True
+
+    runtime.queue = FlakyQueue()
+    runtime.worker_id = "heartbeat-test-worker"
+    job = Job(
+        1,
+        "12345678-1234-4234-8234-123456789abc",
+        "tenant-heartbeat",
+        {"objective": "heartbeat retry"},
+        1,
+        3,
+        runtime.worker_id,
+        "11111111-1111-4111-8111-111111111111",
+    )
+    lost_lease = asyncio.Event()
+    cancel_requested = asyncio.Event()
+
+    async def immediate_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("rusa_agents.runtime.asyncio.sleep", immediate_sleep)
+    asyncio.run(runtime._heartbeat(job, lost_lease, cancel_requested))
+
+    assert runtime.queue.heartbeats == 2
+    assert cancel_requested.is_set()
+    assert not lost_lease.is_set()
