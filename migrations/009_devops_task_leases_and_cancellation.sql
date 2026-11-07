@@ -43,6 +43,10 @@ ALTER TABLE public.devops_tasks
     ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 
 ALTER TABLE public.devops_tasks
+    ADD COLUMN IF NOT EXISTS side_effect TEXT
+        CHECK (side_effect IS NULL OR side_effect IN ('NONE', 'APPLIED', 'UNKNOWN'));
+
+ALTER TABLE public.devops_tasks
     ADD CONSTRAINT devops_tasks_lease_consistency
     CHECK (
         (lease_owner IS NULL AND lease_until IS NULL)
