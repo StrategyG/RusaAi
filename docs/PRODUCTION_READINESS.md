@@ -36,6 +36,29 @@ The optional runtime can load a compatible, externally supplied, locally mounted
 model artifact after manifest verification. Real-model throughput and quality
 remain unmeasured until a specific checkpoint and target hardware are supplied.
 
+## Vulnerability scan interpretation
+
+The production-image CI job runs Trivy with `--ignore-unfixed` and blocks fixable
+CRITICAL/HIGH findings. A passing job does **not** mean that the images contain
+zero known vulnerabilities; it means no fixable CRITICAL/HIGH finding caused the
+gate to fail.
+
+For PR head commit `4536a1105e761a03be4a0d98c1e1ca06da3e6817`, the raw Trivy
+reports showed 0 CRITICAL findings and the following HIGH findings:
+
+| Image | HIGH | CRITICAL |
+|---|---:|---:|
+| API | 51 | 0 |
+| Agent sandbox | 56 | 0 |
+| Worker | 55 | 0 |
+| RAG/MCP | 51 | 0 |
+
+These findings remain open for package-owner and exploitability triage. Do not
+describe these images as vulnerability-free or production-certified. Record
+affected package, CVE, fixed version availability, exposure, mitigation, and
+owner; publish VEX only when there is defensible evidence for a not-affected
+assessment.
+
 ## Release gates still open
 
 | Gate | Evidence required | Status |
