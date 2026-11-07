@@ -34,7 +34,7 @@ The eight lifecycle agents are specialist stage identities, not replacements for
 | workflow_id | run_id | One canonical workflow identifier; never generate a second ID |
 | task_id | task_id | Stable across redelivery |
 | tenant_id | tenant_id | Derived from authenticated context and checked against envelope |
-| attempt | attempt | Redelivery preserves attempt; retry creates new attempt and lease |
+| attempt | attempt | Required on task and result. Redelivery preserves attempt; retry creates a new attempt and lease. A result from an earlier attempt is rejected even when task ID is unchanged |
 | audit.traceparent | traceparent | Propagate W3C trace context |
 | handoff.next_agent | producer/routing metadata | Producer is authenticated sender; recipient derived from validated registry |
 | handoff.event | type + domain event | Must match registered stage/event mapping |
