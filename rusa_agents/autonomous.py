@@ -182,6 +182,11 @@ class AutonomousCodeWorker:
                     if tool_attempt < self.max_tool_retries:
                         transcript.append(f"TOOL RETRY {action['name']} ({tool_attempt + 1}): {result.output[-2000:]}")
                 if result is None or not result.ok:
+                    if action["name"] == "run_check" and result is not None:
+                        profile = action.get("arguments", {}).get("profile", "unknown")
+                        evidence[f"check:{profile}"] = result.evidence or {
+                            "profile": profile, "exit_code": 1, "output": result.output[-2000:]
+                        }
                     transcript.append("TOOL ACTION FAILED; do not claim completion: " + unresolved_tool_failures[action["name"]])
                     continue
                 if action["name"] == "write_file" and result.ok:
