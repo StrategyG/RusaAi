@@ -1,4 +1,6 @@
 import asyncio
+
+import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -459,3 +461,58 @@ def test_orchestrator_requires_a_changed_developer_artifact(tmp_path):
     assert record.state == TaskState.AWAITING_APPROVAL
     assert any("no changed workspace artifacts" in error for error in record.errors)
     assert not any(result.role == WorkerRole.TESTER for result in record.results)
+
+
+def test_orchestrator_rejects_duplicate_worker_roles():
+    with pytest.raises(ValueError, match="duplicate worker roles"):
+        AICodeOrchestrator([StubWorker(WorkerRole.ANALYST), StubWorker(WorkerRole.ANALYST)])
+
+
+def test_orchestrator_rejects_incomplete_or_cyclic_dag(monkeypatch):
+    cyclic = dict(AICodeOrchestrator.EXECUTION_DAG)
+    cyclic[WorkerRole.ANALYST] = (WorkerRole.ARCHITECT,)
+    cyclic[WorkerRole.ARCHITECT] = (WorkerRole.ANALYST,)
+    monkeypatch.setattr(AICodeOrchestrator, "EXECUTION_DAG", cyclic)
+    with pytest.raises(ValueError, match="dependency cycle"):
+        AICodeOrchestrator(workers())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_parallel_workers": 1.5},
+        {"max_parallel_workers": True},
+        {"max_repair_cycles": 1.5},
+        {"max_repair_cycles": True},
+    ],
+)
+def test_orchestrator_rejects_non_integer_execution_budgets(kwargs):
+    with pytest.raises(ValueError):
+        AICodeOrchestrator(workers(), **kwargs)
+
+
+def test_orchestrator_persists_typed_worker_failure(tmp_path):
+    class InfrastructureFailure(StubWorker):
+        async def run(self, task, prior_results):
+            return WorkerResult(
+                role=self.role,
+                summary="workspace I/O unavailable",
+                success=False,
+                blockers=["disk unavailable"],
+                failure_kind="infrastructure",
+            )
+
+    configured = workers()
+    configured[0] = InfrastructureFailure(WorkerRole.ANALYST)
+    memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
+    current_task = task()
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=memory,
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(current_task))
+    stored = memory.get(current_task.task_id, tenant_id="default")
+    assert record.state == TaskState.BLOCKED
+    assert stored["payload"]["results"][0]["failure_kind"] == "infrastructure"
