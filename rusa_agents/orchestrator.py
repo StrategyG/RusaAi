@@ -181,6 +181,7 @@ class AICodeOrchestrator:
                 summary=message,
                 success=False,
                 blockers=[f"{role.value} worker execution failed: {message}"],
+                failure_kind="infrastructure",
             )
         if result.role != role:
             return WorkerResult(
@@ -209,6 +210,19 @@ class AICodeOrchestrator:
                 "manager": manager_name,
                 "success": result.success,
                 "summary": result.summary[:500],
+                "failure_kind": result.failure_kind,
+                "artifact_count": len(result.artifacts),
+                "evidence": {
+                    key: {
+                        "profile": value.get("profile"),
+                        "exit_code": value.get("exit_code"),
+                        "workspace_digest": value.get("workspace_digest"),
+                        "output_digest": value.get("output_digest"),
+                        "execution_id": value.get("execution_id"),
+                    }
+                    for key, value in result.evidence.items()
+                    if isinstance(value, dict)
+                },
             },
         )
         await self._persist(record)
@@ -216,7 +230,12 @@ class AICodeOrchestrator:
     @staticmethod
     def _check_passed(result: WorkerResult, key: str) -> bool:
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        return (
+            isinstance(evidence, dict)
+            and type(evidence.get("exit_code")) is int
+            and evidence.get("exit_code") == 0
+            and evidence.get("profile") in {None, key.removeprefix("check:")}
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
@@ -244,6 +263,29 @@ class AICodeOrchestrator:
                 "Missing mandatory verification evidence: " + ", ".join(missing)
             )
             return None
+        provenance = [
+            worker_result.evidence[key]
+            for worker_result, key in required
+            if isinstance(worker_result.evidence.get(key), dict)
+        ]
+        digests = {
+            item.get("workspace_digest") for item in provenance
+            if item.get("workspace_digest") is not None
+        }
+        task_ids = {
+            item.get("task_id") for item in provenance
+            if item.get("task_id") is not None
+        }
+        attempts = {
+            item.get("attempt") for item in provenance
+            if item.get("attempt") is not None
+        }
+        if len(digests) > 1 or len(task_ids) > 1 or len(attempts) > 1:
+            record.errors.append("Validation evidence provenance does not describe one consistent workspace snapshot.")
+            return False
+        if task_ids and task_ids != {record.task.task_id}:
+            record.errors.append("Validation evidence belongs to a different task.")
+            return False
         failed = [
             key for worker_result, key in required
             if not self._check_passed(worker_result, key)
@@ -399,16 +441,19 @@ class AICodeOrchestrator:
                         await self._record_result(record, result)
 
                     failed_quality_workers = [
-                        result.role.value
-                        for result in quality_results
+                        result for result in quality_results
                         if not result.success or result.blockers
+                    ]
+                    infrastructure_failures = [
+                        result for result in failed_quality_workers
+                        if result.failure_kind == "infrastructure"
                     ]
                     if failed_quality_workers:
                         record.errors.append(
                             "Quality worker execution failed: "
-                            + ", ".join(failed_quality_workers)
+                            + ", ".join(result.role.value for result in failed_quality_workers)
                         )
-                        evidence_result = False
+                        evidence_result = None if infrastructure_failures else False
                     else:
                         evidence_result = self._verify_evidence(record)
 
@@ -431,9 +476,20 @@ class AICodeOrchestrator:
                     )
                     record.transition(TaskState.EXECUTING)
                     await self._persist(record)
+                    repair_context = WorkerResult(
+                        role=WorkerRole.ANALYST,
+                        summary="Latest quality-gate diagnosis: " + "; ".join(record.errors[-12:])[:5000],
+                        success=False,
+                        blockers=list(record.errors[-12:]),
+                        evidence={
+                            result.role.value: result.evidence
+                            for result in quality_results
+                        },
+                        failure_kind="quality_gate",
+                    )
                     await self._run_primary_roles(
                         record,
-                        previous_attempt_results,
+                        previous_attempt_results + [repair_context],
                         semaphore,
                         (WorkerRole.DEVELOPER, WorkerRole.DEBUGGER),
                     )
