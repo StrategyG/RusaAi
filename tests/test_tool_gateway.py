@@ -155,6 +155,11 @@ def test_protected_deployment_paths(tmp_path, path):
         "rusa_agents/tool_gateway.py",
         "rusa_agents/policy.py",
         "rusa_agents/runtime.py",
+        "rusa_agents/config.py",
+        "rusa_agents/providers.py",
+        "llm-project/serve/app.py",
+        "rusa_knowledge/store.py",
+        "rusa_mcp/server.py",
     ],
 )
 def test_developer_cannot_modify_qa_or_agent_control_plane(tmp_path, path):
