@@ -8,9 +8,21 @@ from .contracts import (
     validate_workflow_event,
 )
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
+from .store import (
+    OutboxLeaseLostError,
+    PostgresInbox,
+    PostgresOutboxRelay,
+    PostgresWorkflowStore,
+    WorkflowIdempotencyConflictError,
+)
 
 __all__ = [
     "ContractValidationError",
+    "OutboxLeaseLostError",
+    "PostgresInbox",
+    "PostgresOutboxRelay",
+    "PostgresWorkflowStore",
+    "WorkflowIdempotencyConflictError",
     "DevOpsDryRunOrchestrator",
     "DevOpsDryRunReport",
     "SyntheticDevOpsAgent",
