@@ -4,7 +4,7 @@ import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.git_workspace import GitHubPublisher, GitWorkspaceManager
-from rusa_agents.qa_attestation import digest_snapshot, extract_snapshot_archive
+from rusa_agents.qa_attestation import digest_snapshot, digest_snapshot_archive, extract_snapshot_archive
 
 
 def git(*args, cwd=None):
@@ -377,3 +377,33 @@ def test_candidate_snapshot_rejects_symlink_git_objects(tmp_path):
     publisher = GitHubPublisher(github_token="test-token")
     with pytest.raises(RuntimeError, match="symlinks"):
         publisher.prepare_candidate_snapshot(repository)
+
+
+
+def test_publication_rejects_digest_mismatch_even_when_tree_sha_matches(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("checkout", "-b", "feature/qa-digest", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
+    (repository / "README.md").write_text("tested candidate")
+
+    publisher = GitHubPublisher(github_token="test-token")
+    archive, tree_sha = publisher.prepare_candidate_snapshot(repository)
+    actual_digest = digest_snapshot_archive(archive)
+    assert len(actual_digest) == 64
+
+    with pytest.raises(RuntimeError, match="artifact digest changed"):
+        publisher.commit_and_push(
+            str(repository),
+            "StrategyG/RusaAi",
+            "feature/qa-digest",
+            "must not publish",
+            expected_tree_sha=tree_sha,
+            expected_artifact_digest="f" * 64,
+        )

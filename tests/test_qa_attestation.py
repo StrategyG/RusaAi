@@ -240,3 +240,12 @@ def test_signed_verdict_cannot_claim_pass_when_a_profile_failed():
             key_id="qa-key-1",
             sandbox_image=SANDBOX_IMAGE,
         )
+
+
+
+def test_archive_digest_matches_extracted_snapshot_manifest(tmp_path):
+    from rusa_agents.qa_attestation import digest_snapshot_archive
+
+    archive = make_archive([("src/main.py", b"print('RUSA')", 0o644)])
+    extracted_digest = extract_snapshot_archive(archive, tmp_path / "snapshot")
+    assert digest_snapshot_archive(archive) == extracted_digest

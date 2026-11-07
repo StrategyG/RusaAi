@@ -1,5 +1,7 @@
 """Worker-side verification tests for signed independent QA verdicts."""
 import base64
+import io
+import tarfile
 from datetime import datetime, timedelta, timezone
 
 from cryptography.hazmat.primitives import serialization
@@ -8,10 +10,25 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
-from rusa_agents.qa_attestation import REQUIRED_QA_PROFILES, sign_verdict
+from rusa_agents.qa_attestation import REQUIRED_QA_PROFILES, digest_snapshot_archive, sign_verdict
 from rusa_agents.qa_client import IndependentQAClient, QAAttestationError
 
 SANDBOX_IMAGE = "registry.invalid/rusa-sandbox@sha256:" + "a" * 64
+
+
+def make_archive():
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        info = tarfile.TarInfo("README.md")
+        info.size = len(b"RUSA-AI")
+        info.mode = 0o644
+        archive.addfile(info, io.BytesIO(b"RUSA-AI"))
+    return buffer.getvalue()
+
+
+class FakePublisher:
+    def prepare_candidate_snapshot(self, workspace):
+        return make_archive(), "c" * 40
 
 
 def make_client_and_task():
@@ -21,7 +38,7 @@ def make_client_and_task():
         format=serialization.PublicFormat.Raw,
     )
     client = IndependentQAClient(
-        publisher=object(),
+        publisher=FakePublisher(),
         workspace="/tmp/rusa-qa-client-test",
         service_url="http://qa:8010",
         service_token="qa-service-token-that-is-at-least-32-bytes-long",
@@ -39,7 +56,7 @@ def make_client_and_task():
     return private, client, task
 
 
-def make_envelope(private, *, verdict="PASS", tenant_id="tenant-a", task_id="task-a", expires=None):
+def make_envelope(private, *, verdict="PASS", tenant_id="tenant-a", task_id="task-a", expires=None, artifact_digest=None):
     issued = datetime.now(timezone.utc)
     profiles = {
         profile: {
@@ -55,7 +72,7 @@ def make_envelope(private, *, verdict="PASS", tenant_id="tenant-a", task_id="tas
         "tenant_id": tenant_id,
         "task_id": task_id,
         "git_tree_sha": "c" * 40,
-        "artifact_digest": "d" * 64,
+        "artifact_digest": artifact_digest or digest_snapshot_archive(make_archive()),
         "sandbox_image": SANDBOX_IMAGE,
         "profiles": profiles,
         "verdict": verdict,
@@ -112,4 +129,13 @@ def test_worker_rejects_tampered_signature():
     envelope["payload"]["git_tree_sha"] = "f" * 40
 
     with pytest.raises(QAAttestationError, match="signature"):
+        client.verify_release_verdict(envelope, task)
+
+
+
+def test_worker_rejects_signed_verdict_for_different_artifact_digest():
+    private, client, task = make_client_and_task()
+    envelope = make_envelope(private, artifact_digest="f" * 64)
+
+    with pytest.raises(QAAttestationError, match="artifact digest"):
         client.verify_release_verdict(envelope, task)
