@@ -21,7 +21,7 @@ for the exact commit and checks that ran; it is not a production approval.
 - Offline retrieval evaluation metrics: Recall@K, MRR@K, and NDCG@K.
 - Optional RAG ingestion and hybrid retrieval using PostgreSQL/pgvector, with a
   separate read-only bearer-authenticated MCP server.
-- Separate Python 3.11 CI job for RAG/MCP dependencies and pgvector integration tests.
+- Separate Python 3.12 CI job for RAG/MCP dependencies and pgvector integration tests.
 - Isolated, non-root MCP container image with vulnerability scanning in CI.
 
 ## Verification boundary
