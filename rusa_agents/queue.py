@@ -51,6 +51,11 @@ class PostgresTaskQueue:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     @staticmethod
+    def _set_lock_timeout(conn) -> None:
+        """Bound row-lock waits for latency-sensitive queue control operations."""
+        conn.execute("SET LOCAL lock_timeout = '2s'")
+
+    @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
@@ -400,6 +405,7 @@ class PostgresTaskQueue:
         if not lease_token or not 15 <= lease_seconds <= 3600:
             raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
         with self._connect() as conn:
+            self._set_lock_timeout(conn)
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
@@ -617,6 +623,7 @@ class PostgresTaskQueue:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
+            self._set_lock_timeout(conn)
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 UPDATE aicode_jobs
@@ -637,6 +644,7 @@ class PostgresTaskQueue:
     ) -> bool:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
+            self._set_lock_timeout(conn)
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
