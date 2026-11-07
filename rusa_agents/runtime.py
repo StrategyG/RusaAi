@@ -18,6 +18,7 @@ from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
+from .qa_client import IndependentQAClient
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 
@@ -100,7 +101,7 @@ class AICodeRuntime:
 
     async def _build_orchestrator(
         self, task: CodingTask, tenant_id: str
-    ) -> tuple[AICodeOrchestrator, str]:
+    ) -> tuple[AICodeOrchestrator, str, IndependentQAClient | None]:
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
@@ -115,16 +116,33 @@ class AICodeRuntime:
             AutonomousCodeWorker(role, self.provider, gateway)
             for role in AICodeOrchestrator.PIPELINE
         ]
-        return (
-            AICodeOrchestrator(
-                workers=workers,
-                memory=self.memory,
-                audit=self.audit,
-                max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
-                max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
-            ),
-            str(workspace),
+        qa_client = None
+        if (
+            self.config.qa_service_url
+            and self.config.qa_service_token
+            and self.config.qa_public_key_b64
+            and self.config.qa_key_id
+            and self.config.qa_sandbox_image
+        ):
+            qa_client = IndependentQAClient(
+                publisher=self.publisher,
+                workspace=workspace,
+                service_url=self.config.qa_service_url,
+                service_token=self.config.qa_service_token,
+                public_key_b64=self.config.qa_public_key_b64,
+                key_id=self.config.qa_key_id,
+                sandbox_image=self.config.qa_sandbox_image,
+            )
+        orchestrator = AICodeOrchestrator(
+            workers=workers,
+            memory=self.memory,
+            audit=self.audit,
+            max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
+            max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
+            qa_validator=qa_client,
+            require_independent_qa=self.config.environment == "production",
         )
+        return orchestrator, str(workspace), qa_client
 
     async def _await_with_lease(
         self, operation: Coroutine, lost_lease: asyncio.Event
@@ -248,7 +266,7 @@ class AICodeRuntime:
             if not authorized:
                 lost_lease.set()
                 raise RuntimeError("Worker is not authorized by the current task lease")
-            orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+            orchestrator, workspace, qa_client = await self._build_orchestrator(task, job.tenant_id)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
@@ -276,18 +294,34 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease)
+            def publish_candidate() -> str | None:
+                expected_tree_sha = None
+                if qa_client is not None:
+                    qa_payload = qa_client.verify_release_verdict(
+                        record.qa_verdict,
+                        task,
+                        require_pass=True,
+                    )
+                    expected_tree_sha = qa_payload["git_tree_sha"]
+                elif self.config.environment == "production":
+                    raise RuntimeError(
+                        "Production publication requires a signed independent QA verdict"
+                    )
+                return self.publisher.commit_and_push(
+                    workspace,
+                    task.repository.full_name,
+                    task.repository.work_branch,
+                    f"feat(aicode): {task.objective[:120]}",
+                    expected_tree_sha=expected_tree_sha,
+                )
+
             commit_sha = await asyncio.to_thread(
                 self.queue.publish_if_lease_owned,
                 job.id,
                 job.tenant_id,
                 self.worker_id,
                 job.lease_token,
-                lambda: self.publisher.commit_and_push(
-                    workspace,
-                    task.repository.full_name,
-                    task.repository.work_branch,
-                    f"feat(aicode): {task.objective[:120]}",
-                ),
+                publish_candidate,
                 lease_seconds=900,
             )
             await self._assert_lease(job, lost_lease)
@@ -314,7 +348,22 @@ class AICodeRuntime:
                 "pull_request.created",
                 task.task_id,
                 self.worker_id,
-                {"pull_request_url": pr_url, "commit_sha": commit_sha},
+                {
+                    "pull_request_url": pr_url,
+                    "commit_sha": commit_sha,
+                    "qa_artifact_digest": (
+                        record.qa_verdict.get("payload", {}).get("artifact_digest")
+                        if record.qa_verdict else None
+                    ),
+                    "qa_git_tree_sha": (
+                        record.qa_verdict.get("payload", {}).get("git_tree_sha")
+                        if record.qa_verdict else None
+                    ),
+                    "qa_key_id": (
+                        record.qa_verdict.get("payload", {}).get("key_id")
+                        if record.qa_verdict else None
+                    ),
+                },
                 tenant_id=job.tenant_id,
             )
             ci_timeout = int(os.getenv("RUSA_CI_TIMEOUT_SECONDS", "900"))
