@@ -337,7 +337,7 @@ class AICodeRuntime:
         status_code = getattr(response, "status_code", None)
         if isinstance(status_code, int):
             if status_code == 403:
-                headers = getattr(response, "headers", {})
+                headers = getattr(response, "headers", None) or {}
                 return str(headers.get("X-RateLimit-Remaining", "")) == "0"
             return status_code in {408, 425, 429, 500, 502, 503, 504}
         return not isinstance(exc, (PermissionError, ValueError, TypeError))
