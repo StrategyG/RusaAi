@@ -133,6 +133,11 @@ def test_cancel_racing_with_successful_completion_is_linearizable():
             cancel_result = cancelled.result()
             complete_result = completed.result()
 
+        if cancel_result:
+            assert not complete_result
+            assert queue.mark_cancelled(
+                job.id, tenant, "cancel-race-worker", job.lease_token
+            )
         current = queue.get(task_id, tenant)
         assert current is not None
         assert current["status"] in {"cancelled", "succeeded"}
@@ -255,4 +260,94 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
         assert replacement and replacement[0] != lease_token
     finally:
         release_publish.set()
+        remove_task(task_id, tenant)
+
+
+
+def test_cancel_does_not_wait_for_git_publication_row_lock():
+    queue = make_queue()
+    tenant = f"queue-cancel-publish-{uuid4().hex}"
+    task_id = str(uuid4())
+    publishing = Event()
+    release_publish = Event()
+
+    def bounded_publish() -> str:
+        publishing.set()
+        if not release_publish.wait(timeout=10):
+            raise TimeoutError("test publisher was not released")
+        return "b" * 40
+
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "cancel while publishing"})
+        job = queue.claim("cancel-publish-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publication = pool.submit(
+                queue.publish_if_lease_owned,
+                job.id,
+                tenant,
+                "cancel-publish-worker",
+                job.lease_token,
+                bounded_publish,
+                lease_seconds=900,
+            )
+            assert publishing.wait(timeout=5)
+
+            # Cancellation must only lock the independent control row. It must not
+            # wait for the job row lock held across the in-flight Git push.
+            cancellation = pool.submit(queue.cancel, task_id, tenant)
+            assert cancellation.result(timeout=2) is True
+            assert queue.is_cancel_requested(task_id, tenant)
+
+            release_publish.set()
+            assert publication.result(timeout=10) == "b" * 40
+
+        assert queue.mark_cancelled(
+            job.id,
+            tenant,
+            "cancel-publish-worker",
+            job.lease_token,
+            {"side_effects": {"git_publication": "reconciliation_required"}},
+        )
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["result"]["side_effects"]["git_publication"] == "reconciliation_required"
+    finally:
+        release_publish.set()
+        remove_task(task_id, tenant)
+
+
+def test_manual_retry_budget_is_bounded_across_retry_cycles():
+    queue = make_queue()
+    tenant = f"queue-manual-retry-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "bounded operator retry"},
+            max_attempts=1,
+            priority=2**31 - 1,
+        )
+        for cycle in range(4):
+            job = queue.claim(f"manual-retry-worker-{cycle}", lease_seconds=30)
+            assert job and job.task_id == task_id
+            assert queue.fail(
+                job.id,
+                tenant,
+                job.lease_owner,
+                job.lease_token,
+                "permanent test failure",
+                retryable=False,
+            )
+            if cycle < 3:
+                assert queue.retry(task_id, tenant)
+            else:
+                assert not queue.retry(task_id, tenant)
+
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "failed"
+        assert current["attempts"] == 1
+    finally:
         remove_task(task_id, tenant)
