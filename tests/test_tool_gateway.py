@@ -150,7 +150,7 @@ def test_protected_deployment_paths(tmp_path, path):
 @pytest.mark.parametrize(
     "path",
     [
-        "tests/test_security.py",
+        "tests/test_tool_gateway.py",
         "rusa_agents/orchestrator.py",
         "rusa_agents/tool_gateway.py",
         "rusa_agents/policy.py",
@@ -158,6 +158,10 @@ def test_protected_deployment_paths(tmp_path, path):
     ],
 )
 def test_developer_cannot_modify_qa_or_agent_control_plane(tmp_path, path):
+    if path.startswith("tests/"):
+        baseline = tmp_path / path
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("# protected QA baseline\\n")
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "unsafe = True\n", WorkerRole.DEVELOPER)
@@ -170,3 +174,12 @@ def test_gateway_marks_unchanged_write_as_noop(tmp_path):
     assert first.evidence["changed"] is True
     assert second.ok
     assert second.evidence["changed"] is False
+
+
+def test_developer_can_add_new_qa_test_file(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    result = gateway.write_file(
+        "tests/test_new_feature.py", "def test_new_feature():\\n    assert True\\n", WorkerRole.DEVELOPER
+    )
+    assert result.ok
+    assert (tmp_path / "tests" / "test_new_feature.py").is_file()
