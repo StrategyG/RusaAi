@@ -166,23 +166,27 @@ class GitWorkspaceManager:
             raise ValueError("Workspace path escaped configured root")
         workspace.parent.mkdir(parents=True, exist_ok=True)
         if workspace.exists():
-            current = self._run(["git", "-C", str(workspace), "branch", "--show-current"])
-            if current.returncode == 0 and current.stdout.strip() == branch:
+            inside = self._run(["git", "-C", str(workspace), "rev-parse", "--is-inside-work-tree"])
+            remote = self._run(["git", "-C", str(workspace), "remote", "get-url", "origin"])
+            if (
+                inside.returncode == 0
+                and inside.stdout.strip() == "true"
+                and remote.returncode == 0
+            ):
+                GitHubPublisher.validate_origin_url(remote.stdout, task.repository.full_name)
                 return workspace
-            raise FileExistsError("Task workspace exists but is not on the expected branch")
+            raise FileExistsError("Task workspace exists but is not a valid worktree for the authorized repository")
 
         existing_branch = self._run([
             "git", "--git-dir", str(mirror), "show-ref", "--verify",
             f"refs/heads/{branch}",
         ])
+        start_point = branch if existing_branch.returncode == 0 else task.repository.base_branch
         command = [
             "git", "-c", "core.hooksPath=/dev/null",
-            "--git-dir", str(mirror), "worktree", "add",
+            "--git-dir", str(mirror), "worktree", "add", "--detach",
+            str(workspace), start_point,
         ]
-        if existing_branch.returncode == 0:
-            command.extend([str(workspace), branch])
-        else:
-            command.extend(["-b", branch, str(workspace), task.repository.base_branch])
         created = self._run(command)
         if created.returncode:
             raise RuntimeError(f"Could not create feature worktree: {created.stderr[-3000:]}")
@@ -200,9 +204,9 @@ class GitWorkspaceManager:
             raise ValueError("Cleanup path escaped configured roots")
         if not workspace.exists():
             return
-        current = self._run(["git", "-C", str(workspace), "branch", "--show-current"])
-        if current.returncode or current.stdout.strip() != task.repository.work_branch:
-            raise RuntimeError("Refusing to clean a workspace on an unexpected branch")
+        symbolic_head = self._run(["git", "-C", str(workspace), "symbolic-ref", "-q", "HEAD"])
+        if symbolic_head.returncode == 0:
+            raise RuntimeError("Refusing to clean a workspace that is not detached")
         removed = self._run([
             "git", "--git-dir", str(mirror), "worktree", "remove", "--force", str(workspace)
         ])
@@ -332,9 +336,9 @@ class GitHubPublisher:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
             raise ValueError("Publishing is restricted to task feature branches")
-        current = self._run(["git", "branch", "--show-current"], str(root))
-        if current.returncode or current.stdout.strip() != branch:
-            raise RuntimeError("Workspace branch does not match the task branch")
+        top_level = self._run(["git", "rev-parse", "--show-toplevel"], str(root))
+        if top_level.returncode or Path(top_level.stdout.strip()).resolve() != root:
+            raise RuntimeError("Workspace is not the expected Git worktree")
         remote = self._run(["git", "remote", "get-url", "origin"], str(root))
         if remote.returncode:
             raise RuntimeError("Origin remote is unavailable")
