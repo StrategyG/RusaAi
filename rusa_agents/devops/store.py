@@ -140,7 +140,11 @@ class PostgresWorkflowStore:
             raise ValueError("event tenant_id does not match authenticated tenant")
         if destination not in {"commands", "events"}:
             raise ValueError("destination must be commands or events")
-        if isinstance(aggregate_version, bool) or not isinstance(aggregate_version, int) or aggregate_version < 1:
+        if (
+            isinstance(aggregate_version, bool)
+            or not isinstance(aggregate_version, int)
+            or aggregate_version < 1
+        ):
             raise ValueError("aggregate_version must be a positive integer")
         self._set_tenant(conn, tenant_id)
         conn.execute(
