@@ -618,10 +618,31 @@ async def _serve_from_environment() -> None:
             raise RuntimeError(f"{name} must point to a mounted PEM file")
         return Path(path).read_bytes()
 
-    api_dsn = os.getenv("RUSA_API_DATABASE_URL")
-    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL")
-    if not api_dsn or not worker_dsn:
-        raise RuntimeError("RUSA_API_DATABASE_URL and RUSA_WORKER_DATABASE_URL are required")
+    profile = os.getenv("RUSA_GRPC_PROFILE", "combined").strip().lower()
+    if profile == "orchestrator":
+        principal_methods = {
+            principal: methods
+            for principal, methods in DEFAULT_PRINCIPAL_METHODS.items()
+            if principal not in STAGE_AGENT_IDS
+        }
+    elif profile == "workers":
+        principal_methods = {
+            principal: DEFAULT_PRINCIPAL_METHODS[principal]
+            for principal in STAGE_AGENT_IDS
+        }
+    elif profile == "combined":
+        principal_methods = DEFAULT_PRINCIPAL_METHODS
+    else:
+        raise RuntimeError("RUSA_GRPC_PROFILE must be orchestrator, workers, or combined")
+
+    api_dsn = os.getenv("RUSA_API_DATABASE_URL") or None
+    worker_dsn = os.getenv("RUSA_WORKER_DATABASE_URL") or None
+    if profile == "orchestrator" and not api_dsn:
+        raise RuntimeError("orchestrator gRPC profile requires RUSA_API_DATABASE_URL")
+    if profile == "workers" and not worker_dsn:
+        raise RuntimeError("worker gRPC profile requires RUSA_WORKER_DATABASE_URL")
+    if profile == "combined" and (not api_dsn or not worker_dsn):
+        raise RuntimeError("combined gRPC profile requires both scoped database DSNs")
     store = PostgresWorkflowControlStore(
         api_dsn=api_dsn,
         worker_dsn=worker_dsn,
@@ -629,7 +650,8 @@ async def _serve_from_environment() -> None:
         statement_timeout_ms=int(os.getenv("RUSA_GRPC_STATEMENT_TIMEOUT_MS", "2000")),
     )
     resolver = SpiffeIdentityResolver(
-        trust_domain=os.getenv("RUSA_GRPC_TRUST_DOMAIN", "rusa.ai")
+        trust_domain=os.getenv("RUSA_GRPC_TRUST_DOMAIN", "rusa.ai"),
+        principal_methods=principal_methods,
     )
     servicer = WorkflowControlServicer(
         store=store,
