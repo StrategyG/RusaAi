@@ -1,20 +1,15 @@
-import importlib.util
-import sys
+import runpy
 from pathlib import Path
 
 import pytest
 
 
 BLUEPRINT_PATH = Path(__file__).resolve().parents[1] / "llm-project" / "model" / "blueprint.py"
-SPEC = importlib.util.spec_from_file_location("rusa_model_blueprint", BLUEPRINT_PATH)
-assert SPEC is not None and SPEC.loader is not None
-BLUEPRINT = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = BLUEPRINT
-SPEC.loader.exec_module(BLUEPRINT)
+BLUEPRINT = runpy.run_path(str(BLUEPRINT_PATH))
 
 
 def test_default_blueprint_does_not_claim_unverified_model_capabilities():
-    blueprint = BLUEPRINT.ProjectBlueprint()
+    blueprint = BLUEPRINT["ProjectBlueprint"]()
     blueprint.validate()
 
     assert blueprint.status == "PLANNED"
@@ -29,14 +24,14 @@ def test_default_blueprint_does_not_claim_unverified_model_capabilities():
 
 
 def test_blueprint_rejects_inconsistent_attention_dimensions():
-    blueprint = BLUEPRINT.ProjectBlueprint(
-        model=BLUEPRINT.ModelSpec(hidden_size=100, attention_heads=3)
+    blueprint = BLUEPRINT["ProjectBlueprint"](
+        model=BLUEPRINT["ModelSpec"](hidden_size=100, attention_heads=3)
     )
     with pytest.raises(ValueError, match="divisible"):
         blueprint.validate()
 
 
 def test_blueprint_cannot_claim_verified_without_artifact_evidence():
-    blueprint = BLUEPRINT.ProjectBlueprint(status="VERIFIED")
+    blueprint = BLUEPRINT["ProjectBlueprint"](status="VERIFIED")
     with pytest.raises(ValueError, match="artifact and evaluation evidence"):
         blueprint.validate()
