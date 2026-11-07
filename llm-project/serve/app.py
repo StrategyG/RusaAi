@@ -844,7 +844,8 @@ def create_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
-    work_branch_prefix = f"feature/aicode/{task_id[:12]}"
+    tenant_suffix = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:12]
+    work_branch_prefix = f"feature/aicode/{tenant_suffix}-{task_id}"
     payload = {
         "objective": request.objective,
         "context": request.context,
@@ -864,7 +865,7 @@ def create_aicode_task(
                 idempotency_key,
                 audit_actor=_api_task_actor(http_request),
             )
-            work_branch_prefix = f"feature/aicode/{task_id[:12]}"
+            work_branch_prefix = f"feature/aicode/{tenant_suffix}-{task_id}"
             accepted = True
         else:
             created = queue.enqueue(
