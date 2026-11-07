@@ -51,14 +51,14 @@
             "type": "object",
             "required": [
               "negative_cases",
-              "cross_tenant_reads",
-              "cross_tenant_writes",
+              "unauthorized_cross_tenant_reads",
+              "unauthorized_cross_tenant_writes",
               "unauthorized_accesses"
             ],
             "properties": {
               "negative_cases": { "type": "integer", "minimum": 0 },
-              "cross_tenant_reads": { "type": "integer", "minimum": 0 },
-              "cross_tenant_writes": { "type": "integer", "minimum": 0 },
+              "unauthorized_cross_tenant_reads": { "type": "integer", "minimum": 0 },
+              "unauthorized_cross_tenant_writes": { "type": "integer", "minimum": 0 },
               "unauthorized_accesses": { "type": "integer", "minimum": 0 }
             }
           }],
