@@ -5,8 +5,9 @@ import stat
 import tarfile
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from cryptography.hazmat.primitives import serialization
+
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from rusa_agents.qa_attestation import (
@@ -139,7 +140,7 @@ def test_snapshot_rejects_symbolic_links(tmp_path):
 def test_snapshot_enforces_file_and_total_size_limits(tmp_path):
     archive = make_archive([("large.bin", b"x" * 20, 0o644)])
 
-    with pytest.raises(SnapshotError, match="file size"):
+    with pytest.raises(SnapshotError, match="file exceeds"):
         extract_snapshot_archive(
             archive,
             tmp_path / "snapshot-file-limit",

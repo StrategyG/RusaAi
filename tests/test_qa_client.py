@@ -2,8 +2,9 @@
 import base64
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from cryptography.hazmat.primitives import serialization
+
+import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget

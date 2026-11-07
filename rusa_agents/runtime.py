@@ -294,6 +294,7 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease)
+
             def publish_candidate() -> str | None:
                 expected_tree_sha = None
                 if qa_client is not None:

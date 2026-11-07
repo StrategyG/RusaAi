@@ -135,6 +135,7 @@ class QAService:
                 if (
                     type(exit_code) is not int
                     or evidence.get("profile") != profile
+                    or evidence.get("image") != self.sandbox.image
                     or (not result.ok and exit_code == 0)
                 ):
                     exit_code = 127

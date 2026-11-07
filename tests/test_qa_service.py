@@ -5,8 +5,9 @@ import io
 import tarfile
 from pathlib import Path
 
-import httpx
 from cryptography.hazmat.primitives import serialization
+
+import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from rusa_agents.qa_attestation import (

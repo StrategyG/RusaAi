@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
@@ -466,6 +467,9 @@ class AICodeOrchestrator:
                                         "git_tree_sha": payload.get("git_tree_sha"),
                                         "artifact_digest": payload.get("artifact_digest"),
                                         "profile_exit_codes": profile_codes,
+                                        "signature_sha256": hashlib.sha256(
+                                            envelope["signature"].encode("ascii")
+                                        ).hexdigest(),
                                     },
                                 )
                                 if payload.get("verdict") == "PASS":
