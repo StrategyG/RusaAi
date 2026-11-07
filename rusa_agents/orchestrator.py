@@ -150,6 +150,7 @@ class AICodeOrchestrator:
                     "artifacts": result.artifacts,
                     "evidence": result.evidence,
                     "blockers": result.blockers,
+                    "failure_kind": result.failure_kind,
                 }
                 for result in record.results
             ],
@@ -242,6 +243,15 @@ class AICodeOrchestrator:
                         "workspace_digest": value.get("workspace_digest"),
                         "output_digest": value.get("output_digest"),
                         "execution_id": value.get("execution_id"),
+                        "task_id": value.get("task_id"),
+                        "attempt": value.get("attempt"),
+                        "worker_role": value.get("worker_role"),
+                        "started_at": value.get("started_at"),
+                        "completed_at": value.get("completed_at"),
+                        "duration_seconds": value.get("duration_seconds"),
+                        "image": value.get("image"),
+                        "snapshot_bytes": value.get("snapshot_bytes"),
+                        "error": value.get("error"),
                     }
                     for key, value in result.evidence.items()
                     if isinstance(value, dict)
@@ -435,6 +445,11 @@ class AICodeOrchestrator:
                                 artifacts=list(item.get("artifacts", []))[:100],
                                 evidence=dict(item.get("evidence", {})),
                                 blockers=list(item.get("blockers", []))[:30],
+                                failure_kind=(
+                                    item.get("failure_kind")
+                                    if isinstance(item.get("failure_kind"), str)
+                                    else None
+                                ),
                             )
                         )
                     except (KeyError, TypeError, ValueError):
