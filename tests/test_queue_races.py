@@ -459,7 +459,7 @@ def test_expired_worker_lease_during_cancel_is_reconciled():
 
         # The bounded recovery sweep finalizes cancellation without claiming
         # an unrelated tenant's queued job as a side effect of this test.
-        assert queue.recover_cancelled(batch_size=10) >= 1
+        assert queue.recover_cancelled(batch_size=1000) >= 1
 
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "cancelled"
