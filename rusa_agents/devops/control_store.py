@@ -1215,7 +1215,7 @@ class PostgresWorkflowControlStore:
             )
             tasks = conn.execute(
                 """
-                SELECT task_id, attempt, state_version, status, lease_owner
+                SELECT task_id, attempt, state_version, status, lease_owner, lease_until
                 FROM public.devops_tasks
                 WHERE tenant_id=%s AND run_id=%s
                   AND status IN ('queued','accepted','running','validating','needs_approval')
@@ -1225,9 +1225,16 @@ class PostgresWorkflowControlStore:
                 (tenant_id, run_id),
             ).fetchall()
             active_leases = 0
-            for task_id, attempt, old_version, old_status, lease_owner in tasks:
+            reconciliation_required = False
+            now = datetime.now(timezone.utc)
+            for task_id, attempt, old_version, old_status, lease_owner, old_lease_until in tasks:
                 new_task_version = old_version + 1
-                has_worker = old_status != "queued" and lease_owner is not None
+                has_worker = (
+                    old_status != "queued"
+                    and lease_owner is not None
+                    and _as_utc(old_lease_until) is not None
+                    and _as_utc(old_lease_until) > now
+                )
                 if has_worker:
                     active_leases += 1
                     conn.execute(
@@ -1262,7 +1269,7 @@ class PostgresWorkflowControlStore:
                         destination="commands",
                         aggregate_version=new_task_version,
                     )
-                else:
+                elif old_status in {"queued", "needs_approval"}:
                     conn.execute(
                         """
                         UPDATE public.devops_tasks
@@ -1297,8 +1304,45 @@ class PostgresWorkflowControlStore:
                         destination="events",
                         aggregate_version=new_task_version,
                     )
+                else:
+                    reconciliation_required = True
+                    conn.execute(
+                        """
+                        UPDATE public.devops_tasks
+                        SET status='cancel_requested', state_version=%s,
+                            side_effect='UNKNOWN', lease_owner=NULL, lease_until=NULL,
+                            updated_at=clock_timestamp()
+                        WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                        """,
+                        (new_task_version, tenant_id, run_id, task_id),
+                    )
+                    correlation_id, _ = self._event_context(
+                        conn, tenant_id, run_id, task_id
+                    )
+                    audit_event = self._event(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=attempt,
+                        event_type="audit.recorded",
+                        payload={
+                            "action": "task.cancel.reconciliation_required",
+                            "outcome": "pending",
+                            "resource_ref": f"task://{task_id}/{attempt}",
+                            "state_version": new_task_version,
+                        },
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                    )
+                    self._append_event(
+                        conn,
+                        tenant_id=tenant_id,
+                        event=audit_event,
+                        destination="events",
+                        aggregate_version=new_task_version,
+                    )
 
-            if active_leases == 0:
+            if active_leases == 0 and not reconciliation_required:
                 run_version += 1
                 conn.execute(
                     """
@@ -1320,6 +1364,15 @@ class PostgresWorkflowControlStore:
                 status = "cancelled"
             else:
                 status = "cancel_requested"
+            if reconciliation_required:
+                conn.execute(
+                    """
+                    UPDATE public.devops_run_cancellations
+                    SET status='reconciliation_required'
+                    WHERE tenant_id=%s AND run_id=%s AND status='requested'
+                    """,
+                    (tenant_id, run_id),
+                )
             return {
                 "accepted": True,
                 "status": status,
