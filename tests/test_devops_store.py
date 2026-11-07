@@ -283,3 +283,67 @@ def test_task_and_outbox_foreign_keys_prevent_cross_tenant_run_linkage():
     finally:
         _cleanup(tenant_id)
 
+def test_append_outbox_event_shares_the_callers_transaction():
+    tenant_id = f"test-{uuid4()}"
+    store = PostgresWorkflowStore(DSN)
+    initial = _event(tenant_id)
+    try:
+        run_id, _ = store.submit_workflow(
+            tenant_id=tenant_id,
+            idempotency_key="shared-transaction",
+            request={"objective": "atomic-state-and-event"},
+            initial_event=initial,
+        )
+        progress = _event(tenant_id, run_id)
+        progress["task_id"] = initial["task_id"]
+        progress["type"] = "task.progress"
+        progress["payload"] = {
+            "lease_epoch": 1,
+            "state_version": 2,
+            "percent": 50,
+            "stage": "code",
+        }
+
+        with pytest.raises(RuntimeError, match="force transaction rollback"):
+            with store._connect() as conn:
+                store._set_tenant(conn, tenant_id)
+                conn.execute(
+                    """
+                    UPDATE public.devops_workflows
+                    SET status='running', state_version=state_version + 1
+                    WHERE tenant_id=%s AND run_id=%s
+                    """,
+                    (tenant_id, run_id),
+                )
+                store.append_outbox_event(
+                    conn=conn,
+                    tenant_id=tenant_id,
+                    event=progress,
+                    destination="events",
+                    aggregate_version=2,
+                )
+                raise RuntimeError("force transaction rollback")
+
+        with store._connect() as conn:
+            store._set_tenant(conn, tenant_id)
+            status, state_version = conn.execute(
+                """
+                SELECT status, state_version
+                FROM public.devops_workflows
+                WHERE tenant_id=%s AND run_id=%s
+                """,
+                (tenant_id, run_id),
+            ).fetchone()
+            outbox_count = conn.execute(
+                """
+                SELECT count(*) FROM public.devops_event_outbox
+                WHERE tenant_id=%s AND run_id=%s
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+        assert status == "queued"
+        assert state_version == 1
+        assert outbox_count == 1
+    finally:
+        _cleanup(tenant_id)
+
