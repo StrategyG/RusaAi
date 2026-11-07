@@ -30,9 +30,14 @@ BLOCKED_WRITE_NAMES = {
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
+    "policy.py", "orchestrator.py", "tool_gateway.py", "git_workspace.py",
+    "runtime.py", "config.py", "qa_service.py", "qa_client.py", "qa_attestation.py",
+    "dockerfile.worker", "dockerfile.agent-sandbox",
+    "docker-compose.production.yml", "docker-compose.production.rag-mcp.yml",
 }
 BLOCKED_WRITE_PREFIXES = (
-    ".github/", "migrations/", "schemas/", "llm-project/configs/",
+    ".github/", "migrations/", "schemas/", "tests/qa_contract/", "scripts/deploy/",
+    "llm-project/configs/",
     "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
     "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
 )
