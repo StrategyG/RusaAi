@@ -134,6 +134,13 @@ def _production_database_dsn_errors(dsn: str) -> list[str]:
         errors.append("Sandbox executor database DSN must not contain placeholder host/password values")
     if parse_qs(parsed.query).get("sslmode", [""])[-1] != "verify-full":
         errors.append("Sandbox executor database DSN must use sslmode=verify-full")
+    root_cert = parse_qs(parsed.query).get("sslrootcert", [""])[-1]
+    if (
+        not root_cert
+        or not Path(root_cert).is_absolute()
+        or not Path(root_cert).is_file()
+    ):
+        errors.append("Sandbox executor database DSN must reference a mounted sslrootcert file")
     return errors
 
 

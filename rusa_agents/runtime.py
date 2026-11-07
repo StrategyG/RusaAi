@@ -13,8 +13,8 @@ from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
-from .github_auth import GitHubAppTokenProvider
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
+from .github_auth import GitHubAppTokenProvider
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator

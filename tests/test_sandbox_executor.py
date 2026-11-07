@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from rusa_agents.sandbox_executor import (
     SandboxRunRequest,
+    _production_database_dsn_errors,
     _validate_workspace,
     _workspace_for_lease,
     create_app,
@@ -178,3 +179,19 @@ def test_executor_rejects_unknown_profile_and_extra_request_fields(tmp_path, mon
         )
     assert bad_profile.status_code == 422
     assert extra_field.status_code == 422
+
+
+
+def test_production_database_dsn_requires_existing_root_ca_file(tmp_path):
+    ca_file = tmp_path / "postgres-ca.crt"
+    ca_file.write_text("test CA")
+    base = "postgresql://rusa_sandbox_login:p%40ssword123@db.internal/rusa?sslmode=verify-full"
+    assert _production_database_dsn_errors(base) == [
+        "Sandbox executor database DSN must reference a mounted sslrootcert file"
+    ]
+    verified = base + f"&sslrootcert={ca_file}"
+    assert _production_database_dsn_errors(verified) == []
+    missing = base + f"&sslrootcert={tmp_path / 'missing.crt'}"
+    assert _production_database_dsn_errors(missing) == [
+        "Sandbox executor database DSN must reference a mounted sslrootcert file"
+    ]

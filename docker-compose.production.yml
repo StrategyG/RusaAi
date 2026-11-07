@@ -144,6 +144,7 @@ services:
       - ${RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE:?Set executor TLS certificate}:/run/secrets/server.crt:ro
       - ${RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE:?Set executor TLS private key}:/run/secrets/server.key:ro
       - ${RUSA_SANDBOX_EXECUTOR_CA_FILE:?Set executor CA certificate}:/run/secrets/sandbox-executor-ca.crt:ro
+      - ${RUSA_SANDBOX_EXECUTOR_DATABASE_CA_FILE:?Set PostgreSQL CA certificate}:/run/secrets/postgres-ca.crt:ro
     group_add:
       - "${RUSA_DOCKER_GID:?Set the rootless Docker socket GID}"
     expose:

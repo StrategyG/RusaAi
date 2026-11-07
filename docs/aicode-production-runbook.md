@@ -41,7 +41,7 @@ CREATE ROLE rusa_sandbox_login LOGIN PASSWORD 'sandbox-managed-secret' IN ROLE r
 GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login, rusa_sandbox_login;
 ```
 
-Use `rusa_api_login` only in `RUSA_API_DATABASE_URL`, `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, and `rusa_sandbox_login` only in `RUSA_SANDBOX_EXECUTOR_DATABASE_URL`, all with `sslmode=verify-full`. The API container must not receive worker or sandbox DSNs. The worker must not receive the API or sandbox DSN, tenant API keys, or executor private key. The sandbox executor must not receive the worker DSN, GitHub App private key or installation map, model key, or audit HMAC key. Never use the schema owner or a PostgreSQL superuser in application containers.
+Use `rusa_api_login` only in `RUSA_API_DATABASE_URL`, `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, and `rusa_sandbox_login` only in `RUSA_SANDBOX_EXECUTOR_DATABASE_URL`, all with `sslmode=verify-full`. The API container must not receive worker or sandbox DSNs. The worker must not receive the API or sandbox DSN, tenant API keys, or executor private key. The sandbox executor receives only the read-only lease-verifier DSN and its database CA certificate; it must not receive the worker DSN, GitHub App private key or installation map, model key, or audit HMAC key. Never use the schema owner or a PostgreSQL superuser in application containers.
 
 Runtime permissions:
 - API role: tenant-scoped SELECT, INSERT, UPDATE on jobs; tenant-scoped rate-limit maintenance.

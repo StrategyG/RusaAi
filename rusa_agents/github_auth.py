@@ -91,7 +91,7 @@ class GitHubAppTokenProvider:
     def from_env(
         cls,
         tenant_repositories: dict[str, list[str]],
-    ) -> "GitHubAppTokenProvider":
+    ) -> GitHubAppTokenProvider:
         raw_app_id = os.getenv("RUSA_GITHUB_APP_ID", "")
         try:
             app_id = int(raw_app_id)

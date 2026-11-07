@@ -460,6 +460,7 @@ class GitHubPublisher:
         tenant_id: str = "default",
     ) -> str:
         import asyncio
+
         import httpx
 
         token = await asyncio.to_thread(self._token_for, tenant_id, repository)

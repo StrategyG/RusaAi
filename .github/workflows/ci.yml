@@ -205,7 +205,8 @@ jobs:
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_SANDBOX_EXECUTOR_URL: https://sandbox-executor:9101
           RUSA_SANDBOX_EXECUTOR_TOKEN: ci-only-sandbox-executor-token-12345678901234567890
-          RUSA_SANDBOX_EXECUTOR_DATABASE_URL: postgresql://rusa_sandbox_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_SANDBOX_EXECUTOR_DATABASE_URL: "postgresql://rusa_sandbox_login:secret@db.internal/rusa?sslmode=verify-full&sslrootcert=/run/secrets/postgres-ca.crt"
+          RUSA_SANDBOX_EXECUTOR_DATABASE_CA_FILE: /tmp/postgres-ca.crt
           RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE: /run/secrets/sandbox-executor.crt
           RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE: /run/secrets/sandbox-executor.key
           RUSA_SANDBOX_EXECUTOR_CA_FILE: /run/secrets/sandbox-executor-ca.crt
