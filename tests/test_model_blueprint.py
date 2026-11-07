@@ -34,3 +34,9 @@ def test_blueprint_cannot_claim_verified_without_artifact_evidence():
     blueprint = BLUEPRINT["ProjectBlueprint"](status="VERIFIED")
     with pytest.raises(ValueError, match="artifact and evaluation evidence"):
         blueprint.validate()
+
+
+def test_blueprint_cannot_claim_implementation_without_evidence():
+    blueprint = BLUEPRINT["ProjectBlueprint"](status="IMPLEMENTED")
+    with pytest.raises(ValueError, match="versioned model artifact and evaluation evidence"):
+        blueprint.validate()
