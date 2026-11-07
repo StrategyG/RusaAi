@@ -61,7 +61,8 @@ def _suite_stats(cases: list[ET.Element], suite_path: str) -> dict[str, int | st
         identity = " ".join(
             [case.get("file", ""), case.get("classname", ""), case.get("name", "")]
         ).replace("\\", "/").lower()
-        if target in identity or Path(target).name in identity:
+        module_stem = Path(target).stem
+        if target in identity or Path(target).name in identity or module_stem in identity:
             selected.append(case)
 
     skipped = sum(case.find("skipped") is not None for case in selected)
