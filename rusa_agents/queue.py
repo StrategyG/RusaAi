@@ -1062,8 +1062,26 @@ class PostgresTaskQueue:
                 conn.execute(
                     """
                     UPDATE public.aicode_jobs
-                    SET status='cancelled', lease_owner=NULL, lease_until=NULL,
-                        lease_token=NULL, updated_at=NOW()
+                    SET status='cancelled',
+                        result=CASE
+                            WHEN status='awaiting_approval'
+                                 AND result IS NOT NULL
+                                 AND result ? 'pull_request_url'
+                            THEN result || jsonb_build_object(
+                                'side_effects', jsonb_build_object(
+                                    'git_publication', 'completed',
+                                    'pull_request_creation', 'completed',
+                                    'pull_request_cleanup', 'reconciliation_required'
+                                ),
+                                'cancellation_reconciliation', jsonb_build_object(
+                                    'required', true,
+                                    'reason', 'approval_paused_task_cancelled'
+                                )
+                            )
+                            ELSE result
+                        END,
+                        lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                        updated_at=NOW()
                     WHERE tenant_id=%s AND task_id=%s
                       AND status IN ('queued', 'awaiting_approval')
                     """,
