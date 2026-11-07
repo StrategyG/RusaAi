@@ -145,3 +145,19 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_security.py",
+        "rusa_agents/orchestrator.py",
+        "rusa_agents/tool_gateway.py",
+        "rusa_agents/policy.py",
+        "rusa_agents/runtime.py",
+    ],
+)
+def test_developer_cannot_modify_qa_or_agent_control_plane(tmp_path, path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.write_file(path, "unsafe = True\n", WorkerRole.DEVELOPER)
