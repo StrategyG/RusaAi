@@ -24,14 +24,15 @@ CREATE TABLE IF NOT EXISTS public.devops_workflows (
     result_ref TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE (tenant_id, idempotency_key)
+    UNIQUE (tenant_id, idempotency_key),
+    UNIQUE (tenant_id, run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_devops_workflows_tenant_created
     ON public.devops_workflows(tenant_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.devops_tasks (
     task_id UUID PRIMARY KEY,
-    run_id UUID NOT NULL REFERENCES public.devops_workflows(run_id),
+    run_id UUID NOT NULL,
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
     agent_id TEXT NOT NULL CHECK (length(agent_id) BETWEEN 1 AND 128),
     stage TEXT NOT NULL CHECK (length(stage) BETWEEN 1 AND 64),
@@ -47,7 +48,9 @@ CREATE TABLE IF NOT EXISTS public.devops_tasks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     UNIQUE (tenant_id, task_id),
-    UNIQUE (tenant_id, run_id, task_id, attempt)
+    UNIQUE (tenant_id, run_id, task_id, attempt),
+    FOREIGN KEY (tenant_id, run_id)
+        REFERENCES public.devops_workflows(tenant_id, run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_devops_tasks_run
     ON public.devops_tasks(tenant_id, run_id, created_at);
@@ -76,7 +79,9 @@ CREATE TABLE IF NOT EXISTS public.devops_event_outbox (
     CHECK (
         (status = 'publishing' AND lease_token IS NOT NULL AND lease_until IS NOT NULL)
         OR (status <> 'publishing' AND lease_token IS NULL AND lease_until IS NULL)
-    )
+    ),
+    FOREIGN KEY (tenant_id, run_id)
+        REFERENCES public.devops_workflows(tenant_id, run_id)
 );
 CREATE INDEX IF NOT EXISTS idx_devops_outbox_pending
     ON public.devops_event_outbox(destination, available_at, outbox_id)
