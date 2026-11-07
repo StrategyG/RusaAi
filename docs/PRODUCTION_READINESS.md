@@ -90,6 +90,6 @@ Outstanding certification evidence:
 - Complete policy/audit reconciliation, verified evidence provenance, independent QA, and seven accountable owner sign-offs.
 - Repository branch protection requiring the ERG-06 automated check and protected reviewers for the enterprise-readiness environment.
 
-PRs #55–#59 remain separate open candidates and are not treated as merged into main. Their code and deployment claims must be revalidated on the exact commit before being included in a production certification decision.
+PRs #55–#59 and #61 remain separate open candidates and are not treated as merged into main. Their code and deployment claims must be revalidated on the exact commit before being included in a production certification decision.
 
 **Phase 6 entry rule: NO PASS = NO GO.**
