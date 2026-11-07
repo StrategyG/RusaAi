@@ -347,27 +347,86 @@ class GitHubPublisher:
         import httpx
 
         owner = repository.split("/", 1)[0]
+        task_match = re.search(
+            r"(?:RUSA-AI-Task-ID|Task ID):\\s*([A-Za-z0-9-]{1,128})",
+            body,
+        )
+        task_id = task_match.group(1) if task_match else None
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
-            existing = await client.get(
-                f"https://api.github.com/repos/{repository}/pulls",
-                headers=headers,
-                params={"state": "open", "head": f"{owner}:{branch}", "base": base},
-            )
-            existing.raise_for_status()
-            items = existing.json()
-            if items:
-                return items[0]["html_url"]
+            async def find_existing() -> str | None:
+                closed_match: str | None = None
+                for page in range(1, 11):
+                    response = await client.get(
+                        f"https://api.github.com/repos/{repository}/pulls",
+                        headers=headers,
+                        params={
+                            "state": "all",
+                            "base": base,
+                            "per_page": 100,
+                            "page": page,
+                        },
+                    )
+                    response.raise_for_status()
+                    items = response.json()
+                    if not isinstance(items, list):
+                        raise RuntimeError("GitHub returned an invalid pull request listing")
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        head_ref = (item.get("head") or {}).get("ref")
+                        base_ref = (item.get("base") or {}).get("ref")
+                        item_body = item.get("body") or ""
+                        matches_task = bool(
+                            task_id
+                            and re.search(
+                                r"(?:RUSA-AI-Task-ID|Task ID):\\s*"
+                                + re.escape(task_id)
+                                + r"\\b",
+                                item_body,
+                            )
+                        )
+                        matches_branch = head_ref == branch and base_ref == base
+                        if matches_task or (not task_id and matches_branch):
+                            if item.get("state") == "open":
+                                return item.get("html_url")
+                            closed_match = item.get("html_url") or closed_match
+                    if len(items) < 100:
+                        break
+                else:
+                    raise RuntimeError(
+                        "Could not safely reconcile task PR: search exceeded 1000 pull requests"
+                    )
+                if closed_match:
+                    raise RuntimeError(
+                        "A previous pull request for this task is closed; manual reconciliation is required"
+                    )
+                return None
+
+            existing_url = await find_existing()
+            if existing_url:
+                return existing_url
+
             created = await client.post(
                 f"https://api.github.com/repos/{repository}/pulls",
                 headers=headers,
                 json={"title": title, "head": branch, "base": base, "body": body, "draft": True},
             )
-            created.raise_for_status()
+            try:
+                created.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    # Two recovered workers may race between lookup and creation. GitHub
+                    # rejects a second open PR for the same head/base; reconcile by task ID.
+                    existing_url = await find_existing()
+                    if existing_url:
+                        return existing_url
+                raise
             return created.json()["html_url"]
 
 
