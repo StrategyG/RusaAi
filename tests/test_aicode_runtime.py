@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
     CodingTask,
