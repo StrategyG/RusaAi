@@ -71,3 +71,25 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
   evaluation datasets.
 - Do not describe the complete product as production-ready until every applicable
   release gate has objective evidence and human approval.
+
+## ERG-06 — Enterprise Readiness Gate (2026-11-07)
+
+**Decision status: HOLD / NO GO.** Phase 6 — Scale and Enterprise is not authorized.
+
+A dedicated implementation is proposed in draft PR #60. It adds an automated PostgreSQL tenant-isolation/recovery check, a versioned staging-evidence schema, and a manual certification workflow. The implementation is not part of main until reviewed and merged.
+
+The automated check is limited to the exact PostgreSQL/RLS and queue-recovery suites executed on the candidate commit. A green automated check is not enterprise certification.
+
+Outstanding certification evidence:
+- Staging adversarial tenant-isolation tests against deployed tenant identities, distinguishing unauthorized access from the documented cross-tenant queue-consumer permission.
+- A verified tenant-bound worker identity or credential-broker boundary; the shared queue worker is intentionally trusted to consume queue rows across tenants.
+- At least 100 recoverable-fault simulations with recovery >=95%, zero duplicate business effects, and consistent state.
+- Backup/restore drill meeting RPO <=5 minutes and RTO <=60 minutes, with zero confirmed loss of acknowledged audit events.
+- Kill-switch p99 <=5 seconds and internal cancellation p95 <=30 seconds.
+- 2x projected peak load for at least 60 minutes while meeting service SLOs.
+- Complete policy/audit reconciliation, verified evidence provenance, independent QA, and seven accountable owner sign-offs.
+- Repository branch protection requiring the ERG-06 automated check and protected reviewers for the enterprise-readiness environment.
+
+PRs #55–#59 and #61 remain separate open candidates and are not treated as merged into main. Their code and deployment claims must be revalidated on the exact commit before being included in a production certification decision.
+
+**Phase 6 entry rule: NO PASS = NO GO.**

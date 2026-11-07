@@ -1,0 +1,232 @@
+name: RUSA-AI Enterprise Readiness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - main
+      - feat/erg06-enterprise-readiness-gate-20261107
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact 40-character commit SHA to certify
+        required: true
+        type: string
+      evidence_run_id:
+        description: Successful RUSA-AI Staging Acceptance workflow run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: erg06-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  automated:
+    if: github.event_name != 'workflow_dispatch'
+    name: ERG-06 automated tenant-isolation and recovery gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: rusa_erg06
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rusa_erg06"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: development
+      RUSA_AUDIT_HMAC_KEY: ci-only-erg06-audit-key-change-me
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install project and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Compile gate and test packages
+        run: python -m compileall -q scripts tests rusa_agents
+      - name: Lint gate and test packages
+        run: ruff check scripts/enterprise_readiness_gate.py tests/test_enterprise_readiness_gate.py
+      - name: Prepare isolated PostgreSQL databases
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          import psycopg
+          from psycopg import sql
+
+          admin_dsn = "postgresql://postgres:postgres@localhost:5432/postgres"
+          database_names = (
+              "rusa_erg06_backends",
+              "rusa_erg06_rls",
+              "rusa_erg06_recovery",
+          )
+          with psycopg.connect(admin_dsn, autocommit=True) as connection:
+              for database_name in database_names:
+                  connection.execute(
+                      sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name))
+                  )
+
+          migration_names = (
+              "001_aicode_core.sql",
+              "002_aicode_lease_fencing.sql",
+              "003_aicode_task_results.sql",
+              "004_aicode_tenant_rls.sql",
+              "005_aicode_task_policy_audit.sql",
+              "006_aicode_idempotency.sql",
+          )
+          for database_name in ("rusa_erg06_backends", "rusa_erg06_recovery"):
+              dsn = f"postgresql://postgres:postgres@localhost:5432/{database_name}"
+              with psycopg.connect(dsn, autocommit=True) as connection:
+                  for migration_name in migration_names:
+                      migration = Path("migrations") / migration_name
+                      connection.execute(migration.read_text(encoding="utf-8"), prepare=False)
+          PY
+      - name: Run ERG-06 contract suite
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts
+          python -m pytest -q tests/test_enterprise_readiness_gate.py \
+            --junitxml=artifacts/erg06-contract.xml
+      - name: Run isolated PostgreSQL backend tests
+        continue-on-error: true
+        env:
+          RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_erg06_backends
+        run: |
+          python -m pytest -q tests/test_postgres_backends.py \
+            --junitxml=artifacts/erg06-backends.xml
+      - name: Run isolated PostgreSQL RLS tests
+        continue-on-error: true
+        env:
+          RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_erg06_rls
+        run: |
+          python -m pytest -q tests/test_postgres_rls.py \
+            --junitxml=artifacts/erg06-rls.xml
+      - name: Run isolated queue recovery tests
+        continue-on-error: true
+        env:
+          RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_erg06_recovery
+        run: |
+          python -m pytest -q tests/test_queue_races.py \
+            --junitxml=artifacts/erg06-recovery.xml
+      - name: Evaluate automated ERG-06 evidence
+        run: |
+          python scripts/enterprise_readiness_gate.py \
+            --mode automated \
+            --junitxml artifacts/erg06-contract.xml \
+            --junitxml artifacts/erg06-backends.xml \
+            --junitxml artifacts/erg06-rls.xml \
+            --junitxml artifacts/erg06-recovery.xml \
+            --expected-sha "${CANDIDATE_SHA}" \
+            --output artifacts/erg06-automated-report.json
+      - name: Upload ERG-06 automated evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erg06-automated-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            artifacts/erg06-contract.xml
+            artifacts/erg06-backends.xml
+            artifacts/erg06-rls.xml
+            artifacts/erg06-recovery.xml
+            artifacts/erg06-automated-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  certify:
+    if: github.event_name == 'workflow_dispatch'
+    name: ERG-06 staging certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: enterprise-readiness
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ inputs.candidate_sha }}
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
+    steps:
+      - name: Check out exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install evidence validator
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Verify source staging workflow run
+        run: |
+          gh run view "${EVIDENCE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json headSha,conclusion,workflowName > /tmp/erg06-source-run.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run = json.loads(Path("/tmp/erg06-source-run.json").read_text())
+          expected_sha = os.environ["EXPECTED_SHA"]
+          if run.get("headSha", "").lower() != expected_sha.lower():
+              raise SystemExit("staging evidence run targets a different commit")
+          if run.get("conclusion") != "success":
+              raise SystemExit("staging evidence workflow did not conclude successfully")
+          if run.get("workflowName") != "RUSA-AI Staging Acceptance":
+              raise SystemExit("evidence was not produced by RUSA-AI Staging Acceptance")
+          PY
+      - name: Download staging evidence artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: erg06-staging-evidence
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts/staging
+      - name: Verify GitHub artifact attestation
+        run: |
+          gh attestation verify \
+            artifacts/staging/erg06-staging-evidence.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/staging-acceptance.yml" \
+            --source-digest "${EXPECTED_SHA}"
+      - name: Evaluate full ERG-06 certification
+        run: |
+          python scripts/enterprise_readiness_gate.py \
+            --mode certify \
+            --evidence artifacts/staging/erg06-staging-evidence.json \
+            --expected-sha "${EXPECTED_SHA}" \
+            --expected-run-id "${EVIDENCE_RUN_ID}" \
+            --output artifacts/erg06-certification-report.json
+      - name: Upload ERG-06 certification decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: erg06-certification-decision-${{ inputs.candidate_sha }}
+          path: artifacts/erg06-certification-report.json
+          if-no-files-found: warn
+          retention-days: 90
