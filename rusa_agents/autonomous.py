@@ -100,6 +100,7 @@ class AutonomousCodeWorker:
         evidence: dict[str, Any] = {}
         last_message = ""
         unresolved_tool_failures: dict[str, str] = {}
+        unresolved_tool_failure_kinds: dict[str, str] = {}
         for step in range(self.max_steps):
             system_prompt = (
                 f"You are the {self.role.value} worker in RUSA-AI AICode. "
@@ -162,6 +163,7 @@ class AutonomousCodeWorker:
                         success=False, artifacts=artifacts, evidence=evidence,
                         blockers=["Worker attempted an operation outside its role permissions."],
                     )
+                action_key = json.dumps(action, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
                 result = None
                 for tool_attempt in range(self.max_tool_retries + 1):
                     try:
@@ -173,21 +175,27 @@ class AutonomousCodeWorker:
                             blockers=[str(exc)], failure_kind="policy",
                         )
                     except OSError as exc:
-                        unresolved_tool_failures[action["name"]] = f"{action['name']}: {type(exc).__name__}: {exc}"
+                        unresolved_tool_failures[action_key] = f"{action['name']}: {type(exc).__name__}: {exc}"
+                        unresolved_tool_failure_kinds[action_key] = "infrastructure"
                         break
                     if result.ok:
-                        unresolved_tool_failures.pop(action["name"], None)
+                        unresolved_tool_failures.pop(action_key, None)
+                        unresolved_tool_failure_kinds.pop(action_key, None)
                         break
-                    unresolved_tool_failures[action["name"]] = f"{action['name']}: {result.output[-2000:]}"
-                    if tool_attempt < self.max_tool_retries:
+                    unresolved_tool_failures[action_key] = f"{action['name']}: {result.output[-2000:]}"
+                    unresolved_tool_failure_kinds[action_key] = result.failure_kind or "tool"
+                    if result.retryable and tool_attempt < self.max_tool_retries:
                         transcript.append(f"TOOL RETRY {action['name']} ({tool_attempt + 1}): {result.output[-2000:]}")
+                        continue
+                    break
                 if result is None or not result.ok:
                     if action["name"] == "run_check" and result is not None:
                         profile = action.get("arguments", {}).get("profile", "unknown")
-                        evidence[f"check:{profile}"] = result.evidence or {
-                            "profile": profile, "exit_code": 1, "output": result.output[-2000:]
-                        }
-                    transcript.append("TOOL ACTION FAILED; do not claim completion: " + unresolved_tool_failures[action["name"]])
+                        check_evidence = dict(result.evidence or {})
+                        check_evidence.setdefault("profile", profile)
+                        check_evidence.setdefault("output", result.output[-2000:])
+                        evidence[f"check:{profile}"] = check_evidence
+                    transcript.append("TOOL ACTION FAILED; do not claim completion: " + unresolved_tool_failures[action_key])
                     continue
                 if action["name"] == "write_file" and result.ok:
                     artifacts.append(str(action.get("arguments", {}).get("path", "")))
@@ -211,7 +219,11 @@ class AutonomousCodeWorker:
                         artifacts=artifacts,
                         evidence=evidence,
                         blockers=list(unresolved_tool_failures.values())[:10],
-                        failure_kind="tool",
+                        failure_kind=(
+                            "infrastructure"
+                            if "infrastructure" in unresolved_tool_failure_kinds.values()
+                            else "tool"
+                        ),
                     )
                 return WorkerResult(
                     role=self.role, summary=last_message, success=True,
