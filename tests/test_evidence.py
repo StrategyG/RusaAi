@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 import pytest
-
 from rusa_agents.evidence import EvidenceAttestor
 
 
