@@ -184,7 +184,7 @@ class AICodeRuntime:
         )
         watchers = [lease_watch] + ([cancel_watch] if cancel_watch is not None else [])
         try:
-            done, _ = await asyncio.wait(
+            await asyncio.wait(
                 {operation_task, *watchers},
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -314,7 +314,13 @@ class AICodeRuntime:
             result,
         )
         if not updated:
-            raise RuntimeError("Queue rejected awaiting-approval transition because the lease was lost")
+            if await asyncio.to_thread(
+                self.queue.is_cancel_requested, job.task_id, job.tenant_id
+            ):
+                raise TaskCancellationRequested("Task cancellation was requested")
+            raise LeaseLostError(
+                "Queue rejected awaiting-approval transition because the lease was lost"
+            )
         await asyncio.to_thread(
             self.audit.record,
             "task.awaiting_approval",
@@ -451,7 +457,7 @@ class AICodeRuntime:
                 return True
             if record.state != TaskState.SUCCEEDED:
                 retryable = record.state == TaskState.FAILED
-                await asyncio.to_thread(
+                failed = await asyncio.to_thread(
                     self.queue.fail,
                     job.id,
                     job.tenant_id,
@@ -461,6 +467,11 @@ class AICodeRuntime:
                     self._retry_delay_seconds(job.attempts),
                     retryable=retryable,
                 )
+                if not failed:
+                    await self._assert_lease(job, lost_lease, cancel_requested)
+                    raise LeaseLostError(
+                        "Queue rejected the failure transition because the lease changed"
+                    )
                 outcome = "failed" if retryable else "blocked"
                 return True
 
