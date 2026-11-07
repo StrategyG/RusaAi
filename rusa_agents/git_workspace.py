@@ -354,11 +354,11 @@ class GitHubPublisher:
 
         listing = run_bytes(["ls-tree", "-r", "-z", "--full-tree", tree_sha])
         entries: list[tuple[str, str, str]] = []
-        for raw_entry in listing.split(b"\\0"):
+        for raw_entry in listing.split(b"\0"):
             if not raw_entry:
                 continue
             try:
-                metadata, raw_path = raw_entry.split(b"\\t", 1)
+                metadata, raw_path = raw_entry.split(b"\t", 1)
                 mode, object_type, object_sha = metadata.decode("ascii").split()
                 path = raw_path.decode("utf-8", "strict")
             except (ValueError, UnicodeDecodeError) as exc:
@@ -370,7 +370,7 @@ class GitHubPublisher:
             if (
                 relative.is_absolute()
                 or ".." in relative.parts
-                or "\\\\" in path
+                or "\\" in path
                 or parts.intersection(BLOCKED_PATH_PARTS)
                 or any(part.startswith(".env") and part != ".env.example" for part in parts)
                 or relative.suffix.lower() in BLOCKED_SUFFIXES
@@ -383,7 +383,7 @@ class GitHubPublisher:
             raise RuntimeError("Candidate Git tree is empty or exceeds the QA file-count limit")
 
         object_ids = b"".join(
-            object_sha.encode("ascii") + b"\\n"
+            object_sha.encode("ascii") + b"\n"
             for _, _, object_sha in entries
         )
         size_output = run_bytes(["cat-file", "--batch-check"], object_ids)
@@ -406,7 +406,7 @@ class GitHubPublisher:
         archive_buffer = io.BytesIO()
         with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
             for (path, mode, expected_sha), expected_size in zip(entries, sizes, strict=True):
-                header_end = object_output.find(b"\\n", cursor)
+                header_end = object_output.find(b"\n", cursor)
                 if header_end < 0:
                     raise RuntimeError("Git returned a truncated candidate blob header")
                 header = object_output[cursor:header_end].decode("ascii", "strict").split()
@@ -417,7 +417,7 @@ class GitHubPublisher:
                     raise RuntimeError("Git candidate blob size changed during snapshot creation")
                 data_start = header_end + 1
                 data_end = data_start + actual_size
-                if data_end >= len(object_output) or object_output[data_end:data_end + 1] != b"\\n":
+                if data_end >= len(object_output) or object_output[data_end:data_end + 1] != b"\n":
                     raise RuntimeError("Git returned a truncated candidate blob")
                 data = object_output[data_start:data_end]
                 info = tarfile.TarInfo(name=path)
