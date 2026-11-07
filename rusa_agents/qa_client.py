@@ -11,8 +11,8 @@ import httpx
 
 from .contracts import CodingTask
 from .qa_attestation import (
-    REQUIRED_QA_PROFILES,
     AttestationError,
+    REQUIRED_QA_PROFILES,
     digest_snapshot_archive,
     load_public_key,
     verify_verdict,

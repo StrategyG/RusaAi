@@ -5,9 +5,9 @@ import tarfile
 from datetime import datetime, timedelta, timezone
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.qa_attestation import REQUIRED_QA_PROFILES, digest_snapshot_archive, sign_verdict
