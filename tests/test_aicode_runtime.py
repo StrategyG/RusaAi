@@ -33,9 +33,9 @@ def task():
 def workers(with_evidence=True):
     evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}} if with_evidence else {}
     security = {
-        "check:bandit": {"exit_code": 0},
-        "check:ruff": {"exit_code": 0},
-        "check:compile": {"exit_code": 0},
+        "check:bandit": {"exit_code": 0, "profile": "bandit"},
+        "check:ruff": {"exit_code": 0, "profile": "ruff"},
+        "check:compile": {"exit_code": 0, "profile": "compile"},
     } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
@@ -118,9 +118,9 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
                 evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}}
             elif role == WorkerRole.SECURITY:
                 evidence = {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                    "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                    "check:compile": {"exit_code": 0, "profile": "compile"},
                 }
             super().__init__(role, evidence)
             self.seen_prior = []
@@ -206,9 +206,9 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
                 ParallelWorker(
                     role,
                     {
-                        "check:bandit": {"exit_code": 0},
-                        "check:ruff": {"exit_code": 0},
-                        "check:compile": {"exit_code": 0},
+                        "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                        "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                        "check:compile": {"exit_code": 0, "profile": "compile"},
                     },
                 )
             )
@@ -260,9 +260,9 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
             super().__init__(
                 WorkerRole.SECURITY,
                 {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                    "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                    "check:compile": {"exit_code": 0, "profile": "compile"},
                 },
             )
             self.calls = 0
