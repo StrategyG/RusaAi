@@ -1,5 +1,5 @@
-import runpy
 from pathlib import Path
+import runpy
 
 import pytest
 
