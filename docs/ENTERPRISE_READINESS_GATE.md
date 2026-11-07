@@ -17,7 +17,7 @@ The repository currently has a code-level PostgreSQL suite for tenant-scoped API
 
 | ID | Control pillar | Required evidence | Accountable owner |
 |---|---|---|---|
-| ERG-01 | Multi-tenant isolation | Negative cross-tenant read/write tests, identity and credential-scope review, no unauthorized access | Security |
+| ERG-01 | Multi-tenant isolation | Negative tests for unauthorized cross-tenant reads/writes, identity and credential-scope review, no unauthorized access; explicitly allow only documented control-plane queue consumption | Security |
 | ERG-02 | Failure recovery and resilience | At least 100 recoverable-fault simulations, >=95% recovery, no duplicate external effects, consistent durable state | Platform / SRE |
 | ERG-03 | Backup, restore and disaster recovery | Restore drill with RPO <=5 minutes, RTO <=60 minutes, no confirmed loss of acknowledged audit events | SRE |
 | ERG-04 | Policy enforcement and audit integrity | 100% sensitive-action policy/audit reconciliation, zero critical false-allow, durable intent and outcome/receipt | Security / Governance |
