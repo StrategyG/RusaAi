@@ -187,7 +187,7 @@ class PostgresTaskQueue:
                     SELECT COUNT(*) = 2
                     FROM information_schema.columns
                     WHERE table_schema='public' AND table_name='aicode_jobs'
-                      AND column_name = ANY(%s)
+                      AND column_name::text = ANY(%s)
                 """, (["manual_retry_count", "max_manual_retries"],)).fetchone()
                 if not retry_columns or not retry_columns[0]:
                     raise RuntimeError(
@@ -218,7 +218,7 @@ class PostgresTaskQueue:
                     SELECT COUNT(*) = 3
                     FROM information_schema.columns
                     WHERE table_schema='public' AND table_name='aicode_job_controls'
-                      AND column_name = ANY(%s)
+                      AND column_name::text = ANY(%s)
                 """, ([
                     "cancel_epoch", "cancel_requested_at", "requested_by",
                 ],)).fetchone()
