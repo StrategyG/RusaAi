@@ -541,6 +541,7 @@
           },
           "input": {
             "required": [
+              "commit_sha",
               "artifact_digest",
               "test_evidence_ref",
               "sbom_ref"
@@ -572,6 +573,7 @@
             "required": [
               "release_manifest_ref",
               "environment",
+              "commit_sha",
               "artifact_digest"
             ]
           }
