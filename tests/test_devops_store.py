@@ -263,10 +263,9 @@ def test_task_and_outbox_foreign_keys_prevent_cross_tenant_run_linkage():
 
     tenant_id = f"test-{uuid4()}"
     other_tenant = f"other-{uuid4()}"
-    store = PostgresWorkflowStore(DSN)
     event = _event(tenant_id)
     try:
-        run_id, _ = store.submit_workflow(
+        run_id, _ = PostgresWorkflowStore(DSN).submit_workflow(
             tenant_id=tenant_id,
             idempotency_key="tenant-fk",
             request={"objective": "tenant-link"},
