@@ -631,6 +631,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
                   AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 RETURNING id
                 """,
                 (lease_seconds, job_id, tenant_id, worker_id, lease_token),
@@ -646,7 +652,15 @@ class PostgresTaskQueue:
             refreshed = conn.execute(
                 """
                 UPDATE public.aicode_jobs
-                SET lease_until=NOW() + (180 * INTERVAL '1 second'),
+                SET lease_until=CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM public.aicode_job_controls AS control
+                            WHERE control.tenant_id=aicode_jobs.tenant_id
+                              AND control.task_id=aicode_jobs.task_id
+                              AND control.cancel_requested_at IS NOT NULL
+                        ) THEN NOW()
+                        ELSE NOW() + (180 * INTERVAL '1 second')
+                    END,
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
