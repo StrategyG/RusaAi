@@ -84,13 +84,15 @@ class AICodeRuntime:
     def _task(job: Job) -> CodingTask:
         data: dict[str, Any] = job.payload
         repository = data["repository"]
-        lease_suffix = job.lease_token.replace("-", "")[:8]
+        # Keep the branch stable across lease retries so a successful remote push
+        # can be reconciled instead of creating a second branch and draft PR.
+        stable_task_id = job.task_id.replace("-", "")
         return CodingTask(
             objective=data["objective"],
             repository=RepositoryTarget(
                 full_name=repository["full_name"],
                 base_branch=repository.get("base_branch", "main"),
-                work_branch=f"feature/aicode/{job.task_id[:12]}-{lease_suffix}",
+                work_branch=f"feature/aicode/{stable_task_id}",
             ),
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
@@ -287,6 +289,7 @@ class AICodeRuntime:
                     task.repository.full_name,
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
+                    task.repository.base_branch,
                 ),
                 lease_seconds=900,
             )

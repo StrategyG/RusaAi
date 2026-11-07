@@ -17,6 +17,29 @@ def test_health_endpoint():
     assert response.json()["status"] == "healthy"
 
 
+def test_models_endpoint_identifies_gateway_alias_and_backend(monkeypatch):
+    class ExternalProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "provider response"
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    set_inference_provider(ExternalProvider())
+    try:
+        response = client.get("/v1/models")
+        assert response.status_code == 200
+        model = response.json()["data"][0]
+        assert model["owned_by"] == "rusa-ai-gateway"
+        assert model["backend"] == "openai_compatible_provider"
+    finally:
+        set_inference_provider(None)
+
+
 def test_chat_completions_fails_closed_without_backend():
     set_inference_provider(None)
     payload = {"messages": [{"role": "user", "content": "Hello"}]}
@@ -76,6 +99,43 @@ def test_validate_task_endpoint_invalid():
     response = client.post("/v1/validate-task", json={"envelope": {"protocol_version": "1.0"}})
     assert response.status_code == 200
     assert response.json()["valid"] is False
+
+
+def test_aicode_task_intake_uses_local_development_identity_without_api_keys(monkeypatch):
+    class StubQueue:
+        def __init__(self):
+            self.audit_actor = None
+
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            self.audit_actor = audit_actor
+            return True
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_DEFAULT_TENANT", "local-dev")
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"local-dev":["StrategyG/RusaAi"]}')
+    for name in ("RUSA_API_KEYS", "RUSA_API_KEY", "RUSA_API_KEYS_JSON"):
+        monkeypatch.delenv(name, raising=False)
+
+    queue = StubQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    payload = {
+        "objective": "Exercise local development authentication",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The local development identity is attributed"],
+    }
+
+    accepted = client.post("/v1/aicode/tasks", json=payload)
+    assert accepted.status_code == 202
+    assert accepted.json()["tenant_id"] == "local-dev"
+    assert queue.audit_actor == "api:local-development"
+
+    rejected = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "unconfigured-key"},
+        json=payload,
+    )
+    assert rejected.status_code == 401
 
 
 def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
@@ -510,4 +570,23 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
         set_inference_provider(None)
 
     assert response.status_code == 404
+
+def test_readiness_fails_when_inference_provider_reports_not_ready(monkeypatch):
+    class NotReadyProvider:
+        async def check_ready(self):
+            return False
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("completion must not be called by readiness")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setattr(app.state, "queue", None, raising=False)
+    set_inference_provider(NotReadyProvider())
+    try:
+        response = client.get("/health/ready")
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Inference backend is unavailable"
 

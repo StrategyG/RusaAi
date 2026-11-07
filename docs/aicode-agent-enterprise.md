@@ -4,7 +4,7 @@
 
 AICode is the autonomous software-engineering subsystem of RUSA-AI. It accepts a scoped coding task, refreshes an authorized Git mirror, creates an isolated feature worktree, delegates work to specialized agents, executes validation in a disposable sandbox, publishes a draft pull request, and waits for required GitHub Actions checks.
 
-The architecture is hierarchical and autonomous within explicit policy boundaries. It is not an unrestricted shell agent.
+The architecture is hierarchical and autonomous within explicit policy boundaries. It is not an unrestricted shell agent. The six roles are scoped worker invocations inside one runtime and may share the configured inference provider and tool gateway; they are not six separately deployed models or microservices.
 
 ### Autonomy boundaries
 
@@ -183,7 +183,7 @@ A task can be marked successful only when all of the following are true:
 - The Security worker produces real successful Ruff, Bandit, and compile exit codes.
 - A commit is pushed to the task feature branch.
 - A draft PR is created or found.
-- Both required GitHub Actions jobs complete successfully.
+- All required GitHub Actions jobs complete successfully on the exact published commit SHA. The current CI workflow has three required jobs: Test, lint, and security; Build, test, and scan production images; and RAG and MCP integration tests.
 
 Missing or unverifiable evidence is not treated as success. Human approval is still required to convert a draft PR to a mergeable PR and merge it. Deployment remains a separate operator-controlled process.
 
@@ -191,7 +191,7 @@ Missing or unverifiable evidence is not treated as success. Human approval is st
 
 | Requirement | Implementation evidence | Production gate |
 |---|---|---|
-| Hierarchical orchestration | Master + six typed workers | Unit/integration tests |
+| Hierarchical orchestration | Master + six typed role-scoped worker invocations in one runtime | Unit/integration tests |
 | Bounded autonomy | Role permissions, allowlists, state machine | Adversarial tests |
 | Tenant isolation | API keys, repository allowlist, tenant-scoped DB keys | Cross-tenant penetration tests |
 | Durable queue | PostgreSQL leases, retries, cancellation | Multi-worker concurrency tests |

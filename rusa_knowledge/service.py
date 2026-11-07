@@ -28,8 +28,14 @@ class KnowledgeService:
         dsn = database_url or os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or os.getenv("RUSA_AGENT_DATABASE_URL")
         if not dsn:
             raise RuntimeError("RUSA_KNOWLEDGE_DATABASE_URL is required")
+        embedding_base_url = os.getenv("RUSA_EMBEDDING_BASE_URL", "").strip()
+        if not embedding_base_url:
+            raise RuntimeError(
+                "RUSA_EMBEDDING_BASE_URL is required; configure an approved HTTPS "
+                "or loopback endpoint before using RAG"
+            )
         provider = OpenAICompatibleEmbeddingProvider(
-            base_url=os.getenv("RUSA_EMBEDDING_BASE_URL", "https://api.openai.com/v1"),
+            base_url=embedding_base_url,
             api_key=os.getenv("RUSA_EMBEDDING_API_KEY", ""),
             model=os.getenv("RUSA_EMBEDDING_MODEL", "text-embedding-3-small"),
             dimensions=1536,

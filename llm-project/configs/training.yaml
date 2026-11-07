@@ -1,34 +1,32 @@
 project: llm-project
 status: planned
 
+# No training pipeline is implemented. Keep execution settings unset until a
+# reproducible training system, dataset provenance, and compute plan exist.
 training:
-  pretraining:
-    objective: next_token_prediction
-    precision: bf16
-    distributed:
-      enabled: true
-      strategy: fsdp
-  post_training:
-    - supervised_fine_tuning
-    - rlhf_rlaif
-    - reasoning_rl
-    - safety_alignment
+  pretraining: null
+  post_training: []
   checkpointing:
-    enabled: true
-    save_interval_steps: 500
-    keep_last_n: 5
+    enabled: false
+    save_interval_steps: null
+    keep_last_n: null
 
 optimization:
-  gradient_checkpointing: true
-  mixed_precision: bf16
-  flash_attention: true
+  distributed_strategy: null
+  gradient_checkpointing: null
+  mixed_precision: null
+  attention_implementation: null
 
 safety:
-  alignment_layers:
-    - constitutional_feedback
-    - red_teaming
-    - classifier_filtering
+  alignment_methods: []
+
+evidence:
+  dataset_manifest: null
+  code_revision: null
+  training_command: null
+  checkpoint_manifest: null
+  evaluation_report: null
 
 notes:
-  - This is a design scaffold for future training runs.
-  - Concrete dataset hashes, runtime environment, and evaluation metrics are required before verification.
+  - This is non-executable planning metadata, not a training recipe.
+  - No pretraining, SFT, RLHF/RLAIF, reasoning-RL, or alignment run is claimed.

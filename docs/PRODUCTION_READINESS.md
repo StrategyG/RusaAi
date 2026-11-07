@@ -2,11 +2,11 @@
 
 ## Scope
 
-This ledger describes the capabilities present on the integration branch and separates
+This ledger describes source-code capabilities on the branch under review and separates
 automated code validation from deployment certification. Passing CI is evidence only
 for the exact commit and checks that ran; it is not a production approval.
 
-## Delivered in this integration branch
+## Implemented in source code (deployment not certified)
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
 - Local model artifact manifest and SHA-256 verification; production local loading
@@ -21,7 +21,7 @@ for the exact commit and checks that ran; it is not a production approval.
 - Offline retrieval evaluation metrics: Recall@K, MRR@K, and NDCG@K.
 - Optional RAG ingestion and hybrid retrieval using PostgreSQL/pgvector, with a
   separate read-only bearer-authenticated MCP server.
-- Separate Python 3.11 CI job for RAG/MCP dependencies and pgvector integration tests.
+- Separate Python 3.12 CI job for RAG/MCP dependencies and pgvector integration tests.
 - Isolated, non-root MCP container image with vulnerability scanning in CI.
 
 ## Verification boundary
@@ -35,6 +35,30 @@ A local model backend is not a trained RUSA-AI model. No model weights are bundl
 The optional runtime can load a compatible, externally supplied, locally mounted
 model artifact after manifest verification. Real-model throughput and quality
 remain unmeasured until a specific checkpoint and target hardware are supplied.
+
+## Vulnerability scan interpretation
+
+The production-image CI job runs Trivy with `--ignore-unfixed` and blocks fixable
+CRITICAL/HIGH findings. A passing job does **not** mean that the images contain
+zero known vulnerabilities; it means no fixable CRITICAL/HIGH finding caused the
+gate to fail.
+
+For the PR #63 CI run on head commit `4536a1105e761a03be4a0d98c1e1ca06da3e6817`
+(image build tag `87fc65592578c793e334ada969e3f15a2d112c75`), the raw Trivy
+reports showed 0 CRITICAL findings and the following HIGH findings:
+
+| Image | HIGH | CRITICAL |
+|---|---:|---:|
+| API | 51 | 0 |
+| Agent sandbox | 56 | 0 |
+| Worker | 55 | 0 |
+| RAG/MCP | 51 | 0 |
+
+These findings remain open for package-owner and exploitability triage. Do not
+describe these images as vulnerability-free or production-certified. Record
+affected package, CVE, fixed version availability, exposure, mitigation, and
+owner; publish VEX only when there is defensible evidence for a not-affected
+assessment.
 
 ## Release gates still open
 
@@ -63,7 +87,7 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Apply migrations `001` through `006` in order using the database owner before
   enabling production task intake. The API runtime must not have schema-owner or
   superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
+- Apply `migrations/007_rag_knowledge_pgvector.sql` only on a pgvector-enabled
   knowledge database and configure the restricted `rusa_knowledge_worker` role.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.

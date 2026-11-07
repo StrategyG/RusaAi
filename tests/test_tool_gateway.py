@@ -145,3 +145,10 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+
+def test_sandbox_validation_profiles_cover_all_ci_source_packages():
+    expected = {"rusa_agents", "rusa_knowledge", "rusa_mcp", "llm-project/serve"}
+    for profile in ("compile", "ruff", "bandit"):
+        assert expected.issubset(set(DockerSandbox.PROFILES[profile]))

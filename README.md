@@ -10,7 +10,7 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 
 ## Key Features & Architecture
 
-- **Model architecture blueprint**: Decoder-only Transformer/MoE design; planned only and not a trained or verified model.
+- **Model blueprint**: metadata-only planning scaffold. No RUSA-AI model architecture implementation, trained weights, tokenizer-training pipeline, or pretraining/SFT pipeline is supplied.
 - **Inference gateway**: FastAPI OpenAI-compatible API with an optional checksum-verified local Transformers/vLLM backend and external OpenAI-compatible provider support.
 - **Knowledge retrieval**: Optional tenant-scoped PostgreSQL/pgvector ingestion and hybrid retrieval, with offline Recall@K, MRR, and NDCG@K evaluation.
 - **Knowledge MCP**: Separate read-only, bearer-authenticated MCP service for tenant-scoped search and document access.
@@ -56,13 +56,15 @@ RusaAi/
 │   │   ├── training.yaml
 │   │   └── inference.yaml
 │   ├── model/
-│   │   └── blueprint.py         # MoE model architecture specifications & blueprint
+│   │   └── blueprint.py         # Untrained, metadata-only planning placeholder
 │   ├── serve/
-│   │   └── app.py               # Production FastAPI serving engine
-│   ├── tests/
-│   │   ├── test_serve.py        # API unit & integration tests
-│   │   └── test_blueprint.py    # Model blueprint unit tests
-│   └── __init__.py
+│   │   ├── app.py               # FastAPI inference gateway
+│   │   └── model_runtime.py     # Optional local Transformers/vLLM adapters
+│   └── README.md                # LLM project status and implementation boundaries
+├── tests/                        # Repository-level unit and integration tests
+│   ├── test_app.py
+│   ├── test_inference_runtime.py
+│   └── test_model_blueprint.py
 ├── schemas/
 │   └── a2a/
 │       └── task-envelope.schema.json # Task payload validation schema
@@ -152,7 +154,7 @@ pytest -q
 
 ## AICode Enterprise Coding Agent
 
-RUSA-AI includes an autonomous coding subsystem that operates within tenant-authorized repositories and isolated task branches. It uses a hierarchical master orchestrator with Analyst, Architect, Developer, Debugger, Tester, and Security workers.
+RUSA-AI includes an autonomous coding subsystem that operates within tenant-authorized repositories and isolated task branches. It uses a hierarchical master orchestrator with six role-scoped worker invocations: Analyst, Architect, Developer, Debugger, Tester, and Security. These roles run inside one runtime and may share the configured inference provider and tool gateway; they are not six separately deployed models or microservices.
 
 ### Operating boundaries
 

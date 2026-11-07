@@ -29,10 +29,13 @@ class AutonomyPolicy:
     }
 
     def __init__(self, allowed_actions: set[str] | None = None):
-        self.allowed_actions = allowed_actions or {
+        defaults = {
             "repo_read", "branch_create", "workspace_write",
             "test_run", "commit_feature_branch", "pull_request_create", "audit_read",
         }
+        # None means use the safe built-in defaults. An explicitly empty set
+        # is an intentional deny-all policy and must never be widened.
+        self.allowed_actions = set(defaults if allowed_actions is None else allowed_actions)
 
     def evaluate(
         self, action: str, risk: RiskLevel = RiskLevel.LOW

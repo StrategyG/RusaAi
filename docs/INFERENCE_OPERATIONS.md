@@ -40,16 +40,18 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | Variable | Purpose | Suggested starting point |
 |---|---|---|
 | ENVIRONMENT | Controls production fail-closed behavior | production |
-| RUSA_API_KEY | Service API credential | Secret manager; 48+ random bytes |
+| RUSA_API_KEYS_JSON | Production tenant-bound API key digest registry | SHA-256 digest mapped to subject, tenant_id, and roles; provision through a secret manager |
 | RUSA_MODEL_PATH or RUSA_LOCAL_MODEL_PATH | Mounted model directory | /models |
 | RUSA_MODEL_MANIFEST_SHA256 | Pinned artifact manifest digest | Exact SHA-256 from manifest generator |
-| RUSA_MODEL_NAME | OpenAI API model identifier | rusa-ai-v1 |
+| RUSA_MODEL_NAME | Gateway model alias accepted by the OpenAI-compatible API | Deployment-approved alias |
 | RUSA_INFERENCE_BACKEND | Backend selection | vllm after validation |
 | RUSA_MAX_MODEL_LEN | Maximum prompt + output context | Never above verified model limit |
 | RUSA_GENERATION_TIMEOUT_SECONDS | Per-generation timeout | 180; tune to workload |
-| RUSA_MAX_CONCURRENT_REQUESTS | Active API generation admission | 8; tune per backend |
-| RUSA_MAX_QUEUED_REQUESTS | Bounded waiting queue | 32 |
-| RUSA_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 10 |
+| RUSA_MAX_CONCURRENT_INFERENCES | Active API generation admission | 8; tune per backend |
+| RUSA_MAX_WAITING_INFERENCES | Bounded waiting queue | 32 |
+| RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 10 |
+| RUSA_MODEL_BASE_URL | OpenAI-compatible external provider endpoint when no local model artifact is configured | Deployment-approved HTTPS endpoint |
+| RUSA_MODEL_API_KEY | Credential for the configured external provider, if required | Secret manager |
 | RUSA_MAX_NUM_SEQS | vLLM maximum active sequences | 16 |
 | RUSA_MAX_NUM_BATCHED_TOKENS | vLLM batch token budget | 8192 |
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
@@ -61,14 +63,14 @@ Values above are initial configuration examples, not capacity guarantees. Measur
 
 1. Start the API with the model directory mounted read-only. Model loading occurs before the application reports ready; configure the orchestrator startup grace period for the expected artifact size.
 2. Confirm logs state that the selected backend and verified model loaded successfully. Logs must not contain prompts, completions, API keys, or secret values.
-3. GET /health/live confirms only that the process responds.
-4. GET /health/ready must return HTTP 200 and report model_loaded, model_manifest_verified, authentication_configured, and task_schema_loaded as true.
-5. GET /v1/models with X-API-Key must return the expected configured model ID.
+3. GET /health is the process health endpoint; it is not a substitute for /health/ready.
+4. GET /health/ready must return HTTP 200. The current endpoint reports provider reachability and, when configured, database/audit reachability; it does not expose separate model_loaded, model_manifest_verified, authentication_configured, or task_schema_loaded booleans.
+5. GET /v1/models with X-API-Key must return the configured gateway model alias and its backend kind. The owned_by field identifies the RUSA-AI gateway, not ownership of the underlying model weights.
 6. Run one non-streaming request and one streaming request using a controlled test prompt.
 7. Confirm response usage counts are present and streaming terminates with data: [DONE].
 8. The manifest generator and runtime accept safetensors weights only; convert any pickle-based checkpoint through a trusted, isolated conversion workflow before intake.
 
-If any readiness check fails, keep the instance out of the load balancer. The API returns 503 rather than generating a substitute answer when the model is missing or unverified.
+If any readiness check fails, keep the instance out of the load balancer. If a local artifact path is configured but the artifact cannot be verified or loaded, the application does not silently substitute another model. If no local artifact path is configured, a reachable RUSA_MODEL_BASE_URL provider that lists the configured RUSA_MODEL_NAME from GET /models is required instead.
 
 ## 5. API smoke test
 

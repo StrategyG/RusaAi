@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
@@ -11,6 +12,7 @@ from rusa_agents.contracts import (
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
+from rusa_agents.runtime import AICodeRuntime
 
 
 class StubWorker:
@@ -31,11 +33,11 @@ def task():
 
 
 def workers(with_evidence=True):
-    evidence = {"check:pytest": {"exit_code": 0}} if with_evidence else {}
+    evidence = {"check:pytest": {"profile": "pytest", "exit_code": 0}} if with_evidence else {}
     security = {
-        "check:bandit": {"exit_code": 0},
-        "check:ruff": {"exit_code": 0},
-        "check:compile": {"exit_code": 0},
+        "check:bandit": {"profile": "bandit", "exit_code": 0},
+        "check:ruff": {"profile": "ruff", "exit_code": 0},
+        "check:compile": {"profile": "compile", "exit_code": 0},
     } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
@@ -98,7 +100,7 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
 
 def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     failing = workers()
-    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    failing[-2].evidence = {"check:pytest": {"profile": "pytest", "exit_code": 1}}
     orchestrator = AICodeOrchestrator(
         failing,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
@@ -115,12 +117,12 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
         def __init__(self, role):
             evidence = {}
             if role == WorkerRole.TESTER:
-                evidence = {"check:pytest": {"exit_code": 0}}
+                evidence = {"check:pytest": {"profile": "pytest", "exit_code": 0}}
             elif role == WorkerRole.SECURITY:
                 evidence = {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"profile": "bandit", "exit_code": 0},
+                    "check:ruff": {"profile": "ruff", "exit_code": 0},
+                    "check:compile": {"profile": "compile", "exit_code": 0},
                 }
             super().__init__(role, evidence)
             self.seen_prior = []
@@ -199,16 +201,16 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
     for role in AICodeOrchestrator.PIPELINE:
         if role == WorkerRole.TESTER:
             evidence_workers.append(
-                ParallelWorker(role, {"check:pytest": {"exit_code": 0}})
+                ParallelWorker(role, {"check:pytest": {"profile": "pytest", "exit_code": 0}})
             )
         elif role == WorkerRole.SECURITY:
             evidence_workers.append(
                 ParallelWorker(
                     role,
                     {
-                        "check:bandit": {"exit_code": 0},
-                        "check:ruff": {"exit_code": 0},
-                        "check:compile": {"exit_code": 0},
+                        "check:bandit": {"profile": "bandit", "exit_code": 0},
+                        "check:ruff": {"profile": "ruff", "exit_code": 0},
+                        "check:compile": {"profile": "compile", "exit_code": 0},
                     },
                 )
             )
@@ -252,7 +254,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence={"check:pytest": {"profile": "pytest", "exit_code": 1 if self.calls == 1 else 0}},
             )
 
     class CountingSecurity(StubWorker):
@@ -260,9 +262,9 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
             super().__init__(
                 WorkerRole.SECURITY,
                 {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"profile": "bandit", "exit_code": 0},
+                    "check:ruff": {"profile": "ruff", "exit_code": 0},
+                    "check:compile": {"profile": "compile", "exit_code": 0},
                 },
             )
             self.calls = 0
@@ -297,3 +299,50 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_runtime_task_branch_is_stable_across_lease_retries():
+    payload = {
+        "objective": "Make a deterministic task branch",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The same task reuses its feature branch"],
+    }
+    first_job = SimpleNamespace(
+        payload=payload,
+        task_id="a1b2c3d4-e5f6-4789-9012-abcdefabcdef",
+        tenant_id="tenant-a",
+        lease_token="lease-token-first",
+    )
+    retry_job = SimpleNamespace(
+        payload=payload,
+        task_id="a1b2c3d4-e5f6-4789-9012-abcdefabcdef",
+        tenant_id="tenant-a",
+        lease_token="lease-token-second",
+    )
+
+    first = AICodeRuntime._task(first_job)
+    retry = AICodeRuntime._task(retry_job)
+
+    assert first.repository.work_branch == retry.repository.work_branch
+    assert first.repository.work_branch == "feature/aicode/a1b2c3d4e5f647899012abcdefabcdef"
+    assert first.metadata["lease_token"] != retry.metadata["lease_token"]
+
+
+
+def test_orchestrator_rejects_mismatched_or_boolean_check_evidence():
+    mismatched = WorkerResult(
+        role=WorkerRole.TESTER,
+        summary="claimed success",
+        success=True,
+        evidence={"check:pytest": {"profile": "bandit", "exit_code": 0}},
+    )
+    boolean_exit_code = WorkerResult(
+        role=WorkerRole.TESTER,
+        summary="claimed success",
+        success=True,
+        evidence={"check:pytest": {"profile": "pytest", "exit_code": False}},
+    )
+
+    assert not AICodeOrchestrator._check_passed(mismatched, "check:pytest")
+    assert not AICodeOrchestrator._check_passed(boolean_exit_code, "check:pytest")

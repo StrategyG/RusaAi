@@ -55,7 +55,7 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace_root = tmp_path / "workspaces"
     manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, work_branch=None: None)
     task = CodingTask(
         objective="test worktree",
         repository=RepositoryTarget(
@@ -66,7 +66,17 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace = manager.create(task, "tenant-a")
     assert workspace.is_dir()
-    assert git("branch", "--show-current", cwd=workspace).stdout.strip() == task.repository.work_branch
+    detached = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert detached.returncode != 0
+    assert git("rev-parse", "HEAD", cwd=workspace).stdout.strip() == git(
+        "--git-dir", str(mirror), "rev-parse", "main"
+    ).stdout.strip()
 
     other_task = CodingTask(
         objective="test second tenant worktree",
@@ -155,12 +165,12 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     git("clone", "--bare", str(source), str(mirror))
 
     manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, work_branch=None: None)
 
     first = CodingTask(
         objective="first lease attempt",
         repository=RepositoryTarget(
-            "StrategyG/RusaAi", "main", "feature/aicode/lease-first"
+            "StrategyG/RusaAi", "main", "feature/aicode/same-task"
         ),
         acceptance_criteria=["isolated workspace"],
         task_id="same-task",
@@ -169,7 +179,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     second = CodingTask(
         objective="second lease attempt",
         repository=RepositoryTarget(
-            "StrategyG/RusaAi", "main", "feature/aicode/lease-second"
+            "StrategyG/RusaAi", "main", "feature/aicode/same-task"
         ),
         acceptance_criteria=["isolated workspace"],
         task_id="same-task",
@@ -180,6 +190,15 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     second_workspace = manager.create(second, "tenant-a")
     assert first_workspace != second_workspace
     assert first_workspace.is_dir() and second_workspace.is_dir()
+    for workspace in (first_workspace, second_workspace):
+        detached = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert detached.returncode != 0
 
     manager.cleanup(first, "tenant-a")
     manager.cleanup(second, "tenant-a")
@@ -212,11 +231,18 @@ def test_ci_evidence_requires_all_jobs_from_latest_trusted_suite():
     runs = [
         _github_check_run("Test, lint, and security", suite_id=100, run_id=1001, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=100, run_id=1002, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=100, run_id=1003, head_sha=sha),
         _github_check_run("Test, lint, and security", suite_id=101, run_id=1011, head_sha=sha),
         _github_check_run(
             "Build, test, and scan production images",
             suite_id=101,
             run_id=1012,
+            head_sha=sha,
+        ),
+        _github_check_run(
+            "RAG and MCP integration tests",
+            suite_id=101,
+            run_id=1013,
             status="in_progress",
             conclusion=None,
             head_sha=sha,
@@ -234,6 +260,7 @@ def test_ci_evidence_does_not_fall_back_to_an_older_successful_suite():
     runs = [
         _github_check_run("Test, lint, and security", suite_id=200, run_id=2001, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=200, run_id=2002, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=200, run_id=2003, head_sha=sha),
         _github_check_run(
             "Test, lint, and security",
             suite_id=201,
@@ -242,6 +269,7 @@ def test_ci_evidence_does_not_fall_back_to_an_older_successful_suite():
             head_sha=sha,
         ),
         _github_check_run("Build, test, and scan production images", suite_id=201, run_id=2012, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=201, run_id=2013, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
@@ -286,6 +314,7 @@ def test_ci_evidence_rejects_skipped_required_jobs():
             conclusion="skipped",
             head_sha=sha,
         ),
+        _github_check_run("RAG and MCP integration tests", suite_id=400, run_id=4003, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
@@ -299,9 +328,60 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
     runs = [
         _github_check_run("Test, lint, and security", suite_id=500, run_id=5001, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=499, run_id=4992, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=500, run_id=5003, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_ci_evidence_requires_rag_mcp_job_even_when_other_jobs_pass():
+    sha = "9" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=600, run_id=6001, head_sha=sha),
+        _github_check_run("Build, test, and scan production images", suite_id=600, run_id=6002, head_sha=sha),
+    ]
+
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+
+    assert state == "pending"
+    assert "RAG and MCP integration tests" in reason
+
+
+
+def test_publisher_refuses_to_publish_an_empty_task_branch(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
+    git("checkout", "-b", "feature/aicode/empty-task", cwd=repository)
+
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(RuntimeError, match="empty task branch"):
+        publisher.commit_and_push(
+            str(repository),
+            "StrategyG/RusaAi",
+            "feature/aicode/empty-task",
+            "empty task",
+            "main",
+        )
+
+
+def test_publisher_rejects_unsafe_publication_target_before_git_access(tmp_path):
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="safe task feature branches"):
+        publisher.commit_and_push(
+            str(tmp_path / "missing-worktree"),
+            "StrategyG/RusaAi",
+            "../main",
+            "unsafe",
+            "main",
+        )

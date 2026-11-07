@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 KNOWN_API_ROLES = {"platform_admin", "tenant_admin", "developer", "read_only"}
+SUPPORTED_ENVIRONMENTS = {"development", "production"}
 
 
 @dataclass(frozen=True)
@@ -57,10 +58,18 @@ class RuntimeConfig:
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        raw_environment = os.getenv("ENVIRONMENT")
+        if raw_environment is None or not raw_environment.strip():
+            raise ValueError(
+                "ENVIRONMENT is required; set it explicitly to development or production"
+            )
+        environment = raw_environment.strip().lower()
+        if environment not in SUPPORTED_ENVIRONMENTS:
+            allowed = ", ".join(sorted(SUPPORTED_ENVIRONMENTS))
+            raise ValueError(f"ENVIRONMENT must be one of: {allowed}")
         raw_enabled = os.getenv("RUSA_AICODE_ENABLED")
         if raw_enabled is None:
-            aicode_enabled = environment != "production"
+            aicode_enabled = environment == "development"
         elif raw_enabled.strip().lower() in {"1", "true", "yes", "on"}:
             aicode_enabled = True
         elif raw_enabled.strip().lower() in {"0", "false", "no", "off"}:

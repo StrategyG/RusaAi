@@ -1,43 +1,44 @@
 project_name: llm-project
 status: planned
 
+# Planning metadata only. These values are intentionally unset until a real
+# architecture is implemented, reviewed, and backed by a versioned artifact.
 model:
-  name: opus-5.5-blueprint
-  type: decoder-only-transformer
+  name: null
+  type: null
   architecture:
-    layers: 96
-    hidden_size: 12288
-    attention_heads: 96
-    kv_heads: 8
-    context_window: 1000000
-    positional_encoding: rope
-    normalization: rmsnorm
-    activation: swiglu
+    layers: null
+    hidden_size: null
+    attention_heads: null
+    kv_heads: null
+    context_window: null
+    positional_encoding: null
+    normalization: null
+    activation: null
   moe:
-    enabled: true
-    num_experts: 64
-    experts_per_token: 2
-  modalities:
-    - text
-    - image
+    enabled: false
+    num_experts: null
+    experts_per_token: null
+  modalities: []
 
 training:
-  objective: next_token_prediction
-  precision: bf16
-  pipeline:
-    - pretraining
-    - supervised_fine_tuning
-    - rlhf_rlaif
-    - reasoning_rl
-    - safety_alignment
+  objective: null
+  precision: null
+  pipeline: []
 
 inference:
-  quantization:
-    - int8
-    - fp8
-  speculative_decoding: true
-  tool_use: true
+  quantization: []
+  speculative_decoding: null
+  tool_use: null
+
+evidence:
+  model_artifact: null
+  tokenizer_artifact: null
+  training_run: null
+  benchmark_report: null
+  safety_evaluation: null
 
 notes:
-  - This config is a target blueprint and not a verified production configuration.
-  - Model, dataset, benchmark, and deployment evidence must be recorded before claiming verification.
+  - This file is not consumed as a production model configuration.
+  - No trained RUSA-AI weights or tokenizer artifact are bundled in this repository.
+  - Do not populate architecture or capability claims without implementation evidence.

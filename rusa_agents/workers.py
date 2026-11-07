@@ -47,5 +47,11 @@ class AgentWorker:
             system_prompt=system_prompt, user_prompt=user_prompt
         )
         return WorkerResult(
-            role=self.role, summary=output.strip(), success=bool(output.strip())
+            role=self.role,
+            summary=output.strip(),
+            success=False,
+            blockers=[
+                "This adapter only generates a report; it does not execute repository tools or produce verifiable execution evidence. "
+                "Use AutonomousCodeWorker for task execution."
+            ],
         )

@@ -100,6 +100,18 @@ def test_config_rejects_malformed_tenant_mapping(monkeypatch):
         RuntimeConfig.from_env()
 
 
+def test_environment_is_required(monkeypatch):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    with pytest.raises(ValueError, match="ENVIRONMENT is required"):
+        RuntimeConfig.from_env()
+
+
+def test_environment_rejects_unknown_values(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    with pytest.raises(ValueError, match="ENVIRONMENT must be one of"):
+        RuntimeConfig.from_env()
+
+
 def test_aicode_kill_switch_defaults_to_disabled_in_production(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("RUSA_AICODE_ENABLED", raising=False)
