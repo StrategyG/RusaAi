@@ -92,22 +92,6 @@ CREATE TABLE IF NOT EXISTS public.devops_event_inbox (
     UNIQUE (tenant_id, consumer_id, message_id)
 );
 
-CREATE TABLE IF NOT EXISTS public.devops_event_log (
-    event_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
-    run_id UUID NOT NULL,
-    message_id TEXT NOT NULL CHECK (length(message_id) BETWEEN 1 AND 128),
-    event_type TEXT NOT NULL CHECK (length(event_type) BETWEEN 1 AND 128),
-    aggregate_version BIGINT NOT NULL CHECK (aggregate_version > 0),
-    envelope JSONB NOT NULL,
-    occurred_at TIMESTAMPTZ NOT NULL,
-    recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE (tenant_id, message_id),
-    UNIQUE (tenant_id, run_id, aggregate_version)
-);
-CREATE INDEX IF NOT EXISTS idx_devops_event_log_run
-    ON public.devops_event_log(tenant_id, run_id, aggregate_version);
-
 -- Separate NOLOGIN role groups. Login identities are provisioned by deployment.
 GRANT USAGE ON SCHEMA public TO rusa_api_runtime, rusa_worker_runtime, rusa_relay_runtime;
 GRANT SELECT, INSERT, UPDATE ON public.devops_workflows TO rusa_api_runtime, rusa_worker_runtime;
@@ -117,8 +101,6 @@ GRANT SELECT, UPDATE ON public.devops_event_outbox TO rusa_relay_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.devops_event_outbox_outbox_id_seq TO rusa_api_runtime, rusa_worker_runtime, rusa_relay_runtime;
 GRANT SELECT, INSERT ON public.devops_event_inbox TO rusa_worker_runtime;
 GRANT USAGE, SELECT ON SEQUENCE public.devops_event_inbox_inbox_id_seq TO rusa_worker_runtime;
-GRANT SELECT, INSERT ON public.devops_event_log TO rusa_worker_runtime;
-GRANT USAGE, SELECT ON SEQUENCE public.devops_event_log_event_id_seq TO rusa_worker_runtime;
 
 ALTER TABLE public.devops_workflows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devops_workflows FORCE ROW LEVEL SECURITY;
@@ -128,8 +110,6 @@ ALTER TABLE public.devops_event_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devops_event_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.devops_event_inbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devops_event_inbox FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.devops_event_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.devops_event_log FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS devops_workflows_tenant ON public.devops_workflows;
 CREATE POLICY devops_workflows_tenant ON public.devops_workflows
@@ -159,16 +139,7 @@ CREATE POLICY devops_inbox_worker_tenant ON public.devops_event_inbox
     FOR INSERT TO rusa_worker_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
-DROP POLICY IF EXISTS devops_event_log_worker_tenant ON public.devops_event_log;
-CREATE POLICY devops_event_log_worker_select ON public.devops_event_log
-    FOR SELECT TO rusa_worker_runtime
-    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
-CREATE POLICY devops_event_log_worker_insert ON public.devops_event_log
-    FOR INSERT TO rusa_worker_runtime
-    WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
-
 -- Runtime roles may append but never mutate or delete canonical event history.
-REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_log FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
 REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_inbox FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
 
 CREATE OR REPLACE FUNCTION public.rusa_devops_append_only() RETURNS trigger
@@ -179,13 +150,5 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.rusa_devops_append_only() FROM PUBLIC;
 
-DROP TRIGGER IF EXISTS trg_devops_event_log_immutable ON public.devops_event_log;
-CREATE TRIGGER trg_devops_event_log_immutable
-BEFORE UPDATE OR DELETE ON public.devops_event_log
-FOR EACH ROW EXECUTE FUNCTION public.rusa_devops_append_only();
-DROP TRIGGER IF EXISTS trg_devops_event_log_no_truncate ON public.devops_event_log;
-CREATE TRIGGER trg_devops_event_log_no_truncate
-BEFORE TRUNCATE ON public.devops_event_log
-FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_devops_append_only();
 
 COMMIT;
