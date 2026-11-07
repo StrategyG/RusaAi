@@ -207,6 +207,19 @@ class PostgresTaskQueue:
                         "Production cancellation control is missing; "
                         "apply migrations/008_aicode_job_controls.sql"
                     )
+                control_columns = conn.execute("""
+                    SELECT COUNT(*) = 3
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='aicode_job_controls'
+                      AND column_name = ANY(%s)
+                """, ([
+                    "cancel_epoch", "cancel_requested_at", "requested_by",
+                ],)).fetchone()
+                if not control_columns or not control_columns[0]:
+                    raise RuntimeError(
+                        "Production cancellation control columns are incomplete; "
+                        "apply migrations/008_aicode_job_controls.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
