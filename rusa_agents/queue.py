@@ -290,10 +290,12 @@ class PostgresTaskQueue:
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT")
             conn.execute(
-                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS manual_retry_count INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS manual_retry_count "
+                "INTEGER NOT NULL DEFAULT 0 CHECK (manual_retry_count >= 0)"
             )
             conn.execute(
-                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS max_manual_retries INTEGER NOT NULL DEFAULT 3"
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS max_manual_retries "
+                "INTEGER NOT NULL DEFAULT 3 CHECK (max_manual_retries >= 0)"
             )
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_aicode_jobs_idempotency
