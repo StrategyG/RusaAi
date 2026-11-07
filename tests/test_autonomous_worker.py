@@ -187,3 +187,15 @@ def test_autonomous_worker_caps_tool_retries_at_two():
         AutonomousCodeWorker(
             WorkerRole.ANALYST, StubProvider("{}"), StubGateway(), max_tool_retries=3
         )
+
+
+def test_autonomous_worker_preserves_policy_failure_classification():
+    gateway = StubGateway([ToolResult(False, "Policy denied", failure_kind="policy")])
+    provider = StubProvider(json.dumps({
+        "message": "Could not inspect file",
+        "actions": [{"name": "list_files", "arguments": {"path": "."}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "policy"
