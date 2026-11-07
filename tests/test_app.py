@@ -119,7 +119,10 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert response.status_code == 202
     data = response.json()
     assert data["tenant_id"] == "tenant-alpha"
-    assert data["work_branch_prefix"].startswith("feature/aicode/")
+    tenant_suffix = hashlib.sha256(b"tenant-alpha").hexdigest()[:12]
+    assert data["work_branch_prefix"] == (
+        f"feature/aicode/{tenant_suffix}-{data['task_id']}"
+    )
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
 
