@@ -496,32 +496,74 @@ class DevOpsDryRunOrchestrator:
                 return report
 
             if result["status"] != "passed":
-                report.status = result["status"]
-                report.blockers.append(
-                    f"{stage} returned {result['status']}; downstream stages were not executed."
-                )
-                report.events.append(self._event(
-                    event_type="task.failed",
-                    workflow_id=workflow_id,
-                    correlation_id=correlation_id,
-                    traceparent=traceparent,
-                    producer=task["agent_id"],
-                    task_id=task["task_id"],
-                    attempt=task["attempt"],
-                    payload={
-                        "lease_epoch": 1,
-                        "state_version": 2,
-                        "code": f"{stage}_{result['status']}",
-                        "category": "POLICY" if result["status"] == "blocked" else "PERMANENT",
-                        "side_effect": "NONE",
-                    },
-                ))
+                result_status = result["status"]
+                if result_status == "cancelled":
+                    report.status = "cancelled"
+                    report.blockers.append(
+                        f"{stage} was cancelled; downstream stages were not executed."
+                    )
+                    report.events.append(self._event(
+                        event_type="task.cancelled",
+                        workflow_id=workflow_id,
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                        producer=task["agent_id"],
+                        task_id=task["task_id"],
+                        attempt=task["attempt"],
+                        payload={
+                            "cancel_epoch": 1,
+                            "state_version": 2,
+                            "side_effect": "NONE",
+                        },
+                    ))
+                elif result_status == "skipped":
+                    report.status = "blocked"
+                    report.blockers.append(
+                        f"{stage} was skipped; downstream stages were not executed."
+                    )
+                    report.events.append(self._event(
+                        event_type="audit.recorded",
+                        workflow_id=workflow_id,
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                        producer=task["agent_id"],
+                        task_id=task["task_id"],
+                        attempt=task["attempt"],
+                        payload={
+                            "action": f"{stage}.skipped",
+                            "outcome": "skipped",
+                            "resource_ref": _result_ref(task),
+                            "policy_version": self.policy_version,
+                            "state_version": 2,
+                        },
+                    ))
+                else:
+                    report.status = result_status
+                    report.blockers.append(
+                        f"{stage} returned {result_status}; downstream stages were not executed."
+                    )
+                    report.events.append(self._event(
+                        event_type="task.failed",
+                        workflow_id=workflow_id,
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                        producer=task["agent_id"],
+                        task_id=task["task_id"],
+                        attempt=task["attempt"],
+                        payload={
+                            "lease_epoch": 1,
+                            "state_version": 2,
+                            "code": f"{stage}_{result_status}",
+                            "category": "POLICY" if result_status == "blocked" else "PERMANENT",
+                            "side_effect": "NONE",
+                        },
+                    ))
                 report.events.append(self._blocked_event(
                     workflow_id=workflow_id,
                     correlation_id=correlation_id,
                     traceparent=traceparent,
                     stage=stage,
-                    reason_code=f"{stage}_{result['status']}",
+                    reason_code=f"{stage}_{result_status}",
                     state_version=len(report.events) + 1,
                 ))
                 return report
