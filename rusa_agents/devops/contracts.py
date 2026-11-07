@@ -89,7 +89,7 @@ def validate_agent_result_for_task(
     validate_agent_task(task)
     validate_agent_result(result)
 
-    for field in ("task_id", "workflow_id", "tenant_id", "agent_id", "stage"):
+    for field in ("task_id", "workflow_id", "tenant_id", "agent_id", "stage", "attempt"):
         if task.get(field) != result.get(field):
             raise ContractValidationError(
                 f"agent result does not match originating task field: {field}"
