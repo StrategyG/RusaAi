@@ -78,6 +78,43 @@ def test_validate_task_endpoint_invalid():
     assert response.json()["valid"] is False
 
 
+def test_aicode_task_intake_uses_local_development_identity_without_api_keys(monkeypatch):
+    class StubQueue:
+        def __init__(self):
+            self.audit_actor = None
+
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            self.audit_actor = audit_actor
+            return True
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_DEFAULT_TENANT", "local-dev")
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"local-dev":["StrategyG/RusaAi"]}')
+    for name in ("RUSA_API_KEYS", "RUSA_API_KEY", "RUSA_API_KEYS_JSON"):
+        monkeypatch.delenv(name, raising=False)
+
+    queue = StubQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    payload = {
+        "objective": "Exercise local development authentication",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["The local development identity is attributed"],
+    }
+
+    accepted = client.post("/v1/aicode/tasks", json=payload)
+    assert accepted.status_code == 202
+    assert accepted.json()["tenant_id"] == "local-dev"
+    assert queue.audit_actor == "api:local-development"
+
+    rejected = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "unconfigured-key"},
+        json=payload,
+    )
+    assert rejected.status_code == 401
+
+
 def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     class StubQueue:
         def __init__(self):
