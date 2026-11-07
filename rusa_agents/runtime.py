@@ -645,16 +645,51 @@ class AICodeRuntime:
                 outcome = "lease_lost" if lost_lease.is_set() else "failed"
                 if not lost_lease.is_set():
                     retryable = not isinstance(exc, (PermissionError, ValueError, TypeError))
-                    await asyncio.to_thread(
-                        self.queue.fail,
-                        job.id,
-                        job.tenant_id,
-                        self.worker_id,
-                        job.lease_token,
-                        f"{type(exc).__name__}: {exc}",
-                        self._retry_delay_seconds(job.attempts),
-                        retryable=retryable,
-                    )
+                    try:
+                        failed = await asyncio.to_thread(
+                            self.queue.fail,
+                            job.id,
+                            job.tenant_id,
+                            self.worker_id,
+                            job.lease_token,
+                            f"{type(exc).__name__}: {exc}",
+                            self._retry_delay_seconds(job.attempts),
+                            retryable=retryable,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Could not persist failure transition for task %s",
+                            job.task_id,
+                        )
+                        lost_lease.set()
+                        outcome = "lease_lost"
+                    else:
+                        if not failed:
+                            try:
+                                if await asyncio.to_thread(
+                                    self.queue.is_cancel_requested,
+                                    job.task_id,
+                                    job.tenant_id,
+                                ):
+                                    cancel_requested.set()
+                                    outcome = "cancelled"
+                                    await self._acknowledge_cancellation(
+                                        job,
+                                        publication_started=publication_started,
+                                        publication_finished=publication_finished,
+                                        pr_creation_started=pr_creation_started,
+                                        pr_creation_finished=pr_creation_finished,
+                                    )
+                                else:
+                                    lost_lease.set()
+                                    outcome = "lease_lost"
+                            except Exception:
+                                logger.exception(
+                                    "Could not reconcile rejected failure transition for task %s",
+                                    job.task_id,
+                                )
+                                lost_lease.set()
+                                outcome = "lease_lost"
         finally:
             heartbeat.cancel()
             try:
