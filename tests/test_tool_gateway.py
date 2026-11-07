@@ -170,3 +170,60 @@ def test_direct_gateway_write_also_checks_execution_guard(tmp_path):
         gateway.write_file("unsafe.py", "SHOULD_NOT_WRITE", WorkerRole.DEVELOPER)
 
     assert not (tmp_path / "unsafe.py").exists()
+
+
+
+def test_sandbox_terminates_container_when_lease_guard_fails(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "src.py").write_text("print('safe')")
+
+    class FakeProcess:
+        def __init__(self, command, **_kwargs):
+            self.command = command
+            self.returncode = None
+            self.terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self):
+            self.terminated = True
+            self.returncode = -9
+
+        def communicate(self, timeout=None):
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            return "", "terminated"
+
+    processes = []
+    cleanup_commands = []
+
+    def fake_popen(command, **kwargs):
+        process = FakeProcess(command, **kwargs)
+        processes.append(process)
+        return process
+
+    def fake_run(command, **kwargs):
+        cleanup_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
+    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
+
+    result = DockerSandbox(image="sandbox:test").run(
+        workspace,
+        "pytest",
+        cancellation_check=lambda: False,
+    )
+
+    assert not result.ok
+    assert result.evidence["cancelled"] is True
+    assert processes and processes[0].terminated
+    assert cleanup_commands
+    assert cleanup_commands[0][:3] == ["/usr/bin/docker", "rm", "-f"]
