@@ -4,6 +4,7 @@ import json
 from rusa_agents.autonomous import AutonomousCodeWorker
 from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.tool_gateway import ToolResult
+from rusa_agents.workers import AgentWorker
 
 
 class StubProvider:
@@ -175,3 +176,16 @@ def test_tool_failure_cannot_be_reported_as_worker_success():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert "unsuccessful result" in result.blockers[0]
+
+
+
+def test_report_only_worker_never_claims_execution_success():
+    class TextProvider:
+        async def complete(self, *, system_prompt, user_prompt):
+            return "Planning report generated; no repository tools were executed."
+
+    result = asyncio.run(
+        AgentWorker(WorkerRole.ANALYST, TextProvider()).run(make_task(), [])
+    )
+    assert not result.success
+    assert "does not execute repository tools" in result.blockers[0]
