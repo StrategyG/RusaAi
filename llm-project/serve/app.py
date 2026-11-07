@@ -369,7 +369,12 @@ class AICodeTaskResponse(BaseModel):
     task_id: str
     status: str
     tenant_id: str
-    work_branch_prefix: str
+    work_branch_prefix: str = Field(
+        description=(
+            "Tenant-scoped stable publication branch; the isolated worker worktree "
+            "branch appends a lease-specific suffix."
+        )
+    )
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
