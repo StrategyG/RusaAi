@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: erg06-\${{ github.workflow }}-\${{ github.event_name }}-\${{ github.ref }}
+  group: erg06-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -77,13 +77,13 @@ jobs:
           python scripts/enterprise_readiness_gate.py \
             --mode automated \
             --junitxml artifacts/erg06-junit.xml \
-            --expected-sha "\${GITHUB_SHA}" \
+            --expected-sha "${GITHUB_SHA}" \
             --output artifacts/erg06-automated-report.json
       - name: Upload ERG-06 automated evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: erg06-automated-evidence-\${{ github.sha }}
+          name: erg06-automated-evidence-${{ github.sha }}
           path: |
             artifacts/erg06-junit.xml
             artifacts/erg06-automated-report.json
@@ -101,14 +101,14 @@ jobs:
       attestations: read
       contents: read
     env:
-      GH_TOKEN: \${{ github.token }}
-      EXPECTED_SHA: \${{ inputs.candidate_sha }}
-      EVIDENCE_RUN_ID: \${{ inputs.evidence_run_id }}
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ inputs.candidate_sha }}
+      EVIDENCE_RUN_ID: ${{ inputs.evidence_run_id }}
     steps:
       - name: Check out exact candidate commit
         uses: actions/checkout@v4
         with:
-          ref: \${{ inputs.candidate_sha }}
+          ref: ${{ inputs.candidate_sha }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -120,8 +120,8 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Verify source staging workflow run
         run: |
-          gh run view "\${EVIDENCE_RUN_ID}" \
-            --repo "\${GITHUB_REPOSITORY}" \
+          gh run view "${EVIDENCE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --json headSha,conclusion,workflowName > /tmp/erg06-source-run.json
           python - <<'PY'
           import json
@@ -141,26 +141,26 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: erg06-staging-evidence
-          run-id: \${{ inputs.evidence_run_id }}
-          github-token: \${{ github.token }}
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
           path: artifacts/staging
       - name: Verify GitHub artifact attestation
         run: |
           gh attestation verify \
             artifacts/staging/erg06-staging-evidence.json \
-            --repo "\${GITHUB_REPOSITORY}"
+            --repo "${GITHUB_REPOSITORY}"
       - name: Evaluate full ERG-06 certification
         run: |
           python scripts/enterprise_readiness_gate.py \
             --mode certify \
             --evidence artifacts/staging/erg06-staging-evidence.json \
-            --expected-sha "\${EXPECTED_SHA}" \
+            --expected-sha "${EXPECTED_SHA}" \
             --output artifacts/erg06-certification-report.json
       - name: Upload ERG-06 certification decision
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: erg06-certification-decision-\${{ inputs.candidate_sha }}
+          name: erg06-certification-decision-${{ inputs.candidate_sha }}
           path: artifacts/erg06-certification-report.json
           if-no-files-found: warn
           retention-days: 90
