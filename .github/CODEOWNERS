@@ -1,0 +1,3 @@
+# Repository-wide ownership. GitHub requires a different user to approve a PR;
+# add a second maintainer before enforcing mandatory code-owner review.
+* @StrategyG

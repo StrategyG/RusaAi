@@ -63,7 +63,7 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Apply migrations `001` through `006` in order using the database owner before
   enabling production task intake. The API runtime must not have schema-owner or
   superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
+- Apply `migrations/007_rag_knowledge_pgvector.sql` only on a pgvector-enabled
   knowledge database and configure the restricted `rusa_knowledge_worker` role.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
