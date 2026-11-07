@@ -11,7 +11,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from .contracts import validate_workflow_event
 
