@@ -51,6 +51,64 @@ class PostgresTaskQueue:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     @staticmethod
+    def _lock_execution_control(conn, job_id: int, tenant_id: str):
+        """Serialize terminal transitions with cancellation using a transaction advisory lock.
+
+        Advisory locks avoid granting the worker UPDATE rights on the API-owned control table.
+        They are independent from the job row lock held during bounded Git publication.
+        """
+        task = conn.execute(
+            "SELECT task_id::text FROM public.aicode_jobs WHERE id=%s AND tenant_id=%s",
+            (job_id, tenant_id),
+        ).fetchone()
+        if task is None:
+            return None
+        lock_key = f"{tenant_id}:{task[0]}"
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (lock_key,),
+        )
+        return conn.execute(
+            """
+            SELECT cancel_requested_at
+            FROM public.aicode_job_controls
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, task[0]),
+        ).fetchone()
+
+    @staticmethod
+    def _lock_task_control(conn, task_id: str, tenant_id: str) -> str | None:
+        """Acquire the same advisory lock used by worker terminal transitions.
+
+        Resolve the UUID from PostgreSQL first so alternate textual UUID spellings
+        cannot bypass serialization between API cancellation/retry and worker ACKs.
+        """
+        row = conn.execute(
+            """
+            SELECT task_id::text
+            FROM public.aicode_jobs
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, task_id),
+        ).fetchone()
+        if row is None:
+            return None
+        canonical_task_id = row[0]
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:{canonical_task_id}",),
+        )
+        control = conn.execute(
+            """
+            SELECT 1 FROM public.aicode_job_controls
+            WHERE tenant_id=%s AND task_id=%s
+            """,
+            (tenant_id, canonical_task_id),
+        ).fetchone()
+        return canonical_task_id if control is not None else None
+
+    @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
@@ -125,6 +183,17 @@ class PostgresTaskQueue:
                         "Production idempotency index is missing; "
                         "apply migrations/006_aicode_idempotency.sql"
                     )
+                retry_columns = conn.execute("""
+                    SELECT COUNT(*) = 2
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='aicode_jobs'
+                      AND column_name::text = ANY(%s)
+                """, (["manual_retry_count", "max_manual_retries"],)).fetchone()
+                if not retry_columns or not retry_columns[0]:
+                    raise RuntimeError(
+                        "Production bounded manual retry policy is missing; "
+                        "apply migrations/008_aicode_job_controls.sql"
+                    )
                 result_column = conn.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
@@ -137,34 +206,125 @@ class PostgresTaskQueue:
                         "Production task result storage is not installed; "
                         "apply migrations/003_aicode_task_results.sql"
                     )
+                control_table = conn.execute(
+                    "SELECT to_regclass('public.aicode_job_controls')"
+                ).fetchone()
+                if not control_table or control_table[0] is None:
+                    raise RuntimeError(
+                        "Production cancellation control is missing; "
+                        "apply migrations/008_aicode_job_controls.sql"
+                    )
+                control_columns = conn.execute("""
+                    SELECT COUNT(*) = 6
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='aicode_job_controls'
+                      AND column_name::text = ANY(%s)
+                """, ([
+                    "tenant_id", "task_id", "cancel_epoch", "cancel_requested_at",
+                    "requested_by", "updated_at",
+                ],)).fetchone()
+                if not control_columns or not control_columns[0]:
+                    raise RuntimeError(
+                        "Production cancellation control columns are incomplete; "
+                        "apply migrations/008_aicode_job_controls.sql"
+                    )
                 protected = conn.execute("""
                     SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
                     FROM pg_class AS c
                     JOIN pg_namespace AS n ON n.oid=c.relnamespace
                     WHERE n.nspname='public'
                       AND c.relname = ANY(%s)
-                """, (["aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"],)).fetchall()
+                """, ([
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
+                ],)).fetchall()
                 states = {row[0]: (row[1], row[2]) for row in protected}
-                if set(states) != {"aicode_jobs", "aicode_rate_limits", "aicode_memory", "aicode_audit_events"}:
-                    raise RuntimeError("Production RLS migration is incomplete; apply migrations/004_aicode_tenant_rls.sql")
+                if set(states) != {
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
+                }:
+                    raise RuntimeError(
+                        "Production RLS migration is incomplete; apply migrations/004_aicode_tenant_rls.sql and migrations/008_aicode_job_controls.sql"
+                    )
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
-                policies = conn.execute("""
-                    SELECT tablename, policyname FROM pg_policies
-                    WHERE schemaname='public' AND policyname = ANY(%s)
+                control_privileges = conn.execute("""
+                    SELECT
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
+                        has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
+                        has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
+                """).fetchone()
+                if (
+                    not control_privileges
+                    or not all(control_privileges[:4])
+                    or control_privileges[4]
+                ):
+                    raise RuntimeError(
+                        "Cancellation control grants must allow API SELECT/INSERT/UPDATE "
+                        "and worker SELECT only"
+                    )
+                policy_rows = conn.execute("""
+                    SELECT tablename, policyname, roles, cmd, qual, with_check
+                    FROM pg_policies
+                    WHERE schemaname='public' AND tablename = ANY(%s)
                 """, ([
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_only",
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
                 ],)).fetchall()
-                policy_names = {row[1] for row in policies}
-                required_policies = {
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_only",
+                policies = {
+                    (row[0], row[1]): (tuple(row[2] or ()), row[3], row[4], row[5])
+                    for row in policy_rows
                 }
-                if not required_policies.issubset(policy_names):
-                    raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                required_policy_specs = {
+                    ("aicode_jobs", "aicode_jobs_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_jobs", "aicode_jobs_worker_queue"):
+                        ("rusa_worker_runtime", "ALL", "all"),
+                    ("aicode_job_controls", "aicode_job_controls_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_job_controls", "aicode_job_controls_worker_read"):
+                        ("rusa_worker_runtime", "SELECT", "all"),
+                    ("aicode_rate_limits", "aicode_rate_limits_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_memory", "aicode_memory_worker_tenant"):
+                        ("rusa_worker_runtime", "ALL", "tenant"),
+                    ("aicode_audit_events", "aicode_audit_worker_only"):
+                        ("rusa_worker_runtime", "ALL", "all"),
+                }
+                if set(policies) != set(required_policy_specs):
+                    raise RuntimeError(
+                        "Production tenant/cancellation RLS policies are missing or attached "
+                        "to the wrong tables; apply migrations/004_aicode_tenant_rls.sql "
+                        "and migrations/008_aicode_job_controls.sql"
+                    )
+
+                for key, (expected_role, expected_command, scope) in required_policy_specs.items():
+                    roles, command, using_expression, check_expression = policies[key]
+                    if roles != (expected_role,) or command != expected_command:
+                        raise RuntimeError(
+                            f"Production RLS policy {key[1]} has an unsafe role or command"
+                        )
+                    using_sql = (using_expression or "").replace(" ", "").lower().strip("()")
+                    check_sql = (check_expression or "").replace(" ", "").lower().strip("()")
+                    if scope == "tenant":
+                        tenant_predicate = (
+                            "tenant_id=" in using_sql
+                            and "current_setting('rusa.tenant_id'" in using_sql
+                            and "tenant_id=" in check_sql
+                            and "current_setting('rusa.tenant_id'" in check_sql
+                        )
+                        if not tenant_predicate:
+                            raise RuntimeError(
+                                f"Production RLS policy {key[1]} is missing its tenant predicate"
+                            )
+                    elif using_sql != "true" or (
+                        expected_command != "SELECT" and check_sql != "true"
+                    ):
+                        raise RuntimeError(
+                            f"Production worker RLS policy {key[1]} is unexpectedly restrictive"
+                        )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
@@ -230,6 +390,14 @@ class PostgresTaskQueue:
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT")
+            conn.execute(
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS manual_retry_count "
+                "INTEGER NOT NULL DEFAULT 0 CHECK (manual_retry_count >= 0)"
+            )
+            conn.execute(
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS max_manual_retries "
+                "INTEGER NOT NULL DEFAULT 3 CHECK (max_manual_retries >= 0)"
+            )
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_aicode_jobs_idempotency
                 ON aicode_jobs(tenant_id, idempotency_key)
@@ -242,6 +410,24 @@ class PostgresTaskQueue:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_aicode_jobs_tenant
                 ON aicode_jobs(tenant_id, created_at DESC)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS aicode_job_controls (
+                    tenant_id TEXT NOT NULL,
+                    task_id UUID NOT NULL,
+                    cancel_epoch BIGINT NOT NULL DEFAULT 0 CHECK (cancel_epoch >= 0),
+                    cancel_requested_at TIMESTAMPTZ,
+                    requested_by TEXT,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, task_id),
+                    FOREIGN KEY (tenant_id, task_id)
+                        REFERENCES aicode_jobs(tenant_id, task_id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("""
+                INSERT INTO aicode_job_controls (tenant_id, task_id)
+                SELECT tenant_id, task_id FROM aicode_jobs
+                ON CONFLICT (tenant_id, task_id) DO NOTHING
             """)
 
     def ping(self) -> bool:
@@ -271,6 +457,15 @@ class PostgresTaskQueue:
                 ON CONFLICT (tenant_id, task_id) DO NOTHING
                 RETURNING id
             """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
+            if row is not None:
+                conn.execute(
+                    """
+                    INSERT INTO public.aicode_job_controls (tenant_id, task_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (tenant_id, task_id) DO NOTHING
+                    """,
+                    (tenant_id, task_id),
+                )
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.create",
                 "allow" if row is not None else "deny",
@@ -326,6 +521,14 @@ class PostgresTaskQueue:
                 ),
             ).fetchone()
             if inserted is not None:
+                conn.execute(
+                    """
+                    INSERT INTO public.aicode_job_controls (tenant_id, task_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT (tenant_id, task_id) DO NOTHING
+                    """,
+                    (tenant_id, task_id),
+                )
                 self._record_policy_event(
                     conn, tenant_id, task_id, audit_actor, "task.create", "allow"
                 )
@@ -358,25 +561,107 @@ class PostgresTaskQueue:
             )
             return str(existing[0]), False, str(existing[2])
 
+    @staticmethod
+    def _recover_cancelled_in_transaction(conn, batch_size: int = 100) -> int:
+        cur = conn.execute("""
+            WITH cancelled AS (
+                SELECT job.id
+                FROM public.aicode_jobs AS job
+                JOIN public.aicode_job_controls AS control
+                  ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                WHERE control.cancel_requested_at IS NOT NULL
+                  AND (
+                      job.status IN ('queued', 'awaiting_approval')
+                      OR (job.status='running' AND job.lease_until < NOW())
+                  )
+                ORDER BY job.id
+                FOR UPDATE OF job SKIP LOCKED
+                LIMIT %s
+            )
+            UPDATE public.aicode_jobs AS job
+            SET status='cancelled',
+                result=CASE
+                    WHEN job.status='running' THEN
+                        COALESCE(job.result, '{}'::jsonb) || jsonb_build_object(
+                            'side_effects', jsonb_build_object(
+                                'git_publication', 'reconciliation_required',
+                                'git_publication_cleanup', 'reconciliation_required',
+                                'pull_request_creation', 'reconciliation_required',
+                                'pull_request_cleanup', 'reconciliation_required',
+                                'reconciliation_required', true
+                            ),
+                            'cancellation_reconciliation', jsonb_build_object(
+                                'required', true,
+                                'reason', 'worker_lease_expired_during_cancellation'
+                            )
+                        )
+                    ELSE job.result
+                END,
+                last_error=CASE
+                    WHEN job.status='running'
+                    THEN 'Cancellation requested; worker lease expired before acknowledgement'
+                    ELSE job.last_error
+                END,
+                lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                updated_at=NOW()
+            FROM cancelled
+            WHERE job.id=cancelled.id
+        """, (batch_size,))
+        return cur.rowcount
+
+    def recover_cancelled(self, batch_size: int = 100) -> int:
+        """Finalize durable cancellations whose worker lease expired before acknowledgement."""
+        if type(batch_size) is not int or not 1 <= batch_size <= 1000:
+            raise ValueError("batch_size must be an integer between 1 and 1000")
+        with self._connect() as conn:
+            return self._recover_cancelled_in_transaction(conn, batch_size)
+
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
             raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
         lease_token = str(uuid4())
         with self._connect() as conn:
+            self._recover_cancelled_in_transaction(conn, 100)
             conn.execute("""
-                UPDATE aicode_jobs
+                WITH candidate AS MATERIALIZED (
+                    SELECT id, tenant_id, task_id::text AS task_id
+                    FROM public.aicode_jobs
+                    WHERE status='running' AND lease_until < NOW()
+                      AND attempts >= max_attempts
+                    ORDER BY id
+                    LIMIT 1
+                ),
+                locked AS MATERIALIZED (
+                    SELECT candidate.id
+                    FROM candidate
+                    CROSS JOIN LATERAL (
+                        SELECT pg_advisory_xact_lock(
+                            hashtextextended(candidate.tenant_id || ':' || candidate.task_id, 0)
+                        )
+                    ) AS task_lock
+                )
+                UPDATE public.aicode_jobs AS job
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
-                WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
+                FROM locked, public.aicode_job_controls AS control
+                WHERE job.id=locked.id
+                  AND control.tenant_id=job.tenant_id
+                  AND control.task_id=job.task_id
+                  AND control.cancel_requested_at IS NULL
+                  AND job.status='running' AND job.lease_until < NOW()
+                  AND job.attempts >= job.max_attempts
             """)
             row = conn.execute("""
                 WITH candidate AS (
-                    SELECT id FROM aicode_jobs
-                    WHERE attempts < max_attempts
-                      AND ((status='queued' AND available_at <= NOW())
-                        OR (status='running' AND lease_until < NOW()))
-                    ORDER BY priority DESC, created_at ASC
-                    FOR UPDATE SKIP LOCKED
+                    SELECT job.id FROM public.aicode_jobs AS job
+                    JOIN public.aicode_job_controls AS control
+                      ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                    WHERE control.cancel_requested_at IS NULL
+                      AND job.attempts < job.max_attempts
+                      AND ((job.status='queued' AND job.available_at <= NOW())
+                        OR (job.status='running' AND job.lease_until < NOW()))
+                    ORDER BY job.priority DESC, job.created_at ASC
+                    FOR UPDATE OF job SKIP LOCKED
                     LIMIT 1
                 )
                 UPDATE aicode_jobs AS job
@@ -406,6 +691,12 @@ class PostgresTaskQueue:
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
             """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
@@ -419,12 +710,14 @@ class PostgresTaskQueue:
         *,
         lease_seconds: int = 900,
     ) -> str | None:
-        """Hold the queue row lock across remote publication to prevent lease handoff races.
+        """Fence a bounded Git publication against lease handoff.
 
-        The bounded Git operation runs while the active lease row is locked. A replacement
-        worker uses SKIP LOCKED and cannot reclaim this task until publication has finished.
-        The lease is extended before publication and refreshed again before the transaction
-        releases the row. The publisher must use a task/lease-specific branch.
+        The active job row is locked while the bounded push runs, so a replacement worker
+        cannot reclaim the task mid-publication. Cancellation intent lives in a separate
+        control row and can be committed without waiting for this publication lock. A push
+        already in flight when cancellation commits is an external side effect that requires
+        reconciliation; callers must use a stable task identity in publication metadata even
+        when each lease receives an isolated feature branch.
         """
         if (
             type(job_id) is not int
@@ -446,6 +739,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
                   AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 FOR UPDATE
                 """,
                 (job_id, tenant_id, worker_id, lease_token),
@@ -461,6 +760,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
                   AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 RETURNING id
                 """,
                 (lease_seconds, job_id, tenant_id, worker_id, lease_token),
@@ -476,7 +781,15 @@ class PostgresTaskQueue:
             refreshed = conn.execute(
                 """
                 UPDATE public.aicode_jobs
-                SET lease_until=NOW() + (180 * INTERVAL '1 second'),
+                SET lease_until=CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM public.aicode_job_controls AS control
+                            WHERE control.tenant_id=aicode_jobs.tenant_id
+                              AND control.task_id=aicode_jobs.task_id
+                              AND control.cancel_requested_at IS NOT NULL
+                        ) THEN NOW()
+                        ELSE NOW() + (180 * INTERVAL '1 second')
+                    END,
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
@@ -498,6 +811,9 @@ class PostgresTaskQueue:
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='succeeded', result=%s::jsonb,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
@@ -520,6 +836,9 @@ class PostgresTaskQueue:
     ) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='awaiting_approval', result=%s::jsonb,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
@@ -533,21 +852,38 @@ class PostgresTaskQueue:
         return cur.rowcount == 1
 
     def fail(
-        self, job_id: int, tenant_id: str, worker_id: str,
-        lease_token: str, error: str, retry_delay_seconds: int = 30,
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        error: str,
+        retry_delay_seconds: int = 30,
+        *,
+        retryable: bool = True,
     ) -> bool:
+        """Fail a lease-owned task, retrying only when the caller classifies it as transient."""
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is not None:
+                return False
             cur = conn.execute("""
                 UPDATE aicode_jobs
-                SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
-                    available_at=NOW() + (%s * INTERVAL '1 second'),
+                SET status=CASE
+                        WHEN NOT %s OR attempts >= max_attempts THEN 'failed'
+                        ELSE 'queued'
+                    END,
+                    available_at=CASE
+                        WHEN NOT %s OR attempts >= max_attempts THEN NOW()
+                        ELSE NOW() + (%s * INTERVAL '1 second')
+                    END,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (
-                max(0, retry_delay_seconds), error[:4000],
+                retryable, retryable, max(0, retry_delay_seconds), error[:4000],
                 job_id, tenant_id, worker_id, lease_token,
             ))
         return cur.rowcount == 1
@@ -580,6 +916,12 @@ class PostgresTaskQueue:
                 WHERE id=%s AND task_id=%s AND tenant_id=%s
                   AND lease_owner=%s AND lease_token=%s::uuid
                   AND status='running' AND lease_until > NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.aicode_job_controls AS control
+                      WHERE control.tenant_id=aicode_jobs.tenant_id
+                        AND control.task_id=aicode_jobs.task_id
+                        AND control.cancel_requested_at IS NOT NULL
+                  )
                 FOR UPDATE
                 """,
                 (job_id, task_id, tenant_id, worker_id, lease_token),
@@ -605,9 +947,62 @@ class PostgresTaskQueue:
                     WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                       AND lease_token=%s::uuid AND status='running'
                       AND lease_until > NOW()
+                      AND NOT EXISTS (
+                          SELECT 1 FROM public.aicode_job_controls AS control
+                          WHERE control.tenant_id=aicode_jobs.tenant_id
+                            AND control.task_id=aicode_jobs.task_id
+                            AND control.cancel_requested_at IS NOT NULL
+                      )
                 )
             """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
         return bool(row and row[0])
+
+    def is_cancel_requested(self, task_id: str, tenant_id: str) -> bool:
+        """Read the independent cancellation control row without waiting on a job publication lock."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM public.aicode_job_controls
+                    WHERE tenant_id=%s AND task_id=%s
+                      AND cancel_requested_at IS NOT NULL
+                )
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+        return bool(row and row[0])
+
+    def mark_cancelled(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        result: dict[str, Any] | None = None,
+    ) -> bool:
+        """Acknowledge cancellation and persist any external side effects needing reconciliation."""
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            control = self._lock_execution_control(conn, job_id, tenant_id)
+            if control is None or control[0] is None:
+                return False
+            cur = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET status='cancelled', result=%s::jsonb,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                """,
+                (
+                    json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                    job_id, tenant_id, worker_id, lease_token,
+                ),
+            )
+        return cur.rowcount == 1
 
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
@@ -618,14 +1013,25 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            row = conn.execute("""
-                UPDATE aicode_jobs
-                SET status='queued', attempts=0, available_at=NOW(), result=NULL,
-                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
-                RETURNING id
-            """, (task_id, tenant_id)).fetchone()
+            canonical_task_id = self._lock_task_control(conn, task_id, tenant_id)
+            row = None
+            if canonical_task_id is not None:
+                row = conn.execute("""
+                    UPDATE aicode_jobs
+                    SET status='queued', attempts=0, manual_retry_count=manual_retry_count+1,
+                        available_at=NOW(), result=NULL, lease_owner=NULL, lease_until=NULL,
+                        lease_token=NULL, last_error=NULL, updated_at=NOW()
+                    WHERE task_id=%s AND tenant_id=%s
+                      AND status IN ('awaiting_approval', 'failed')
+                      AND manual_retry_count < max_manual_retries
+                      AND NOT EXISTS (
+                          SELECT 1 FROM public.aicode_job_controls AS control
+                          WHERE control.tenant_id=aicode_jobs.tenant_id
+                            AND control.task_id=aicode_jobs.task_id
+                            AND control.cancel_requested_at IS NOT NULL
+                      )
+                    RETURNING id
+                """, (canonical_task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.retry",
                 "allow" if row is not None else "deny",
@@ -635,19 +1041,87 @@ class PostgresTaskQueue:
     def cancel(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
+        """Persist cancellation intent independently from the row locked during publication.
+
+        Running workers observe this control row through the heartbeat/control poll.
+        The API therefore does not wait for a bounded external publish to release the job row.
+        """
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            cur = conn.execute("""
-                UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
-                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
-            """, (task_id, tenant_id))
+            canonical_task_id = self._lock_task_control(conn, task_id, tenant_id)
+            if canonical_task_id is None:
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.cancel", "deny"
+                )
+                return False
+            control = conn.execute(
+                """
+                SELECT control.cancel_requested_at, job.status
+                FROM public.aicode_job_controls AS control
+                JOIN public.aicode_jobs AS job
+                  ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
+                WHERE control.tenant_id=%s AND control.task_id=%s
+                """,
+                (tenant_id, canonical_task_id),
+            ).fetchone()
+            if control is None or control[1] in {"succeeded", "failed"}:
+                self._record_policy_event(
+                    conn, tenant_id, canonical_task_id, audit_actor, "task.cancel", "deny"
+                )
+                return False
+
+            if control[0] is None:
+                conn.execute(
+                    """
+                    UPDATE public.aicode_job_controls
+                    SET cancel_epoch=cancel_epoch+1,
+                        cancel_requested_at=NOW(),
+                        requested_by=%s,
+                        updated_at=NOW()
+                    WHERE tenant_id=%s AND task_id=%s
+                    """,
+                    (audit_actor, tenant_id, canonical_task_id),
+                )
+
+            if control[1] in {"queued", "awaiting_approval"}:
+                conn.execute(
+                    """
+                    UPDATE public.aicode_jobs
+                    SET status='cancelled',
+                        result=CASE
+                            WHEN status='awaiting_approval'
+                                 AND result IS NOT NULL
+                                 AND result ? 'pull_request_url'
+                            THEN result || jsonb_build_object(
+                                'side_effects', jsonb_build_object(
+                                    'git_publication', 'completed',
+                                    'git_publication_cleanup', 'reconciliation_required',
+                                    'pull_request_creation', 'completed',
+                                    'pull_request_cleanup', 'reconciliation_required',
+                                    'reconciliation_required', true
+                                ),
+                                'cancellation_reconciliation', jsonb_build_object(
+                                    'required', true,
+                                    'reason', 'approval_paused_task_cancelled'
+                                )
+                            )
+                            ELSE result
+                        END,
+                        lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                        updated_at=NOW()
+                    WHERE tenant_id=%s AND task_id=%s
+                      AND status IN ('queued', 'awaiting_approval')
+                    """,
+                    (tenant_id, canonical_task_id),
+                )
+
             self._record_policy_event(
-                conn, tenant_id, task_id, audit_actor, "task.cancel",
-                "allow" if cur.rowcount == 1 else "deny",
+                conn, tenant_id, canonical_task_id, audit_actor, "task.cancel", "allow"
             )
-        return cur.rowcount == 1
+        return True
 
     def get(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
@@ -656,9 +1130,14 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
-                SELECT task_id::text, tenant_id, payload, result, status, attempts,
-                       max_attempts, last_error, created_at, updated_at
-                FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s
+                SELECT job.task_id::text, job.tenant_id, job.payload, job.result,
+                       job.status, job.attempts, job.max_attempts, job.last_error,
+                       job.created_at, job.updated_at,
+                       (control.cancel_requested_at IS NOT NULL)
+                FROM public.aicode_jobs AS job
+                LEFT JOIN public.aicode_job_controls AS control
+                  ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                WHERE job.task_id=%s AND job.tenant_id=%s
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.read",
@@ -675,4 +1154,5 @@ class PostgresTaskQueue:
             "result": result, "status": row[4], "attempts": row[5],
             "max_attempts": row[6], "last_error": row[7],
             "created_at": row[8].isoformat(), "updated_at": row[9].isoformat(),
+            "cancel_requested": bool(row[10]),
         }

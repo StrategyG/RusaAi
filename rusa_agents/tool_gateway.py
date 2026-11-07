@@ -11,6 +11,8 @@ import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -85,7 +87,13 @@ class DockerSandbox:
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
 
-    def run(self, workspace: Path, profile: str) -> ToolResult:
+    def run(
+        self,
+        workspace: Path,
+        profile: str,
+        *,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:
@@ -179,28 +187,109 @@ class DockerSandbox:
                 self.image,
                 *self.PROFILES[profile],
             ]
-            try:
-                completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
-                    command,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
-                    env={key: value for key, value in os.environ.items()
-                         if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
-                )
-            except FileNotFoundError as exc:
-                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-            except subprocess.TimeoutExpired:
+            sandbox_env = {
+                key: value for key, value in os.environ.items()
+                if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}
+            }
+
+            def remove_container() -> None:
                 try:
                     subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
                         [DOCKER_BIN, "rm", "-f", container_name],
-                        check=False, capture_output=True, text=True, timeout=30,
-                        env={key: value for key, value in os.environ.items()
-                             if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=sandbox_env,
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+
+            try:
+                if cancellation_check is None:
+                    completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout_seconds,
+                        env=sandbox_env,
+                    )
+                else:
+                    process = subprocess.Popen(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=sandbox_env,
+                    )
+                    def stop_process(*, force: bool = False) -> None:
+                        try:
+                            if process.poll() is None:
+                                if force:
+                                    process.kill()
+                                else:
+                                    process.terminate()
+                        except ProcessLookupError:
+                            pass
+                        if force:
+                            process.communicate()
+                        else:
+                            try:
+                                process.communicate(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                try:
+                                    if process.poll() is None:
+                                        process.kill()
+                                except ProcessLookupError:
+                                    pass
+                                process.communicate()
+                        remove_container()
+
+                    deadline = time.monotonic() + self.timeout_seconds
+                    while True:
+                        try:
+                            execution_allowed = cancellation_check()
+                        except Exception as exc:
+                            stop_process()
+                            raise RuntimeError(
+                                "Could not verify the task lease during sandbox execution"
+                            ) from exc
+                        if not execution_allowed:
+                            stop_process()
+                            return ToolResult(
+                                False,
+                                "Sandbox execution stopped because the task lease was lost or cancelled.",
+                                {
+                                    "profile": profile,
+                                    "cancelled": True,
+                                    "image": self.image,
+                                    "snapshot_bytes": totals[0],
+                                },
+                            )
+
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            stop_process(force=True)
+                            return ToolResult(
+                                False,
+                                f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.",
+                                {"profile": profile, "timeout": True},
+                            )
+                        try:
+                            stdout, stderr = process.communicate(
+                                timeout=min(1.0, remaining)
+                            )
+                            completed = subprocess.CompletedProcess(
+                                command, process.returncode, stdout, stderr
+                            )
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
+            except FileNotFoundError as exc:
+                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
+            except subprocess.TimeoutExpired:
+                remove_container()
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
             output = (completed.stdout + "\n" + completed.stderr)[-20000:]
             return ToolResult(
@@ -250,6 +339,7 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        execution_guard: Callable[[], bool] | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -264,6 +354,13 @@ class WorkspaceToolGateway:
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        self.execution_guard = execution_guard
+
+    def _assert_execution_allowed(self) -> None:
+        if self.execution_guard is not None and not self.execution_guard():
+            raise ToolDenied(
+                "Task lease is no longer active or cancellation was requested; refusing tool execution"
+            )
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -302,6 +399,7 @@ class WorkspaceToolGateway:
         return target
 
     def read_file(self, raw_path: str) -> ToolResult:
+        self._assert_execution_allowed()
         target = self._resolve(raw_path)
         if not target.is_file():
             return ToolResult(False, f"File not found: {raw_path}")
@@ -310,6 +408,7 @@ class WorkspaceToolGateway:
         return ToolResult(True, target.read_text(encoding="utf-8"), {"path": raw_path})
 
     def write_file(self, raw_path: str, content: str, role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         if role != WorkerRole.DEVELOPER:
             raise ToolDenied("Only the developer worker may modify workspace files")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
@@ -329,6 +428,7 @@ class WorkspaceToolGateway:
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
             temporary.write_text(content, encoding="utf-8")
+            self._assert_execution_allowed()
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
@@ -339,6 +439,7 @@ class WorkspaceToolGateway:
         )
 
     def list_files(self, raw_path: str = ".") -> ToolResult:
+        self._assert_execution_allowed()
         target = self.workspace if raw_path == "." else self._resolve(raw_path)
         if not target.exists() or not target.is_dir():
             return ToolResult(False, f"Directory not found: {raw_path}")
@@ -367,6 +468,7 @@ class WorkspaceToolGateway:
         return ToolResult(True, "\n".join(files), {"count": len(files)})
 
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
         allowed_profiles = {
@@ -376,9 +478,14 @@ class WorkspaceToolGateway:
         }
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
-        return self.sandbox.run(self.workspace, profile)
+        return self.sandbox.run(
+            self.workspace,
+            profile,
+            cancellation_check=self.execution_guard,
+        )
 
     def git_diff(self) -> ToolResult:
+        self._assert_execution_allowed()
         if not GIT_BIN:
             return ToolResult(False, "Git executable is unavailable in the worker image.")
         completed = subprocess.run(  # nosec B603 - fixed argv, absolute executable, shell=False
@@ -395,6 +502,7 @@ class WorkspaceToolGateway:
         return self.knowledge_service, self.knowledge_tenant_id
 
     def _search_knowledge(self, args: dict[str, Any]) -> ToolResult:
+        self._assert_execution_allowed()
         service, tenant_id = self._knowledge_context()
         query = args.get("query")
         collection = args.get("collection", self.knowledge_collection)
@@ -446,6 +554,7 @@ class WorkspaceToolGateway:
         )
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         name = action.get("name")
         args = action.get("arguments", {})
         if not isinstance(args, dict):

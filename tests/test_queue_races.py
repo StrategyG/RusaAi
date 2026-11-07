@@ -133,6 +133,11 @@ def test_cancel_racing_with_successful_completion_is_linearizable():
             cancel_result = cancelled.result()
             complete_result = completed.result()
 
+        if cancel_result:
+            assert not complete_result
+            assert queue.mark_cancelled(
+                job.id, tenant, "cancel-race-worker", job.lease_token
+            )
         current = queue.get(task_id, tenant)
         assert current is not None
         assert current["status"] in {"cancelled", "succeeded"}
@@ -255,4 +260,229 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
         assert replacement and replacement[0] != lease_token
     finally:
         release_publish.set()
+        remove_task(task_id, tenant)
+
+
+
+def test_cancel_does_not_wait_for_git_publication_row_lock():
+    queue = make_queue()
+    tenant = f"queue-cancel-publish-{uuid4().hex}"
+    task_id = str(uuid4())
+    publishing = Event()
+    release_publish = Event()
+
+    def bounded_publish() -> str:
+        publishing.set()
+        if not release_publish.wait(timeout=10):
+            raise TimeoutError("test publisher was not released")
+        return "b" * 40
+
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "cancel while publishing"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-publish-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publication = pool.submit(
+                queue.publish_if_lease_owned,
+                job.id,
+                tenant,
+                "cancel-publish-worker",
+                job.lease_token,
+                bounded_publish,
+                lease_seconds=900,
+            )
+            assert publishing.wait(timeout=5)
+
+            # Cancellation must only lock the independent control row. It must not
+            # wait for the job row lock held across the in-flight Git push.
+            cancellation = pool.submit(queue.cancel, task_id, tenant)
+            assert cancellation.result(timeout=2) is True
+            assert queue.is_cancel_requested(task_id, tenant)
+
+            release_publish.set()
+            assert publication.result(timeout=10) == "b" * 40
+
+        assert queue.mark_cancelled(
+            job.id,
+            tenant,
+            "cancel-publish-worker",
+            job.lease_token,
+            {"side_effects": {"git_publication": "reconciliation_required"}},
+        )
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["result"]["side_effects"]["git_publication"] == "reconciliation_required"
+    finally:
+        release_publish.set()
+        remove_task(task_id, tenant)
+
+
+def test_manual_retry_budget_is_bounded_across_retry_cycles():
+    queue = make_queue()
+    tenant = f"queue-manual-retry-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "bounded operator retry"},
+            max_attempts=1,
+            priority=2**31 - 1,
+        )
+        for cycle in range(4):
+            job = queue.claim(f"manual-retry-worker-{cycle}", lease_seconds=30)
+            assert job and job.task_id == task_id
+            assert queue.fail(
+                job.id,
+                tenant,
+                job.lease_owner,
+                job.lease_token,
+                "permanent test failure",
+                retryable=False,
+            )
+            if cycle < 3:
+                assert queue.retry(task_id, tenant)
+            else:
+                assert not queue.retry(task_id, tenant)
+
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "failed"
+        assert current["attempts"] == 1
+    finally:
+        remove_task(task_id, tenant)
+
+
+
+def test_cancel_racing_with_retryable_failure_is_linearizable():
+    queue = make_queue()
+    tenant = f"queue-cancel-fail-race-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "cancel versus retryable failure"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-fail-race-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cancelled = pool.submit(queue.cancel, task_id, tenant)
+            failed = pool.submit(
+                queue.fail,
+                job.id,
+                tenant,
+                "cancel-fail-race-worker",
+                job.lease_token,
+                "transient failure",
+                30,
+                retryable=True,
+            )
+            cancel_result = cancelled.result()
+            fail_result = failed.result()
+
+        assert cancel_result is True
+        current = queue.get(task_id, tenant)
+        assert current is not None
+        if current["status"] == "running":
+            assert not fail_result
+            assert queue.mark_cancelled(
+                job.id, tenant, "cancel-fail-race-worker", job.lease_token
+            )
+            current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_cancel_approval_paused_task_flags_existing_draft_pr_for_reconciliation():
+    queue = make_queue()
+    tenant = f"queue-cancel-approval-{uuid4().hex}"
+    task_id = str(uuid4())
+    pr_url = "https://github.com/StrategyG/RusaAi/pull/999"
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "approval pause with draft PR"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-approval-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.await_approval(
+            job.id,
+            tenant,
+            "cancel-approval-worker",
+            job.lease_token,
+            "CI needs human review",
+            {
+                "pull_request_url": pr_url,
+                "commit_sha": "c" * 40,
+                "branch": "feature/aicode/stable-task",
+            },
+        )
+
+        assert queue.cancel(task_id, tenant)
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["result"]["pull_request_url"] == pr_url
+        assert current["result"]["side_effects"]["git_publication_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["pull_request_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["reconciliation_required"] is True
+        assert current["result"]["cancellation_reconciliation"]["required"] is True
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_expired_worker_lease_during_cancel_is_reconciled():
+    queue = make_queue()
+    tenant = f"queue-cancel-expired-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "crash during cancellation"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-expired-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        expire_lease(job.id, tenant)
+
+        # The bounded recovery sweep finalizes cancellation without claiming
+        # an unrelated tenant's queued job as a side effect of this test.
+        assert queue.recover_cancelled(batch_size=1000) >= 1
+
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["last_error"] == (
+            "Cancellation requested; worker lease expired before acknowledgement"
+        )
+        assert current["result"]["side_effects"]["reconciliation_required"] is True
+        assert current["result"]["side_effects"]["git_publication"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["pull_request_creation"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["git_publication_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["pull_request_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["cancellation_reconciliation"]["required"] is True
+    finally:
         remove_task(task_id, tenant)

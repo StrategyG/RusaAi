@@ -5,12 +5,102 @@ import hashlib
 import os
 import re
 import shutil
+import signal
 import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from .contracts import CodingTask
+
+
+def _run_bounded_process(
+    args: list[str],
+    *,
+    cwd: str | None,
+    env: dict[str, str],
+    timeout_seconds: int,
+    cancellation_check: Callable[[], bool] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run fixed argv and terminate the whole process group when the lease is revoked."""
+    if cancellation_check is None:
+        return subprocess.run(  # nosec B603 - fixed argv, shell=False
+            args, cwd=cwd, env=env, capture_output=True, text=True,
+            timeout=timeout_seconds,
+        )
+
+    try:
+        initially_allowed = cancellation_check()
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not verify the active task lease before Git execution"
+        ) from exc
+    if not initially_allowed:
+        raise RuntimeError(
+            "Git execution stopped because the task lease was lost or cancelled"
+        )
+
+    process = subprocess.Popen(  # nosec B603 - fixed argv, shell=False
+        args,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=(os.name == "posix"),
+    )
+    deadline = time.monotonic() + timeout_seconds
+
+    def stop_process() -> tuple[str, str]:
+        # Git may spawn credential/transport helpers. Kill the process group, not
+        # only the Git parent, so a revoked lease cannot leave a child running.
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGTERM)
+            elif process.poll() is None:
+                process.terminate()
+        except ProcessLookupError:
+            pass
+        try:
+            return process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                elif process.poll() is None:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            return process.communicate()
+
+    while True:
+        try:
+            allowed = cancellation_check()
+        except Exception as exc:
+            stop_process()
+            raise RuntimeError(
+                "Could not verify the active task lease during Git execution"
+            ) from exc
+        if not allowed:
+            stop_process()
+            raise RuntimeError(
+                "Git execution stopped because the task lease was lost or cancelled"
+            )
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            stdout, stderr = stop_process()
+            raise subprocess.TimeoutExpired(
+                args, timeout_seconds, output=stdout, stderr=stderr
+            )
+        try:
+            stdout, stderr = process.communicate(timeout=min(0.5, remaining))
+            return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            continue
 
 GIT_BIN = shutil.which("git")
 BRANCH_PATTERN = re.compile(r"^(feature|fix|chore|docs)/[A-Za-z0-9._/-]{1,180}$")
@@ -52,6 +142,7 @@ class GitWorkspaceManager:
         args: list[str],
         cwd: str | None = None,
         extra_env: dict[str, str] | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> subprocess.CompletedProcess:
         env = {
             "PATH": os.getenv("PATH", "/usr/bin:/bin"),
@@ -67,16 +158,30 @@ class GitWorkspaceManager:
             raise RuntimeError("Git executable is unavailable in the worker image")
         if args and args[0] == "git":
             args = [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
-        return subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
-            args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120
+        return _run_bounded_process(
+            args,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=120,
+            cancellation_check=cancellation_check,
         )
 
-    def refresh(self, repository: str, base_branch: str) -> None:
+    def refresh(
+        self,
+        repository: str,
+        base_branch: str,
+        publish_branch: str | None = None,
+        *,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> None:
         owner, repo = repository.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Authorized bare Git mirror is missing: {repository}")
-        remote = self._run(["git", "--git-dir", str(mirror), "remote", "get-url", "origin"])
+        remote = self._run(
+            ["git", "--git-dir", str(mirror), "remote", "get-url", "origin"],
+            cancellation_check=cancellation_check,
+        )
         if remote.returncode:
             raise RuntimeError("Git mirror origin is unavailable")
         GitHubPublisher.validate_origin_url(remote.stdout, repository)
@@ -106,20 +211,75 @@ class GitWorkspaceManager:
                     f"+refs/heads/{base_branch}:refs/heads/{base_branch}",
                 ],
                 extra_env=extra_env,
+                cancellation_check=cancellation_check,
             )
             if fetched.returncode:
                 raise RuntimeError(f"Git mirror refresh failed: {fetched.stderr[-2000:]}")
+            if publish_branch:
+                remote_branch = self._run(
+                    [
+                        "git", "-c", "credential.helper=", "--git-dir", str(mirror),
+                        "ls-remote", "--heads", "origin",
+                        f"refs/heads/{publish_branch}",
+                    ],
+                    extra_env=extra_env,
+                    cancellation_check=cancellation_check,
+                )
+                if remote_branch.returncode:
+                    raise RuntimeError(
+                        f"Could not inspect stable task branch: {remote_branch.stderr[-2000:]}"
+                    )
+                if remote_branch.stdout.strip():
+                    fetched_publish_branch = self._run(
+                        [
+                            "git", "-c", "credential.helper=", "--git-dir", str(mirror),
+                            "fetch", "--no-tags", "origin",
+                            f"+refs/heads/{publish_branch}:refs/heads/{publish_branch}",
+                        ],
+                        extra_env=extra_env,
+                        cancellation_check=cancellation_check,
+                    )
+                    if fetched_publish_branch.returncode:
+                        raise RuntimeError(
+                            "Could not refresh stable task branch: "
+                            f"{fetched_publish_branch.stderr[-2000:]}"
+                        )
+                else:
+                    removed_stale_branch = self._run([
+                        "git", "--git-dir", str(mirror), "update-ref", "-d",
+                        f"refs/heads/{publish_branch}",
+                    ], cancellation_check=cancellation_check)
+                    if removed_stale_branch.returncode:
+                        raise RuntimeError(
+                            "Could not remove stale local stable task branch: "
+                            f"{removed_stale_branch.stderr[-2000:]}"
+                        )
         finally:
             if askpass_path:
                 askpass_path.unlink(missing_ok=True)
 
-    def create(self, task: CodingTask, tenant_id: str) -> Path:
+    def create(
+        self,
+        task: CodingTask,
+        tenant_id: str,
+        *,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> Path:
         owner, repo = task.repository.full_name.split("/", 1)
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
             raise ValueError("Invalid repository identity")
         branch = task.repository.work_branch
+        publish_branch = task.metadata.get("publish_branch")
         if not BRANCH_PATTERN.fullmatch(branch) or ".." in branch or "//" in branch:
             raise ValueError("Work branch must be a safe feature/fix/chore/docs branch")
+        if publish_branch is not None and (
+            not isinstance(publish_branch, str)
+            or not BRANCH_PATTERN.fullmatch(publish_branch)
+            or publish_branch in {"main", "master"}
+            or ".." in publish_branch
+            or "//" in publish_branch
+        ):
+            raise ValueError("Stable publish branch must be a safe task feature branch")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,180}", task.repository.base_branch) or ".." in task.repository.base_branch:
             raise ValueError("Base branch is invalid")
         if task.repository.base_branch in {"main", "master"} and branch in {"main", "master"}:
@@ -128,9 +288,37 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
-        self.refresh(task.repository.full_name, task.repository.base_branch)
-        self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
-        bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
+        if cancellation_check is not None and not cancellation_check():
+            raise RuntimeError("Workspace creation stopped because the task lease is inactive")
+        if publish_branch and cancellation_check is not None:
+            self.refresh(
+                task.repository.full_name,
+                task.repository.base_branch,
+                publish_branch,
+                cancellation_check=cancellation_check,
+            )
+        elif publish_branch:
+            self.refresh(
+                task.repository.full_name,
+                task.repository.base_branch,
+                publish_branch,
+            )
+        elif cancellation_check is not None:
+            self.refresh(
+                task.repository.full_name,
+                task.repository.base_branch,
+                cancellation_check=cancellation_check,
+            )
+        else:
+            self.refresh(task.repository.full_name, task.repository.base_branch)
+        self._run(
+            ["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"],
+            cancellation_check=cancellation_check,
+        )
+        bare = self._run(
+            ["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"],
+            cancellation_check=cancellation_check,
+        )
         if bare.returncode or bare.stdout.strip() != "true":
             raise ValueError("Repository mirror must be a valid bare Git repository")
 
@@ -148,10 +336,13 @@ class GitWorkspaceManager:
                 return workspace
             raise FileExistsError("Task workspace exists but is not on the expected branch")
 
-        existing_branch = self._run([
-            "git", "--git-dir", str(mirror), "show-ref", "--verify",
-            f"refs/heads/{branch}",
-        ])
+        existing_branch = self._run(
+            [
+                "git", "--git-dir", str(mirror), "show-ref", "--verify",
+                f"refs/heads/{branch}",
+            ],
+            cancellation_check=cancellation_check,
+        )
         command = [
             "git", "-c", "core.hooksPath=/dev/null",
             "--git-dir", str(mirror), "worktree", "add",
@@ -159,8 +350,19 @@ class GitWorkspaceManager:
         if existing_branch.returncode == 0:
             command.extend([str(workspace), branch])
         else:
-            command.extend(["-b", branch, str(workspace), task.repository.base_branch])
-        created = self._run(command)
+            start_point = task.repository.base_branch
+            if publish_branch:
+                existing_publish_branch = self._run(
+                    [
+                        "git", "--git-dir", str(mirror), "show-ref", "--verify",
+                        f"refs/heads/{publish_branch}",
+                    ],
+                    cancellation_check=cancellation_check,
+                )
+                if existing_publish_branch.returncode == 0:
+                    start_point = publish_branch
+            command.extend(["-b", branch, str(workspace), start_point])
+        created = self._run(command, cancellation_check=cancellation_check)
         if created.returncode:
             raise RuntimeError(f"Could not create feature worktree: {created.stderr[-3000:]}")
         return workspace
@@ -200,7 +402,13 @@ class GitHubPublisher:
             raise ValueError("RUSA_GITHUB_TOKEN is required for GitHub publication")
 
     @staticmethod
-    def _run(args: list[str], cwd: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    def _run(
+        args: list[str],
+        cwd: str,
+        env: dict[str, str] | None = None,
+        *,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> subprocess.CompletedProcess:
         base_env = {
             "PATH": os.getenv("PATH", "/usr/bin:/bin"),
             "HOME": tempfile.gettempdir(),
@@ -215,14 +423,23 @@ class GitHubPublisher:
             raise RuntimeError("Git executable is unavailable in the worker image")
         if args and args[0] == "git":
             args = [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args[1:]]
-        return subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
-            args, cwd=cwd, env=base_env, capture_output=True, text=True, timeout=180
+        return _run_bounded_process(
+            args,
+            cwd=cwd,
+            env=base_env,
+            timeout_seconds=180,
+            cancellation_check=cancellation_check,
         )
 
     @staticmethod
-    def _safe_changed_paths(workspace: Path) -> list[str]:
+    def _safe_changed_paths(
+        workspace: Path,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> list[str]:
         if not GIT_BIN:
             return []
+        if cancellation_check is not None and not cancellation_check():
+            raise RuntimeError("Git publication stopped because the task lease is inactive")
         result = subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
             [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
              "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -238,6 +455,8 @@ class GitHubPublisher:
         )
         if result.returncode:
             raise RuntimeError(result.stderr.decode("utf-8", "replace"))
+        if cancellation_check is not None and not cancellation_check():
+            raise RuntimeError("Git publication stopped because the task lease is inactive")
         paths = []
         records = result.stdout.split(b"\0")
         skip_next = False
@@ -294,33 +513,72 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        *,
+        publish_branch: str | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> str | None:
         root = Path(workspace).resolve(strict=True)
-        if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
-            raise ValueError("Publishing is restricted to task feature branches")
-        current = self._run(["git", "branch", "--show-current"], str(root))
+        target_branch = publish_branch or branch
+        for candidate in (branch, target_branch):
+            if (
+                not BRANCH_PATTERN.fullmatch(candidate)
+                or candidate in {"main", "master"}
+                or ".." in candidate
+                or "//" in candidate
+            ):
+                raise ValueError("Publishing is restricted to safe task feature branches")
+        def ensure_active() -> None:
+            if cancellation_check is not None and not cancellation_check():
+                raise RuntimeError(
+                    "Git publication stopped because the task lease was lost or cancelled"
+                )
+
+        ensure_active()
+        current = self._run(
+            ["git", "branch", "--show-current"], str(root),
+            cancellation_check=cancellation_check,
+        )
         if current.returncode or current.stdout.strip() != branch:
             raise RuntimeError("Workspace branch does not match the task branch")
-        remote = self._run(["git", "remote", "get-url", "origin"], str(root))
+        remote = self._run(
+            ["git", "remote", "get-url", "origin"], str(root),
+            cancellation_check=cancellation_check,
+        )
         if remote.returncode:
             raise RuntimeError("Origin remote is unavailable")
         self.validate_origin_url(remote.stdout, repository)
 
-        changed = self._safe_changed_paths(root)
+        changed = self._safe_changed_paths(root, cancellation_check)
         if changed:
-            added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
+            added = self._run(
+                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed],
+                str(root),
+                cancellation_check=cancellation_check,
+            )
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
             commit = self._run([
                 "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=RUSA-AI",
                 "-c", "user.email=rusa-ai@users.noreply.github.com",
                 "commit", "--no-gpg-sign", "-m", message[:200],
-            ], str(root))
+            ], str(root), cancellation_check=cancellation_check)
             if commit.returncode:
                 raise RuntimeError(f"Git commit failed: {commit.stderr[-3000:]}")
-            sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
+            sha = self._run(
+                ["git", "rev-parse", "HEAD"], str(root),
+                cancellation_check=cancellation_check,
+            ).stdout.strip()
         else:
-            sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
+            sha = self._run(
+                ["git", "rev-parse", "HEAD"], str(root),
+                cancellation_check=cancellation_check,
+            ).stdout.strip()
 
         askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-askpass-")
         os.close(askpass_fd)
@@ -333,42 +591,178 @@ class GitHubPublisher:
         askpass.chmod(0o700)
         try:
             pushed = self._run(
-                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{branch}"],
+                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{target_branch}"],
                 str(root),
                 {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "RUSA_GITHUB_TOKEN": self.token},
+                cancellation_check=cancellation_check,
             )
         finally:
             askpass.unlink(missing_ok=True)
         if pushed.returncode:
             raise RuntimeError(f"Git push failed: {pushed.stderr[-3000:]}")
+        ensure_active()
         return sha
 
     async def create_or_get_draft_pr(self, repository: str, branch: str, base: str, title: str, body: str) -> str:
         import httpx
 
-        owner = repository.split("/", 1)[0]
+        task_match = re.search(
+            r"(?:RUSA-AI-Task-ID|Task ID):\s*([A-Za-z0-9-]{1,128})",
+            body,
+        )
+        task_id = task_match.group(1) if task_match else None
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.token}",
             "X-GitHub-Api-Version": "2022-11-28",
         }
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
-            existing = await client.get(
-                f"https://api.github.com/repos/{repository}/pulls",
-                headers=headers,
-                params={"state": "open", "head": f"{owner}:{branch}", "base": base},
+
+        def same_repository(repository_info: Any) -> bool:
+            full_name = (
+                repository_info.get("full_name")
+                if isinstance(repository_info, dict) else None
             )
-            existing.raise_for_status()
-            items = existing.json()
-            if items:
-                return items[0]["html_url"]
+            return (
+                isinstance(full_name, str)
+                and full_name.casefold() == repository.casefold()
+            )
+
+        def validated_pr_url(item: dict[str, Any]) -> str:
+            url = item.get("html_url")
+            if not isinstance(url, str):
+                raise RuntimeError("GitHub returned a pull request without a URL")
+            parsed = urlparse(url)
+            parts = parsed.path.strip("/").split("/")
+            owner, repo_name = repository.split("/", 1)
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != "github.com"
+                or parsed.port not in {None, 443}
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or len(parts) != 4
+                or parts[0].casefold() != owner.casefold()
+                or parts[1].casefold() != repo_name.casefold()
+                or parts[2] != "pull"
+                or not parts[3].isdigit()
+            ):
+                raise RuntimeError("GitHub returned a pull request URL outside the authorized repository")
+            return url
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            async def find_existing() -> str | None:
+                closed_match: str | None = None
+                legacy_branch_match: str | None = None
+                for page in range(1, 11):
+                    response = await client.get(
+                        f"https://api.github.com/repos/{repository}/pulls",
+                        headers=headers,
+                        params={
+                            "state": "all",
+                            "base": base,
+                            "per_page": 100,
+                            "page": page,
+                        },
+                    )
+                    response.raise_for_status()
+                    items = response.json()
+                    if not isinstance(items, list):
+                        raise RuntimeError("GitHub returned an invalid pull request listing")
+                    for item in items:
+                        if not isinstance(item, dict):
+                            raise RuntimeError("GitHub returned a malformed pull request item")
+                        head = item.get("head") or {}
+                        base_item = item.get("base") or {}
+                        if not isinstance(head, dict) or not isinstance(base_item, dict):
+                            raise RuntimeError("GitHub returned malformed pull request branch metadata")
+                        head_ref = head.get("ref")
+                        base_ref = base_item.get("ref")
+                        item_body = item.get("body") or ""
+                        if not isinstance(item_body, str):
+                            raise RuntimeError("GitHub returned malformed pull request body metadata")
+                        matches_task = bool(
+                            task_id
+                            and re.search(
+                                r"(?:RUSA-AI-Task-ID|Task ID):\s*"
+                                + re.escape(task_id)
+                                + r"\b",
+                                item_body,
+                            )
+                        )
+                        matches_branch = head_ref == branch and base_ref == base
+                        if matches_branch:
+                            if not same_repository(head.get("repo")) or not same_repository(
+                                base_item.get("repo")
+                            ):
+                                raise ValueError(
+                                    "Existing task pull request is not rooted in the authorized "
+                                    "repository; manual reconciliation is required"
+                                )
+                            if item.get("state") == "open":
+                                return validated_pr_url(item)
+                            closed_match = validated_pr_url(item)
+                        elif matches_task:
+                            # A legacy per-lease PR cannot be assumed to contain the
+                            # stable publication branch's current commit.
+                            legacy_branch_match = item.get("html_url") or legacy_branch_match
+                    if len(items) < 100:
+                        break
+                else:
+                    raise ValueError(
+                        "Could not safely reconcile task PR: search exceeded 1000 pull requests"
+                    )
+                if closed_match:
+                    raise ValueError(
+                        "A previous pull request for this task is closed; manual reconciliation is required"
+                    )
+                if legacy_branch_match:
+                    raise ValueError(
+                        "A previous task pull request uses a lease-specific branch; "
+                        "manual reconciliation is required before publishing to the stable task branch"
+                    )
+                return None
+
+            existing_url = await find_existing()
+            if existing_url:
+                return existing_url
+
             created = await client.post(
                 f"https://api.github.com/repos/{repository}/pulls",
                 headers=headers,
                 json={"title": title, "head": branch, "base": base, "body": body, "draft": True},
             )
-            created.raise_for_status()
-            return created.json()["html_url"]
+            try:
+                created.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    # Two recovered workers may race between lookup and creation. GitHub
+                    # rejects a second open PR for the same head/base; reconcile by task ID.
+                    existing_url = await find_existing()
+                    if existing_url:
+                        return existing_url
+                raise
+
+            created_payload = created.json()
+            if not isinstance(created_payload, dict):
+                raise RuntimeError("GitHub returned a malformed created pull request")
+            created_head = created_payload.get("head")
+            created_base = created_payload.get("base")
+            if not isinstance(created_head, dict) or not isinstance(created_base, dict):
+                raise RuntimeError("GitHub returned malformed created pull request branch metadata")
+            if (
+                created_payload.get("state") != "open"
+                or created_payload.get("draft") is not True
+                or created_head.get("ref") != branch
+                or created_base.get("ref") != base
+                or not same_repository(created_head.get("repo"))
+                or not same_repository(created_base.get("repo"))
+            ):
+                raise RuntimeError(
+                    "GitHub did not create the expected draft PR for the authorized task branch"
+                )
+            return validated_pr_url(created_payload)
 
 
     @staticmethod

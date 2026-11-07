@@ -119,7 +119,10 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert response.status_code == 202
     data = response.json()
     assert data["tenant_id"] == "tenant-alpha"
-    assert data["work_branch_prefix"].startswith("feature/aicode/")
+    tenant_suffix = hashlib.sha256(b"tenant-alpha").hexdigest()[:12]
+    assert data["work_branch_prefix"] == (
+        f"feature/aicode/{tenant_suffix}-{data['task_id']}"
+    )
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
 
@@ -511,3 +514,68 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
 
     assert response.status_code == 404
 
+
+
+
+def test_cancel_endpoint_reports_request_until_worker_acknowledges(monkeypatch):
+    task_id = "00000000-0000-4000-8000-000000000099"
+
+    class RunningCancelQueue:
+        def cancel(self, requested_task_id, tenant_id, *, audit_actor=None):
+            assert requested_task_id == task_id
+            assert tenant_id == "tenant-alpha"
+            assert audit_actor
+            return True
+
+        def get(self, requested_task_id, tenant_id, *, audit_actor=None):
+            assert requested_task_id == task_id
+            assert tenant_id == "tenant-alpha"
+            assert audit_actor
+            return {
+                "task_id": task_id,
+                "tenant_id": tenant_id,
+                "status": "running",
+                "cancel_requested": True,
+            }
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", RunningCancelQueue(), raising=False)
+
+    response = client.delete(
+        f"/v1/aicode/tasks/{task_id}",
+        headers={"X-API-Key": "tenant-key"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "cancellation_requested"
+    assert response.json()["cancel_requested"] is True
+
+
+def test_cancel_endpoint_reports_cancelled_after_worker_acknowledges(monkeypatch):
+    task_id = "00000000-0000-4000-8000-000000000098"
+
+    class AcknowledgedCancelQueue:
+        def cancel(self, *_args, **_kwargs):
+            return True
+
+        def get(self, *_args, **_kwargs):
+            return {
+                "task_id": task_id,
+                "tenant_id": "tenant-alpha",
+                "status": "cancelled",
+                "cancel_requested": True,
+            }
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", AcknowledgedCancelQueue(), raising=False)
+
+    response = client.delete(
+        f"/v1/aicode/tasks/{task_id}",
+        headers={"X-API-Key": "tenant-key"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["cancel_requested"] is True

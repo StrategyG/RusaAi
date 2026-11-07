@@ -12,9 +12,13 @@ for the exact commit and checks that ran; it is not a production approval.
 - Local model artifact manifest and SHA-256 verification; production local loading
   requires an externally pinned manifest digest.
 - Bounded generation/streaming adapters, API admission control, and backend shutdown.
-- Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
-  fencing of stale acknowledgements, cancellation/completion race protection,
-  and retry limits.
+- Tenant-scoped PostgreSQL coding-task queue with lease fencing, durable out-of-band
+  cancellation, bounded cancellation recovery, advisory-locked terminal transitions,
+  bounded manual retries, and production RLS/privilege-definition readiness checks.
+- Stable tenant/task publication branches with lease-specific worktrees, idempotent
+  draft-PR reconciliation, and explicit cleanup flags for cancelled external side effects.
+- Cooperative worker shutdown and process-group termination when cancellation or
+  lease revocation interrupts Git operations.
 - Optional tenant-scoped idempotency keys for task creation. Replays with identical
   request payloads return the original task; payload changes under the same key
   return HTTP 409.
@@ -26,10 +30,13 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Verification boundary
 
-The primary CI job has previously passed compile, lint, Bandit, and unit tests on
-commit `7ed80f0801651165cd634b95dcd993a6c85b9484`. Subsequent commits added
-RAG/MCP packaging, queue idempotency, race tests, and further CI changes; those
-changes must be judged only by the latest workflow run on the exact PR head.
+Latest full CI run: `42343970591` on PR #59 head
+`fee032f4e552e86f2f9c8155204fcac2d4ab24aa`. All checks passed: Python compile,
+Ruff lint, Bandit, the main test suite, RAG/MCP integration tests, API image,
+isolated sandbox image and its full test suite, knowledge MCP image, autonomous
+worker image, Trivy fixable CRITICAL/HIGH vulnerability gates, and production
+Compose validation. The only change after this evidence snapshot is this
+readiness-ledger update; application and migration code are unchanged.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -40,12 +47,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Pending latest run |
+| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Passed on PR #59 head; readiness-ledger-only update follows |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests pass on current PR head; production migration not applied |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
@@ -60,11 +67,14 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Apply migrations `001` through `006` in order using the database owner before
-  enabling production task intake. The API runtime must not have schema-owner or
+- Apply AICode migrations `001` through `006` using the database owner.
+  If RAG shares this database, apply `007_rag_knowledge_pgvector.sql` next on a
+  pgvector-enabled database. Then apply `008_aicode_job_controls.sql` before
+  enabling production task intake; it installs durable cancellation controls and
+  bounded manual-retry counters. The API runtime must not have schema-owner or
   superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
-  knowledge database and configure the restricted `rusa_knowledge_worker` role.
+- If RAG uses a separate database, apply `007_rag_knowledge_pgvector.sql` there
+  and configure the restricted `rusa_knowledge_worker` role independently.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
 - Do not commit model weights, credentials, tenant bearer tokens, or private

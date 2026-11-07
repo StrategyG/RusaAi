@@ -1,9 +1,18 @@
+import asyncio
+import os
 import subprocess
+import sys
+import time
 
+import httpx
 import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
-from rusa_agents.git_workspace import GitHubPublisher, GitWorkspaceManager
+from rusa_agents.git_workspace import (
+    GitHubPublisher,
+    GitWorkspaceManager,
+    _run_bounded_process,
+)
 
 
 def git(*args, cwd=None):
@@ -305,3 +314,566 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_draft_pr_recovery_finds_task_pr_from_previous_lease(monkeypatch):
+    task_id = "12345678-1234-4234-8234-123456789abc"
+    existing_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/123",
+        "body": f"Task ID: {task_id}",
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [existing_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            self.posts = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, *, headers, params):
+            assert params["state"] == "all"
+            assert params["base"] == "main"
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            self.posts += 1
+            raise AssertionError("recovery must not create a duplicate PR")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            "feature/aicode/stable-task",
+            "main",
+            "Recovered task",
+            f"Task ID: {task_id}\nRUSA-AI-Task-ID: {task_id}",
+        )
+    )
+
+    assert url == existing_pr["html_url"]
+
+
+def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
+    task_id = "abcdefab-cdef-4abc-8def-abcdefabcdef"
+    existing_pr = {
+        "state": "closed",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/124",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [existing_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("closed PR must not be duplicated")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="manual reconciliation"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
+
+
+
+def test_new_lease_worktree_starts_from_existing_stable_publish_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    stable_branch = "feature/aicode/tenant-hash-task-id"
+    (source / "recovered-change.txt").write_text("already published")
+    git("add", "recovered-change.txt", cwd=source)
+    git("commit", "-m", "published before worker crash", cwd=source)
+    git(
+        "--git-dir", str(mirror), "fetch", str(source),
+        f"+refs/heads/main:refs/heads/{stable_branch}",
+    )
+    stable_sha = git(
+        "--git-dir", str(mirror), "rev-parse", stable_branch
+    ).stdout.strip()
+
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    monkeypatch.setattr(
+        manager,
+        "refresh",
+        lambda repository, base_branch, publish_branch=None: None,
+    )
+    task = CodingTask(
+        objective="recover previous publication",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi",
+            "main",
+            "feature/aicode/tenant-hash-task-id-new-lease",
+        ),
+        acceptance_criteria=["reuse stable publication head"],
+        task_id="same-task",
+        metadata={
+            "lease_token": "new-lease",
+            "publish_branch": stable_branch,
+        },
+    )
+
+    workspace = manager.create(task, "tenant-a")
+    assert git("rev-parse", "HEAD", cwd=workspace).stdout.strip() == stable_sha
+    assert (workspace / "recovered-change.txt").read_text() == "already published"
+
+    manager.cleanup(task, "tenant-a")
+
+
+
+def test_publisher_pushes_lease_worktree_to_stable_task_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    remote = tmp_path / "remote.git"
+    git("clone", "--bare", str(source), str(remote))
+    workspace = tmp_path / "workspace"
+    git("clone", str(remote), str(workspace))
+    git("checkout", "-b", "feature/aicode/attempt-branch", cwd=workspace)
+    git("config", "user.name", "Test", cwd=workspace)
+    git("config", "user.email", "test@example.invalid", cwd=workspace)
+    (workspace / "change.py").write_text("print('recovered safely')\n")
+
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "validate_origin_url",
+        staticmethod(lambda _remote, _repository: None),
+    )
+    publisher = GitHubPublisher("test-token")
+    sha = publisher.commit_and_push(
+        str(workspace),
+        "StrategyG/RusaAi",
+        "feature/aicode/attempt-branch",
+        "test: publish stable task head",
+        publish_branch="feature/aicode/stable-task-branch",
+    )
+
+    stable = git(
+        "--git-dir", str(remote), "rev-parse",
+        "refs/heads/feature/aicode/stable-task-branch",
+    ).stdout.strip()
+    attempt_ref = subprocess.run(
+        [
+            "git", "--git-dir", str(remote), "show-ref", "--verify",
+            "refs/heads/feature/aicode/attempt-branch",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert sha == stable
+    assert attempt_ref.returncode != 0
+
+
+
+def test_workspace_refresh_fetches_existing_stable_publish_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    stable_branch = "feature/aicode/tenant-hash-task-id"
+    (source / "stable.txt").write_text("published")
+    git("add", "stable.txt", cwd=source)
+    git("commit", "-m", "published stable branch", cwd=source)
+    git("branch", stable_branch, cwd=source)
+    expected_sha = git("rev-parse", stable_branch, cwd=source).stdout.strip()
+
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "validate_origin_url",
+        staticmethod(lambda _remote, _repository: None),
+    )
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    manager.refresh("StrategyG/RusaAi", "main", stable_branch)
+
+    actual_sha = git(
+        "--git-dir", str(mirror), "rev-parse", f"refs/heads/{stable_branch}"
+    ).stdout.strip()
+    assert actual_sha == expected_sha
+
+
+
+def test_draft_pr_creation_race_reconciles_github_422(monkeypatch):
+    task_id = "fedcba98-7654-4321-8765-fedcba987654"
+    existing_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/125",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
+    }
+    request = httpx.Request(
+        "POST", "https://api.github.com/repos/StrategyG/RusaAi/pulls"
+    )
+    conflict = httpx.HTTPStatusError(
+        "GitHub reports an existing open pull request",
+        request=request,
+        response=httpx.Response(422, request=request),
+    )
+
+    class FakeResponse:
+        def __init__(self, payload=None, error=None):
+            self.payload = payload
+            self.error = error
+
+        def raise_for_status(self):
+            if self.error:
+                raise self.error
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            self.lookups = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            self.lookups += 1
+            return FakeResponse([] if self.lookups == 1 else [existing_pr])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(error=conflict)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            "feature/aicode/stable-task",
+            "main",
+            "Recovered task",
+            f"RUSA-AI-Task-ID: {task_id}",
+        )
+    )
+
+    assert url == existing_pr["html_url"]
+
+
+
+def test_draft_pr_recovery_refuses_legacy_lease_specific_head_branch(monkeypatch):
+    task_id = "13572468-2468-4135-8246-813572468135"
+    legacy_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/126",
+        "body": f"Task ID: {task_id}",
+        "head": {"ref": "feature/aicode/old-lease-attempt", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [legacy_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("legacy branch PR must be reconciled manually")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="lease-specific branch"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"Task ID: {task_id}",
+            )
+        )
+
+
+def test_git_process_is_terminated_when_lease_guard_is_revoked(tmp_path):
+    checks = 0
+
+    def guard():
+        nonlocal checks
+        checks += 1
+        return checks < 2
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="lease was lost or cancelled"):
+        _run_bounded_process(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=str(tmp_path),
+            env=os.environ.copy(),
+            timeout_seconds=10,
+            cancellation_check=guard,
+        )
+
+    assert time.monotonic() - started < 5
+
+
+def test_draft_pr_recovery_rejects_matching_branch_from_fork(monkeypatch):
+    task_id = "24681357-1357-4246-8135-724681357246"
+    fork_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/127",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {
+            "ref": "feature/aicode/stable-task",
+            "repo": {"full_name": "untrusted-fork/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [fork_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("untrusted fork PR must not be reused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="authorized repository"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
+
+
+def test_draft_pr_creation_validates_github_response_identity(monkeypatch):
+    task_id = "abcdef12-3456-4789-8abc-def123456789"
+    branch = "feature/aicode/stable-task"
+    created_payload = {
+        "state": "open",
+        "draft": True,
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/128",
+        "head": {
+            "ref": branch,
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse([])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(created_payload)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            branch,
+            "main",
+            "Recovered task",
+            f"RUSA-AI-Task-ID: {task_id}",
+        )
+    )
+    assert url == created_payload["html_url"]
+
+
+def test_draft_pr_creation_rejects_unexpected_head_repository(monkeypatch):
+    task_id = "abcdef12-3456-4789-8abc-def123456789"
+    created_payload = {
+        "state": "open",
+        "draft": True,
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/129",
+        "head": {
+            "ref": "feature/aicode/stable-task",
+            "repo": {"full_name": "untrusted-fork/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse([])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(created_payload)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(RuntimeError, match="expected draft PR"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
+
+
+def test_git_command_is_not_spawned_when_lease_is_already_revoked(tmp_path):
+    marker = tmp_path / "command-started"
+    command = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('started')",
+        str(marker),
+    ]
+
+    with pytest.raises(RuntimeError, match="lease was lost or cancelled"):
+        _run_bounded_process(
+            command,
+            cwd=str(tmp_path),
+            env=os.environ.copy(),
+            timeout_seconds=10,
+            cancellation_check=lambda: False,
+        )
+
+    assert not marker.exists()
