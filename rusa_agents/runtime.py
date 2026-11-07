@@ -330,6 +330,15 @@ class AICodeRuntime:
         ceiling = min(300, 2 ** max(0, attempt - 1))
         return random.randint(0, ceiling)
 
+    @staticmethod
+    def _is_retryable_failure(exc: Exception) -> bool:
+        """Classify deterministic client/policy errors separately from transient failures."""
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code in {408, 425, 429, 500, 502, 503, 504}
+        return not isinstance(exc, (PermissionError, ValueError, TypeError))
+
     async def _await_human_review(
         self,
         job: Job,
@@ -677,7 +686,7 @@ class AICodeRuntime:
                 logger.exception("AICode task %s failed", job.task_id)
                 outcome = "lease_lost" if lost_lease.is_set() else "failed"
                 if not lost_lease.is_set():
-                    retryable = not isinstance(exc, (PermissionError, ValueError, TypeError))
+                    retryable = self._is_retryable_failure(exc)
                     try:
                         failed = await asyncio.to_thread(
                             self.queue.fail,
