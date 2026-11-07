@@ -339,6 +339,10 @@ class _FakeChannel:
     async def set_qos(self, *, prefetch_count):
         self.prefetch = prefetch_count
 
+    async def get_queue(self, name, *, ensure):
+        assert ensure is False
+        return self.queues.setdefault(name, _FakeQueue(name))
+
 
 @pytest.mark.asyncio
 async def test_topology_declares_quorum_queues_per_capability_and_priority_with_dlq():
@@ -488,19 +492,36 @@ async def test_consumer_rejects_oversized_command_body():
     assert message.actions == [("reject", False)]
 
 
+
 @pytest.mark.asyncio
 async def test_consumer_requires_explicit_control_queue_permission():
-    signer, verifier = _signing_pair()
-    event = _cancel_request()
-    message = _FakeIncomingMessage(event, signer)
-    message.routing_key = "control.p0"
-    message.headers["x-rusa-routing-key"] = "control.p0"
-    consumer = RabbitMQCommandConsumer(
+    _, verifier = _signing_pair()
+    topology = RabbitMQTopology(("research",))
+    denied = RabbitMQCommandConsumer(
         consumer_id="research-worker",
         verifier=verifier,
         allowed_capabilities=("research",),
         tenant_authorizer=lambda *_args: True,
         handler=lambda _event: None,
     )
-    assert await consumer.handle_message(message) == "acked"
+    with pytest.raises(ValueError, match="outside this consumer"):
+        await denied.start(
+            channel=_FakeChannel(),
+            topology=topology,
+            queue_names=["rusa.commands.control.p0"],
+        )
 
+    control = RabbitMQCommandConsumer(
+        consumer_id="control-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+        allow_control_queue=True,
+    )
+    tags = await control.start(
+        channel=_FakeChannel(),
+        topology=topology,
+        queue_names=["rusa.commands.control.p0"],
+    )
+    assert tags == ("consumer-rusa.commands.control.p0",)
