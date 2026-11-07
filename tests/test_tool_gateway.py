@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from rusa_agents.contracts import WorkerRole
-from rusa_agents.tool_gateway import DockerSandbox, ToolDenied, WorkspaceToolGateway
+from rusa_agents.tool_gateway import DockerSandbox, SandboxExecutorClient, ToolDenied, WorkspaceToolGateway
 
 
 def test_gateway_rejects_path_traversal(tmp_path):
@@ -203,3 +203,29 @@ def test_gateway_rejects_nul_and_backslash_paths(tmp_path):
         gateway.read_file("src\\\\..\\\\secret.txt")
     with pytest.raises(ToolDenied):
         gateway.read_file("src\\x00secret.txt")
+
+
+
+def test_remote_sandbox_client_rejects_unassigned_workspace_before_network(tmp_path):
+    from uuid import uuid4
+
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    client = SandboxExecutorClient(
+        url="https://sandbox.internal:9101",
+        token="s" * 48,
+        image="registry.internal/sandbox@sha256:" + "a" * 64,
+        workspace_root=workspace_root,
+        ca_file=None,
+    )
+    with pytest.raises(ToolDenied, match="workspace identity"):
+        client.run(
+            unrelated,
+            "pytest",
+            tenant_id="tenant-a",
+            task_id=str(uuid4()),
+            worker_id="worker-a",
+            lease_token=str(uuid4()),
+        )

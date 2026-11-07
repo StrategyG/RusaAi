@@ -102,6 +102,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Build isolated sandbox executor image
+        run: docker build --pull -f Dockerfile.sandbox-executor -t rusa-ai-sandbox-executor:${{ github.sha }} .
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
         with:
@@ -115,6 +117,7 @@ jobs:
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-sandbox-executor:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -176,6 +179,7 @@ jobs:
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-sandbox-executor:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
               --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -184,6 +188,7 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_SANDBOX_EXECUTOR_IMAGE: example.invalid/rusa-ai-sandbox-executor@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
@@ -195,6 +200,14 @@ jobs:
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_SANDBOX_EXECUTOR_URL: https://sandbox-executor:9101
+          RUSA_SANDBOX_EXECUTOR_TOKEN: ci-only-sandbox-executor-token-12345678901234567890
+          RUSA_SANDBOX_EXECUTOR_DATABASE_URL: postgresql://rusa_sandbox_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_SANDBOX_EXECUTOR_TLS_CERT_FILE: /run/secrets/sandbox-executor.crt
+          RUSA_SANDBOX_EXECUTOR_TLS_KEY_FILE: /run/secrets/sandbox-executor.key
+          RUSA_SANDBOX_EXECUTOR_CA_FILE: /run/secrets/sandbox-executor-ca.crt
+          RUSA_SANDBOX_SNAPSHOT_ROOT: /srv/rusa/sandbox-snapshots
+          RUSA_SANDBOX_MAX_CONCURRENCY: "2"
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
           RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces

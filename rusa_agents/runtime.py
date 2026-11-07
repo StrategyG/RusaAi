@@ -19,7 +19,7 @@ from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
-from .tool_gateway import DockerSandbox, WorkspaceToolGateway
+from .tool_gateway import DockerSandbox, SandboxExecutorClient, WorkspaceToolGateway
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
@@ -30,8 +30,6 @@ class AICodeRuntime:
         self.config.validate_worker()
         if not self.config.worker_database_url or not self.config.workspace_root or not self.config.git_mirror_root:
             raise RuntimeError("Database, workspace root, and Git mirror root are required")
-        if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
-            raise RuntimeError("Production worker requires DOCKER_HOST connected to a dedicated rootless sandbox daemon")
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
         self.queue = PostgresTaskQueue(self.config.worker_database_url)
         self.memory = PostgresMemory(self.config.worker_database_url)
@@ -46,7 +44,16 @@ class AICodeRuntime:
         )
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
-        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        if self.config.environment == "production":
+            self.sandbox = SandboxExecutorClient(
+                url=self.config.sandbox_executor_url or "",
+                token=self.config.sandbox_executor_token or "",
+                image=self.config.sandbox_image,
+                workspace_root=self.config.workspace_root,
+                ca_file=self.config.sandbox_executor_ca_file,
+            )
+        else:
+            self.sandbox = DockerSandbox(image=self.config.sandbox_image)
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
@@ -107,6 +114,12 @@ class AICodeRuntime:
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=self.sandbox,
+            sandbox_context={
+                "tenant_id": tenant_id,
+                "task_id": task.task_id,
+                "worker_id": self.worker_id,
+                "lease_token": str(task.metadata.get("lease_token", "")),
+            },
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),

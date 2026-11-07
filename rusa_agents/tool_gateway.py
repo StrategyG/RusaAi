@@ -5,6 +5,7 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 """
 from __future__ import annotations  # noqa: I001
 
+import hashlib
 import json
 import os
 import shutil
@@ -13,9 +14,9 @@ import subprocess  # nosec B404 - only fixed argv operations with shell=False ar
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlsplit
 from typing import Any
-from uuid import uuid4
+from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 from .contracts import WorkerRole
 from .metrics import TOOL_EXECUTIONS
@@ -52,12 +53,15 @@ class DockerSandbox:
         memory_limit: str = "2g",
         cpu_limit: str = "2",
         max_snapshot_bytes: int = 100_000_000,
+        snapshot_root: str | Path | None = None,
     ) -> None:
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
+        self.snapshot_root = Path(snapshot_root).resolve() if snapshot_root else None
+        self.rootless = False
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
@@ -74,7 +78,8 @@ class DockerSandbox:
             raise RuntimeError("Docker daemon readiness check timed out") from exc
         if info.returncode != 0:
             raise RuntimeError(f"Docker daemon is unavailable: {info.stderr[-1000:]}")
-        if require_rootless and "rootless" not in info.stdout.lower():
+        self.rootless = "rootless" in info.stdout.lower()
+        if require_rootless and not self.rootless:
             raise RuntimeError("Production Docker daemon must run in rootless mode")
         if require_image:
             inspected = subprocess.run(  # nosec B603 - fixed argv and absolute Docker executable
@@ -141,7 +146,9 @@ class DockerSandbox:
                     ignored.add(name)
             return ignored
         # The real checkout and Git metadata are never mounted into test containers.
-        with tempfile.TemporaryDirectory(prefix=".rusa-sandbox-", dir=workspace.parent) as temp_root:
+        snapshot_root = self.snapshot_root or workspace.parent
+        snapshot_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.TemporaryDirectory(prefix=".rusa-sandbox-", dir=snapshot_root) as temp_root:
             snapshot = Path(temp_root) / "workspace"
             try:
                 shutil.copytree(
@@ -155,6 +162,10 @@ class DockerSandbox:
                         if not path.is_symlink():
                             mode = stat.S_IMODE(path.stat().st_mode)
                             os.chmod(path, (mode | 0o444) & ~0o222)
+                # The rootless daemon runs under a different host UID. A setgid
+                # snapshot-root gives its configured group traverse-only access
+                # to this private parent while the mounted snapshot remains read-only.
+                os.chmod(temp_root, 0o710)
             except (OSError, ToolDenied) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
@@ -223,6 +234,8 @@ class SandboxExecutorClient:
         url: str,
         token: str,
         image: str | None = None,
+        workspace_root: str | Path | None = None,
+        ca_file: str | Path | None = None,
         timeout_seconds: int = 600,
     ) -> None:
         parsed = urlsplit(url)
@@ -237,21 +250,35 @@ class SandboxExecutorClient:
             raise ValueError("Sandbox executor URL must be credential-free HTTP(S)")
         if not isinstance(token, str) or len(token.encode("utf-8")) < 32:
             raise ValueError("Sandbox executor token must contain at least 32 UTF-8 bytes")
+        if not workspace_root:
+            raise ValueError("Sandbox executor workspace root is required")
         self.url = url.rstrip("/")
         self.token = token
         self.image = image
+        self.workspace_root = Path(workspace_root).resolve(strict=True)
+        self.ca_file = str(Path(ca_file).resolve(strict=True)) if ca_file else True
         self.timeout_seconds = timeout_seconds
+
+    def _client(self):
+        import httpx
+
+        return httpx.Client(
+            timeout=self.timeout_seconds + 45,
+            follow_redirects=False,
+            verify=self.ca_file,
+            trust_env=False,
+        )
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         import httpx
 
         try:
-            with httpx.Client(timeout=10.0, follow_redirects=False) as client:
+            with self._client() as client:
                 response = client.get(f"{self.url}/healthz")
                 response.raise_for_status()
                 payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError(f"Sandbox executor readiness check failed: {type(exc).__name__}") from None
+        except (httpx.HTTPError, ValueError):
+            raise RuntimeError("Sandbox executor readiness check failed") from None
         if not isinstance(payload, dict) or payload.get("ready") is not True:
             raise RuntimeError("Sandbox executor is not ready")
         if require_rootless and payload.get("rootless") is not True:
@@ -259,35 +286,61 @@ class SandboxExecutorClient:
         if require_image and (not self.image or payload.get("image") != self.image):
             raise RuntimeError("Sandbox executor image does not match the configured immutable digest")
 
-    def run(self, workspace: Path, profile: str) -> ToolResult:
+    def run(
+        self,
+        workspace: Path,
+        profile: str,
+        *,
+        tenant_id: str,
+        task_id: str,
+        worker_id: str,
+        lease_token: str,
+    ) -> ToolResult:
         import httpx
 
         if profile not in DockerSandbox.PROFILES:
             raise ToolDenied(f"Unknown validation profile: {profile}")
+        if (
+            not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128
+            or not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 128
+        ):
+            raise ToolDenied("Sandbox task identity is invalid")
         try:
-            resolved_workspace = Path(workspace).resolve(strict=True)
-        except OSError as exc:
-            raise ToolDenied("Sandbox workspace is unavailable") from exc
+            task_uuid = UUID(task_id)
+            lease_uuid = UUID(lease_token)
+            tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:20]
+            attempt_key = hashlib.sha256(str(lease_uuid).encode("utf-8")).hexdigest()[:12]
+            expected = self.workspace_root / tenant_key / str(task_uuid) / attempt_key
+            resolved = Path(workspace).resolve(strict=True)
+            if resolved != expected or not resolved.is_dir():
+                raise ToolDenied("Sandbox workspace does not match the authenticated task identity")
+        except (TypeError, ValueError, OSError) as exc:
+            raise ToolDenied("Sandbox workspace identity is invalid") from exc
         try:
-            with httpx.Client(
-                timeout=self.timeout_seconds + 45,
-                follow_redirects=False,
-            ) as client:
+            with self._client() as client:
                 response = client.post(
                     f"{self.url}/v1/run",
                     headers={"Authorization": f"Bearer {self.token}"},
-                    json={"workspace": str(resolved_workspace), "profile": profile},
+                    json={
+                        "tenant_id": tenant_id,
+                        "task_id": str(task_uuid),
+                        "worker_id": worker_id,
+                        "lease_token": str(lease_uuid),
+                        "profile": profile,
+                    },
                 )
             if response.status_code in {401, 403}:
                 raise ToolDenied("Sandbox executor rejected the worker capability")
+            if response.status_code == 409:
+                raise ToolDenied("Sandbox executor rejected an expired or unowned task lease")
             response.raise_for_status()
             payload = response.json()
         except ToolDenied:
             raise
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError):
             return ToolResult(
                 False,
-                f"Sandbox executor request failed: {type(exc).__name__}",
+                "Sandbox executor request failed",
                 {"profile": profile, "executor": self.url},
             )
         if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
@@ -340,11 +393,13 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        sandbox_context: dict[str, str] | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
             raise ValueError("workspace must be an existing directory")
         self.sandbox = sandbox or DockerSandbox()
+        self.sandbox_context = dict(sandbox_context or {})
         self.max_file_bytes = max_file_bytes
         if knowledge_service is not None and (
             not isinstance(knowledge_tenant_id, str)
@@ -515,6 +570,8 @@ class WorkspaceToolGateway:
                 return ToolResult(True, content, {"path": raw_path, "bytes": total})
             finally:
                 os.close(file_fd)
+        except ToolDenied:
+            raise
         except OSError as exc:
             raise ToolDenied("File could not be opened safely") from exc
         finally:
@@ -568,6 +625,8 @@ class WorkspaceToolGateway:
             # Replacing a symlink replaces the link itself; it never follows its target.
             os.replace(temporary, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
             os.fsync(parent_fd)
+        except ToolDenied:
+            raise
         except OSError as exc:
             raise ToolDenied("File could not be written safely") from exc
         finally:
@@ -641,6 +700,10 @@ class WorkspaceToolGateway:
         }
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
+        if isinstance(self.sandbox, SandboxExecutorClient):
+            if set(self.sandbox_context) != {"tenant_id", "task_id", "worker_id", "lease_token"}:
+                raise ToolDenied("Remote sandbox requires a complete authenticated task lease context")
+            return self.sandbox.run(self.workspace, profile, **self.sandbox_context)
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:

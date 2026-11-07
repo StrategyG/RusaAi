@@ -35,6 +35,9 @@ def set_worker_environment(monkeypatch):
         "RUSA_SANDBOX_IMAGE",
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_URL", "https://sandbox.internal:9101")
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_TOKEN", "s" * 48)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_CA_FILE", "/run/secrets/sandbox-ca.crt")
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
 
@@ -132,3 +135,25 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
     )
     with pytest.raises(ValueError, match="roles"):
         RuntimeConfig.from_env()
+
+
+
+def test_production_worker_rejects_insecure_sandbox_executor_url(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_URL", "http://sandbox.internal:9101")
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_short_sandbox_executor_token(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_TOKEN", "short")
+    with pytest.raises(RuntimeError, match="32 UTF-8 bytes"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_requires_absolute_sandbox_ca_path(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_EXECUTOR_CA_FILE", "sandbox-ca.crt")
+    with pytest.raises(RuntimeError, match="absolute mounted CA"):
+        RuntimeConfig.from_env().validate_worker()

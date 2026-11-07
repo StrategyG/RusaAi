@@ -33,6 +33,9 @@ class RuntimeConfig:
     metrics_api_key: str | None
     workspace_root: str | None
     sandbox_image: str | None
+    sandbox_executor_url: str | None
+    sandbox_executor_token: str | None
+    sandbox_executor_ca_file: str | None
     git_mirror_root: str | None
     github_token: str | None
     model_base_url: str | None
@@ -141,6 +144,9 @@ class RuntimeConfig:
             metrics_api_key=os.getenv("RUSA_METRICS_API_KEY"),
             workspace_root=os.getenv("RUSA_WORKSPACE_ROOT"),
             sandbox_image=os.getenv("RUSA_SANDBOX_IMAGE"),
+            sandbox_executor_url=os.getenv("RUSA_SANDBOX_EXECUTOR_URL"),
+            sandbox_executor_token=os.getenv("RUSA_SANDBOX_EXECUTOR_TOKEN"),
+            sandbox_executor_ca_file=os.getenv("RUSA_SANDBOX_EXECUTOR_CA_FILE"),
             git_mirror_root=os.getenv("RUSA_GIT_MIRROR_ROOT"),
             github_token=os.getenv("RUSA_GITHUB_TOKEN"),
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
@@ -237,6 +243,9 @@ class RuntimeConfig:
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
             "RUSA_GITHUB_TOKEN": self.github_token,
             "RUSA_SANDBOX_IMAGE": self.sandbox_image,
+            "RUSA_SANDBOX_EXECUTOR_URL": self.sandbox_executor_url,
+            "RUSA_SANDBOX_EXECUTOR_TOKEN": self.sandbox_executor_token,
+            "RUSA_SANDBOX_EXECUTOR_CA_FILE": self.sandbox_executor_ca_file,
         }
         missing.extend(name for name, value in required.items() if not value)
         if self.audit_hmac_key and (
@@ -257,6 +266,24 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
+        if self.sandbox_executor_url:
+            executor_url = urlparse(self.sandbox_executor_url)
+            if (
+                executor_url.scheme != "https"
+                or not executor_url.hostname
+                or executor_url.username
+                or executor_url.password
+                or executor_url.query
+                or executor_url.fragment
+            ):
+                missing.append("RUSA_SANDBOX_EXECUTOR_URL must use credential-free HTTPS")
+        if self.sandbox_executor_token and (
+            len(self.sandbox_executor_token.encode("utf-8")) < 32
+            or self._looks_placeholder(self.sandbox_executor_token)
+        ):
+            missing.append("RUSA_SANDBOX_EXECUTOR_TOKEN must be a real secret of at least 32 UTF-8 bytes")
+        if self.sandbox_executor_ca_file and not Path(self.sandbox_executor_ca_file).is_absolute():
+            missing.append("RUSA_SANDBOX_EXECUTOR_CA_FILE must be an absolute mounted CA file path")
         missing.extend(self._validate_tenants_and_model())
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
