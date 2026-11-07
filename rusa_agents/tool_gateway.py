@@ -39,9 +39,9 @@ class DockerSandbox:
 
     PROFILES = {
         "pytest": ["python", "-m", "pytest", "-q"],
-        "compile": ["python", "-m", "compileall", "-q", "rusa_agents", "llm-project/serve", "tests"],
-        "ruff": ["ruff", "check", "rusa_agents", "tests", "llm-project/serve"],
-        "bandit": ["bandit", "-q", "-r", "rusa_agents"],
+        "compile": ["python", "-m", "compileall", "-q", "rusa_agents", "rusa_knowledge", "rusa_mcp", "llm-project/serve", "tests"],
+        "ruff": ["ruff", "check", "rusa_agents", "rusa_knowledge", "rusa_mcp", "tests", "llm-project/serve"],
+        "bandit": ["bandit", "-q", "-r", "rusa_agents", "rusa_knowledge", "rusa_mcp"],
     }
 
     def __init__(
@@ -223,6 +223,10 @@ class WorkspaceToolGateway:
     PROTECTED_NAMES = {
         "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
         "credentials.json", "service-account.json", ".npmrc", ".pypirc",
+        "policy.py", "orchestrator.py", "tool_gateway.py", "git_workspace.py",
+        "runtime.py", "config.py", "qa_service.py", "qa_client.py", "qa_attestation.py",
+        "dockerfile.worker", "dockerfile.agent-sandbox",
+        "docker-compose.production.yml", "docker-compose.production.rag-mcp.yml",
         ".netrc", "secrets.json", "token.json", ".gitattributes", ".gitmodules", ".lfsconfig",
     }
     PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk", ".tfstate", ".tfvars"}
@@ -237,7 +241,8 @@ class WorkspaceToolGateway:
         "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
     }
     PROTECTED_WRITE_PREFIXES = (
-        ".github/", "migrations/", "schemas/", "llm-project/configs/",
+        ".github/", "migrations/", "schemas/", "tests/qa_contract/", "scripts/deploy/",
+        "llm-project/configs/",
         "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
         "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
     )

@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import shutil
 import subprocess  # nosec B404 - fixed argv only, shell execution is never enabled
+import tarfile
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 from .contracts import CodingTask
@@ -28,9 +30,14 @@ BLOCKED_WRITE_NAMES = {
     "setup.py", "setup.cfg", "package.json", "package-lock.json",
     "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".npmrc", ".pypirc", ".netrc",
+    "policy.py", "orchestrator.py", "tool_gateway.py", "git_workspace.py",
+    "runtime.py", "config.py", "qa_service.py", "qa_client.py", "qa_attestation.py",
+    "dockerfile.worker", "dockerfile.agent-sandbox",
+    "docker-compose.production.yml", "docker-compose.production.rag-mcp.yml",
 }
 BLOCKED_WRITE_PREFIXES = (
-    ".github/", "migrations/", "schemas/", "llm-project/configs/",
+    ".github/", "migrations/", "schemas/", "tests/qa_contract/", "scripts/deploy/",
+    "llm-project/configs/",
     "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
     "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
 )
@@ -294,7 +301,155 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def prepare_candidate_snapshot(
+        self,
+        workspace: str | Path,
+        max_archive_bytes: int = 100_000_000,
+    ) -> tuple[bytes, str]:
+        """Stage safe changes and export the exact candidate Git tree for independent QA."""
+        root = Path(workspace).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("Candidate workspace must be a directory")
+        changed = self._safe_changed_paths(root)
+        if changed:
+            staged = self._run(
+                ["git", "add", "--", *changed],
+                str(root),
+            )
+            if staged.returncode:
+                raise RuntimeError(f"Git staging failed before QA: {staged.stderr[-3000:]}")
+
+        tree_result = self._run(["git", "write-tree"], str(root))
+        if tree_result.returncode:
+            raise RuntimeError(f"Could not create candidate Git tree: {tree_result.stderr[-2000:]}")
+        tree_sha = tree_result.stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", tree_sha):
+            raise RuntimeError("Git returned an invalid candidate tree SHA")
+
+        env = {
+            "PATH": os.getenv("PATH", "/usr/bin:/bin"),
+            "HOME": tempfile.gettempdir(),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_LFS_SKIP_SMUDGE": "1",
+        }
+
+        def run_bytes(args: list[str], input_data: bytes | None = None) -> bytes:
+            if not GIT_BIN:
+                raise RuntimeError("Git executable is unavailable in the worker image")
+            completed = subprocess.run(
+                [
+                    GIT_BIN,
+                    "-c", "core.fsmonitor=false",
+                    "-c", "core.hooksPath=/dev/null",
+                    *args,
+                ],
+                cwd=str(root),
+                env=env,
+                input=input_data,
+                capture_output=True,
+                timeout=180,
+                check=False,
+            )
+            if completed.returncode:
+                detail = completed.stderr.decode("utf-8", "replace")[-2000:]
+                raise RuntimeError(f"Git candidate snapshot command failed: {detail}")
+            return completed.stdout
+
+        listing = run_bytes(["ls-tree", "-r", "-z", "--full-tree", tree_sha])
+        entries: list[tuple[str, str, str]] = []
+        for raw_entry in listing.split(b"\0"):
+            if not raw_entry:
+                continue
+            try:
+                metadata, raw_path = raw_entry.split(b"\t", 1)
+                mode, object_type, object_sha = metadata.decode("ascii").split()
+                path = raw_path.decode("utf-8", "strict")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RuntimeError("Candidate Git tree contains an invalid entry") from exc
+            if object_type != "blob" or mode not in {"100644", "100755"}:
+                raise RuntimeError("QA snapshot refuses symlinks, submodules, and non-regular Git objects")
+            relative = PurePosixPath(path)
+            parts = {part.lower() for part in relative.parts}
+            if (
+                relative.is_absolute()
+                or ".." in relative.parts
+                or "\\" in path
+                or parts.intersection(BLOCKED_PATH_PARTS)
+                or any(part.startswith(".env") and part != ".env.example" for part in parts)
+                or relative.suffix.lower() in BLOCKED_SUFFIXES
+                or relative.name.lower() in {"id_rsa", "id_ed25519", "authorized_keys", "known_hosts"}
+            ):
+                raise RuntimeError(f"Candidate Git tree contains a protected path: {path}")
+            entries.append((path, mode, object_sha))
+
+        if not entries or len(entries) > 20_000:
+            raise RuntimeError("Candidate Git tree is empty or exceeds the QA file-count limit")
+
+        object_ids = b"".join(
+            object_sha.encode("ascii") + b"\n"
+            for _, _, object_sha in entries
+        )
+        size_output = run_bytes(["cat-file", "--batch-check"], object_ids)
+        sizes: list[int] = []
+        total_size = 0
+        for line in size_output.splitlines():
+            fields = line.decode("ascii", "strict").split()
+            if len(fields) != 3 or fields[1] != "blob":
+                raise RuntimeError("Candidate Git tree contains a missing or invalid blob")
+            size = int(fields[2])
+            if size < 0:
+                raise RuntimeError("Candidate Git tree contains an invalid blob size")
+            total_size += size
+            if total_size > max_archive_bytes:
+                raise RuntimeError("Candidate Git tree exceeds the configured QA snapshot limit")
+            sizes.append(size)
+
+        object_output = run_bytes(["cat-file", "--batch"], object_ids)
+        cursor = 0
+        archive_buffer = io.BytesIO()
+        with tarfile.open(fileobj=archive_buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            for (path, mode, expected_sha), expected_size in zip(entries, sizes, strict=True):
+                header_end = object_output.find(b"\n", cursor)
+                if header_end < 0:
+                    raise RuntimeError("Git returned a truncated candidate blob header")
+                header = object_output[cursor:header_end].decode("ascii", "strict").split()
+                if len(header) != 3 or header[0] != expected_sha or header[1] != "blob":
+                    raise RuntimeError("Git candidate blob identity did not match its tree entry")
+                actual_size = int(header[2])
+                if actual_size != expected_size:
+                    raise RuntimeError("Git candidate blob size changed during snapshot creation")
+                data_start = header_end + 1
+                data_end = data_start + actual_size
+                if data_end >= len(object_output) or object_output[data_end:data_end + 1] != b"\n":
+                    raise RuntimeError("Git returned a truncated candidate blob")
+                data = object_output[data_start:data_end]
+                info = tarfile.TarInfo(name=path)
+                info.size = len(data)
+                info.mode = int(mode, 8) & 0o777
+                info.mtime = 0
+                info.uid = 0
+                info.gid = 0
+                info.uname = ""
+                info.gname = ""
+                archive.addfile(info, io.BytesIO(data))
+                cursor = data_end + 1
+
+        archive_bytes = archive_buffer.getvalue()
+        if len(archive_bytes) > max_archive_bytes:
+            raise RuntimeError("Serialized QA snapshot exceeds the configured upload limit")
+        return archive_bytes, tree_sha
+
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        expected_tree_sha: str | None = None,
+        expected_artifact_digest: str | None = None,
+    ) -> str | None:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
             raise ValueError("Publishing is restricted to task feature branches")
@@ -311,6 +466,23 @@ class GitHubPublisher:
             added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
+        if expected_artifact_digest is not None and expected_tree_sha is None:
+            raise ValueError("An artifact digest requires an independently attested Git tree SHA")
+        if expected_tree_sha is not None:
+            if not re.fullmatch(r"[0-9a-f]{40}", expected_tree_sha):
+                raise ValueError("Expected QA Git tree SHA is invalid")
+            candidate_archive, candidate_tree_sha = self.prepare_candidate_snapshot(root)
+            if candidate_tree_sha != expected_tree_sha:
+                raise RuntimeError("Candidate Git tree changed after independent QA; publication is blocked")
+            if expected_artifact_digest is not None:
+                if not re.fullmatch(r"[0-9a-f]{64}", expected_artifact_digest):
+                    raise ValueError("Expected QA artifact digest is invalid")
+                from .qa_attestation import digest_snapshot_archive
+
+                candidate_digest = digest_snapshot_archive(candidate_archive)
+                if candidate_digest != expected_artifact_digest:
+                    raise RuntimeError("Candidate artifact digest changed after independent QA; publication is blocked")
+        if changed:
             commit = self._run([
                 "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=RUSA-AI",
                 "-c", "user.email=rusa-ai@users.noreply.github.com",
@@ -321,6 +493,11 @@ class GitHubPublisher:
             sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
         else:
             sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
+
+        if expected_tree_sha is not None:
+            committed_tree = self._run(["git", "rev-parse", "HEAD^{tree}"], str(root))
+            if committed_tree.returncode or committed_tree.stdout.strip() != expected_tree_sha:
+                raise RuntimeError("Committed Git tree does not match the independently validated QA snapshot")
 
         askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-askpass-")
         os.close(askpass_fd)

@@ -33,6 +33,8 @@ RUN apt-get update \
     && useradd --create-home --uid 10001 sandbox
 
 COPY --from=builder /usr/local /usr/local
+COPY tests/qa_contract /opt/rusa-qa-tests
+RUN chmod -R a-w /opt/rusa-qa-tests
 
 RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \

@@ -67,7 +67,7 @@ RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && python - <<'PY'
 import importlib
 
-for module in ("rusa_agents.worker_main", "psycopg", "prometheus_client", "httpx"):
+for module in ("rusa_agents.worker_main", "rusa_agents.qa_service", "psycopg", "prometheus_client", "httpx", "cryptography"):
     importlib.import_module(module)
 if __import__("os").getenv("RUSA_INSTALL_RAG") == "1":
     importlib.import_module("rusa_knowledge.service")

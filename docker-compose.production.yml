@@ -10,6 +10,8 @@ services:
       RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
       RUSA_WORKER_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      RUSA_MCP_DATABASE_URL: ""
+      RUSA_WORKER_KNOWLEDGE_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
@@ -20,6 +22,18 @@ services:
       RUSA_GIT_MIRROR_ROOT: ""
       RUSA_DOCKER_SOCKET: ""
       RUSA_DOCKER_GID: ""
+      RUSA_QA_URL: ""
+      RUSA_QA_SERVICE_TOKEN: ""
+      RUSA_QA_PUBLIC_KEY_B64: ""
+      RUSA_QA_PRIVATE_KEY_B64: ""
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
+      RUSA_QA_DOCKER_SOCKET: ""
+      RUSA_QA_DOCKER_GID: ""
+      RUSA_QA_KEY_ID: ""
+      RUSA_QA_SANDBOX_IMAGE: ""
+      RUSA_QA_DOCKER_SOCKET: ""
+      RUSA_QA_DOCKER_GID: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
@@ -59,6 +73,16 @@ services:
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
       DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
+      RUSA_QA_URL: http://qa:8010
+      RUSA_QA_SERVICE_TOKEN: ${RUSA_QA_SERVICE_TOKEN:?Set the worker-to-QA service token}
+      RUSA_QA_PUBLIC_KEY_B64: ${RUSA_QA_PUBLIC_KEY_B64:?Set the QA Ed25519 public key}
+      RUSA_QA_PRIVATE_KEY_B64: ""
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
+      RUSA_QA_KEY_ID: ${RUSA_QA_KEY_ID:?Set the QA signing key ID}
+      RUSA_QA_SANDBOX_IMAGE: ${RUSA_QA_SANDBOX_IMAGE:?Set the pinned QA sandbox image}
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -80,7 +104,81 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      qa:
+        condition: service_healthy
     networks: [rusa-internal, rusa-egress]
+
+  qa:
+    image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["uvicorn", "rusa_agents.qa_service:app", "--host", "0.0.0.0", "--port", "8010"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_QA_SERVICE_TOKEN: ${RUSA_QA_SERVICE_TOKEN:?Set the worker-to-QA service token}
+      RUSA_QA_PRIVATE_KEY_B64: ${RUSA_QA_PRIVATE_KEY_B64:?Set the QA Ed25519 private key}
+      RUSA_QA_PUBLIC_KEY_B64: ""
+      RUSA_QA_KEY_ID: ${RUSA_QA_KEY_ID:?Set the QA signing key ID}
+      RUSA_QA_SANDBOX_IMAGE: ${RUSA_QA_SANDBOX_IMAGE:?Set the pinned QA sandbox image}
+      RUSA_QA_WORKSPACE_ROOT: ${RUSA_QA_WORKSPACE_ROOT:?Set a host-shared private QA workspace root}
+      RUSA_QA_CHECK_TIMEOUT_SECONDS: "600"
+      RUSA_QA_MAX_UPLOAD_BYTES: "100000000"
+      RUSA_QA_MAX_FILES: "20000"
+      RUSA_QA_MAX_TOTAL_BYTES: "100000000"
+      RUSA_QA_MAX_FILE_BYTES: "25000000"
+      RUSA_QA_VERDICT_TTL_SECONDS: "1800"
+      RUSA_WORKER_DATABASE_URL: ""
+      RUSA_API_DATABASE_URL: ""
+      RUSA_DATABASE_URL: ""
+      RUSA_API_KEY: ""
+      RUSA_API_KEYS: "{}"
+      RUSA_API_KEYS_JSON: "{}"
+      RUSA_METRICS_API_KEY: ""
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_AUDIT_HMAC_KEY: ""
+      RUSA_MODEL_BASE_URL: ""
+      RUSA_MODEL_API_KEY: ""
+      RUSA_EMBEDDING_BASE_URL: ""
+      RUSA_EMBEDDING_API_KEY: ""
+      RUSA_MCP_TENANT_KEYS: "{}"
+      RUSA_MCP_ALLOWED_HOSTS: ""
+      RUSA_TENANT_REPOSITORIES: ""
+      RUSA_SANDBOX_IMAGE: ""
+      RUSA_WORKSPACE_ROOT: ""
+      RUSA_GIT_MIRROR_ROOT: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
+      RUSA_QA_URL: ""
+      RUSA_QA_DOCKER_SOCKET: ""
+      RUSA_QA_DOCKER_GID: ""
+      RUSA_QA_WORKSPACE_GID: ""
+      POSTGRES_PASSWORD: ""
+      DOCKER_HOST: unix:///run/qa-docker.sock
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 3g
+    cpus: 4.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    volumes:
+      - ${RUSA_QA_DOCKER_SOCKET:?Set a dedicated rootless QA Docker socket}:/run/qa-docker.sock
+      - ${RUSA_QA_WORKSPACE_ROOT:?Set a host-shared private QA workspace root}:${RUSA_QA_WORKSPACE_ROOT}
+    group_add:
+      - "${RUSA_QA_DOCKER_GID:?Set the rootless QA Docker socket GID}"
+      - "${RUSA_QA_WORKSPACE_GID:?Set the shared QA workspace group GID}"
+    expose:
+      - "8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal]
 
 networks:
   rusa-internal:

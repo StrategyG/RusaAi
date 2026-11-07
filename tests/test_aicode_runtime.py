@@ -11,6 +11,7 @@ from rusa_agents.contracts import (
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
+from rusa_agents.qa_client import QAAttestationError, QAServiceUnavailable
 
 
 class StubWorker:
@@ -31,11 +32,11 @@ def task():
 
 
 def workers(with_evidence=True):
-    evidence = {"check:pytest": {"exit_code": 0}} if with_evidence else {}
+    evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}} if with_evidence else {}
     security = {
-        "check:bandit": {"exit_code": 0},
-        "check:ruff": {"exit_code": 0},
-        "check:compile": {"exit_code": 0},
+        "check:bandit": {"exit_code": 0, "profile": "bandit"},
+        "check:ruff": {"exit_code": 0, "profile": "ruff"},
+        "check:compile": {"exit_code": 0, "profile": "compile"},
     } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
@@ -98,7 +99,7 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
 
 def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     failing = workers()
-    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    failing[-2].evidence = {"check:pytest": {"exit_code": 1, "profile": "pytest"}}
     orchestrator = AICodeOrchestrator(
         failing,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
@@ -115,12 +116,12 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
         def __init__(self, role):
             evidence = {}
             if role == WorkerRole.TESTER:
-                evidence = {"check:pytest": {"exit_code": 0}}
+                evidence = {"check:pytest": {"exit_code": 0, "profile": "pytest"}}
             elif role == WorkerRole.SECURITY:
                 evidence = {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                    "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                    "check:compile": {"exit_code": 0, "profile": "compile"},
                 }
             super().__init__(role, evidence)
             self.seen_prior = []
@@ -199,16 +200,16 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
     for role in AICodeOrchestrator.PIPELINE:
         if role == WorkerRole.TESTER:
             evidence_workers.append(
-                ParallelWorker(role, {"check:pytest": {"exit_code": 0}})
+                ParallelWorker(role, {"check:pytest": {"exit_code": 0, "profile": "pytest"}})
             )
         elif role == WorkerRole.SECURITY:
             evidence_workers.append(
                 ParallelWorker(
                     role,
                     {
-                        "check:bandit": {"exit_code": 0},
-                        "check:ruff": {"exit_code": 0},
-                        "check:compile": {"exit_code": 0},
+                        "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                        "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                        "check:compile": {"exit_code": 0, "profile": "compile"},
                     },
                 )
             )
@@ -252,7 +253,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0, "profile": "pytest"}},
             )
 
     class CountingSecurity(StubWorker):
@@ -260,9 +261,9 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
             super().__init__(
                 WorkerRole.SECURITY,
                 {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": {"exit_code": 0, "profile": "bandit"},
+                    "check:ruff": {"exit_code": 0, "profile": "ruff"},
+                    "check:compile": {"exit_code": 0, "profile": "compile"},
                 },
             )
             self.calls = 0
@@ -297,3 +298,120 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def _signed_qa_stub_envelope(verdict="PASS"):
+    profiles = {
+        "pytest": {"exit_code": 0 if verdict == "PASS" else 1},
+        "bandit": {"exit_code": 0},
+        "ruff": {"exit_code": 0},
+        "compile": {"exit_code": 0},
+    }
+    return {
+        "payload": {
+            "service_id": "rusa-independent-qa",
+            "key_id": "test-key",
+            "verdict": verdict,
+            "git_tree_sha": "a" * 40,
+            "artifact_digest": "b" * 64,
+            "profiles": profiles,
+        },
+        "signature": "test-only-validator-boundary",
+    }
+
+
+class StubQAValidator:
+    def __init__(self, verdicts=None, error=None):
+        self.verdicts = list(verdicts or ["PASS"])
+        self.error = error
+        self.calls = 0
+
+    async def validate(self, task):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        verdict = self.verdicts[min(self.calls - 1, len(self.verdicts) - 1)]
+        return _signed_qa_stub_envelope(verdict)
+
+
+def test_production_orchestrator_holds_without_independent_qa(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        require_independent_qa=True,
+    )
+
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("no QA validator" in error for error in record.errors)
+
+
+def test_orchestrator_requires_signed_independent_qa_pass(tmp_path):
+    validator = StubQAValidator()
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        qa_validator=validator,
+        require_independent_qa=True,
+    )
+
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.SUCCEEDED
+    assert validator.calls == 1
+    assert record.qa_verdict["payload"]["verdict"] == "PASS"
+
+
+def test_orchestrator_repairs_after_independent_qa_failure(tmp_path):
+    validator = StubQAValidator(["FAIL", "PASS"])
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        qa_validator=validator,
+        require_independent_qa=True,
+        max_repair_cycles=1,
+    )
+
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.SUCCEEDED
+    assert validator.calls == 2
+    assert record.qa_verdict["payload"]["verdict"] == "PASS"
+    assert any("Independent QA returned FAIL" in error for error in record.errors)
+
+
+def test_orchestrator_holds_when_independent_qa_is_unavailable(tmp_path):
+    validator = StubQAValidator(error=QAServiceUnavailable("QA unavailable"))
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        qa_validator=validator,
+        require_independent_qa=True,
+    )
+
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("QA unavailable" in error for error in record.errors)
+
+
+def test_orchestrator_blocks_invalid_independent_qa_attestation(tmp_path):
+    validator = StubQAValidator(error=QAAttestationError("invalid QA signature"))
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        qa_validator=validator,
+        require_independent_qa=True,
+    )
+
+    record = asyncio.run(orchestrator.run(task()))
+
+    assert record.state == TaskState.BLOCKED
+    assert any("invalid QA signature" in error for error in record.errors)

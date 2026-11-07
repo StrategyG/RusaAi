@@ -4,6 +4,7 @@ import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
 from rusa_agents.git_workspace import GitHubPublisher, GitWorkspaceManager
+from rusa_agents.qa_attestation import digest_snapshot, digest_snapshot_archive, extract_snapshot_archive
 
 
 def git(*args, cwd=None):
@@ -305,3 +306,104 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_candidate_snapshot_is_the_exact_staged_git_tree(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("checkout", "-b", "feature/qa-snapshot", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
+    (repository / "README.md").write_text("candidate")
+    (repository / "src").mkdir()
+    (repository / "src" / "app.py").write_text("VALUE = 42\n")
+
+    publisher = GitHubPublisher(github_token="test-token")
+    archive, tree_sha = publisher.prepare_candidate_snapshot(repository)
+    snapshot = tmp_path / "qa-snapshot"
+    digest = extract_snapshot_archive(archive, snapshot)
+
+    assert len(tree_sha) == 40
+    assert digest == digest_snapshot(snapshot)
+    assert (snapshot / "README.md").read_text() == "candidate"
+    assert (snapshot / "src" / "app.py").read_text() == "VALUE = 42\n"
+    assert git("write-tree", cwd=repository).stdout.strip() == tree_sha
+
+
+def test_publication_rejects_workspace_mutation_after_qa_snapshot(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("checkout", "-b", "feature/qa-mutation", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
+    (repository / "README.md").write_text("tested candidate")
+
+    publisher = GitHubPublisher(github_token="test-token")
+    _, attested_tree = publisher.prepare_candidate_snapshot(repository)
+    (repository / "README.md").write_text("changed after QA")
+
+    with pytest.raises(RuntimeError, match="changed after independent QA"):
+        publisher.commit_and_push(
+            str(repository),
+            "StrategyG/RusaAi",
+            "feature/qa-mutation",
+            "must not publish",
+            expected_tree_sha=attested_tree,
+        )
+
+
+def test_candidate_snapshot_rejects_symlink_git_objects(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    (repository / "external-link").symlink_to("/etc/passwd")
+    git("add", "README.md", "external-link", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+
+    publisher = GitHubPublisher(github_token="test-token")
+    with pytest.raises(RuntimeError, match="symlinks"):
+        publisher.prepare_candidate_snapshot(repository)
+
+
+
+def test_publication_rejects_digest_mismatch_even_when_tree_sha_matches(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("checkout", "-b", "feature/qa-digest", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
+    (repository / "README.md").write_text("tested candidate")
+
+    publisher = GitHubPublisher(github_token="test-token")
+    archive, tree_sha = publisher.prepare_candidate_snapshot(repository)
+    actual_digest = digest_snapshot_archive(archive)
+    assert len(actual_digest) == 64
+
+    with pytest.raises(RuntimeError, match="artifact digest changed"):
+        publisher.commit_and_push(
+            str(repository),
+            "StrategyG/RusaAi",
+            "feature/qa-digest",
+            "must not publish",
+            expected_tree_sha=tree_sha,
+            expected_artifact_digest="f" * 64,
+        )

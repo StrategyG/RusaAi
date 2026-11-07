@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
 from .memory import SQLiteMemory
 from .metrics import WORKER_STEPS
 from .policy import AutonomyPolicy
+from .qa_client import QAAttestationError, QAServiceUnavailable
 from .workers import Worker
 
 
@@ -65,8 +67,12 @@ class AICodeOrchestrator:
     )
     QUALITY_ROLES = (WorkerRole.TESTER, WorkerRole.SECURITY)
     PIPELINE = PRIMARY_ROLES + QUALITY_ROLES
-    REQUIRED_TEST_EVIDENCE = ("check:pytest",)
-    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile")
+    REQUIRED_TEST_EVIDENCE = {"check:pytest": "pytest"}
+    REQUIRED_SECURITY_EVIDENCE = {
+        "check:bandit": "bandit",
+        "check:ruff": "ruff",
+        "check:compile": "compile",
+    }
 
     def __init__(
         self,
@@ -76,6 +82,8 @@ class AICodeOrchestrator:
         audit: AuditLog | None = None,
         max_parallel_workers: int = 4,
         max_repair_cycles: int = 2,
+        qa_validator=None,
+        require_independent_qa: bool = False,
     ):
         self.workers = {worker.role: worker for worker in workers}
         self.policy = policy or AutonomyPolicy()
@@ -87,6 +95,8 @@ class AICodeOrchestrator:
             raise ValueError("max_repair_cycles must be between 0 and 5")
         self.max_parallel_workers = max_parallel_workers
         self.max_repair_cycles = max_repair_cycles
+        self.qa_validator = qa_validator
+        self.require_independent_qa = require_independent_qa
 
         missing = set(self.PIPELINE) - set(self.workers)
         if missing:
@@ -131,6 +141,7 @@ class AICodeOrchestrator:
                 for result in record.results
             ],
             "errors": record.errors,
+            "qa_verdict": record.qa_verdict,
         }
         await asyncio.to_thread(
             self.memory.save,
@@ -214,9 +225,22 @@ class AICodeOrchestrator:
         await self._persist(record)
 
     @staticmethod
-    def _check_passed(result: WorkerResult, key: str) -> bool:
+    def _check_passed(
+        result: WorkerResult,
+        key: str,
+        expected_profile: str,
+    ) -> bool:
+        if not isinstance(result.evidence, dict):
+            return False
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        if not isinstance(evidence, dict):
+            return False
+        exit_code = evidence.get("exit_code")
+        return (
+            evidence.get("profile") == expected_profile
+            and type(exit_code) is int
+            and exit_code == 0
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
@@ -231,13 +255,16 @@ class AICodeOrchestrator:
             record.errors.append("Tester or security worker did not produce a result.")
             return None
         required = [
-            (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
+            (tester, key, profile)
+            for key, profile in self.REQUIRED_TEST_EVIDENCE.items()
         ] + [
-            (security, key) for key in self.REQUIRED_SECURITY_EVIDENCE
+            (security, key, profile)
+            for key, profile in self.REQUIRED_SECURITY_EVIDENCE.items()
         ]
         missing = [
-            key for worker_result, key in required
-            if key not in worker_result.evidence
+            key
+            for worker_result, key, _ in required
+            if not isinstance(worker_result.evidence, dict) or key not in worker_result.evidence
         ]
         if missing:
             record.errors.append(
@@ -245,8 +272,9 @@ class AICodeOrchestrator:
             )
             return None
         failed = [
-            key for worker_result, key in required
-            if not self._check_passed(worker_result, key)
+            key
+            for worker_result, key, profile in required
+            if not self._check_passed(worker_result, key, profile)
         ]
         if failed:
             record.errors.append("Validation checks failed: " + ", ".join(failed))
@@ -413,9 +441,73 @@ class AICodeOrchestrator:
                         evidence_result = self._verify_evidence(record)
 
                     if evidence_result is True:
-                        record.transition(TaskState.SUCCEEDED)
-                        await self._persist(record)
-                        break
+                        if self.qa_validator is not None:
+                            try:
+                                envelope = await self.qa_validator.validate(task)
+                                if (
+                                    not isinstance(envelope, dict)
+                                    or not isinstance(envelope.get("payload"), dict)
+                                ):
+                                    raise QAAttestationError("Independent QA returned a malformed verdict")
+                                payload = envelope["payload"]
+                                record.qa_verdict = envelope
+                                profiles = payload.get("profiles", {})
+                                profile_codes = {
+                                    name: item.get("exit_code")
+                                    for name, item in profiles.items()
+                                    if isinstance(item, dict)
+                                } if isinstance(profiles, dict) else {}
+                                await self._audit(
+                                    "qa.verdict",
+                                    task,
+                                    str(payload.get("service_id", "unknown-qa")),
+                                    {
+                                        "verdict": payload.get("verdict"),
+                                        "key_id": payload.get("key_id"),
+                                        "git_tree_sha": payload.get("git_tree_sha"),
+                                        "artifact_digest": payload.get("artifact_digest"),
+                                        "profile_exit_codes": profile_codes,
+                                        "signature_sha256": hashlib.sha256(
+                                            envelope["signature"].encode("ascii")
+                                        ).hexdigest(),
+                                    },
+                                )
+                                if payload.get("verdict") == "PASS":
+                                    record.transition(TaskState.SUCCEEDED)
+                                    await self._persist(record)
+                                    break
+                                failed_profiles = sorted(
+                                    name for name, code in profile_codes.items() if code != 0
+                                )
+                                record.errors.append(
+                                    "Independent QA returned FAIL"
+                                    + (
+                                        ": " + ", ".join(failed_profiles)
+                                        if failed_profiles else ""
+                                    )
+                                )
+                                evidence_result = False
+                            except QAServiceUnavailable as exc:
+                                record.errors.append(str(exc))
+                                record.transition(TaskState.AWAITING_APPROVAL)
+                                await self._persist(record)
+                                break
+                            except QAAttestationError as exc:
+                                record.errors.append(str(exc))
+                                record.transition(TaskState.BLOCKED)
+                                await self._persist(record)
+                                break
+                        elif self.require_independent_qa:
+                            record.errors.append(
+                                "Independent QA is required but no QA validator is configured."
+                            )
+                            record.transition(TaskState.AWAITING_APPROVAL)
+                            await self._persist(record)
+                            break
+                        else:
+                            record.transition(TaskState.SUCCEEDED)
+                            await self._persist(record)
+                            break
                     if evidence_result is None:
                         record.transition(TaskState.AWAITING_APPROVAL)
                         await self._persist(record)

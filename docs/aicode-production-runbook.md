@@ -24,27 +24,40 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–005 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+Apply core migrations 001–006 in numeric order. They create the durable queue, lease fencing, task results, tenant RLS, append-only policy audit, and tenant-scoped client idempotency. The API and worker fail closed when required schema objects or policies are missing.
 
-Create two independent login roles using a secret manager for passwords:
+When RAG/MCP is enabled, apply the optional knowledge-plane migrations in order after core migrations:
+
+```bash
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_rag_read_only_reader.sql
+```
+
+Migration 007 requires pgvector. Migration 008 creates a non-login, non-superuser read-only knowledge role, removes the worker runtime's ingestion-role membership, grants the worker only explicit read-role assumption, and revokes knowledge-table SELECT from the API runtime. Do not apply 007–008 unless the knowledge database, pgvector extension, and restricted roles are ready.
+
+Create independent login roles using a secret manager for passwords:
 
 ```sql
 CREATE ROLE rusa_api_login LOGIN PASSWORD 'api-managed-secret' IN ROLE rusa_api_runtime;
 CREATE ROLE rusa_worker_login LOGIN PASSWORD 'worker-managed-secret' IN ROLE rusa_worker_runtime;
-GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login;
+CREATE ROLE rusa_mcp_login LOGIN NOINHERIT PASSWORD 'mcp-managed-secret';
+GRANT rusa_knowledge_reader TO rusa_mcp_login WITH INHERIT FALSE;
+GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login, rusa_mcp_login;
 ```
 
-Use `rusa_api_login` only in `RUSA_API_DATABASE_URL` and `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, both with `sslmode=verify-full`. The API container must not receive the worker DSN or worker-only secrets; the worker container must not receive the API DSN or tenant API keys. Never use the schema owner or a PostgreSQL superuser in application containers.
+Create `rusa_mcp_login` only when RAG/MCP is enabled and after migration 008. Use separate TLS DSNs with `sslmode=verify-full`: `RUSA_API_DATABASE_URL` for API, `RUSA_WORKER_DATABASE_URL` for queue operations, `RUSA_WORKER_KNOWLEDGE_DATABASE_URL` for worker retrieval, and `RUSA_MCP_DATABASE_URL` for MCP retrieval. The worker and MCP clients explicitly assume `rusa_knowledge_reader`; neither receives ingestion privileges. Never use the schema owner or a PostgreSQL superuser in application containers.
 
 Runtime permissions:
-- API role: tenant-scoped SELECT, INSERT, UPDATE on jobs; tenant-scoped rate-limit maintenance.
-- Worker role: cross-tenant SELECT/UPDATE on the durable queue; tenant-scoped memory; append to the immutable audit ledger and task policy event table.
-- Neither role can perform DDL, grant privileges, or mutate existing audit records.
-- The API role cannot read memory or audit tables.
+- API role: tenant-scoped queue and rate-limit operations; no knowledge-document or knowledge-chunk access.
+- Worker role: cross-tenant queue claim/update; tenant-scoped memory and read-only knowledge retrieval; append-only audit/task-policy writes.
+- MCP login: read-only knowledge retrieval through the reader role, constrained by tenant RLS.
+- Ingestion identity: separate, restricted, and used only by the approved ingestion workflow.
+- No runtime identity can perform DDL, grant privileges, bypass RLS, or mutate existing audit records.
 
-The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
+The database policies use transaction-local `rusa.tenant_id` context. Verify these boundaries with the PostgreSQL integration tests and adversarial cross-tenant tests against the actual staging login roles; application-level WHERE clauses alone are not sufficient.
 
 ## 3. GitHub token permissions
 
@@ -69,26 +82,27 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build all three images from the reviewed commit:
+Do not publish production images manually from an unreviewed branch or mutable tag. After the exact commit is merged to `main`, create an authorized semantic-version tag in the form `vMAJOR.MINOR.PATCH`. The `.github/workflows/release.yml` workflow:
 
-```bash
-docker build -t ghcr.io/ORG/rusa-ai:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-aicode-worker:RELEASE .
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-aicode-sandbox:RELEASE .
-docker push ghcr.io/ORG/rusa-ai:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-worker:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-sandbox:RELEASE
-```
+1. Rejects non-semantic tags and tags whose commit is not reachable from `main`.
+2. Re-runs the complete reusable CI workflow on the exact tagged commit, including the stable **Release Gate** and actionlint.
+3. Builds and publishes four images to GHCR: API, worker (with approved RAG dependencies), isolated sandbox, and RAG/MCP.
+4. Scans the exact published digests for fixable CRITICAL/HIGH vulnerabilities.
+5. Creates keyless Cosign signatures using GitHub OIDC, build-provenance attestations, and OCI SBOM attestations.
+6. Publishes a GitHub Release with `release-manifest.txt`, which records all four immutable image digests.
 
-Resolve the sandbox digest from the registry and configure `RUSA_SANDBOX_IMAGE` as an immutable reference:
+The production image references are:
 
 ```text
-ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST
+ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST
+ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST
+ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:MCP_DIGEST
 ```
 
-The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
+Image publication is gated by the GitHub `release` environment. Configure required reviewers and restrict the environment to approved `vMAJOR.MINOR.PATCH` tags. The worker uses the sandbox image through the dedicated rootless Docker daemon. The RAG/MCP image is deployed only when `RUSA_RAG_ENABLED=true`; the release still records and signs its digest so rollback and later enablement remain reproducible.
 
-The current CI builds images but does not publish them to a registry automatically. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
+The standard API image does not bundle model weights or heavyweight local-model dependencies. A local Transformers/vLLM deployment requires a separately approved model artifact, a compatible image build, and target-hardware validation. `release-manifest.txt` is the source of truth for the digest values supplied to the manual production deployment workflow.
 
 ## 6. Prepare Git mirrors and storage
 
@@ -173,17 +187,25 @@ docker compose up -d
 docker compose --profile worker up -d --build
 ```
 
-For production, set the API and worker image references to immutable registry digests in the deployment environment, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then validate and deploy the external-database stack:
+For production, pre-provision `.env` with all four immutable image digests, separate managed TLS DSNs, rootless Docker socket, workspace/mirror paths, tenant API-key digests, and required secrets. `RUSA_MCP_IMAGE` must contain a digest even when RAG is disabled; set `RUSA_RAG_ENABLED=false` for the base stack or `true` only after migration 007–008, the MCP login, worker knowledge DSN, embedding endpoint, tenant tokens, and overlay settings have been verified.
+
+Before every deployment or rollback, set `RUSA_AICODE_ENABLED=false`, wait until active tasks reach a safe terminal/checkpoint state, and confirm no worker is executing a task. The deployment script fails closed if intake is enabled; it does not drain active work itself. Re-enable intake only after post-deploy smoke tests and operator approval.
+
+The manual `.github/workflows/deploy-production.yml` workflow requires approval in the GitHub `production` environment, verifies all four Cosign signatures against the exact release workflow identity, and transfers the base/optional RAG Compose files and deployment scripts over pinned SSH.
+
+The host deployment script can also be run manually after verifying the release manifest and all image signatures:
 
 ```bash
-export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
-export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
-docker compose -f docker-compose.production.yml config
-docker compose -f docker-compose.production.yml pull
-docker compose -f docker-compose.production.yml up -d
-docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs --tail=200 api worker
+./scripts/deploy/compose-deploy.sh ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST ghcr.io/strategyg/rusa-ai-rag-mcp@sha256:MCP_DIGEST
 ```
+
+It requires the previous four image digests to exist in `.env` as rollback targets. It pulls API/worker images from the host Docker daemon, pulls the sandbox through `RUSA_DOCKER_SOCKET`, includes `docker-compose.production.rag-mcp.yml` and waits for MCP health only when `RUSA_RAG_ENABLED=true`, then waits for API/worker health. If a candidate fails, it restores the previous digest set. Manual rollback uses:
+
+```bash
+./scripts/deploy/compose-rollback.sh
+```
+
+The deployment workflow requires these GitHub `production` environment variables: `PRODUCTION_SSH_HOST`, `PRODUCTION_SSH_USER`, `PRODUCTION_DEPLOY_PATH`, and `GHCR_PULL_USERNAME`. It requires these environment secrets: `PRODUCTION_SSH_PRIVATE_KEY`, `PRODUCTION_SSH_KNOWN_HOSTS`, and a read-only `GHCR_PULL_TOKEN`. Configure required reviewers and tag restrictions on both the `release` and `production` environments before use.
 
 The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 

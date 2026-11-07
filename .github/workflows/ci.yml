@@ -1,12 +1,14 @@
 name: RUSA-AI CI
 
 on:
-  # PR branches are validated by pull_request only; avoid duplicate push runs.
+  # Feature branches are validated by pull_request; integration candidates also run on push.
   push:
-    branches: [main]
+    branches: [main, "integration/**"]
   pull_request:
     branches: [main]
-  workflow_dispatch:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch: {}
+  workflow_call: {}
 
 permissions:
   contents: read
@@ -56,6 +58,14 @@ jobs:
         run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
       - name: Tests
         run: python -m pytest -q
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate GitHub Actions workflows
+        run: "$(go env GOPATH)/bin/actionlint" -color
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
+          bash tests/test_deploy_scripts.sh
 
   docker-build:
     name: Build, test, and scan production images
@@ -102,6 +112,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Verify independent QA service imports in the worker image
+        run: docker run --rm --entrypoint python "rusa-ai-worker:${{ github.sha }}" -c "import rusa_agents.qa_service; print('independent QA service import passed')"
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
         with:
@@ -184,6 +196,15 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_QA_SERVICE_TOKEN: ci-only-qa-service-token-123456789012345678901234
+          RUSA_QA_PRIVATE_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          RUSA_QA_PUBLIC_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          RUSA_QA_KEY_ID: ci-qa-key-1
+          RUSA_QA_SANDBOX_IMAGE: example.invalid/rusa-ai-agent-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_QA_DOCKER_SOCKET: /run/user/1000/qa-docker.sock
+          RUSA_QA_DOCKER_GID: "1000"
+          RUSA_QA_WORKSPACE_ROOT: /srv/rusa/qa-workspaces
+          RUSA_QA_WORKSPACE_GID: "1000"
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
@@ -208,6 +229,55 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
+      - name: Validate full production Compose configuration
+        env:
+          RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_QA_SERVICE_TOKEN: ci-only-qa-service-token-123456789012345678901234
+          RUSA_QA_PRIVATE_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          RUSA_QA_PUBLIC_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          RUSA_QA_KEY_ID: ci-qa-key-1
+          RUSA_QA_SANDBOX_IMAGE: example.invalid/rusa-ai-agent-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_QA_DOCKER_SOCKET: /run/user/1000/qa-docker.sock
+          RUSA_QA_DOCKER_GID: "1000"
+          RUSA_QA_WORKSPACE_ROOT: /srv/rusa/qa-workspaces
+          RUSA_QA_WORKSPACE_GID: "1000"
+          RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
+          RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
+          RUSA_MODEL_BASE_URL: https://model.internal/v1
+          RUSA_MODEL_NAME: rusa-ai
+          RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
+          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
+          RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+          RUSA_TASK_TIMEOUT_SECONDS: "3600"
+          RUSA_CI_TIMEOUT_SECONDS: "900"
+          RUSA_CI_POLL_SECONDS: "15"
+          RUSA_MAX_PARALLEL_WORKERS: "4"
+          RUSA_MAX_REPAIR_CYCLES: "2"
+          RUSA_METRICS_PORT: "9100"
+          RUSA_MCP_IMAGE: example.invalid/rusa-ai-rag-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_MCP_DATABASE_URL: postgresql://rusa_mcp_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_WORKER_KNOWLEDGE_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_RAG_ENABLED: "true"
+          RUSA_KNOWLEDGE_DB_ROLE: rusa_knowledge_reader
+          RUSA_KNOWLEDGE_COLLECTION: agent
+          RUSA_EMBEDDING_BASE_URL: https://embedding.internal/v1
+          RUSA_EMBEDDING_API_KEY: ci-only-embedding-key
+          RUSA_EMBEDDING_MODEL: text-embedding-3-small
+          RUSA_MCP_TENANT_KEYS: '{"0000000000000000000000000000000000000000000000000000000000000000":"tenant-ci"}'
+          RUSA_MCP_ALLOWED_HOSTS: knowledge.example.com,knowledge.example.com:*
+          RUSA_MCP_BIND_PORT: "8002"
+        run: |
+          docker compose -f docker-compose.production.yml \
+            -f docker-compose.production.rag-mcp.yml config --quiet
 
   rag-mcp:
     name: RAG and MCP integration tests
@@ -254,6 +324,31 @@ jobs:
             tests/test_knowledge_postgres.py \
             tests/test_knowledge_safety.py \
             tests/test_knowledge_service.py \
+            tests/test_knowledge_reader_postgres.py \
             tests/test_mcp_client.py \
             tests/test_mcp_server.py \
             tests/test_mcp_server_security.py
+
+  release-gate:
+    name: Release Gate
+    if: always()
+    needs:
+      - test
+      - docker-build
+      - rag-mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release check to pass
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          IMAGE_RESULT: ${{ needs['docker-build'].result }}
+          RAG_MCP_RESULT: ${{ needs['rag-mcp'].result }}
+        run: |
+          printf 'Test, lint, and security: %s\n' "$TEST_RESULT"
+          printf 'Build, test, and scan production images: %s\n' "$IMAGE_RESULT"
+          printf 'RAG and MCP integration tests: %s\n' "$RAG_MCP_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$IMAGE_RESULT" != "success" || "$RAG_MCP_RESULT" != "success" ]]; then
+            echo "Release Gate failed: every required job must succeed on this exact commit." >&2
+            exit 1
+          fi

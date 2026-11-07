@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -39,6 +40,11 @@ class RuntimeConfig:
     model_name: str
     tenant_repositories: dict[str, list[str]]
     aicode_enabled: bool = False
+    qa_service_url: str | None = None
+    qa_service_token: str | None = None
+    qa_public_key_b64: str | None = None
+    qa_key_id: str | None = None
+    qa_sandbox_image: str | None = None
 
     @staticmethod
     def _looks_placeholder(value: str | None) -> bool:
@@ -147,6 +153,11 @@ class RuntimeConfig:
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
             tenant_repositories=tenant_repositories,
             aicode_enabled=aicode_enabled,
+            qa_service_url=os.getenv("RUSA_QA_URL"),
+            qa_service_token=os.getenv("RUSA_QA_SERVICE_TOKEN"),
+            qa_public_key_b64=os.getenv("RUSA_QA_PUBLIC_KEY_B64"),
+            qa_key_id=os.getenv("RUSA_QA_KEY_ID"),
+            qa_sandbox_image=os.getenv("RUSA_QA_SANDBOX_IMAGE"),
         )
 
     @classmethod
@@ -237,6 +248,11 @@ class RuntimeConfig:
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
             "RUSA_GITHUB_TOKEN": self.github_token,
             "RUSA_SANDBOX_IMAGE": self.sandbox_image,
+            "RUSA_QA_URL": self.qa_service_url,
+            "RUSA_QA_SERVICE_TOKEN": self.qa_service_token,
+            "RUSA_QA_PUBLIC_KEY_B64": self.qa_public_key_b64,
+            "RUSA_QA_KEY_ID": self.qa_key_id,
+            "RUSA_QA_SANDBOX_IMAGE": self.qa_sandbox_image,
         }
         missing.extend(name for name, value in required.items() if not value)
         if self.audit_hmac_key and (
@@ -257,6 +273,39 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
+
+        if self.qa_service_url:
+            qa_url = urlparse(self.qa_service_url)
+            if (
+                qa_url.scheme not in {"http", "https"}
+                or not qa_url.hostname
+                or qa_url.username
+                or qa_url.password
+                or qa_url.query
+                or qa_url.fragment
+            ):
+                missing.append("RUSA_QA_URL must be an absolute credential-free HTTP(S) URL")
+            elif qa_url.scheme == "http" and qa_url.hostname not in {"qa", "localhost", "127.0.0.1"}:
+                missing.append("RUSA_QA_URL may use HTTP only on the private QA service network")
+        if self.qa_service_token and (
+            len(self.qa_service_token.encode("utf-8")) < 32
+            or self._looks_placeholder(self.qa_service_token)
+        ):
+            missing.append("RUSA_QA_SERVICE_TOKEN must be a real secret of at least 32 UTF-8 bytes")
+        if self.qa_public_key_b64:
+            try:
+                public_key = base64.b64decode(self.qa_public_key_b64, validate=True)
+                if len(public_key) != 32:
+                    raise ValueError("wrong key length")
+            except (ValueError, TypeError):
+                missing.append("RUSA_QA_PUBLIC_KEY_B64 must encode a 32-byte Ed25519 public key")
+        if self.qa_key_id and not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", self.qa_key_id):
+            missing.append("RUSA_QA_KEY_ID is invalid")
+        if self.qa_sandbox_image and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._/:@-]+@sha256:[0-9a-f]{64}",
+            self.qa_sandbox_image,
+        ):
+            missing.append("RUSA_QA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
         missing.extend(self._validate_tenants_and_model())
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
