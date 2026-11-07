@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_devops_tasks_run
 CREATE TABLE IF NOT EXISTS public.devops_event_outbox (
     outbox_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
-    run_id UUID NOT NULL,
+    run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 1 AND 128),
     task_id TEXT CHECK (task_id IS NULL OR length(task_id) BETWEEN 1 AND 128),
     attempt INTEGER CHECK (attempt IS NULL OR attempt > 0),
     message_id TEXT NOT NULL CHECK (length(message_id) BETWEEN 1 AND 128),
