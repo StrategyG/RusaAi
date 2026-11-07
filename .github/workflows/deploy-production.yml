@@ -87,6 +87,11 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \\
             --pattern release-manifest.txt --dir "$manifest_dir"
           manifest="$manifest_dir/release-manifest.txt"
+          expected_manifest_identity="https://github.com/StrategyG/RusaAi/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          cosign verify-blob --bundle "$bundle" \
+            --certificate-identity "$expected_manifest_identity" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$manifest"
           manifest_value() {
             local key="$1"
             awk -F= -v key="$key" '
@@ -140,6 +145,11 @@ jobs:
           cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$WORKER_IMAGE@$WORKER_DIGEST"
           cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$SANDBOX_IMAGE@$SANDBOX_DIGEST"
           cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$MCP_IMAGE@$MCP_DIGEST"
+          for image in "$API_IMAGE@$API_DIGEST" "$WORKER_IMAGE@$WORKER_DIGEST" "$SANDBOX_IMAGE@$SANDBOX_DIGEST" "$MCP_IMAGE@$MCP_DIGEST"; do
+            cosign verify-attestation --type slsaprovenance \
+              --certificate-identity "$expected_identity" \
+              --certificate-oidc-issuer "$issuer" "$image" >/dev/null
+          done
 
       - name: Configure pinned SSH host identity
         env:
