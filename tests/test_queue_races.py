@@ -439,3 +439,41 @@ def test_cancel_approval_paused_task_flags_existing_draft_pr_for_reconciliation(
         assert current["result"]["cancellation_reconciliation"]["required"] is True
     finally:
         remove_task(task_id, tenant)
+
+
+def test_expired_worker_lease_during_cancel_is_reconciled():
+    queue = make_queue()
+    tenant = f"queue-cancel-expired-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "crash during cancellation"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-expired-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        expire_lease(job.id, tenant)
+
+        # The next claimant performs the bounded recovery sweep but must not
+        # execute a task whose cancellation was already durably requested.
+        recovered = queue.claim("cancel-expired-recovery-worker", lease_seconds=30)
+        assert recovered is None
+
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["last_error"] == (
+            "Cancellation requested; worker lease expired before acknowledgement"
+        )
+        assert current["result"]["side_effects"]["reconciliation_required"] is True
+        assert current["result"]["side_effects"]["git_publication"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["side_effects"]["pull_request_creation"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["cancellation_reconciliation"]["required"] is True
+    finally:
+        remove_task(task_id, tenant)
