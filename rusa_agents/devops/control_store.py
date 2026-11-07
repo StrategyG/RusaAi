@@ -175,7 +175,7 @@ class PostgresWorkflowControlStore:
             SELECT t.task_id, t.run_id, t.tenant_id, t.agent_id, t.stage,
                    t.attempt, t.status, t.state_version, t.lease_epoch,
                    t.deadline_at, t.task, t.result, t.lease_owner, t.lease_until,
-                   t.heartbeat_at, w.status, w.cancel_epoch
+                   t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
             FROM public.devops_tasks AS t
             JOIN public.devops_workflows AS w
               ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
@@ -201,8 +201,9 @@ class PostgresWorkflowControlStore:
             "lease_owner": row[12],
             "lease_until": row[13],
             "heartbeat_at": row[14],
-            "run_status": row[15],
-            "cancel_epoch": row[16],
+            "side_effect": row[15],
+            "run_status": row[16],
+            "cancel_epoch": row[17],
         }
 
     @staticmethod
@@ -372,6 +373,42 @@ class PostgresWorkflowControlStore:
                     task_id,
                 ),
             ).fetchone()
+
+            if workflow["status"] == "queued":
+                run_version = workflow["state_version"] + 1
+                conn.execute(
+                    """
+                    UPDATE public.devops_workflows
+                    SET status='running', state_version=%s, updated_at=clock_timestamp()
+                    WHERE tenant_id=%s AND run_id=%s AND state_version=%s
+                    """,
+                    (run_version, tenant_id, run_id, workflow["state_version"]),
+                )
+                workflow["status"] = "running"
+                workflow["state_version"] = run_version
+                run_correlation, _ = self._event_context(conn, tenant_id, run_id, task_id)
+                started = self._event(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    task_id=None,
+                    attempt=None,
+                    event_type="audit.recorded",
+                    payload={
+                        "action": "workflow.started",
+                        "outcome": "running",
+                        "resource_ref": f"workflow://{run_id}",
+                        "state_version": run_version,
+                    },
+                    correlation_id=run_correlation,
+                    traceparent=traceparent,
+                )
+                self._append_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    event=started,
+                    destination="events",
+                    aggregate_version=run_version,
+                )
             task["state_version"] = updated[0]
             task["lease_epoch"] = updated[1]
             task["lease_until"] = updated[2]
@@ -739,13 +776,20 @@ class PostgresWorkflowControlStore:
             task = self._task_row(conn, tenant_id, run_id, task_id, lock=True)
             if task["agent_id"] != worker_id:
                 raise TaskAccessDeniedError("workload is not assigned to this task")
+            is_cancel_ack = result.get("status") == "cancelled"
+            task_status_allowed = task["status"] in {"accepted", "running"} or (
+                is_cancel_ack and task["status"] == "cancel_requested"
+            )
+            run_status_allowed = workflow["status"] in {"queued", "running"} or (
+                is_cancel_ack and workflow["status"] == "cancel_requested"
+            )
             if (
                 task["attempt"] != attempt
                 or task["lease_epoch"] != lease_epoch
                 or task["lease_owner"] != worker_id
                 or task["state_version"] != expected_state_version
-                or task["status"] not in {"accepted", "running"}
-                or workflow["status"] not in {"queued", "running"}
+                or not task_status_allowed
+                or not run_status_allowed
                 or _as_utc(task["lease_until"]) is None
                 or _as_utc(task["lease_until"]) <= datetime.now(timezone.utc)
             ):
@@ -803,7 +847,8 @@ class PostgresWorkflowControlStore:
                 """
                 UPDATE public.devops_tasks
                 SET status=%s, state_version=%s, result=%s::jsonb,
-                    lease_owner=NULL, lease_until=NULL, updated_at=clock_timestamp()
+                    side_effect=%s, lease_owner=NULL, lease_until=NULL,
+                    updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND state_version=%s
                 """,
@@ -811,6 +856,7 @@ class PostgresWorkflowControlStore:
                     task_status,
                     new_version,
                     result_json,
+                    side_effect or None,
                     tenant_id,
                     run_id,
                     task_id,
@@ -955,7 +1001,7 @@ class PostgresWorkflowControlStore:
                         FROM public.devops_tasks
                         WHERE tenant_id=%s AND run_id=%s
                           AND status='cancelled'
-                          AND COALESCE(result->>'status','')='cancelled'
+                          AND COALESCE(side_effect, 'UNKNOWN') <> 'NONE'
                         """,
                         (tenant_id, run_id),
                     ).fetchone()[0]
@@ -1135,7 +1181,7 @@ class PostgresWorkflowControlStore:
             )
             tasks = conn.execute(
                 """
-                SELECT task_id, attempt, state_version
+                SELECT task_id, attempt, state_version, status, lease_owner
                 FROM public.devops_tasks
                 WHERE tenant_id=%s AND run_id=%s
                   AND status IN ('queued','accepted','running','validating','needs_approval')
@@ -1144,42 +1190,81 @@ class PostgresWorkflowControlStore:
                 """,
                 (tenant_id, run_id),
             ).fetchall()
-            for task_id, attempt, old_version in tasks:
+            active_leases = 0
+            for task_id, attempt, old_version, old_status, lease_owner in tasks:
                 new_task_version = old_version + 1
-                conn.execute(
-                    """
-                    UPDATE public.devops_tasks
-                    SET status='cancel_requested', state_version=%s,
-                        updated_at=clock_timestamp()
-                    WHERE tenant_id=%s AND run_id=%s AND task_id=%s
-                    """,
-                    (new_task_version, tenant_id, run_id, task_id),
-                )
-                correlation_id, default_trace = self._event_context(
-                    conn, tenant_id, run_id, task_id
-                )
-                event = self._event(
-                    tenant_id=tenant_id,
-                    run_id=run_id,
-                    task_id=task_id,
-                    attempt=attempt,
-                    event_type="task.cancel.requested",
-                    payload={
-                        "cancel_epoch": cancel_epoch,
-                        "reason_code": reason_code,
-                    },
-                    correlation_id=correlation_id,
-                    traceparent=traceparent or default_trace,
-                )
-                self._append_event(
-                    conn,
-                    tenant_id=tenant_id,
-                    event=event,
-                    destination="commands",
-                    aggregate_version=new_task_version,
-                )
+                has_worker = old_status != "queued" and lease_owner is not None
+                if has_worker:
+                    active_leases += 1
+                    conn.execute(
+                        """
+                        UPDATE public.devops_tasks
+                        SET status='cancel_requested', state_version=%s,
+                            updated_at=clock_timestamp()
+                        WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                        """,
+                        (new_task_version, tenant_id, run_id, task_id),
+                    )
+                    correlation_id, default_trace = self._event_context(
+                        conn, tenant_id, run_id, task_id
+                    )
+                    event = self._event(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=attempt,
+                        event_type="task.cancel.requested",
+                        payload={
+                            "cancel_epoch": cancel_epoch,
+                            "reason_code": reason_code,
+                        },
+                        correlation_id=correlation_id,
+                        traceparent=traceparent or default_trace,
+                    )
+                    self._append_event(
+                        conn,
+                        tenant_id=tenant_id,
+                        event=event,
+                        destination="commands",
+                        aggregate_version=new_task_version,
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE public.devops_tasks
+                        SET status='cancelled', state_version=%s, side_effect='NONE',
+                            lease_owner=NULL, lease_until=NULL,
+                            updated_at=clock_timestamp()
+                        WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                        """,
+                        (new_task_version, tenant_id, run_id, task_id),
+                    )
+                    correlation_id, _ = self._event_context(
+                        conn, tenant_id, run_id, task_id
+                    )
+                    event = self._event(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=attempt,
+                        event_type="task.cancelled",
+                        payload={
+                            "cancel_epoch": cancel_epoch,
+                            "state_version": new_task_version,
+                            "side_effect": "NONE",
+                        },
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                    )
+                    self._append_event(
+                        conn,
+                        tenant_id=tenant_id,
+                        event=event,
+                        destination="events",
+                        aggregate_version=new_task_version,
+                    )
 
-            if not tasks:
+            if active_leases == 0:
                 run_version += 1
                 conn.execute(
                     """
