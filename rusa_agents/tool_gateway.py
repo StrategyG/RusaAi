@@ -165,7 +165,7 @@ class DockerSandbox:
                 # The rootless daemon runs under a different host UID. A setgid
                 # snapshot-root gives its configured group traverse-only access
                 # to this private parent while the mounted snapshot remains read-only.
-                os.chmod(temp_root, 0o710)
+                os.chmod(temp_root, 0o710)  # nosec B103 - only the rootless daemon group can traverse this private snapshot parent
             except (OSError, ToolDenied) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
