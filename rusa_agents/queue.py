@@ -215,12 +215,13 @@ class PostgresTaskQueue:
                         "apply migrations/008_aicode_job_controls.sql"
                     )
                 control_columns = conn.execute("""
-                    SELECT COUNT(*) = 3
+                    SELECT COUNT(*) = 6
                     FROM information_schema.columns
                     WHERE table_schema='public' AND table_name='aicode_job_controls'
                       AND column_name::text = ANY(%s)
                 """, ([
-                    "cancel_epoch", "cancel_requested_at", "requested_by",
+                    "tenant_id", "task_id", "cancel_epoch", "cancel_requested_at",
+                    "requested_by", "updated_at",
                 ],)).fetchone()
                 if not control_columns or not control_columns[0]:
                     raise RuntimeError(
