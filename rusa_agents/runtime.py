@@ -46,7 +46,10 @@ class AICodeRuntime:
         )
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
-        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        self.sandbox = DockerSandbox(
+            image=self.config.sandbox_image,
+            attestation_key=self.config.audit_hmac_key,
+        )
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
@@ -110,6 +113,8 @@ class AICodeRuntime:
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+            task_id=task.task_id,
+            tenant_id=tenant_id,
         )
         workers = [
             AutonomousCodeWorker(role, self.provider, gateway)
@@ -122,6 +127,8 @@ class AICodeRuntime:
                 audit=self.audit,
                 max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
                 max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
+                evidence_key=self.config.audit_hmac_key,
+                expected_sandbox_image=self.config.sandbox_image,
             ),
             str(workspace),
         )
