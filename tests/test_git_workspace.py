@@ -406,3 +406,59 @@ def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
                 f"RUSA-AI-Task-ID: {task_id}",
             )
         )
+
+
+
+def test_new_lease_worktree_starts_from_existing_stable_publish_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    stable_branch = "feature/aicode/tenant-hash-task-id"
+    (source / "recovered-change.txt").write_text("already published")
+    git("add", "recovered-change.txt", cwd=source)
+    git("commit", "-m", "published before worker crash", cwd=source)
+    git(
+        "--git-dir", str(mirror), "fetch", str(source),
+        f"+refs/heads/main:refs/heads/{stable_branch}",
+    )
+    stable_sha = git(
+        "--git-dir", str(mirror), "rev-parse", stable_branch
+    ).stdout.strip()
+
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    monkeypatch.setattr(
+        manager,
+        "refresh",
+        lambda repository, base_branch, publish_branch=None: None,
+    )
+    task = CodingTask(
+        objective="recover previous publication",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi",
+            "main",
+            "feature/aicode/tenant-hash-task-id-new-lease",
+        ),
+        acceptance_criteria=["reuse stable publication head"],
+        task_id="same-task",
+        metadata={
+            "lease_token": "new-lease",
+            "publish_branch": stable_branch,
+        },
+    )
+
+    workspace = manager.create(task, "tenant-a")
+    assert git("rev-parse", "HEAD", cwd=workspace).stdout.strip() == stable_sha
+    assert (workspace / "recovered-change.txt").read_text() == "already published"
+
+    manager.cleanup(task, "tenant-a")
