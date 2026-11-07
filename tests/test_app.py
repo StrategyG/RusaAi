@@ -1,14 +1,26 @@
 import hashlib
 import json
+import time
 import uuid
 from types import SimpleNamespace
 
+import pytest
 from app import app, set_inference_provider
 from fastapi.testclient import TestClient
 
 from rusa_agents.providers import InferenceStreamEvent
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def explicit_loopback_development_auth(monkeypatch):
+    """Tests that need no-key access must opt into the loopback-only dev path."""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_ALLOW_INSECURE_DEVELOPMENT_AUTH", "true")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
 
 
 def test_health_endpoint():
@@ -174,12 +186,19 @@ def test_aicode_task_idempotency_header_replays_original_task(monkeypatch):
 def test_aicode_task_rejects_unauthorized_repository(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
-    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     production_key = "tenant-key-production-test-credential-000000"
+    now = int(time.time())
     monkeypatch.setenv(
         "RUSA_API_KEYS_JSON",
-        '{"' + hashlib.sha256(production_key.encode()).hexdigest()
-        + '":{"subject":"tenant-admin","tenant_id":"tenant-alpha","roles":["tenant_admin"]}}',
+        json.dumps({
+            hashlib.sha256(production_key.encode()).hexdigest(): {
+                "subject": "tenant-admin",
+                "tenant_id": "tenant-alpha",
+                "roles": ["tenant_admin"],
+                "not_before": now - 60,
+                "expires_at": now + 3600,
+            }
+        }),
     )
     monkeypatch.delenv("RUSA_API_KEYS", raising=False)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/Allowed"]}')
@@ -511,3 +530,76 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
 
     assert response.status_code == 404
 
+
+
+def test_api_authentication_fails_closed_without_tenant_registry(monkeypatch):
+    monkeypatch.delenv("RUSA_ALLOW_INSECURE_DEVELOPMENT_AUTH", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    response = client.get("/v1/models")
+    assert response.status_code == 503
+
+
+def test_development_auth_bypass_is_loopback_only(monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/v1/models",
+        "headers": [],
+        "client": ("203.0.113.10", 12345),
+        "server": ("api.example", 8000),
+        "scheme": "http",
+        "query_string": b"",
+        "root_path": "",
+    }
+    request = Request(scope)
+    with pytest.raises(HTTPException) as error:
+        app_module = __import__("app")
+        app_module.authenticate_api_key(request, None)
+    assert error.value.status_code == 503
+
+
+def test_api_rejects_expired_and_revoked_principals(monkeypatch):
+    key = "api-lifecycle-test-credential-that-is-long-enough"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    claims = {
+        "subject": "lifecycle-test",
+        "tenant_id": "tenant-lifecycle",
+        "roles": ["developer"],
+        "not_before": now - 60,
+        "expires_at": now - 1,
+    }
+    monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps({digest: claims}))
+    response = client.get("/v1/models", headers={"X-API-Key": key})
+    assert response.status_code == 401
+
+    claims["expires_at"] = now + 3600
+    claims["revoked"] = True
+    monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps({digest: claims}))
+    response = client.get("/v1/models", headers={"X-API-Key": key})
+    assert response.status_code == 401
+
+
+def test_development_auth_bypass_allows_loopback_only(monkeypatch):
+    from starlette.requests import Request
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/v1/models",
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("localhost", 8000),
+        "scheme": "http",
+        "query_string": b"",
+        "root_path": "",
+    })
+    app_module = __import__("app")
+    tenant_id = app_module.authenticate_api_key(request, None)
+    assert tenant_id == "development"
+    assert request.state.principal.subject == "development-loopback"

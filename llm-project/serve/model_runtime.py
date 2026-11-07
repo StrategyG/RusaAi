@@ -253,7 +253,7 @@ class TransformersBackend:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         path = Path(model_path).resolve(strict=True)
-        tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(  # nosec B615 - resolved local artifact; network access disabled below
             str(path),
             local_files_only=True,
             trust_remote_code=False,
@@ -290,7 +290,9 @@ class TransformersBackend:
             load_args["device_map"] = "auto"
             load_args["attn_implementation"] = "sdpa"
 
-        model = AutoModelForCausalLM.from_pretrained(str(path), **load_args)
+        model = AutoModelForCausalLM.from_pretrained(  # nosec B615 - resolved local artifact; local_files_only=True
+            str(path), **load_args
+        )
         if not use_cuda:
             model.to("cpu")
         model.eval()
@@ -511,7 +513,7 @@ class VLLMBackend:
             enable_log_requests=False,
         )
         engine = AsyncLLMEngine.from_engine_args(engine_args)
-        tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(  # nosec B615 - validated local model path; network access disabled
             path,
             local_files_only=True,
             trust_remote_code=False,

@@ -10,6 +10,10 @@ services:
       RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
       RUSA_WORKER_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      RUSA_KNOWLEDGE_DATABASE_URL: ""
+      RUSA_KNOWLEDGE_DB_ROLE: ""
+      RUSA_MCP_TENANT_KEYS: ""
+      RUSA_EMBEDDING_API_KEY: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
@@ -49,6 +53,10 @@ services:
     environment:
       ENVIRONMENT: production
       RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
+      RUSA_KNOWLEDGE_DB_ROLE: rusa_knowledge_worker
+      RUSA_RAG_ENABLED: ${RUSA_RAG_ENABLED:-false}
+      RUSA_MCP_TENANT_KEYS: ""
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
@@ -77,6 +85,40 @@ services:
       - "9100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal, rusa-egress]
+
+
+  knowledge-mcp:
+    image: ${RUSA_MCP_IMAGE:?Set RUSA_MCP_IMAGE to an immutable MCP image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    environment:
+      ENVIRONMENT: production
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_KNOWLEDGE_DATABASE_URL:?Set the dedicated MCP knowledge database login DSN}
+      RUSA_KNOWLEDGE_DB_ROLE: rusa_knowledge_mcp_reader
+      RUSA_MCP_TENANT_KEYS: ${RUSA_MCP_TENANT_KEYS:?Set expiring hashed tenant token claims}
+      RUSA_MCP_ALLOWED_HOSTS: ${RUSA_MCP_ALLOWED_HOSTS:?Set approved MCP Host header values}
+      RUSA_MCP_RATE_LIMIT_PER_MINUTE: ${RUSA_MCP_RATE_LIMIT_PER_MINUTE:-120}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:?Set the approved embedding endpoint}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:?Set the embedding API secret}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-text-embedding-3-small}
+      RUSA_EMBEDDING_TIMEOUT: ${RUSA_EMBEDDING_TIMEOUT:-30}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    expose:
+      - "8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/ready', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3

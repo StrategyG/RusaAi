@@ -84,30 +84,53 @@ class PostgresKnowledgeStore:
                     EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector'),
                     COALESCE((
                         SELECT relrowsecurity AND relforcerowsecurity
-                        FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_documents')
+                        FROM pg_class
+                        WHERE oid = to_regclass('public.rusa_knowledge_documents')
                     ), false),
                     COALESCE((
                         SELECT relrowsecurity AND relforcerowsecurity
-                        FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_chunks')
+                        FROM pg_class
+                        WHERE oid = to_regclass('public.rusa_knowledge_chunks')
                     ), false),
                     COALESCE((
                         SELECT format_type(a.atttypid, a.atttypmod) = 'vector(1536)'
                         FROM pg_attribute a
                         WHERE a.attrelid = to_regclass('public.rusa_knowledge_chunks')
-                          AND a.attname = 'embedding' AND NOT a.attisdropped
+                          AND a.attname = 'embedding'
+                          AND NOT a.attisdropped
                     ), false),
-                    EXISTS (
-                        SELECT 1 FROM pg_policies
-                        WHERE schemaname='public'
-                          AND tablename='rusa_knowledge_documents'
-                          AND policyname='rusa_knowledge_documents_tenant_isolation'
-                    ),
-                    EXISTS (
-                        SELECT 1 FROM pg_policies
-                        WHERE schemaname='public'
-                          AND tablename='rusa_knowledge_chunks'
-                          AND policyname='rusa_knowledge_chunks_tenant_isolation'
-                    ),
+                    COALESCE((
+                        SELECT
+                            count(*) > 0
+                            AND bool_or(
+                                policyname = 'rusa_knowledge_documents_tenant_isolation'
+                            )
+                            AND bool_and(
+                                qual IS NOT NULL
+                                AND with_check IS NOT NULL
+                                AND qual ~* $rusa_policy$^[[:space:]]*\(*[[:space:]]*tenant_id[[:space:]]*=[[:space:]]*current_setting[[:space:]]*\([[:space:]]*'rusa\.tenant_id'(::text)?[[:space:]]*,[[:space:]]*true[[:space:]]*\)[[:space:]]*\)*[[:space:]]*$rusa_policy$
+                                AND with_check ~* $rusa_policy$^[[:space:]]*\(*[[:space:]]*tenant_id[[:space:]]*=[[:space:]]*current_setting[[:space:]]*\([[:space:]]*'rusa\.tenant_id'(::text)?[[:space:]]*,[[:space:]]*true[[:space:]]*\)[[:space:]]*\)*[[:space:]]*$rusa_policy$
+                            )
+                        FROM pg_policies
+                        WHERE schemaname = 'public'
+                          AND tablename = 'rusa_knowledge_documents'
+                    ), false),
+                    COALESCE((
+                        SELECT
+                            count(*) > 0
+                            AND bool_or(
+                                policyname = 'rusa_knowledge_chunks_tenant_isolation'
+                            )
+                            AND bool_and(
+                                qual IS NOT NULL
+                                AND with_check IS NOT NULL
+                                AND qual ~* $rusa_policy$^[[:space:]]*\(*[[:space:]]*tenant_id[[:space:]]*=[[:space:]]*current_setting[[:space:]]*\([[:space:]]*'rusa\.tenant_id'(::text)?[[:space:]]*,[[:space:]]*true[[:space:]]*\)[[:space:]]*\)*[[:space:]]*$rusa_policy$
+                                AND with_check ~* $rusa_policy$^[[:space:]]*\(*[[:space:]]*tenant_id[[:space:]]*=[[:space:]]*current_setting[[:space:]]*\([[:space:]]*'rusa\.tenant_id'(::text)?[[:space:]]*,[[:space:]]*true[[:space:]]*\)[[:space:]]*\)*[[:space:]]*$rusa_policy$
+                            )
+                        FROM pg_policies
+                        WHERE schemaname = 'public'
+                          AND tablename = 'rusa_knowledge_chunks'
+                    ), false),
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_documents', 'SELECT'
                     ),
@@ -115,9 +138,140 @@ class PostgresKnowledgeStore:
                         current_user, 'public.rusa_knowledge_chunks', 'SELECT'
                     ),
                     EXISTS (
-                        SELECT 1 FROM pg_roles
-                        WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
+                        SELECT 1
+                        FROM pg_roles
+                        WHERE rolname = current_user
+                          AND NOT rolsuper
+                          AND NOT rolbypassrls
                     )
+                """
+            ).fetchone()
+        return bool(row and all(row))
+
+    def check_read_only(self) -> bool:
+        """Verify the active MCP role cannot mutate knowledge data or inherit grants."""
+        with self._pool.connection() as connection:
+            self._set_db_role(connection)
+            row = connection.execute(
+                """
+                SELECT
+                    current_user = 'rusa_knowledge_mcp_reader',
+                    EXISTS (
+                        SELECT 1 FROM pg_roles
+                        WHERE rolname = current_user
+                          AND NOT rolsuper
+                          AND NOT rolbypassrls
+                          AND NOT rolinherit
+                          AND NOT rolcanlogin
+                          AND NOT rolcreatedb
+                          AND NOT rolcreaterole
+                          AND NOT rolreplication
+                    ),
+                    pg_has_role(
+                        session_user, 'rusa_knowledge_mcp_reader', 'SET'
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM pg_roles
+                        WHERE rolname = session_user
+                          AND rolcanlogin
+                          AND NOT rolsuper
+                          AND NOT rolbypassrls
+                          AND NOT rolinherit
+                          AND NOT rolcreatedb
+                          AND NOT rolcreaterole
+                          AND NOT rolreplication
+                    ),
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM pg_auth_members
+                        WHERE member = (
+                            SELECT oid FROM pg_roles WHERE rolname = session_user
+                        )
+                          AND roleid <> (
+                            SELECT oid FROM pg_roles
+                            WHERE rolname = 'rusa_knowledge_mcp_reader'
+                        )
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'DELETE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'TRUNCATE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'REFERENCES'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_documents', 'TRIGGER'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'DELETE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'TRUNCATE'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'REFERENCES'
+                    ),
+                    NOT has_table_privilege(
+                        session_user, 'public.rusa_knowledge_chunks', 'TRIGGER'
+                    ),
+                    NOT has_schema_privilege(session_user, 'public', 'CREATE'),
+                    NOT EXISTS (
+                        SELECT 1 FROM pg_auth_members
+                        WHERE member = (
+                            SELECT oid FROM pg_roles WHERE rolname = current_user
+                        )
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'DELETE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'TRUNCATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'REFERENCES'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'TRIGGER'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'DELETE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'TRUNCATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'REFERENCES'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_chunks', 'TRIGGER'
+                    ),
+                    NOT has_schema_privilege(current_user, 'public', 'CREATE')
                 """
             ).fetchone()
         return bool(row and all(row))

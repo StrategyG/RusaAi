@@ -379,9 +379,27 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
 def authenticate_api_key(request: Request, api_key: str | None, *, require_key: bool = False) -> str:
     config = RuntimeConfig.from_env()
     if not config.api_key_principals and not config.api_keys:
-        if require_key or config.environment == "production":
-            raise HTTPException(status_code=503, detail="API authentication is not configured")
-        return os.getenv("RUSA_DEFAULT_TENANT", "development")
+        dev_bypass = (
+            config.environment == "development"
+            and os.getenv("RUSA_ALLOW_INSECURE_DEVELOPMENT_AUTH", "").strip().lower() == "true"
+            and request.client is not None
+            and request.client.host in {"127.0.0.1", "::1", "testclient"}
+            and not require_key
+        )
+        if dev_bypass:
+            from rusa_agents.config import ApiPrincipal
+
+            principal = ApiPrincipal(
+                subject="development-loopback",
+                tenant_id=os.getenv("RUSA_DEFAULT_TENANT", "development"),
+                roles=("tenant_admin",),
+            )
+            request.state.principal = principal
+            return principal.tenant_id
+        raise HTTPException(
+            status_code=503,
+            detail="API authentication is not configured; configure tenant principals",
+        )
     if not api_key or (
         (config.api_key_principals or config.environment == "production")
         and len(api_key.encode("utf-8")) < 32
@@ -406,6 +424,14 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
                     roles=("tenant_admin",),
                 )
                 break
+    if principal is not None:
+        now = int(time.time())
+        if (
+            principal.revoked
+            or (principal.not_before is not None and now < principal.not_before)
+            or (principal.expires_at is not None and now >= principal.expires_at)
+        ):
+            principal = None
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
 

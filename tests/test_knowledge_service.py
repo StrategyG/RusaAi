@@ -1,4 +1,6 @@
-from rusa_knowledge.service import KnowledgeService
+import pytest
+
+from rusa_knowledge.service import KnowledgeService, validate_knowledge_database_identity
 
 
 class FakeStore:
@@ -172,3 +174,47 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+@pytest.mark.parametrize(
+    ("role", "dsn"),
+    [
+        (
+            "rusa_knowledge_mcp_reader",
+            "postgresql://rusa_mcp_login:secret@db.internal/knowledge?sslmode=verify-full",
+        ),
+        (
+            "rusa_knowledge_worker",
+            "postgresql://rusa_worker_login:secret@db.internal/knowledge?sslmode=require",
+        ),
+    ],
+)
+def test_production_knowledge_database_accepts_dedicated_tls_identities(role, dsn):
+    validate_knowledge_database_identity(dsn, role, environment="production")
+
+
+def test_production_knowledge_database_rejects_missing_tls():
+    with pytest.raises(RuntimeError, match="sslmode"):
+        validate_knowledge_database_identity(
+            "postgresql://rusa_mcp_login:secret@db.internal/knowledge",
+            "rusa_knowledge_mcp_reader",
+            environment="production",
+        )
+
+
+def test_production_knowledge_database_rejects_wrong_login_role():
+    with pytest.raises(RuntimeError, match="rusa_mcp_login"):
+        validate_knowledge_database_identity(
+            "postgresql://postgres:secret@db.internal/knowledge?sslmode=verify-full",
+            "rusa_knowledge_mcp_reader",
+            environment="production",
+        )
+
+
+def test_production_knowledge_database_rejects_unrestricted_role():
+    with pytest.raises(RuntimeError, match="dedicated worker or MCP"):
+        validate_knowledge_database_identity(
+            "postgresql://rusa_mcp_login:secret@db.internal/knowledge?sslmode=verify-full",
+            None,
+            environment="production",
+        )

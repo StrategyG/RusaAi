@@ -53,7 +53,7 @@ jobs:
       - name: Lint
         run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis
-        run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
+        run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp llm-project/serve --severity-level medium --confidence-level medium
       - name: Tests
         run: python -m pytest -q
 
@@ -184,9 +184,18 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_MCP_IMAGE: example.invalid/rusa-ai-rag-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_KNOWLEDGE_DATABASE_URL: postgresql://rusa_mcp_login:secret@knowledge-db.internal/rusa_knowledge?sslmode=verify-full
+          RUSA_MCP_TENANT_KEYS: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"tenant_id":"tenant-ci","subject":"ci-mcp","scopes":["knowledge:read"],"not_before":1800000000,"expires_at":1800086400}}'
+          RUSA_MCP_ALLOWED_HOSTS: mcp.example.com,mcp.example.com:443,knowledge-mcp,knowledge-mcp:8002
+          RUSA_MCP_RATE_LIMIT_PER_MINUTE: "120"
+          RUSA_EMBEDDING_BASE_URL: https://embedding.internal/v1
+          RUSA_EMBEDDING_API_KEY: ci-only-embedding-secret
+          RUSA_EMBEDDING_MODEL: text-embedding-3-small
+          RUSA_EMBEDDING_TIMEOUT: "30"
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
-          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"],"not_before":1794000000,"expires_at":1794864000}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
