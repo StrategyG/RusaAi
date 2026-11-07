@@ -346,9 +346,8 @@ class GitHubPublisher:
     async def create_or_get_draft_pr(self, repository: str, branch: str, base: str, title: str, body: str) -> str:
         import httpx
 
-        owner = repository.split("/", 1)[0]
         task_match = re.search(
-            r"(?:RUSA-AI-Task-ID|Task ID):\\s*([A-Za-z0-9-]{1,128})",
+            r"(?:RUSA-AI-Task-ID|Task ID):\s*([A-Za-z0-9-]{1,128})",
             body,
         )
         task_id = task_match.group(1) if task_match else None
@@ -385,9 +384,9 @@ class GitHubPublisher:
                         matches_task = bool(
                             task_id
                             and re.search(
-                                r"(?:RUSA-AI-Task-ID|Task ID):\\s*"
+                                r"(?:RUSA-AI-Task-ID|Task ID):\s*"
                                 + re.escape(task_id)
-                                + r"\\b",
+                                + r"\b",
                                 item_body,
                             )
                         )
