@@ -690,3 +690,169 @@ def test_git_process_is_terminated_when_lease_guard_is_revoked(tmp_path):
         )
 
     assert time.monotonic() - started < 5
+
+
+def test_draft_pr_recovery_rejects_matching_branch_from_fork(monkeypatch):
+    task_id = "24681357-1357-4246-8135-724681357246"
+    fork_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/127",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {
+            "ref": "feature/aicode/stable-task",
+            "repo": {"full_name": "untrusted-fork/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [fork_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("untrusted fork PR must not be reused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="authorized repository"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
+
+
+def test_draft_pr_creation_validates_github_response_identity(monkeypatch):
+    task_id = "abcdef12-3456-4789-8abc-def123456789"
+    branch = "feature/aicode/stable-task"
+    created_payload = {
+        "state": "open",
+        "draft": True,
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/128",
+        "head": {
+            "ref": branch,
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse([])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(created_payload)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            branch,
+            "main",
+            "Recovered task",
+            f"RUSA-AI-Task-ID: {task_id}",
+        )
+    )
+    assert url == created_payload["html_url"]
+
+
+def test_draft_pr_creation_rejects_unexpected_head_repository(monkeypatch):
+    task_id = "abcdef12-3456-4789-8abc-def123456789"
+    created_payload = {
+        "state": "open",
+        "draft": True,
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/129",
+        "head": {
+            "ref": "feature/aicode/stable-task",
+            "repo": {"full_name": "untrusted-fork/RusaAi"},
+        },
+        "base": {
+            "ref": "main",
+            "repo": {"full_name": "StrategyG/RusaAi"},
+        },
+    }
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, *_args, **_kwargs):
+            return FakeResponse([])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(created_payload)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(RuntimeError, match="expected draft PR"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"RUSA-AI-Task-ID: {task_id}",
+            )
+        )
