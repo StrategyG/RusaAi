@@ -522,3 +522,10 @@ def test_orchestrator_persists_typed_worker_failure(tmp_path):
     stored = memory.get(current_task.task_id, tenant_id="default")
     assert record.state == TaskState.BLOCKED
     assert stored["payload"]["results"][0]["failure_kind"] == "infrastructure"
+
+
+def test_invalid_orchestrator_config_has_no_storage_side_effects(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="max_parallel_workers"):
+        AICodeOrchestrator(workers(), max_parallel_workers=1.5)
+    assert not (tmp_path / ".rusa-ai").exists()
