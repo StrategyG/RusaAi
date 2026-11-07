@@ -341,8 +341,8 @@ def test_orchestrator_rejects_boolean_exit_code_as_evidence(tmp_path):
         max_repair_cycles=0,
     )
     record = asyncio.run(orchestrator.run(task()))
-    assert record.state == TaskState.BLOCKED
-    assert any("check:pytest" in error for error in record.errors)
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("invalid provenance" in error for error in record.errors)
 
 
 def test_orchestrator_rejects_mixed_workspace_evidence(tmp_path):
