@@ -502,9 +502,13 @@ def test_publisher_pushes_lease_worktree_to_stable_task_branch(tmp_path, monkeyp
         "--git-dir", str(remote), "rev-parse",
         "refs/heads/feature/aicode/stable-task-branch",
     ).stdout.strip()
-    attempt_ref = git(
-        "--git-dir", str(remote), "show-ref", "--verify",
-        "refs/heads/feature/aicode/attempt-branch",
+    attempt_ref = subprocess.run(
+        [
+            "git", "--git-dir", str(remote), "show-ref", "--verify",
+            "refs/heads/feature/aicode/attempt-branch",
+        ],
+        capture_output=True,
+        text=True,
         check=False,
     )
 
