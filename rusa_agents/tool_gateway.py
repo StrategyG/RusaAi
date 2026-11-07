@@ -224,8 +224,13 @@ class DockerSandbox:
                          if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
                 )
             except FileNotFoundError as exc:
-                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-            except subprocess.TimeoutExpired:
+                return ToolResult(
+                    False,
+                    "Docker executable is unavailable; sandbox checks cannot run.",
+                    {"profile": profile, "error": str(exc)},
+                    failure_kind="infrastructure",
+                )
+            except subprocess.TimeoutExpired as exc:
                 try:
                     subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
                         [DOCKER_BIN, "rm", "-f", container_name],
@@ -241,7 +246,7 @@ class DockerSandbox:
                     timeout_stdout = timeout_stdout.decode("utf-8", errors="replace")
                 if isinstance(timeout_stderr, bytes):
                     timeout_stderr = timeout_stderr.decode("utf-8", errors="replace")
-                timeout_output = timeout_stdout + "\\n" + timeout_stderr
+                timeout_output = timeout_stdout + "\n" + timeout_stderr
                 return ToolResult(
                     False,
                     f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout. {timeout_output[-4000:]}",
