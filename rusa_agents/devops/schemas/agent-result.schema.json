@@ -458,6 +458,76 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          },
+          "stage": {
+            "const": "code"
+          }
+        },
+        "required": [
+          "status",
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "output": {
+            "properties": {
+              "artifact_refs": {
+                "minItems": 1
+              }
+            }
+          },
+          "audit": {
+            "required": [
+              "source_commit"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          },
+          "stage": {
+            "enum": [
+              "build",
+              "test",
+              "release",
+              "deploy"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "output": {
+            "properties": {
+              "artifact_refs": {
+                "minItems": 1
+              }
+            }
+          },
+          "audit": {
+            "required": [
+              "source_commit",
+              "artifact_digest"
+            ]
+          }
+        }
+      }
     }
   ]
 }
