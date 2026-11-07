@@ -231,6 +231,7 @@ async def test_claim_heartbeat_and_progress_are_bound_to_certificate_principal()
             task_id="task-1",
             attempt=1,
             traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            claim_id="worker-process-1",
         ),
         context,
     )
@@ -242,6 +243,7 @@ async def test_claim_heartbeat_and_progress_are_bound_to_certificate_principal()
             attempt=1,
             lease_epoch=2,
             traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            claim_id="worker-process-1",
         ),
         context,
     )
@@ -257,6 +259,7 @@ async def test_claim_heartbeat_and_progress_are_bound_to_certificate_principal()
             stage="code",
             message_id="progress-1",
             traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            claim_id="worker-process-1",
         ),
         context,
     )
@@ -324,6 +327,7 @@ async def test_report_result_converts_protobuf_struct_and_passes_failure_metadat
         failure_category="PERMANENT",
         side_effect="NONE",
         diagnostic_ref="artifact://diagnostics/1",
+        claim_id="worker-process-1",
     )
     ParseDict(result, message.result)
     response = await service.ReportTaskResult(
