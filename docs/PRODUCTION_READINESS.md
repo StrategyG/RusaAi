@@ -2,11 +2,11 @@
 
 ## Scope
 
-This ledger describes the capabilities present on the integration branch and separates
+This ledger describes source-code capabilities on the branch under review and separates
 automated code validation from deployment certification. Passing CI is evidence only
 for the exact commit and checks that ran; it is not a production approval.
 
-## Delivered in this integration branch
+## Implemented in source code (deployment not certified)
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
 - Local model artifact manifest and SHA-256 verification; production local loading
