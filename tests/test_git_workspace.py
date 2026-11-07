@@ -323,8 +323,8 @@ def test_draft_pr_recovery_finds_task_pr_from_previous_lease(monkeypatch):
         "state": "open",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/123",
         "body": f"Task ID: {task_id}",
-        "head": {"ref": "feature/aicode/stable-task"},
-        "base": {"ref": "main"},
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
     }
 
     class FakeResponse:
@@ -374,8 +374,8 @@ def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
         "state": "closed",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/124",
         "body": f"RUSA-AI-Task-ID: {task_id}",
-        "head": {"ref": "feature/aicode/stable-task"},
-        "base": {"ref": "main"},
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
     }
 
     class FakeResponse:
@@ -567,8 +567,8 @@ def test_draft_pr_creation_race_reconciles_github_422(monkeypatch):
         "state": "open",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/125",
         "body": f"RUSA-AI-Task-ID: {task_id}",
-        "head": {"ref": "feature/aicode/stable-task"},
-        "base": {"ref": "main"},
+        "head": {"ref": "feature/aicode/stable-task", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
     }
     request = httpx.Request(
         "POST", "https://api.github.com/repos/StrategyG/RusaAi/pulls"
@@ -630,8 +630,8 @@ def test_draft_pr_recovery_refuses_legacy_lease_specific_head_branch(monkeypatch
         "state": "open",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/126",
         "body": f"Task ID: {task_id}",
-        "head": {"ref": "feature/aicode/old-lease-attempt"},
-        "base": {"ref": "main"},
+        "head": {"ref": "feature/aicode/old-lease-attempt", "repo": {"full_name": "StrategyG/RusaAi"}},
+        "base": {"ref": "main", "repo": {"full_name": "StrategyG/RusaAi"}},
     }
 
     class FakeResponse:
