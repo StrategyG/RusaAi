@@ -106,7 +106,7 @@ services:
     networks: [rusa-internal, rusa-egress]
 
   qa:
-    image: ${RUSA_QA_IMAGE:?Set RUSA_QA_IMAGE to an immutable QA service image digest}
+    image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
     pull_policy: always
     restart: unless-stopped
     init: true

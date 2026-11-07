@@ -112,10 +112,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
-      - name: Build isolated independent QA service image
-        run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-qa:${{ github.sha }} .
-      - name: Verify independent QA service imports
-        run: docker run --rm --entrypoint python "rusa-ai-qa:${{ github.sha }}" -c "import rusa_agents.qa_service; print('independent QA service import passed')"
+      - name: Verify independent QA service imports in the worker image
+        run: docker run --rm --entrypoint python "rusa-ai-worker:${{ github.sha }}" -c "import rusa_agents.qa_service; print('independent QA service import passed')"
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
         with:
@@ -129,7 +127,6 @@ jobs:
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
-            "rusa-ai-qa:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
             trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -191,7 +188,6 @@ jobs:
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
-            "rusa-ai-qa:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
               --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -200,7 +196,6 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_QA_IMAGE: example.invalid/rusa-ai-qa@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_QA_SERVICE_TOKEN: ci-only-qa-service-token-123456789012345678901234
           RUSA_QA_PRIVATE_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           RUSA_QA_PUBLIC_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -238,7 +233,6 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_QA_IMAGE: example.invalid/rusa-ai-qa@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_QA_SERVICE_TOKEN: ci-only-qa-service-token-123456789012345678901234
           RUSA_QA_PRIVATE_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           RUSA_QA_PUBLIC_KEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
