@@ -674,12 +674,16 @@ class GitHubPublisher:
                         raise RuntimeError("GitHub returned an invalid pull request listing")
                     for item in items:
                         if not isinstance(item, dict):
-                            continue
+                            raise RuntimeError("GitHub returned a malformed pull request item")
                         head = item.get("head") or {}
                         base_item = item.get("base") or {}
+                        if not isinstance(head, dict) or not isinstance(base_item, dict):
+                            raise RuntimeError("GitHub returned malformed pull request branch metadata")
                         head_ref = head.get("ref")
                         base_ref = base_item.get("ref")
                         item_body = item.get("body") or ""
+                        if not isinstance(item_body, str):
+                            raise RuntimeError("GitHub returned malformed pull request body metadata")
                         matches_task = bool(
                             task_id
                             and re.search(
@@ -743,17 +747,14 @@ class GitHubPublisher:
                 raise
 
             created_payload = created.json()
-            created_head = (
-                created_payload.get("head") or {}
-                if isinstance(created_payload, dict) else {}
-            )
-            created_base = (
-                created_payload.get("base") or {}
-                if isinstance(created_payload, dict) else {}
-            )
+            if not isinstance(created_payload, dict):
+                raise RuntimeError("GitHub returned a malformed created pull request")
+            created_head = created_payload.get("head")
+            created_base = created_payload.get("base")
+            if not isinstance(created_head, dict) or not isinstance(created_base, dict):
+                raise RuntimeError("GitHub returned malformed created pull request branch metadata")
             if (
-                not isinstance(created_payload, dict)
-                or created_payload.get("state") != "open"
+                created_payload.get("state") != "open"
                 or created_payload.get("draft") is not True
                 or created_head.get("ref") != branch
                 or created_base.get("ref") != base
