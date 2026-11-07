@@ -571,3 +571,22 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
 
     assert response.status_code == 404
 
+def test_readiness_fails_when_inference_provider_reports_not_ready(monkeypatch):
+    class NotReadyProvider:
+        async def check_ready(self):
+            return False
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("completion must not be called by readiness")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setattr(app.state, "queue", None, raising=False)
+    set_inference_provider(NotReadyProvider())
+    try:
+        response = client.get("/health/ready")
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Inference backend is unavailable"
+
