@@ -128,3 +128,21 @@ def test_autonomous_worker_retries_transient_tool_failure():
     result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
     assert result.success
     assert len(gateway.calls) == 2
+
+
+def test_autonomous_worker_preserves_failed_check_evidence_for_repair():
+    gateway = StubGateway([
+        ToolResult(False, "FAILED test_parser.py::test_invalid_input", {
+            "profile": "pytest", "exit_code": 1, "workspace_digest": "a" * 64
+        })
+    ])
+    provider = StubProvider(json.dumps({
+        "message": "Tests need repair",
+        "actions": [{"name": "run_check", "arguments": {"profile": "pytest"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.TESTER, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "tool"
+    assert result.evidence["check:pytest"]["exit_code"] == 1
+    assert "FAILED test_parser.py" in result.blockers[0]
