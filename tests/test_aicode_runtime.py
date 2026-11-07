@@ -14,7 +14,11 @@ from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.queue import Job
-from rusa_agents.runtime import AICodeRuntime, TaskCancellationRequested
+from rusa_agents.runtime import (
+    AICodeRuntime,
+    TaskCancellationRequested,
+    WorkerShutdownRequested,
+)
 
 
 class StubWorker:
@@ -515,3 +519,58 @@ def test_retry_classifier_separates_transient_and_permanent_http_errors():
     )
     assert not AICodeRuntime._is_retryable_failure(ValueError("invalid task input"))
     assert AICodeRuntime._is_retryable_failure(TimeoutError("provider timeout"))
+
+
+def test_runtime_shutdown_interrupts_active_child_operation():
+    runtime = object.__new__(AICodeRuntime)
+
+    async def scenario():
+        runtime._shutdown_event = asyncio.Event()
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def operation():
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.set()
+
+        async def request_shutdown():
+            await started.wait()
+            runtime._shutdown_event.set()
+
+        trigger = asyncio.create_task(request_shutdown())
+        with pytest.raises(WorkerShutdownRequested):
+            await runtime._await_with_lease(operation(), asyncio.Event())
+
+        await trigger
+        assert stopped.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_execution_guard_fails_closed_during_shutdown():
+    runtime = object.__new__(AICodeRuntime)
+    runtime._shutdown_event = asyncio.Event()
+    runtime._shutdown_event.set()
+
+    class QueueMustNotBeCalled:
+        def owns_lease(self, *_args):
+            raise AssertionError("shutdown guard must stop before database access")
+
+    runtime.queue = QueueMustNotBeCalled()
+    runtime.worker_id = "shutdown-test-worker"
+    job = Job(
+        1,
+        "12345678-1234-4234-8234-123456789abc",
+        "tenant-shutdown",
+        {"objective": "shutdown guard"},
+        1,
+        3,
+        runtime.worker_id,
+        "11111111-1111-4111-8111-111111111111",
+    )
+
+    guard = runtime._execution_guard(job, asyncio.Event(), asyncio.Event())
+    assert not guard()
