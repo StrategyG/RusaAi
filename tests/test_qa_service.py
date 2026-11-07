@@ -36,7 +36,7 @@ class FakeSandbox:
         return ToolResult(
             ok=code == 0,
             output=f"{profile} output",
-            evidence={"profile": profile, "exit_code": code},
+            evidence={"profile": profile, "exit_code": code, "image": self.image},
         )
 
 
