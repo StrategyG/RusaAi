@@ -92,7 +92,9 @@ class AutonomousCodeWorker:
         allowed = sorted(self.ROLE_TOOLS[self.role])
         history = "\n".join(
             f"{item.role.value}: {item.summary[:1500]} "
-            f"blockers={item.blockers[:5]} failure_kind={item.failure_kind}"
+            f"artifacts={item.artifacts[:10]} blockers={item.blockers[:5]} "
+            f"failure_kind={item.failure_kind} "
+            f"check_evidence={[(key, {name: value.get(name) for name in ('profile', 'exit_code', 'error', 'output') if name in value}) for key, value in item.evidence.items() if key.startswith('check:') and isinstance(value, dict)]}"
             for item in prior_results
         ) or "No previous worker reports."
         transcript: list[str] = []
