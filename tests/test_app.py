@@ -17,6 +17,29 @@ def test_health_endpoint():
     assert response.json()["status"] == "healthy"
 
 
+def test_models_endpoint_identifies_gateway_alias_and_backend(monkeypatch):
+    class ExternalProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "provider response"
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    set_inference_provider(ExternalProvider())
+    try:
+        response = client.get("/v1/models")
+        assert response.status_code == 200
+        model = response.json()["data"][0]
+        assert model["owned_by"] == "rusa-ai-gateway"
+        assert model["backend"] == "openai_compatible_provider"
+    finally:
+        set_inference_provider(None)
+
+
 def test_chat_completions_fails_closed_without_backend():
     set_inference_provider(None)
     payload = {"messages": [{"role": "user", "content": "Hello"}]}
