@@ -66,7 +66,17 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace = manager.create(task, "tenant-a")
     assert workspace.is_dir()
-    assert git("branch", "--show-current", cwd=workspace).stdout.strip() == task.repository.work_branch
+    detached = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert detached.returncode != 0
+    assert git("rev-parse", "HEAD", cwd=workspace).stdout.strip() == git(
+        "--git-dir", str(mirror), "rev-parse", "main"
+    ).stdout.strip()
 
     other_task = CodingTask(
         objective="test second tenant worktree",
@@ -160,7 +170,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     first = CodingTask(
         objective="first lease attempt",
         repository=RepositoryTarget(
-            "StrategyG/RusaAi", "main", "feature/aicode/lease-first"
+            "StrategyG/RusaAi", "main", "feature/aicode/same-task"
         ),
         acceptance_criteria=["isolated workspace"],
         task_id="same-task",
@@ -169,7 +179,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     second = CodingTask(
         objective="second lease attempt",
         repository=RepositoryTarget(
-            "StrategyG/RusaAi", "main", "feature/aicode/lease-second"
+            "StrategyG/RusaAi", "main", "feature/aicode/same-task"
         ),
         acceptance_criteria=["isolated workspace"],
         task_id="same-task",
@@ -180,6 +190,15 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     second_workspace = manager.create(second, "tenant-a")
     assert first_workspace != second_workspace
     assert first_workspace.is_dir() and second_workspace.is_dir()
+    for workspace in (first_workspace, second_workspace):
+        detached = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert detached.returncode != 0
 
     manager.cleanup(first, "tenant-a")
     manager.cleanup(second, "tenant-a")
