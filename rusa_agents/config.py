@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 KNOWN_API_ROLES = {"platform_admin", "tenant_admin", "developer", "read_only"}
+MAX_API_KEY_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,9 @@ class ApiPrincipal:
     subject: str
     tenant_id: str
     roles: tuple[str, ...]
+    not_before: int | None = None
+    expires_at: int | None = None
+    revoked: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,9 @@ class RuntimeConfig:
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment not in {"development", "staging", "production"}:
+            raise ValueError("ENVIRONMENT must be development, staging, or production")
         raw_enabled = os.getenv("RUSA_AICODE_ENABLED")
         if raw_enabled is None:
             aicode_enabled = environment != "production"
@@ -90,9 +97,16 @@ class RuntimeConfig:
                 raise ValueError("RUSA_API_KEYS_JSON contains an invalid SHA-256 digest")
             if not isinstance(claims, dict):
                 raise ValueError("RUSA_API_KEYS_JSON claims must be objects")
+            if set(claims) - {
+                "subject", "tenant_id", "roles", "not_before", "expires_at", "revoked"
+            }:
+                raise ValueError("RUSA_API_KEYS_JSON contains unsupported principal claims")
             subject = claims.get("subject")
             tenant_id = claims.get("tenant_id")
             roles = claims.get("roles")
+            not_before = claims.get("not_before")
+            expires_at = claims.get("expires_at")
+            revoked = claims.get("revoked", False)
             if not isinstance(subject, str) or not subject.strip() or len(subject) > 128:
                 raise ValueError("RUSA_API_KEYS_JSON subject is missing or invalid")
             if not isinstance(tenant_id, str) or not tenant_id.strip() or len(tenant_id) > 128:
@@ -103,10 +117,32 @@ class RuntimeConfig:
                 or any(not isinstance(role, str) or role not in KNOWN_API_ROLES for role in roles)
             ):
                 raise ValueError("RUSA_API_KEYS_JSON roles are missing or invalid")
+            if environment == "production" and (
+                type(not_before) is not int or type(expires_at) is not int
+            ):
+                raise ValueError(
+                    "production API principals require not_before and expires_at Unix timestamps"
+                )
+            if (not_before is None) != (expires_at is None):
+                raise ValueError("API principal not_before and expires_at must be supplied together")
+            if not_before is not None and (type(not_before) is not int or not_before < 0):
+                raise ValueError("API principal not_before must be a non-negative Unix timestamp")
+            if expires_at is not None and (
+                type(expires_at) is not int
+                or not_before is None
+                or expires_at <= not_before
+                or expires_at - not_before > MAX_API_KEY_TTL_SECONDS
+            ):
+                raise ValueError("API principal expiry must follow not_before within 30 days")
+            if not isinstance(revoked, bool):
+                raise ValueError("API principal revoked claim must be boolean")
             api_key_principals[digest] = ApiPrincipal(
                 subject=subject.strip(),
                 tenant_id=tenant_id.strip(),
                 roles=tuple(sorted(set(roles))),
+                not_before=not_before,
+                expires_at=expires_at,
+                revoked=revoked,
             )
 
         try:
@@ -210,6 +246,14 @@ class RuntimeConfig:
         )
         if not self.api_key_principals:
             missing.append("RUSA_API_KEYS_JSON with at least one tenant-bound principal")
+        now = int(time.time())
+        if self.api_key_principals and not any(
+            not principal.revoked
+            and (principal.not_before is None or now >= principal.not_before)
+            and (principal.expires_at is None or now < principal.expires_at)
+            for principal in self.api_key_principals.values()
+        ):
+            missing.append("RUSA_API_KEYS_JSON with at least one active, non-revoked principal")
         if self.api_keys:
             missing.append("legacy RUSA_API_KEYS/RUSA_API_KEY is forbidden in production; use hashed RUSA_API_KEYS_JSON")
         if not self.metrics_api_key:

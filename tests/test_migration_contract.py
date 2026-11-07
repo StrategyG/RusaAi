@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -56,3 +56,11 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+def test_mcp_reader_migration_is_explicitly_read_only():
+    migration = Path("migrations/008_rag_mcp_readonly_role.sql").read_text(encoding="utf-8")
+    assert "NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION" in migration
+    assert "GRANT SELECT ON public.rusa_knowledge_documents" in migration
+    assert "GRANT SELECT ON public.rusa_knowledge_chunks" in migration
+    assert "must not be a member of any other role" in migration

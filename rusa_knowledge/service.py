@@ -5,11 +5,45 @@ from __future__ import annotations
 import hashlib
 import os
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
 from .safety import reject_credential_material, validate_document_metadata
 from .store import PostgresKnowledgeStore
+
+EXPECTED_KNOWLEDGE_DB_USERS = {
+    "rusa_knowledge_worker": "rusa_worker_login",
+    "rusa_knowledge_mcp_reader": "rusa_mcp_login",
+}
+
+
+def validate_knowledge_database_identity(
+    database_url: str,
+    db_role: str | None,
+    *,
+    environment: str | None = None,
+) -> None:
+    environment = (environment or os.getenv("ENVIRONMENT", "development")).strip().lower()
+    if environment != "production":
+        return
+    expected_user = EXPECTED_KNOWLEDGE_DB_USERS.get(db_role or "")
+    if expected_user is None:
+        raise RuntimeError(
+            "production knowledge service requires a dedicated worker or MCP database role"
+        )
+    parsed = urlparse(database_url)
+    if parsed.scheme not in {"postgres", "postgresql"} or parsed.username != expected_user:
+        raise RuntimeError(
+            f"knowledge database role {db_role} must authenticate as {expected_user}"
+        )
+    ssl_modes = parse_qs(parsed.query).get("sslmode", [])
+    if not parsed.hostname or not parsed.password or not ssl_modes or ssl_modes[-1] not in {
+        "require", "verify-ca", "verify-full"
+    }:
+        raise RuntimeError(
+            "production knowledge database URL requires credentials and sslmode=require, verify-ca, or verify-full"
+        )
 
 
 class KnowledgeService:
@@ -28,6 +62,8 @@ class KnowledgeService:
         dsn = database_url or os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or os.getenv("RUSA_AGENT_DATABASE_URL")
         if not dsn:
             raise RuntimeError("RUSA_KNOWLEDGE_DATABASE_URL is required")
+        db_role = os.getenv("RUSA_KNOWLEDGE_DB_ROLE") or None
+        validate_knowledge_database_identity(dsn, db_role)
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=os.getenv("RUSA_EMBEDDING_BASE_URL", "https://api.openai.com/v1"),
             api_key=os.getenv("RUSA_EMBEDDING_API_KEY", ""),
@@ -38,7 +74,7 @@ class KnowledgeService:
         store = PostgresKnowledgeStore(
             dsn,
             dimensions=1536,
-            db_role=os.getenv("RUSA_KNOWLEDGE_DB_ROLE") or None,
+            db_role=db_role,
         )
         service = cls(store, provider)
         if check_ready:

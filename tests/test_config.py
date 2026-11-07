@@ -1,3 +1,6 @@
+import json
+import time
+
 import pytest
 
 from rusa_agents.config import RuntimeConfig
@@ -9,10 +12,18 @@ def set_api_environment(monkeypatch):
         "RUSA_API_DATABASE_URL",
         "postgresql://rusa_api_login:secret@db/rusa?sslmode=verify-full",
     )
+    now = int(time.time())
     monkeypatch.setenv(
         "RUSA_API_KEYS_JSON",
-        '{"e33cdf9c7f7120b98e8c78408953e07f2ecd183006b5606df349b4c212acf43e":'
-        '{"subject":"api-test","tenant_id":"tenant-a","roles":["tenant_admin"]}}',
+        json.dumps({
+            "e33cdf9c7f7120b98e8c78408953e07f2ecd183006b5606df349b4c212acf43e": {
+                "subject": "api-test",
+                "tenant_id": "tenant-a",
+                "roles": ["tenant_admin"],
+                "not_before": now - 60,
+                "expires_at": now + 24 * 60 * 60,
+            }
+        }),
     )
     monkeypatch.delenv("RUSA_API_KEYS", raising=False)
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
@@ -131,4 +142,31 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
         '{"' + "a" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["root"]}}',
     )
     with pytest.raises(ValueError, match="roles"):
+        RuntimeConfig.from_env()
+
+
+def test_config_rejects_unknown_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "prod")
+    with pytest.raises(ValueError, match="ENVIRONMENT"):
+        RuntimeConfig.from_env()
+
+
+def test_production_api_rejects_principals_without_expiry(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"' + "a" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["tenant_admin"]}}',
+    )
+    with pytest.raises(ValueError, match="not_before and expires_at"):
+        RuntimeConfig.from_env()
+
+
+def test_production_api_rejects_token_lifetime_over_30_days(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        '{"' + "a" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["tenant_admin"],'
+        '"not_before":1000,"expires_at":' + str(1000 + 31 * 24 * 60 * 60) + '}}',
+    )
+    with pytest.raises(ValueError, match="30 days"):
         RuntimeConfig.from_env()
