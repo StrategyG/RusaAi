@@ -351,3 +351,47 @@ def test_manual_retry_budget_is_bounded_across_retry_cycles():
         assert current["attempts"] == 1
     finally:
         remove_task(task_id, tenant)
+
+
+
+def test_cancel_racing_with_retryable_failure_is_linearizable():
+    queue = make_queue()
+    tenant = f"queue-cancel-fail-race-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "cancel versus retryable failure"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-fail-race-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cancelled = pool.submit(queue.cancel, task_id, tenant)
+            failed = pool.submit(
+                queue.fail,
+                job.id,
+                tenant,
+                "cancel-fail-race-worker",
+                job.lease_token,
+                "transient failure",
+                30,
+                retryable=True,
+            )
+            cancel_result = cancelled.result()
+            fail_result = failed.result()
+
+        assert cancel_result is True
+        current = queue.get(task_id, tenant)
+        assert current is not None
+        if current["status"] == "running":
+            assert not fail_result
+            assert queue.mark_cancelled(
+                job.id, tenant, "cancel-fail-race-worker", job.lease_token
+            )
+            current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+    finally:
+        remove_task(task_id, tenant)
