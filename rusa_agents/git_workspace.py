@@ -294,10 +294,25 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        *,
+        publish_branch: str | None = None,
+    ) -> str | None:
         root = Path(workspace).resolve(strict=True)
-        if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
-            raise ValueError("Publishing is restricted to task feature branches")
+        target_branch = publish_branch or branch
+        for candidate in (branch, target_branch):
+            if (
+                not BRANCH_PATTERN.fullmatch(candidate)
+                or candidate in {"main", "master"}
+                or ".." in candidate
+                or "//" in candidate
+            ):
+                raise ValueError("Publishing is restricted to safe task feature branches")
         current = self._run(["git", "branch", "--show-current"], str(root))
         if current.returncode or current.stdout.strip() != branch:
             raise RuntimeError("Workspace branch does not match the task branch")
@@ -333,7 +348,7 @@ class GitHubPublisher:
         askpass.chmod(0o700)
         try:
             pushed = self._run(
-                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{branch}"],
+                ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "push", "origin", f"HEAD:refs/heads/{target_branch}"],
                 str(root),
                 {"GIT_ASKPASS": str(askpass), "GIT_ASKPASS_REQUIRE": "force", "RUSA_GITHUB_TOKEN": self.token},
             )
