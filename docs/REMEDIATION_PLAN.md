@@ -116,6 +116,7 @@ This section records delivered code and verification evidence. It does not chang
 - Heartbeat treats PostgreSQL lock-timeout SQLSTATE `55P03` as a reason to re-check lease ownership without taking a row lock. This is a compatibility measure for the current publisher, which still holds the job row lock during the bounded GitHub push; it is not a substitute for moving remote side effects outside the transaction.
 - Commit `00b86fed6a6f906937f7c962238725589fa2d3bd` makes the new PostgreSQL race tests claim their exact task IDs, avoiding interference from other tenants' queued fixtures.
 - CI run [42372470632](https://github.com/StrategyG/RusaAi/actions/runs/42372470632) passed all three required jobs. The core test job reported 175 passed and 5 skipped; RAG/MCP integration, the full test suite in the isolated sandbox, production image builds, Trivy checks, and production Compose validation also passed.
+- The follow-up CI run [42372769073](https://github.com/StrategyG/RusaAi/actions/runs/42372769073) also passed all three jobs on the documentation-updated head. Its Trivy report counted HIGH findings in the API (53), sandbox (58), worker (57), and RAG/MCP (53) images, with zero CRITICAL findings. The `--ignore-unfixed` gate passed; this means no fixable HIGH/CRITICAL findings blocked the build, not that the images are vulnerability-free. The remaining HIGH findings require triage, upstream monitoring, and a fresh scan after base-image updates.
 
 ### Phase 2 — still required
 
