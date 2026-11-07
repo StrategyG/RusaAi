@@ -31,6 +31,7 @@ dev = [
 ]
 messaging = [
   "aio-pika>=9.4,<10",
+  "aiokafka>=0.11,<1",
   "cryptography>=42,<47",
 ]
 model = [
