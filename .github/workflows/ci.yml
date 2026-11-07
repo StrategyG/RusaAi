@@ -191,6 +191,7 @@ jobs:
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
+            "rusa-ai-qa:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
               --severity CRITICAL,HIGH --pkg-types os,library "${image}"
@@ -207,6 +208,8 @@ jobs:
           RUSA_QA_SANDBOX_IMAGE: example.invalid/rusa-ai-agent-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_QA_DOCKER_SOCKET: /run/user/1000/qa-docker.sock
           RUSA_QA_DOCKER_GID: "1000"
+          RUSA_QA_WORKSPACE_ROOT: /srv/rusa/qa-workspaces
+          RUSA_QA_WORKSPACE_GID: "1000"
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
@@ -243,6 +246,8 @@ jobs:
           RUSA_QA_SANDBOX_IMAGE: example.invalid/rusa-ai-agent-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_QA_DOCKER_SOCKET: /run/user/1000/qa-docker.sock
           RUSA_QA_DOCKER_GID: "1000"
+          RUSA_QA_WORKSPACE_ROOT: /srv/rusa/qa-workspaces
+          RUSA_QA_WORKSPACE_GID: "1000"
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
