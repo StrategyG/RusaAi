@@ -28,7 +28,6 @@ def write_junit(
                 suite,
                 "testcase",
                 classname=f"tests.{module}",
-                file=f"tests/{module}.py",
                 name=f"test_case_{index}",
             )
             if module == failure_module and index == 0:
