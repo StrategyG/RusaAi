@@ -238,6 +238,7 @@ def test_durable_tables_force_rls_and_have_separate_relay_role():
                 "devops_tasks",
                 "devops_event_outbox",
                 "devops_event_inbox",
+                "devops_run_cancellations",
             ],),
         ).fetchall()
         roles = conn.execute(
@@ -248,7 +249,7 @@ def test_durable_tables_force_rls_and_have_separate_relay_role():
             (["rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"],),
         ).fetchall()
 
-    assert len(rows) == 4
+    assert len(rows) == 5
     assert all(enabled and forced for _, enabled, forced in rows)
     assert {name for name, *_ in roles} == {
         "rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"
