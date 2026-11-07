@@ -247,7 +247,9 @@ class AutonomousCodeWorker:
                         evidence=evidence,
                         blockers=list(unresolved_tool_failures.values())[:10],
                         failure_kind=(
-                            "infrastructure"
+                            "policy"
+                            if "policy" in unresolved_tool_failure_kinds.values()
+                            else "infrastructure"
                             if "infrastructure" in unresolved_tool_failure_kinds.values()
                             else "tool"
                         ),
