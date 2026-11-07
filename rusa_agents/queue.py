@@ -576,18 +576,31 @@ class PostgresTaskQueue:
                           job.status IN ('queued', 'awaiting_approval')
                           OR (job.status='running' AND job.lease_until < NOW())
                       )
+                    ORDER BY job.id
                     FOR UPDATE OF job SKIP LOCKED
+                    LIMIT 100
                 )
                 UPDATE public.aicode_jobs AS job
                 SET status='cancelled',
                     result=CASE
-                        WHEN job.status='running' THEN jsonb_build_object(
-                            'side_effects', jsonb_build_object(
-                                'reconciliation_required', true
-                            ),
-                            'reason', 'worker_lease_expired_during_cancellation'
-                        )
+                        WHEN job.status='running' THEN
+                            COALESCE(job.result, '{}'::jsonb) || jsonb_build_object(
+                                'side_effects', jsonb_build_object(
+                                    'git_publication', 'reconciliation_required',
+                                    'pull_request_creation', 'reconciliation_required',
+                                    'reconciliation_required', true
+                                ),
+                                'cancellation_reconciliation', jsonb_build_object(
+                                    'required', true,
+                                    'reason', 'worker_lease_expired_during_cancellation'
+                                )
+                            )
                         ELSE job.result
+                    END,
+                    last_error=CASE
+                        WHEN job.status='running'
+                        THEN 'Cancellation requested; worker lease expired before acknowledgement'
+                        ELSE job.last_error
                     END,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     updated_at=NOW()
