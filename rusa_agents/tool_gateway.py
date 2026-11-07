@@ -13,6 +13,7 @@ import subprocess  # nosec B404 - only fixed argv operations with shell=False ar
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -250,6 +251,7 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        execution_guard: Callable[[], bool] | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -264,6 +266,13 @@ class WorkspaceToolGateway:
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        self.execution_guard = execution_guard
+
+    def _assert_execution_allowed(self) -> None:
+        if self.execution_guard is not None and not self.execution_guard():
+            raise ToolDenied(
+                "Task lease is no longer active or cancellation was requested; refusing tool execution"
+            )
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -310,6 +319,7 @@ class WorkspaceToolGateway:
         return ToolResult(True, target.read_text(encoding="utf-8"), {"path": raw_path})
 
     def write_file(self, raw_path: str, content: str, role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         if role != WorkerRole.DEVELOPER:
             raise ToolDenied("Only the developer worker may modify workspace files")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
@@ -367,6 +377,7 @@ class WorkspaceToolGateway:
         return ToolResult(True, "\n".join(files), {"count": len(files)})
 
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
         allowed_profiles = {
@@ -446,6 +457,7 @@ class WorkspaceToolGateway:
         )
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+        self._assert_execution_allowed()
         name = action.get("name")
         args = action.get("arguments", {})
         if not isinstance(args, dict):
