@@ -30,6 +30,10 @@ RUSA_MCP_IMAGE=$old_mcp
 RUSA_QA_SANDBOX_IMAGE=$old_qa_sandbox
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
 RUSA_QA_DOCKER_SOCKET=/run/user/1002/docker.sock
+RUSA_QA_DOCKER_GID=1002
+RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
+RUSA_QA_WORKSPACE_ROOT=/var/lib/rusa/qa-workspaces
+RUSA_QA_WORKSPACE_GID=1002
 RUSA_AICODE_ENABLED=false
 RUSA_RAG_ENABLED=false
 RUSA_API_DATABASE_URL=postgresql://api:secret@db.example/rusa?sslmode=verify-full
@@ -163,3 +167,23 @@ if run_deploy "$failure_dir" 0 "ghcr.io/strategyg/rusa-ai-api:latest" "$new_work
   exit 1
 fi
 echo "PASS: mutable image tags are rejected before deployment"
+
+same_socket_dir="$tmp_root/same-socket"
+make_case "$same_socket_dir"
+sed -i 's#^RUSA_QA_DOCKER_SOCKET=.*$#RUSA_QA_DOCKER_SOCKET=/run/user/1001/docker.sock#' "$same_socket_dir/.env"
+if run_deploy "$same_socket_dir" 0 "$new_api" "$new_worker" "$new_sandbox" "$new_mcp"; then
+  echo "Worker and QA services must not share a Docker socket." >&2
+  exit 1
+fi
+grep -Fx "RUSA_API_IMAGE=$old_api" "$same_socket_dir/.env" >/dev/null
+echo "PASS: deployment rejects a shared worker/QA Docker socket"
+
+same_workspace_dir="$tmp_root/same-workspace"
+make_case "$same_workspace_dir"
+sed -i 's#^RUSA_QA_WORKSPACE_ROOT=.*$#RUSA_QA_WORKSPACE_ROOT=/var/lib/rusa/workspaces#' "$same_workspace_dir/.env"
+if run_deploy "$same_workspace_dir" 0 "$new_api" "$new_worker" "$new_sandbox" "$new_mcp"; then
+  echo "Worker and QA services must not share a workspace mount." >&2
+  exit 1
+fi
+grep -Fx "RUSA_API_IMAGE=$old_api" "$same_workspace_dir/.env" >/dev/null
+echo "PASS: deployment rejects a shared worker/QA workspace"
