@@ -84,33 +84,18 @@ class AICodeOrchestrator:
         if len(roles) != len(set(roles)):
             duplicates = sorted({role.value for role in roles if roles.count(role) > 1})
             raise ValueError("duplicate worker roles: " + ", ".join(duplicates))
-        self.workers = {worker.role: worker for worker in workers}
-        self.policy = policy or AutonomyPolicy()
-        self.memory = memory or SQLiteMemory()
-        self.audit = audit or AuditLog()
+        worker_map = {worker.role: worker for worker in workers}
         if type(max_parallel_workers) is not int or not 1 <= max_parallel_workers <= 32:
             raise ValueError("max_parallel_workers must be an integer between 1 and 32")
         if type(max_repair_cycles) is not int or not 0 <= max_repair_cycles <= 5:
             raise ValueError("max_repair_cycles must be an integer between 0 and 5")
-        self.max_parallel_workers = max_parallel_workers
-        self.max_repair_cycles = max_repair_cycles
 
-        missing = set(self.PIPELINE) - set(self.workers)
+        missing = set(self.PIPELINE) - set(worker_map)
         if missing:
             raise ValueError(
                 "missing required workers: "
                 + ", ".join(role.value for role in sorted(missing, key=lambda item: item.value))
             )
-
-        self.role_manager = {
-            role: manager_name
-            for manager_name, roles in self.MANAGER_ROLES.items()
-            for role in roles
-        }
-        self.managers = {
-            name: AgentManager(name, roles, self.workers)
-            for name, roles in self.MANAGER_ROLES.items()
-        }
         if set(self.EXECUTION_DAG) != set(self.PIPELINE):
             raise ValueError("execution DAG must define every pipeline role exactly once")
         for role, dependencies in self.EXECUTION_DAG.items():
@@ -132,6 +117,24 @@ class AICodeOrchestrator:
 
         for role in self.PIPELINE:
             visit(role)
+
+        # Do not create directories, databases, or audit files until all pure
+        # configuration and topology validation has succeeded.
+        self.workers = worker_map
+        self.policy = policy if policy is not None else AutonomyPolicy()
+        self.memory = memory if memory is not None else SQLiteMemory()
+        self.audit = audit if audit is not None else AuditLog()
+        self.max_parallel_workers = max_parallel_workers
+        self.max_repair_cycles = max_repair_cycles
+        self.role_manager = {
+            role: manager_name
+            for manager_name, roles in self.MANAGER_ROLES.items()
+            for role in roles
+        }
+        self.managers = {
+            name: AgentManager(name, roles, self.workers)
+            for name, roles in self.MANAGER_ROLES.items()
+        }
 
     @staticmethod
     def _tenant_id(task: CodingTask) -> str:
