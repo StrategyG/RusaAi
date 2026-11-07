@@ -224,7 +224,8 @@ class AutonomousCodeWorker:
                     transcript.append("TOOL ACTION FAILED; do not claim completion: " + unresolved_tool_failures[action_key])
                     continue
                 if action["name"] == "write_file" and result.ok:
-                    artifacts.append(str(action.get("arguments", {}).get("path", "")))
+                    if not isinstance(result.evidence, dict) or result.evidence.get("changed") is not False:
+                        artifacts.append(str(action.get("arguments", {}).get("path", "")))
                 if action["name"] == "run_check":
                     profile = action.get("arguments", {}).get("profile", "unknown")
                     evidence[f"check:{profile}"] = result.evidence or {"output": result.output[-2000:]}
