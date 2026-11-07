@@ -26,6 +26,8 @@ services:
       RUSA_QA_PRIVATE_KEY_B64: ""
       RUSA_QA_WORKSPACE_ROOT: ""
       RUSA_QA_WORKSPACE_GID: ""
+      RUSA_QA_DOCKER_SOCKET: ""
+      RUSA_QA_DOCKER_GID: ""
       RUSA_QA_KEY_ID: ""
       RUSA_QA_SANDBOX_IMAGE: ""
       RUSA_QA_DOCKER_SOCKET: ""
