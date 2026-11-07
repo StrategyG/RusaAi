@@ -24,10 +24,14 @@ services:
       RUSA_QA_SERVICE_TOKEN: ""
       RUSA_QA_PUBLIC_KEY_B64: ""
       RUSA_QA_PRIVATE_KEY_B64: ""
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
       RUSA_QA_KEY_ID: ""
       RUSA_QA_SANDBOX_IMAGE: ""
       RUSA_QA_DOCKER_SOCKET: ""
       RUSA_QA_DOCKER_GID: ""
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
@@ -113,7 +117,7 @@ services:
       RUSA_QA_PUBLIC_KEY_B64: ""
       RUSA_QA_KEY_ID: ${RUSA_QA_KEY_ID:?Set the QA signing key ID}
       RUSA_QA_SANDBOX_IMAGE: ${RUSA_QA_SANDBOX_IMAGE:?Set the pinned QA sandbox image}
-      RUSA_QA_WORKSPACE_ROOT: /tmp/rusa-qa
+      RUSA_QA_WORKSPACE_ROOT: ${RUSA_QA_WORKSPACE_ROOT:?Set a host-shared private QA workspace root}
       RUSA_QA_CHECK_TIMEOUT_SECONDS: "600"
       RUSA_QA_MAX_UPLOAD_BYTES: "100000000"
       RUSA_QA_MAX_FILES: "20000"
@@ -138,8 +142,10 @@ services:
       - /tmp:rw,noexec,nosuid,size=512m
     volumes:
       - ${RUSA_QA_DOCKER_SOCKET:?Set a dedicated rootless QA Docker socket}:/run/qa-docker.sock
+      - ${RUSA_QA_WORKSPACE_ROOT:?Set a host-shared private QA workspace root}:${RUSA_QA_WORKSPACE_ROOT}
     group_add:
       - "${RUSA_QA_DOCKER_GID:?Set the rootless QA Docker socket GID}"
+      - "${RUSA_QA_WORKSPACE_GID:?Set the shared QA workspace group GID}"
     expose:
       - "8010"
     healthcheck:
