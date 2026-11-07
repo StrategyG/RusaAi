@@ -35,6 +35,8 @@ class ToolResult:
     ok: bool
     output: str
     evidence: dict[str, Any] | None = None
+    retryable: bool = False
+    failure_kind: str | None = None
 
 
 class DockerSandbox:
@@ -105,7 +107,12 @@ class DockerSandbox:
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
         if not DOCKER_BIN:
-            return ToolResult(False, "Docker CLI is not installed in the worker image.")
+            return ToolResult(
+                False,
+                "Docker CLI is not installed in the worker image.",
+                {"profile": profile, "error": "docker_unavailable"},
+                failure_kind="infrastructure",
+            )
         if profile not in self.PROFILES:
             raise ToolDenied(f"Unknown validation profile: {profile}")
         workspace = workspace.resolve(strict=True)
@@ -173,7 +180,12 @@ class DockerSandbox:
                             mode = stat.S_IMODE(path.stat().st_mode)
                             os.chmod(path, (mode | 0o444) & ~0o222)
             except (OSError, ToolDenied) as exc:
-                return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
+                return ToolResult(
+                    False,
+                    f"Could not create bounded sandbox snapshot: {exc}",
+                    {"profile": profile, "error": "snapshot_failed"},
+                    failure_kind="infrastructure",
+                )
 
             workspace_digest = self._snapshot_digest(snapshot)
             container_name = f"rusa-sandbox-{uuid4().hex}"
@@ -223,8 +235,27 @@ class DockerSandbox:
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
-                return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
+                timeout_output = (exc.stdout or b"") + b"\\n" + (exc.stderr or b"")
+                if isinstance(timeout_output, bytes):
+                    timeout_output = timeout_output.decode("utf-8", errors="replace")
+                return ToolResult(
+                    False,
+                    f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout. {timeout_output[-4000:]}",
+                    {
+                        "profile": profile,
+                        "error": "timeout",
+                        "workspace_digest": workspace_digest,
+                        "output_digest": hashlib.sha256(timeout_output.encode("utf-8", errors="replace")).hexdigest(),
+                        "execution_id": execution_id,
+                        "started_at": started_at,
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": round(time.monotonic() - started_clock, 6),
+                    },
+                    retryable=True,
+                    failure_kind="infrastructure",
+                )
             full_output = (completed.stdout or "") + "\n" + (completed.stderr or "")
+            docker_runtime_failure = completed.returncode in {125, 126, 127}
             return ToolResult(
                 completed.returncode == 0,
                 full_output[-20000:],
@@ -239,7 +270,10 @@ class DockerSandbox:
                     "started_at": started_at,
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                     "duration_seconds": round(time.monotonic() - started_clock, 6),
+                    "error": "docker_runtime" if docker_runtime_failure else None,
                 },
+                retryable=completed.returncode == 125,
+                failure_kind="infrastructure" if docker_runtime_failure else None,
             )
 
 
@@ -434,7 +468,7 @@ class WorkspaceToolGateway:
         })
         if self.task_id is not None:
             evidence["task_id"] = self.task_id
-        return ToolResult(result.ok, result.output, evidence)
+        return ToolResult(result.ok, result.output, evidence, result.retryable, result.failure_kind)
 
     def git_diff(self) -> ToolResult:
         if not GIT_BIN:
