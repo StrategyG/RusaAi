@@ -339,6 +339,7 @@ class WorkspaceToolGateway:
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
             temporary.write_text(content, encoding="utf-8")
+            self._assert_execution_allowed()
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
