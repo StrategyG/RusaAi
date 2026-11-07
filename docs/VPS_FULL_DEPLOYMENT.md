@@ -23,6 +23,7 @@ This is a production-candidate deployment guide, not a certification. Keep `RUSA
 | TLS reverse proxy | VPS host or dedicated ingress | 80/443 only |
 | API | Docker Compose | Loopback 127.0.0.1:8000 behind TLS |
 | Worker | Docker Compose | Internal network only |
+| Independent QA service | Separate Compose container, worker image, separate key and rootless Docker daemon | Internal network only; no host port |
 | MCP | Docker Compose overlay | Loopback 127.0.0.1:8002 behind TLS |
 | Sandbox | Ephemeral rootless Docker containers | No public ports |
 | PostgreSQL 16 + pgvector | Managed/external database preferred | Private network + TLS only |
@@ -44,7 +45,8 @@ Prepare:
 2. SSH access restricted to an administrator IP/key; disable password SSH after confirming key access.
 3. Docker Engine with Compose v2.
 4. A dedicated unprivileged `rusa-worker` account and rootless Docker daemon.
-5. Persistent worker workspace and Git mirror directories.
+5. A separate unprivileged QA service identity and dedicated rootless Docker daemon/socket; never reuse the worker socket.
+6. Persistent worker workspace, Git mirror, and QA-only workspace directories.
 6. PostgreSQL 16 with pgvector, TLS, encrypted backups, and point-in-time recovery.
 7. A container registry (GHCR is suitable) for immutable API, worker, sandbox, and MCP images.
 8. An approved OpenAI-compatible chat endpoint and embeddings endpoint.
@@ -55,16 +57,17 @@ Prepare:
 
 Allow inbound TCP 80/443 and SSH only from trusted administration addresses. Bind application ports to loopback. Do not publish PostgreSQL 5432, worker metrics 9100, or the rootless Docker socket.
 
-Create persistent paths using the actual worker UID/GID and ensure the rootless Docker daemon can see the same absolute workspace path that is mounted inside the worker container:
+Create persistent paths using the actual service UID/GID. The worker daemon must see the worker workspace path; the QA daemon must separately see the QA-only workspace path at the same absolute path mounted inside the QA container:
 
 ```bash
 sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/rusa/workspaces
 sudo install -d -o 10001 -g 10001 -m 0750 /var/lib/rusa/mirrors
+sudo install -d -o 10001 -g 1002 -m 2770 /var/lib/rusa/qa-workspaces
 ```
 
 Create a bare Git mirror for each explicitly authorized repository. The mirror remote must be credential-free HTTPS; Git credentials are supplied at runtime by the worker's short-lived askpass helper.
 
-Install and enable rootless Docker for the dedicated worker account. Record the actual socket path and socket group ID; do not assume they are `/run/user/1001/docker.sock` and `1001`. The Compose worker must mount that rootless socket, not the host's rootful Docker socket.
+Install and enable rootless Docker for both the dedicated worker account and the separate QA service account. Record each actual socket path and group ID; do not assume they are `/run/user/1001/docker.sock` and `1001`. The worker and QA Compose services must mount different rootless sockets, never the host's rootful Docker socket. Ensure the QA daemon can read the host-backed QA workspace directory through its shared group/ACL.
 
 ## 4. PostgreSQL migrations and roles
 
@@ -112,6 +115,8 @@ Do not build or push production images manually from a workstation or unreviewed
 5. Keylessly signs each digest with Cosign/GitHub OIDC and attaches provenance/SBOM attestations.
 6. Publishes a GitHub Release containing `release-manifest.txt` with all four digests.
 
+The four published image references must be immutable. The independent QA service runs the same pinned worker image digest in a separate container with separate credentials, network attachment, QA-only workspace, and rootless Docker daemon; it does not require a fifth published image in this release design.
+
 The four image references must be immutable:
 
 ```text
@@ -131,6 +136,7 @@ Create a VPS-only `.env` file with owner-only permissions (`chmod 600`). Never c
 - Database DSNs: `RUSA_API_DATABASE_URL`, `RUSA_WORKER_DATABASE_URL`, `RUSA_WORKER_KNOWLEDGE_DATABASE_URL`, `RUSA_MCP_DATABASE_URL`; use the matching least-privilege login and `sslmode=verify-full`.
 - API security: `RUSA_API_KEYS_JSON` (SHA-256 raw API-key digest to tenant/subject/roles), `RUSA_METRICS_API_KEY`, `RUSA_AUDIT_HMAC_KEY` (at least 32 random UTF-8 bytes).
 - Worker: `RUSA_GITHUB_TOKEN` (fine-grained token), `RUSA_TENANT_REPOSITORIES`, `RUSA_WORKSPACE_ROOT`, `RUSA_GIT_MIRROR_ROOT`, `RUSA_DOCKER_SOCKET`, `RUSA_DOCKER_GID`, and `RUSA_SANDBOX_IMAGE`.
+- Independent QA: `RUSA_QA_SERVICE_TOKEN`, `RUSA_QA_PRIVATE_KEY_B64` (QA service only), `RUSA_QA_PUBLIC_KEY_B64` (worker only), `RUSA_QA_KEY_ID`, `RUSA_QA_SANDBOX_IMAGE` (must match `RUSA_SANDBOX_IMAGE`), `RUSA_QA_DOCKER_SOCKET`, `RUSA_QA_DOCKER_GID`, `RUSA_QA_WORKSPACE_ROOT`, and `RUSA_QA_WORKSPACE_GID`. Keep the QA private key out of the API and worker environments; Compose explicitly blanks it there.
 - Chat model: `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME`, and `RUSA_MODEL_API_KEY` for an approved OpenAI-compatible chat endpoint.
 - Embeddings: `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_MODEL` (default `text-embedding-3-small`, 1536 dimensions).
 - MCP: `RUSA_MCP_TENANT_KEYS` (JSON map of lowercase SHA-256 bearer-token digests to tenant IDs), `RUSA_MCP_ALLOWED_HOSTS`, `RUSA_MCP_BIND_PORT`.
@@ -150,7 +156,7 @@ Before each deployment or rollback:
 3. Ensure `.env` contains digest-pinned API, worker, sandbox, and MCP images plus the previous known-good digest set in `.env.previous` (the deployment script maintains this snapshot).
 4. Set `RUSA_RAG_ENABLED=true` only after migrations 007–008, the restricted reader role, worker knowledge DSN, MCP login, tenant tokens, embedding endpoint, and RAG/MCP overlay settings have been verified. Otherwise leave it `false`.
 
-The script refuses deployment if AICode intake is enabled. It includes `docker-compose.production.rag-mcp.yml` only when `RUSA_RAG_ENABLED=true`, health-checks the MCP service in that mode, and automatically restores the previous four-image set if a required health check fails.
+The script refuses deployment if AICode intake is enabled. It includes `docker-compose.production.rag-mcp.yml` only when `RUSA_RAG_ENABLED=true`, health-checks API, worker, QA, and (when enabled) MCP, pre-pulls the sandbox digest through both dedicated rootless Docker sockets, and automatically restores the previous four-image set plus the matching QA sandbox digest if a required health check fails.
 
 For an approved release, obtain all four digests from `release-manifest.txt` and run the workflow with the release tag and four digest values. For a controlled manual host operation after signature verification:
 
@@ -169,6 +175,9 @@ curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/health/ready
 curl --fail http://127.0.0.1:8002/health/live
 curl --fail http://127.0.0.1:8002/health/ready
+# QA has no published host port; verify readiness from inside the private Compose network.
+docker compose --env-file .env -f docker-compose.production.yml exec -T qa \\
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health/ready', timeout=3)"
 ```
 
 Then verify:
@@ -192,7 +201,7 @@ Local Transformers/vLLM serving requires an approved checkpoint, tokenizer/chat 
 ## 10. Rollback and operations
 
 - Set `RUSA_AICODE_ENABLED=false` and safely drain active tasks before rollback.
-- Run `./scripts/deploy/compose-rollback.sh`; it restores the previous four immutable image digests under the same deployment lock and uses the RAG/MCP overlay only when `RUSA_RAG_ENABLED=true`.
+- Run `./scripts/deploy/compose-rollback.sh`; it restores the previous four immutable image digests and matching QA sandbox digest under the same deployment lock and uses the RAG/MCP overlay only when `RUSA_RAG_ENABLED=true`.
 - If automatic rollback reports exit code 2, keep intake disabled, preserve logs and the previous snapshot, and perform operator-led recovery. Do not delete or rewrite audit ledger data.
 - Apply database migrations only forward. Schema rollback is not part of the image rollback procedure.
 - Verify API, worker, and (when enabled) MCP readiness, queue state, audit integrity, tenant isolation, and GitHub branch/PR state before resuming.
@@ -200,6 +209,7 @@ Local Transformers/vLLM serving requires an approved checkpoint, tokenizer/chat 
 
 ## 11. Remaining release gates
 
+- Complete staging deployment of the independent QA service, provision its dedicated rootless daemon/workspace/key, and perform the signed-verdict and rollback rehearsals. mTLS remains a future hardening requirement.
 - Implement and verify the eight-stage Agentic DevOps workflow as a separate phased delivery; do not advertise the target lifecycle as deployed until each agent contract, orchestrator state transition, QA gate, audit event, and approval boundary is evidenced.
 - Apply deny-by-default egress controls to worker and sandbox traffic, and test that unapproved destinations are unreachable.
 
