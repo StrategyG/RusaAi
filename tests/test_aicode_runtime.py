@@ -503,7 +503,15 @@ def test_retry_classifier_separates_transient_and_permanent_http_errors():
         SimpleNamespace(response=SimpleNamespace(status_code=429))
     )
     assert not AICodeRuntime._is_retryable_failure(
-        SimpleNamespace(response=SimpleNamespace(status_code=403))
+        SimpleNamespace(response=SimpleNamespace(status_code=403, headers={}))
+    )
+    assert AICodeRuntime._is_retryable_failure(
+        SimpleNamespace(
+            response=SimpleNamespace(
+                status_code=403,
+                headers={"X-RateLimit-Remaining": "0"},
+            )
+        )
     )
     assert not AICodeRuntime._is_retryable_failure(ValueError("invalid task input"))
     assert AICodeRuntime._is_retryable_failure(TimeoutError("provider timeout"))
