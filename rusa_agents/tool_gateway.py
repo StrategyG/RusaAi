@@ -235,9 +235,13 @@ class DockerSandbox:
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
-                timeout_output = (exc.stdout or b"") + b"\\n" + (exc.stderr or b"")
-                if isinstance(timeout_output, bytes):
-                    timeout_output = timeout_output.decode("utf-8", errors="replace")
+                timeout_stdout = exc.stdout or ""
+                timeout_stderr = exc.stderr or ""
+                if isinstance(timeout_stdout, bytes):
+                    timeout_stdout = timeout_stdout.decode("utf-8", errors="replace")
+                if isinstance(timeout_stderr, bytes):
+                    timeout_stderr = timeout_stderr.decode("utf-8", errors="replace")
+                timeout_output = timeout_stdout + "\\n" + timeout_stderr
                 return ToolResult(
                     False,
                     f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout. {timeout_output[-4000:]}",
