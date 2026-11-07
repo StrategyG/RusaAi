@@ -71,7 +71,9 @@ class GitWorkspaceManager:
             args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120
         )
 
-    def refresh(self, repository: str, base_branch: str) -> None:
+    def refresh(
+        self, repository: str, base_branch: str, work_branch: str | None = None
+    ) -> None:
         owner, repo = repository.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
@@ -99,11 +101,28 @@ class GitWorkspaceManager:
                     "GIT_ASKPASS_REQUIRE": "force",
                     "GITHUB_TOKEN": self.github_token,
                 }
+            refspecs = [f"+refs/heads/{base_branch}:refs/heads/{base_branch}"]
+            if work_branch:
+                remote_branch = self._run(
+                    [
+                        "git", "--git-dir", str(mirror), "ls-remote", "--heads",
+                        "origin", f"refs/heads/{work_branch}",
+                    ],
+                    extra_env=extra_env,
+                )
+                if remote_branch.returncode:
+                    raise RuntimeError(
+                        f"Could not inspect remote task branch: {remote_branch.stderr[-2000:]}"
+                    )
+                if remote_branch.stdout.strip():
+                    refspecs.append(
+                        f"+refs/heads/{work_branch}:refs/heads/{work_branch}"
+                    )
+
             fetched = self._run(
                 [
                     "git", "-c", "credential.helper=", "--git-dir", str(mirror),
-                    "fetch", "--prune", "origin",
-                    f"+refs/heads/{base_branch}:refs/heads/{base_branch}",
+                    "fetch", "--prune", "origin", *refspecs,
                 ],
                 extra_env=extra_env,
             )
@@ -128,7 +147,11 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
-        self.refresh(task.repository.full_name, task.repository.base_branch)
+        self.refresh(
+            task.repository.full_name,
+            task.repository.base_branch,
+            branch,
+        )
         self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
@@ -298,7 +321,14 @@ class GitHubPublisher:
                 "Origin must be credential-free HTTPS to the exact authorized GitHub repository"
             )
 
-    def commit_and_push(self, workspace: str, repository: str, branch: str, message: str) -> str | None:
+    def commit_and_push(
+        self,
+        workspace: str,
+        repository: str,
+        branch: str,
+        message: str,
+        base_branch: str | None = None,
+    ) -> str:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
             raise ValueError("Publishing is restricted to task feature branches")
@@ -309,6 +339,12 @@ class GitHubPublisher:
         if remote.returncode:
             raise RuntimeError("Origin remote is unavailable")
         self.validate_origin_url(remote.stdout, repository)
+
+        if base_branch and (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,180}", base_branch)
+            or ".." in base_branch
+        ):
+            raise ValueError("Base branch is invalid")
 
         changed = self._safe_changed_paths(root)
         if changed:
@@ -324,7 +360,21 @@ class GitHubPublisher:
                 raise RuntimeError(f"Git commit failed: {commit.stderr[-3000:]}")
             sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
         else:
-            sha = self._run(["git", "rev-parse", "HEAD"], str(root)).stdout.strip()
+            if base_branch:
+                ahead = self._run(
+                    ["git", "rev-list", "--count", f"{base_branch}..HEAD"],
+                    str(root),
+                )
+                if ahead.returncode or not ahead.stdout.strip().isdigit():
+                    raise RuntimeError("Could not verify whether the task branch contains commits")
+                if int(ahead.stdout.strip()) == 0:
+                    raise RuntimeError(
+                        "Refusing to publish an empty task branch with no task changes"
+                    )
+            sha_result = self._run(["git", "rev-parse", "HEAD"], str(root))
+            if sha_result.returncode or not re.fullmatch(r"[0-9a-f]{40}", sha_result.stdout.strip()):
+                raise RuntimeError("Could not resolve the task branch commit SHA")
+            sha = sha_result.stdout.strip()
 
         askpass_fd, askpass_name = tempfile.mkstemp(prefix="rusa-askpass-")
         os.close(askpass_fd)
