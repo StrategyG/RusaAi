@@ -534,10 +534,12 @@ class AICodeOrchestrator:
                         if result.failure_kind in {"infrastructure", "policy"}
                     ]
                     if failed_quality_workers:
-                        record.errors.append(
-                            "Quality worker execution failed: "
-                            + ", ".join(result.role.value for result in failed_quality_workers)
-                        )
+                        for result in failed_quality_workers:
+                            details = result.blockers or [result.summary or "unspecified quality-worker failure"]
+                            record.errors.append(
+                                f"{result.role.value} quality worker failed: "
+                                + "; ".join(str(item)[:1000] for item in details[:5])[:3000]
+                            )
                         evidence_result = None if non_repairable_failures else False
                     else:
                         evidence_result = self._verify_evidence(record)
@@ -567,8 +569,10 @@ class AICodeOrchestrator:
                         success=False,
                         blockers=list(record.errors[-12:]),
                         evidence={
-                            result.role.value: result.evidence
+                            key: value
                             for result in quality_results
+                            for key, value in result.evidence.items()
+                            if key.startswith("check:")
                         },
                         failure_kind="quality_gate",
                     )
