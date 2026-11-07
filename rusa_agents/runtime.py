@@ -762,6 +762,15 @@ class AICodeRuntime:
                     pr_creation_started=pr_creation_started,
                     pr_creation_finished=pr_creation_finished,
                 )
+            elif (
+                getattr(self, "_shutdown_event", None) is not None
+                and self._shutdown_event.is_set()
+            ):
+                outcome = "shutdown"
+                logger.info(
+                    "Worker shutdown interrupted task %s; leaving it for lease recovery",
+                    job.task_id,
+                )
             else:
                 logger.exception("AICode task %s failed", job.task_id)
                 outcome = "lease_lost" if lost_lease.is_set() else "failed"
