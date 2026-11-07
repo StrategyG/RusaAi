@@ -141,6 +141,16 @@ class GitWorkspaceManager:
                             "Could not refresh stable task branch: "
                             f"{fetched_publish_branch.stderr[-2000:]}"
                         )
+                else:
+                    removed_stale_branch = self._run([
+                        "git", "--git-dir", str(mirror), "update-ref", "-d",
+                        f"refs/heads/{publish_branch}",
+                    ])
+                    if removed_stale_branch.returncode:
+                        raise RuntimeError(
+                            "Could not remove stale local stable task branch: "
+                            f"{removed_stale_branch.stderr[-2000:]}"
+                        )
         finally:
             if askpass_path:
                 askpass_path.unlink(missing_ok=True)
