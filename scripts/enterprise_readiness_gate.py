@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -287,6 +286,8 @@ def evaluate_certification(
     recovery = checks["failure_recovery"]
     if recovery["recoverable_faults"] < 100:
         holds.append("Fewer than 100 recoverable-fault simulations were recorded.")
+    elif recovery["recovered"] > recovery["recoverable_faults"]:
+        failures.append("Recovered count exceeds the number of recoverable faults.")
     elif recovery["recovered"] / recovery["recoverable_faults"] < 0.95:
         failures.append("Failure-recovery success is below 95%.")
     if recovery["duplicate_business_effects"] != 0:
