@@ -38,10 +38,10 @@ external A2A/event-broker topology, remain staged architecture work.
 ## Verification boundary
 
 GitHub Actions passed all three jobs on commit
-`7c5617e39f7fe54bebbd8d465253f3247dd2afad`: test/lint/security, RAG/MCP
-integration, and Docker image build/sandbox/Trivy/Compose validation. Later
-control-plane write-boundary changes are on the same draft PR and require a new
-successful run on the exact latest PR head before merge.
+`3dd2f8e71c2bca8310cffb4327c8b1fe7921838c`: test/lint/security, RAG/MCP
+integration, and Docker image build/sandbox/Trivy/Compose validation. The AICode
+completion gate now requires all three trusted GitHub Actions jobs to pass on the
+same exact commit SHA before a task can be completed.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -52,14 +52,14 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Passed on 7c5617e; latest head revalidation pending |
-| AICode evidence integrity | Task/attempt/snapshot/image-bound QA evidence and repair diagnostics | Implemented; latest head revalidation pending |
+| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Passed on 3dd2f8e |
+| AICode evidence integrity | Task/attempt/snapshot/image-bound QA evidence and repair diagnostics | Implemented; regression tests pass |
 | Agentic DevOps lifecycle | Eight stage agents, Security Guard, and monitor-to-plan feedback loop | Not implemented in current AICode subsystem |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated CI tests pass; production database/worker deployment validation remains |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
