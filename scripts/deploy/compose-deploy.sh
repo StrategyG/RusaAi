@@ -73,6 +73,10 @@ old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one R
 old_mcp_image="$(get_env_value RUSA_MCP_IMAGE)" || { echo "Exactly one RUSA_MCP_IMAGE must exist in .env." >&2; exit 64; }
 docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
 qa_docker_socket="$(get_env_value RUSA_QA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_QA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+worker_workspace_root="$(get_env_value RUSA_WORKSPACE_ROOT)" || { echo "Exactly one RUSA_WORKSPACE_ROOT must exist in .env." >&2; exit 64; }
+qa_workspace_root="$(get_env_value RUSA_QA_WORKSPACE_ROOT)" || { echo "Exactly one RUSA_QA_WORKSPACE_ROOT must exist in .env." >&2; exit 64; }
+qa_workspace_gid="$(get_env_value RUSA_QA_WORKSPACE_GID)" || { echo "Exactly one RUSA_QA_WORKSPACE_GID must exist in .env." >&2; exit 64; }
+qa_docker_gid="$(get_env_value RUSA_QA_DOCKER_GID)" || { echo "Exactly one RUSA_QA_DOCKER_GID must exist in .env." >&2; exit 64; }
 old_qa_sandbox_image="$(get_env_value RUSA_QA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_QA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
 
 [[ "$old_api_image" =~ $API_PATTERN ]] || { echo "Current API image is not a digest-pinned rollback target." >&2; exit 64; }
@@ -82,6 +86,8 @@ old_qa_sandbox_image="$(get_env_value RUSA_QA_SANDBOX_IMAGE)" || { echo "Exactly
 [[ "$old_qa_sandbox_image" =~ $SANDBOX_PATTERN && "$old_qa_sandbox_image" == "$old_sandbox_image" ]] || { echo "QA and worker sandbox rollback digests must match." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
 [[ "$qa_docker_socket" =~ ^/[A-Za-z0-9._/-]+$ && "$qa_docker_socket" != "$docker_socket" ]] || { echo "RUSA_QA_DOCKER_SOCKET must be a separate safe absolute Unix-socket path." >&2; exit 64; }
+[[ "$qa_workspace_root" =~ ^/[A-Za-z0-9._/-]+$ && "$qa_workspace_root" != "$worker_workspace_root" ]] || { echo "RUSA_QA_WORKSPACE_ROOT must be a separate safe absolute path from the worker workspace." >&2; exit 64; }
+[[ "$qa_workspace_gid" =~ ^[0-9]+$ && "$qa_docker_gid" =~ ^[0-9]+$ ]] || { echo "QA workspace and Docker socket GIDs must be numeric." >&2; exit 64; }
 
 tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
