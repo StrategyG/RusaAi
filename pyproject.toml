@@ -40,6 +40,9 @@ vllm = ["vllm>=0.32,<0.33"]
 [tool.setuptools.packages.find]
 include = ["rusa_agents*", "rusa_knowledge*"]
 
+[tool.setuptools.package-data]
+"rusa_agents.devops" = ["schemas/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
