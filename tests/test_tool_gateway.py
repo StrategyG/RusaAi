@@ -192,3 +192,24 @@ def test_developer_can_add_new_qa_test_file(tmp_path):
     )
     assert updated.ok
     assert (tmp_path / "tests" / "test_new_feature.py").is_file()
+
+
+def test_snapshot_digest_frames_file_boundaries(tmp_path):
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    (first / "a").write_bytes(b"x" + (1).to_bytes(4, "big") + b"b" + b"y")
+    (second / "a").write_bytes(b"x")
+    (second / "b").write_bytes(b"y")
+    assert DockerSandbox._snapshot_digest(first) != DockerSandbox._snapshot_digest(second)
+
+
+def test_snapshot_digest_includes_executable_mode(tmp_path):
+    source = tmp_path / "script.py"
+    source.write_text("print('ok')\n")
+    source.chmod(0o644)
+    ordinary = DockerSandbox._snapshot_digest(tmp_path)
+    source.chmod(0o755)
+    executable = DockerSandbox._snapshot_digest(tmp_path)
+    assert ordinary != executable
