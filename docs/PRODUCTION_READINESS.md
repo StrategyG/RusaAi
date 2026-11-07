@@ -60,12 +60,14 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Apply AICode migrations `001` through `006`, then `008_aicode_job_controls.sql`,
-  using the database owner before enabling production task intake. Migration 008
-  installs the durable cancellation control table and bounded manual-retry budget.
-  The API runtime must not have schema-owner or superuser privileges.
-- Apply `migrations/007_rag_knowledge_pgvector.sql` only on a pgvector-enabled
-  knowledge database and configure the restricted `rusa_knowledge_worker` role.
+- Apply AICode migrations `001` through `006` using the database owner.
+  If RAG shares this database, apply `007_rag_knowledge_pgvector.sql` next on a
+  pgvector-enabled database. Then apply `008_aicode_job_controls.sql` before
+  enabling production task intake; it installs durable cancellation controls and
+  bounded manual-retry counters. The API runtime must not have schema-owner or
+  superuser privileges.
+- If RAG uses a separate database, apply `007_rag_knowledge_pgvector.sql` there
+  and configure the restricted `rusa_knowledge_worker` role independently.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
 - Do not commit model weights, credentials, tenant bearer tokens, or private
