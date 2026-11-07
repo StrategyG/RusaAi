@@ -264,8 +264,9 @@ class PostgresTaskQueue:
                         "Cancellation control grants must allow API SELECT/INSERT/UPDATE "
                         "and worker SELECT only"
                     )
-                policies = conn.execute("""
-                    SELECT tablename, policyname FROM pg_policies
+                policy_rows = conn.execute("""
+                    SELECT tablename, policyname, roles, cmd, qual, with_check
+                    FROM pg_policies
                     WHERE schemaname='public' AND policyname = ANY(%s)
                 """, ([
                     "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
@@ -273,18 +274,58 @@ class PostgresTaskQueue:
                     "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
                     "aicode_audit_worker_only",
                 ],)).fetchall()
-                policy_names = {row[1] for row in policies}
-                required_policies = {
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
-                    "aicode_job_controls_api_tenant", "aicode_job_controls_worker_read",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_only",
+                policies = {
+                    (row[0], row[1]): (tuple(row[2] or ()), row[3], row[4], row[5])
+                    for row in policy_rows
                 }
-                if not required_policies.issubset(policy_names):
+                required_policy_specs = {
+                    ("aicode_jobs", "aicode_jobs_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_jobs", "aicode_jobs_worker_queue"):
+                        ("rusa_worker_runtime", "ALL", "all"),
+                    ("aicode_job_controls", "aicode_job_controls_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_job_controls", "aicode_job_controls_worker_read"):
+                        ("rusa_worker_runtime", "SELECT", "all"),
+                    ("aicode_rate_limits", "aicode_rate_limits_api_tenant"):
+                        ("rusa_api_runtime", "ALL", "tenant"),
+                    ("aicode_memory", "aicode_memory_worker_tenant"):
+                        ("rusa_worker_runtime", "ALL", "tenant"),
+                    ("aicode_audit_events", "aicode_audit_worker_only"):
+                        ("rusa_worker_runtime", "ALL", "all"),
+                }
+                if set(policies) != set(required_policy_specs):
                     raise RuntimeError(
-                        "Production tenant/cancellation RLS policies are missing; "
-                        "apply migrations/004_aicode_tenant_rls.sql and migrations/008_aicode_job_controls.sql"
+                        "Production tenant/cancellation RLS policies are missing or attached "
+                        "to the wrong tables; apply migrations/004_aicode_tenant_rls.sql "
+                        "and migrations/008_aicode_job_controls.sql"
                     )
+
+                for key, (expected_role, expected_command, scope) in required_policy_specs.items():
+                    roles, command, using_expression, check_expression = policies[key]
+                    if roles != (expected_role,) or command != expected_command:
+                        raise RuntimeError(
+                            f"Production RLS policy {key[1]} has an unsafe role or command"
+                        )
+                    using_sql = (using_expression or "").replace(" ", "").lower().strip("()")
+                    check_sql = (check_expression or "").replace(" ", "").lower().strip("()")
+                    if scope == "tenant":
+                        tenant_predicate = (
+                            "tenant_id=" in using_sql
+                            and "current_setting('rusa.tenant_id'" in using_sql
+                            and "tenant_id=" in check_sql
+                            and "current_setting('rusa.tenant_id'" in check_sql
+                        )
+                        if not tenant_predicate:
+                            raise RuntimeError(
+                                f"Production RLS policy {key[1]} is missing its tenant predicate"
+                            )
+                    elif using_sql != "true" or (
+                        expected_command != "SELECT" and check_sql != "true"
+                    ):
+                        raise RuntimeError(
+                            f"Production worker RLS policy {key[1]} is unexpectedly restrictive"
+                        )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
