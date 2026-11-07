@@ -1,11 +1,18 @@
 import asyncio
+import os
 import subprocess
+import sys
+import time
 
 import httpx
 import pytest
 
 from rusa_agents.contracts import CodingTask, RepositoryTarget
-from rusa_agents.git_workspace import GitHubPublisher, GitWorkspaceManager
+from rusa_agents.git_workspace import (
+    GitHubPublisher,
+    GitWorkspaceManager,
+    _run_bounded_process,
+)
 
 
 def git(*args, cwd=None):
@@ -662,3 +669,24 @@ def test_draft_pr_recovery_refuses_legacy_lease_specific_head_branch(monkeypatch
                 f"Task ID: {task_id}",
             )
         )
+
+
+def test_git_process_is_terminated_when_lease_guard_is_revoked(tmp_path):
+    checks = 0
+
+    def guard():
+        nonlocal checks
+        checks += 1
+        return checks < 2
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="lease was lost or cancelled"):
+        _run_bounded_process(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=str(tmp_path),
+            env=os.environ.copy(),
+            timeout_seconds=10,
+            cancellation_check=guard,
+        )
+
+    assert time.monotonic() - started < 5
