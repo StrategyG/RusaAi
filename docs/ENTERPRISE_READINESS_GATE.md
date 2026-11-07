@@ -26,13 +26,14 @@ The repository currently has a code-level PostgreSQL suite for tenant-scoped API
 
 ## 3. Automated CI sub-gate
 
-The existing CI test job already runs against a PostgreSQL service. ERG-06 adds a distinct downstream GitHub Actions check that consumes the JUnit report from that job and verifies that the mandatory suites actually executed:
+The separate .github/workflows/enterprise-readiness.yml workflow runs the required suites against its own PostgreSQL 16 service and emits a JUnit report plus a machine-readable ERG-06 report:
 
 - tests/test_postgres_rls.py
 - tests/test_postgres_backends.py
 - tests/test_queue_races.py
+- tests/test_enterprise_readiness_gate.py
 
-Each suite must execute at least five tests, with zero skipped tests, failures, or errors. The gate depends on the existing test, image/security, and RAG/MCP jobs; any failed upstream job blocks the ERG-06 automated check.
+Each PostgreSQL suite must execute at least five tests, with zero skipped tests, failures, or errors. The existing main CI workflow remains a separate required check; configure both the baseline CI checks and ERG-06 automated check in branch protection.
 
 The automated check has two separate outcomes:
 
@@ -103,7 +104,9 @@ Thresholds enforced by the evaluator:
 
 The check named **ERG-06 automated tenant-isolation and recovery gate** should be configured as a required status check for pull requests targeting main. Repository branch protection/rulesets and required environment reviewers are owner-controlled settings and must be configured separately; adding a workflow does not enable branch protection automatically.
 
-The full certification result must be reviewed against the evidence artifact and the exact candidate SHA before Phase 6 promotion. The current GitHub integration does not change branch protection, repository secrets, environments, database roles, or production infrastructure.
+The workflow_dispatch certification path requires the exact candidate SHA and the run ID of a successful workflow named RUSA-AI Staging Acceptance. It downloads the erg06-staging-evidence artifact, verifies the source run SHA/workflow/conclusion, verifies the GitHub artifact attestation, and evaluates the JSON evidence. Configure the enterprise-readiness GitHub Environment with required reviewers before using this path.
+
+The full certification result must be reviewed against the evidence artifact and the exact candidate SHA before Phase 6 promotion. The current GitHub integration does not change branch protection, repository secrets, environment protection rules, database roles, or production infrastructure.
 
 ## 7. Known limitations and outstanding blockers
 
