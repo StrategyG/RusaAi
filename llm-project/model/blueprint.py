@@ -5,8 +5,6 @@ instantiate a neural network, define a verified model configuration, or imply
 that training data, weights, multimodal support, or performance measurements
 exist.
 """
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 
