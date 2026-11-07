@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
@@ -13,13 +15,40 @@ from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
+def stamped_evidence(task, role, evidence):
+    now = datetime.now(timezone.utc).isoformat()
+    stamped = {}
+    for key, value in evidence.items():
+        if not isinstance(value, dict):
+            continue
+        profile = key.removeprefix("check:")
+        item = dict(value)
+        item.setdefault("profile", profile)
+        item.setdefault("worker_role", role.value)
+        item.setdefault("task_id", task.task_id)
+        item.setdefault("attempt", 1)
+        item.setdefault("workspace_digest", "a" * 64)
+        item.setdefault("output_digest", "b" * 64)
+        item.setdefault("execution_id", uuid4().hex)
+        item.setdefault("started_at", now)
+        item.setdefault("completed_at", now)
+        item.setdefault("duration_seconds", 0.0)
+        item.setdefault("image", "sandbox:test")
+        item.setdefault("snapshot_bytes", 1)
+        stamped[key] = item
+    return stamped
+
+
 class StubWorker:
     def __init__(self, role, evidence=None):
         self.role = role
         self.evidence = evidence or {}
 
     async def run(self, task, prior_results):
-        return WorkerResult(role=self.role, summary="ok", success=True, evidence=self.evidence)
+        return WorkerResult(
+            role=self.role, summary="ok", success=True,
+            evidence=stamped_evidence(task, self.role, self.evidence),
+        )
 
 
 def task():
@@ -252,7 +281,10 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence=stamped_evidence(
+                    task, self.role,
+                    {"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                ),
             )
 
     class CountingSecurity(StubWorker):
@@ -330,8 +362,8 @@ def test_orchestrator_rejects_mixed_workspace_evidence(tmp_path):
         max_repair_cycles=0,
     )
     record = asyncio.run(orchestrator.run(task()))
-    assert record.state == TaskState.BLOCKED
-    assert any("provenance" in error for error in record.errors)
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("workspace snapshot" in error for error in record.errors)
 
 
 def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
@@ -359,7 +391,10 @@ def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
             self.calls += 1
             return WorkerResult(
                 role=self.role, summary="pytest report",
-                success=True, evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                success=True, evidence=stamped_evidence(
+                    task, self.role,
+                    {"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                ),
             )
 
     developer = DiagnosticDeveloper()
@@ -382,3 +417,22 @@ def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
     assert record.state == TaskState.SUCCEEDED
     assert developer.repair_context is not None
     assert "check:pytest" in " ".join(developer.repair_context.blockers)
+
+
+def test_orchestrator_requires_complete_task_bound_provenance(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {
+        "check:pytest": {
+            "exit_code": 0,
+            "task_id": "another-task",
+        }
+    }
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("invalid provenance" in error for error in record.errors)
