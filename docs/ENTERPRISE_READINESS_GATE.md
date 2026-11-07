@@ -115,6 +115,7 @@ The full certification result must be reviewed against the evidence artifact and
 - A passing unit/integration suite does not prove RPO/RTO; a real restore drill is mandatory.
 - Kill-switch latency, external-side-effect reconciliation, 2x peak load, 60-minute soak, alerting, rollback, and on-call readiness require deployment-level evidence.
 - PRs that are still open and unmerged are not part of main. Re-evaluate their exact head commits and required CI before relying on their changes.
+- PR #61 is a separate candidate for HMAC-bound sandbox QA evidence. Its signer and verifier remain inside the same trusted worker runtime, so it does not establish an independent QA trust boundary and must not be counted as independent QA approval. It is not merged into main.
 
 ## 8. Phase 6 entry decision
 
