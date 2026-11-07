@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import random
 from typing import Any
 
 from .contracts import CodingTask, WorkerResult, WorkerRole
@@ -48,6 +50,8 @@ class AutonomousCodeWorker:
         max_actions_per_step: int = 8,
         max_output_chars: int = 12000,
         max_tool_retries: int = 2,
+        retry_base_delay_seconds: float = 0.25,
+        retry_max_delay_seconds: float = 4.0,
     ) -> None:
         if max_steps < 1 or max_steps > 30:
             raise ValueError("max_steps must be between 1 and 30")
@@ -63,7 +67,17 @@ class AutonomousCodeWorker:
             raise ValueError("max_output_chars must be between 1000 and 50000")
         if type(max_tool_retries) is not int or not 0 <= max_tool_retries <= 3:
             raise ValueError("max_tool_retries must be between 0 and 3")
+        for name, value in (
+            ("retry_base_delay_seconds", retry_base_delay_seconds),
+            ("retry_max_delay_seconds", retry_max_delay_seconds),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be a finite non-negative number")
+        if retry_max_delay_seconds < retry_base_delay_seconds or retry_max_delay_seconds > 60:
+            raise ValueError("retry_max_delay_seconds must be >= base delay and <= 60 seconds")
         self.max_tool_retries = max_tool_retries
+        self.retry_base_delay_seconds = float(retry_base_delay_seconds)
+        self.retry_max_delay_seconds = float(retry_max_delay_seconds)
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
@@ -187,7 +201,17 @@ class AutonomousCodeWorker:
                     unresolved_tool_failures[action_key] = f"{action['name']}: {result.output[-2000:]}"
                     unresolved_tool_failure_kinds[action_key] = result.failure_kind or "tool"
                     if result.retryable and tool_attempt < self.max_tool_retries:
-                        transcript.append(f"TOOL RETRY {action['name']} ({tool_attempt + 1}): {result.output[-2000:]}")
+                        delay_ceiling = min(
+                            self.retry_max_delay_seconds,
+                            self.retry_base_delay_seconds * (2 ** tool_attempt),
+                        )
+                        retry_delay = random.uniform(0.0, delay_ceiling)
+                        transcript.append(
+                            f"TOOL RETRY {action['name']} ({tool_attempt + 1}) "
+                            f"after {retry_delay:.3f}s: {result.output[-2000:]}"
+                        )
+                        if retry_delay > 0:
+                            await asyncio.sleep(retry_delay)
                         continue
                     break
                 if result is None or not result.ok:
