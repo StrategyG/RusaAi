@@ -85,5 +85,6 @@ def test_cancellation_control_readiness_does_not_require_nonexistent_sequence():
     migration = Path("migrations/008_aicode_job_controls.sql").read_text(encoding="utf-8")
 
     assert "aicode_job_controls_id_seq" not in queue
+    assert "aicode_job_controls_id_seq" not in migration
     assert "CREATE TABLE IF NOT EXISTS public.aicode_job_controls" in migration
     assert "SERIAL" not in migration.upper()
