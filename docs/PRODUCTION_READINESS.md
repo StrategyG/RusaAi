@@ -30,13 +30,13 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Verification boundary
 
-Latest PR head: `843433149a14eb449f20d57e368d94c2838417ec` (PR #59).
-CI run `42343798084` has passed Python compile, Ruff lint, Bandit, the main test
-suite, and RAG/MCP integration tests. The API image and isolated sandbox image
-have built, and the full test suite inside the sandbox has passed. The knowledge
-MCP image, autonomous worker image, Trivy vulnerability gates, and production
-Compose validation are still running; this ledger must be updated again after
-those steps complete.
+Latest full CI run: `42343970591` on PR #59 head
+`fee032f4e552e86f2f9c8155204fcac2d4ab24aa`. All checks passed: Python compile,
+Ruff lint, Bandit, the main test suite, RAG/MCP integration tests, API image,
+isolated sandbox image and its full test suite, knowledge MCP image, autonomous
+worker image, Trivy fixable CRITICAL/HIGH vulnerability gates, and production
+Compose validation. The only change after this evidence snapshot is this
+readiness-ledger update; application and migration code are unchanged.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -47,7 +47,7 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | In progress: code tests and RAG/MCP pass; image scan/Compose pending |
+| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Passed on PR #59 head; readiness-ledger-only update follows |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
