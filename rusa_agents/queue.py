@@ -52,17 +52,29 @@ class PostgresTaskQueue:
 
     @staticmethod
     def _lock_execution_control(conn, job_id: int, tenant_id: str):
-        """Serialize terminal task transitions with cancellation without blocking publishers."""
+        """Serialize terminal transitions with cancellation using a transaction advisory lock.
+
+        Advisory locks avoid granting the worker UPDATE rights on the API-owned control table.
+        They are independent from the job row lock held during bounded Git publication.
+        """
+        task = conn.execute(
+            "SELECT task_id::text FROM public.aicode_jobs WHERE id=%s AND tenant_id=%s",
+            (job_id, tenant_id),
+        ).fetchone()
+        if task is None:
+            return None
+        lock_key = f"{tenant_id}:{task[0]}"
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (lock_key,),
+        )
         return conn.execute(
             """
-            SELECT control.cancel_requested_at
-            FROM public.aicode_job_controls AS control
-            JOIN public.aicode_jobs AS job
-              ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
-            WHERE job.id=%s AND job.tenant_id=%s
-            FOR UPDATE OF control
+            SELECT cancel_requested_at
+            FROM public.aicode_job_controls
+            WHERE tenant_id=%s AND task_id=%s
             """,
-            (job_id, tenant_id),
+            (tenant_id, task[0]),
         ).fetchone()
 
     @staticmethod
@@ -208,7 +220,10 @@ class PostgresTaskQueue:
                     "aicode_audit_worker_only",
                 }
                 if not required_policies.issubset(policy_names):
-                    raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                    raise RuntimeError(
+                        "Production tenant/cancellation RLS policies are missing; "
+                        "apply migrations/007_aicode_job_controls.sql"
+                    )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
@@ -855,6 +870,10 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"{tenant_id}:{task_id}",),
+            )
             control = conn.execute(
                 """
                 SELECT control.cancel_requested_at, job.status
@@ -862,7 +881,6 @@ class PostgresTaskQueue:
                 JOIN public.aicode_jobs AS job
                   ON job.tenant_id=control.tenant_id AND job.task_id=control.task_id
                 WHERE control.tenant_id=%s AND control.task_id=%s
-                FOR UPDATE OF control
                 """,
                 (tenant_id, task_id),
             ).fetchone()
