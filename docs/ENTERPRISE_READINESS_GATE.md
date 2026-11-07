@@ -71,7 +71,10 @@ Install the project dependencies, then evaluate the staging evidence against the
       --mode certify \
       --evidence /secure/path/erg06-staging-evidence.json \
       --expected-sha "$(git rev-parse HEAD)" \
+      --expected-run-id <staging-workflow-run-id> \
       --output artifacts/erg06-certification-report.json
+
+The command is an offline evaluator only; it cannot establish GitHub attestation validity by itself. Formal certification must run through the workflow_dispatch path, which verifies the source workflow run, candidate SHA, artifact attestation signer, and source digest before invoking the evaluator.
 
 The evaluator returns:
 
