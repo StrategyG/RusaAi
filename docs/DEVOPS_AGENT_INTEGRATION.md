@@ -73,7 +73,7 @@ Consumers must reject a stage/domain-event mismatch and be idempotent. Release a
 
 Security Guard and Monitor are read-only identities. Empty `write_scope` does not make write-capable tools safe.
 
-Successful Code results require a source commit. Successful Build, Test, Release, and Deploy results require source commit and immutable artifact digest. Result validation compares those values with originating task inputs. Evidence from another commit or digest cannot satisfy the current release gate.
+Successful Code results require a source commit. Successful Build, Test, Release, and Deploy results require source commit and immutable artifact digest. Build, Test, Release, and Deploy task inputs carry the expected source commit; Test, Release, and Deploy also carry the expected artifact digest. Result validation compares those values with originating task inputs. Evidence from another commit or digest cannot satisfy the current release gate.
 
 ## 6. Human approval boundaries
 
