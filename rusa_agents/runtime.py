@@ -640,6 +640,7 @@ class AICodeRuntime:
                 cancel_requested,
             )
             pr_creation_finished = True
+            await self._assert_lease(job, lost_lease, cancel_requested)
             await asyncio.to_thread(
                 self.audit.record,
                 "pull_request.created",
