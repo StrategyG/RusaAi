@@ -342,7 +342,7 @@ def test_publisher_refuses_to_publish_an_empty_task_branch(tmp_path):
     (repository / "README.md").write_text("base")
     git("add", "README.md", cwd=repository)
     git("commit", "-m", "initial", cwd=repository)
-    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git")
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git", cwd=repository)
     git("checkout", "-b", "feature/aicode/empty-task", cwd=repository)
 
     publisher = GitHubPublisher("test-token")
