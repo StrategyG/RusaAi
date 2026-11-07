@@ -227,6 +227,23 @@ class PostgresTaskQueue:
                     )
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
+                control_privileges = conn.execute("""
+                    SELECT
+                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
+                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
+                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
+                        pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
+                        pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
+                """).fetchone()
+                if (
+                    not control_privileges
+                    or not all(control_privileges[:4])
+                    or control_privileges[4]
+                ):
+                    raise RuntimeError(
+                        "Cancellation control grants must allow API SELECT/INSERT/UPDATE "
+                        "and worker SELECT only"
+                    )
                 policies = conn.execute("""
                     SELECT tablename, policyname FROM pg_policies
                     WHERE schemaname='public' AND policyname = ANY(%s)
