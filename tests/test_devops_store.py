@@ -223,3 +223,66 @@ def test_outbox_stale_lease_cannot_settle_a_row():
     finally:
         _cleanup(tenant_id)
 
+def test_durable_tables_force_rls_and_have_separate_relay_role():
+    import psycopg
+
+    with psycopg.connect(DSN) as conn:
+        rows = conn.execute(
+            """
+            SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+            FROM pg_class AS c
+            JOIN pg_namespace AS n ON n.oid=c.relnamespace
+            WHERE n.nspname='public'
+              AND c.relname = ANY(%s)
+            """,
+            ([
+                "devops_workflows",
+                "devops_tasks",
+                "devops_event_outbox",
+                "devops_event_inbox",
+            ],),
+        ).fetchall()
+        roles = conn.execute(
+            """
+            SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+            FROM pg_roles WHERE rolname = ANY(%s)
+            """,
+            (["rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"],),
+        ).fetchall()
+
+    assert len(rows) == 4
+    assert all(enabled and forced for _, enabled, forced in rows)
+    assert {name for name, *_ in roles} == {
+        "rusa_api_runtime", "rusa_worker_runtime", "rusa_relay_runtime"
+    }
+    assert all(not can_login and not superuser and not bypass for _, can_login, superuser, bypass in roles)
+
+
+def test_task_and_outbox_foreign_keys_prevent_cross_tenant_run_linkage():
+    import psycopg
+    from psycopg.errors import ForeignKeyViolation
+
+    tenant_id = f"test-{uuid4()}"
+    other_tenant = f"other-{uuid4()}"
+    store = PostgresWorkflowStore(DSN)
+    event = _event(tenant_id)
+    try:
+        run_id, _ = store.submit_workflow(
+            tenant_id=tenant_id,
+            idempotency_key="tenant-fk",
+            request={"objective": "tenant-link"},
+            initial_event=event,
+        )
+        with pytest.raises(ForeignKeyViolation):
+            with psycopg.connect(DSN) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO public.devops_tasks
+                        (task_id, run_id, tenant_id, agent_id, stage, task)
+                    VALUES (%s, %s, %s, %s, %s, '{}'::jsonb)
+                    """,
+                    (str(uuid4()), run_id, other_tenant, "rusa_plan_agent", "plan"),
+                )
+    finally:
+        _cleanup(tenant_id)
+
