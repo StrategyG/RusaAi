@@ -1,35 +1,40 @@
 project: llm-project
-status: planned
+status: planning_metadata
 
+# The serving API is implemented separately. This file is not loaded by the
+# runtime and does not promise batching, quantization, or a specific backend.
 inference:
-  backend: local-runtime
-  quantization: int8/fp8
-  speculative_decoding: true
+  backend: null
+  quantization: []
+  speculative_decoding: null
   batching:
-    enabled: true
-    max_batch_size: 32
+    enabled: null
+    max_batch_size: null
   kv_cache:
-    enabled: true
-    strategy: paged
+    enabled: null
+    strategy: null
   tools:
-    enabled: true
-    calls:
-      - function_calling
-      - retrieval
-      - code_execution
+    enabled: null
+    capabilities: []
 
 runtime:
-  local_only: true
-  external_model_apis_enabled_by_default: false
-  requires_internet: false
+  model_weights_bundled: false
+  local_model_artifact:
+    path_environment_variable: RUSA_LOCAL_MODEL_PATH
+    manifest_digest_environment_variable: RUSA_MODEL_MANIFEST_SHA256
+    production_manifest_pin_required: true
+  external_provider:
+    supported: true
+    endpoint_environment_variable: RUSA_MODEL_BASE_URL
+    selected_when_local_artifact_is_not_configured: true
 
-observability:
-  logging: json
-  metrics:
-    - latency
-    - throughput
-    - memory
-    - error_rate
+evidence:
+  model_manifest_sha256: null
+  container_digest: null
+  hardware_profile: null
+  benchmark_report: null
 
 notes:
-  - Inference should be independently benchmarked before claiming runtime readiness.
+  - The runtime selects a verified local artifact when configured; otherwise it uses the configured OpenAI-compatible provider.
+  - This metadata file does not configure the runtime.
+  - Performance and capacity must be measured on the actual checkpoint and deployment hardware.
