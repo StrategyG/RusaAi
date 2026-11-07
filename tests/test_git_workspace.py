@@ -305,3 +305,51 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_publisher_rejects_rename_out_of_env_instead_of_skipping_source(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / ".env").write_text("GITHUB_TOKEN=do-not-publish")
+    git("add", "-f", ".env", cwd=repository)
+    git("commit", "-m", "fixture", cwd=repository)
+    (repository / ".env").rename(repository / "src-config.txt")
+
+    with pytest.raises(RuntimeError, match="Protected or unsafe path"):
+        GitHubPublisher._safe_changed_paths(repository)
+
+
+def test_publisher_rejects_staged_secret_even_if_worktree_path_is_safe(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    (repository / "src.py").write_text("print('safe')")
+    git("add", "src.py", cwd=repository)
+    git("commit", "-m", "fixture", cwd=repository)
+    (repository / ".env").write_text("TOKEN=secret")
+    git("add", "-f", ".env", cwd=repository)
+
+    with pytest.raises(RuntimeError, match="Protected or unsafe path"):
+        GitHubPublisher._safe_changed_paths(repository)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".docker/config.json",
+        ".kube/config",
+        ".gcloud/application_default_credentials.json",
+        ".git-credentials",
+        ".gnupg/private-keys-v1.d/key",
+    ],
+)
+def test_publisher_blocks_common_credential_paths(path):
+    assert GitHubPublisher._is_publishable_path(path) is False
+
+
+def test_publisher_allows_regular_source_files():
+    assert GitHubPublisher._is_publishable_path("src/application.py") is True

@@ -220,59 +220,87 @@ class GitHubPublisher:
         )
 
     @staticmethod
+    def _is_publishable_path(raw_path: str) -> bool:
+        from pathlib import PurePosixPath
+
+        if not isinstance(raw_path, str) or not raw_path or "\x00" in raw_path:
+            return False
+        if raw_path.startswith("/") or "\\" in raw_path:
+            return False
+        path = PurePosixPath(raw_path)
+        if path.is_absolute() or ".." in path.parts:
+            return False
+        parts = tuple(part.lower() for part in path.parts)
+        if any(
+            part in BLOCKED_PATH_PARTS
+            or (part.startswith(".env") and part != ".env.example")
+            or part in {
+                ".npmrc", ".pypirc", ".netrc", ".git-credentials",
+                "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
+                "credentials.json", "service-account.json", "secrets.json",
+                "token.json", "kubeconfig", "application_default_credentials.json",
+                ".dockerconfigjson",
+            }
+            or PurePosixPath(part).suffix.lower() in BLOCKED_SUFFIXES
+            for part in parts
+        ):
+            return False
+        normalized = "/".join(parts)
+        if any(
+            normalized == prefix.rstrip("/").lower()
+            or normalized.startswith(prefix.lower())
+            for prefix in BLOCKED_WRITE_PREFIXES
+        ):
+            return False
+        if path.name.lower() in BLOCKED_WRITE_NAMES:
+            return False
+        if path.name.lower().startswith(
+            ("requirements", "dockerfile.", "docker-compose.", "compose.")
+        ):
+            return False
+        return True
+
+    @staticmethod
     def _safe_changed_paths(workspace: Path) -> list[str]:
         if not GIT_BIN:
-            return []
-        result = subprocess.run(  # nosec B603 - static argv, absolute executable, shell=False
+            raise RuntimeError("Git executable is unavailable; refusing to publish")
+        environment = {
+            "PATH": os.getenv("PATH", "/usr/bin:/bin"),
+            "HOME": tempfile.gettempdir(),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        result = subprocess.run(
             [GIT_BIN, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
-             "-C", str(workspace), "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            capture_output=True, timeout=30, check=False,
-            env={
-                "PATH": os.getenv("PATH", "/usr/bin:/bin"),
-                "HOME": tempfile.gettempdir(),
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_LFS_SKIP_SMUDGE": "1",
-            },
+             "-C", str(workspace), "status", "--porcelain=v1", "-z",
+             "--untracked-files=all", "--no-renames"],
+            capture_output=True, timeout=30, check=False, env=environment,
         )
         if result.returncode:
-            raise RuntimeError(result.stderr.decode("utf-8", "replace"))
-        paths = []
+            raise RuntimeError(result.stderr.decode("utf-8", "replace")[-2000:])
+        paths: list[str] = []
         records = result.stdout.split(b"\0")
-        skip_next = False
         for record in records:
             if not record:
                 continue
-            if skip_next:
-                skip_next = False
-                continue
-            status = record[:2].decode("ascii", "replace")
+            if len(record) < 4 or record[2:3] != b" ":
+                raise RuntimeError("Git returned an invalid status record; refusing to publish")
             raw_path = record[3:].decode("utf-8", "surrogateescape")
-            if "R" in status or "C" in status:
-                skip_next = True
-            path = Path(raw_path)
-            parts = {part.lower() for part in path.parts}
-            if (
-                path.is_absolute()
-                or ".." in path.parts
-                or parts.intersection(BLOCKED_PATH_PARTS)
-                or any(part.startswith(".env") and part != ".env.example" for part in parts)
-            ):
-                continue
-            if (
-                path.suffix.lower() in BLOCKED_SUFFIXES
-                or path.name.lower() in {"id_rsa", "id_ed25519"}
-                or path.name.lower() in BLOCKED_WRITE_NAMES
-                or path.name.lower().startswith(("requirements", "dockerfile.", "docker-compose.", "compose."))
-                or any(raw_path.lower().startswith(prefix.lower()) for prefix in BLOCKED_WRITE_PREFIXES)
-            ):
-                continue
-            candidate = (workspace / path).resolve(strict=False)
-            if candidate != workspace and workspace not in candidate.parents:
-                continue
-            if (workspace / path).is_symlink():
-                continue
+            if not GitHubPublisher._is_publishable_path(raw_path):
+                raise RuntimeError(
+                    f"Protected or unsafe path changed: {raw_path!r}; refusing to publish any files"
+                )
+            candidate = workspace / raw_path
+            try:
+                resolved = candidate.resolve(strict=False)
+                if resolved != workspace and workspace not in resolved.parents:
+                    raise RuntimeError("Changed path resolves outside the workspace; refusing to publish")
+                if candidate.is_symlink():
+                    raise RuntimeError("Changed symbolic link is not publishable")
+            except OSError as exc:
+                raise RuntimeError("Could not safely inspect changed path") from exc
             paths.append(raw_path)
         return sorted(set(paths))
 
@@ -311,6 +339,28 @@ class GitHubPublisher:
             added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
+            staged = self._run(
+                ["git", "diff", "--cached", "--name-only", "-z", "--no-renames", "--"],
+                str(root),
+            )
+            if staged.returncode:
+                raise RuntimeError(f"Could not inspect staged paths: {staged.stderr[-2000:]}")
+            staged_paths = [
+                item.decode("utf-8", "surrogateescape")
+                for item in staged.stdout.encode("utf-8", "surrogateescape").split(b"\\0")
+                if item
+            ]
+            unsafe_staged = [
+                path for path in staged_paths
+                if not self._is_publishable_path(path)
+                or (root / path).is_symlink()
+                or root not in (root / path).resolve(strict=False).parents
+            ]
+            if unsafe_staged:
+                raise RuntimeError(
+                    "Protected or unsafe staged paths detected; refusing to commit: "
+                    + ", ".join(repr(path) for path in unsafe_staged[:20])
+                )
             commit = self._run([
                 "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=RUSA-AI",
                 "-c", "user.email=rusa-ai@users.noreply.github.com",

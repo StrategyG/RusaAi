@@ -145,3 +145,61 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".docker/config.json",
+        ".kube/config",
+        ".gcloud/application_default_credentials.json",
+        ".git-credentials",
+        ".gnupg/private-keys-v1.d",
+    ],
+)
+def test_gateway_rejects_additional_credential_paths(tmp_path, path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.read_file(path)
+
+
+def test_gateway_reads_using_open_directory_descriptors(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('safe')")
+    gateway = WorkspaceToolGateway(tmp_path)
+    try:
+        result = gateway.read_file("src/main.py")
+        assert result.ok
+        assert result.output == "print('safe')"
+    finally:
+        gateway.close()
+
+
+def test_gateway_rejects_hardlinked_file(tmp_path):
+    source = tmp_path / "source.txt"
+    source.write_text("outside")
+    try:
+        (tmp_path / "linked.txt").hardlink_to(source)
+    except OSError:
+        pytest.skip("Hard links are not supported by this filesystem")
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied, match="Hard-linked"):
+        gateway.read_file("linked.txt")
+
+
+def test_gateway_write_does_not_follow_symlink_target(tmp_path):
+    outside = tmp_path.parent / "outside-rusa-secret.txt"
+    outside.write_text("keep")
+    (tmp_path / "link.txt").symlink_to(outside)
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.write_file("link.txt", "overwrite", WorkerRole.DEVELOPER)
+    assert outside.read_text() == "keep"
+
+
+def test_gateway_rejects_nul_and_backslash_paths(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.read_file("src\\\\..\\\\secret.txt")
+    with pytest.raises(ToolDenied):
+        gateway.read_file("src\\x00secret.txt")
