@@ -11,7 +11,6 @@ import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
-from uuid import UUID
 
 from .contracts import validate_workflow_event
 
@@ -76,7 +75,7 @@ class PostgresWorkflowStore:
             raise ValueError("initial workflow event must be task.request")
         if not idempotency_key or len(idempotency_key) > 256:
             raise ValueError("idempotency_key must contain 1..256 characters")
-        run_id = str(UUID(initial_event["run_id"]))
+        run_id = initial_event["run_id"]
         request_hash = _sha256(request)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
@@ -153,8 +152,8 @@ class PostgresWorkflowStore:
                 """,
                 (
                     tenant_id,
-                    UUID(event["run_id"]),
-                    UUID(event["task_id"]) if event.get("task_id") else None,
+                    event["run_id"],
+                    event.get("task_id"),
                     event.get("attempt"),
                     event["message_id"],
                     destination,
