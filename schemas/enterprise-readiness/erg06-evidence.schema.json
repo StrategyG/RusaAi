@@ -61,7 +61,8 @@
               "cross_tenant_writes": { "type": "integer", "minimum": 0 },
               "unauthorized_accesses": { "type": "integer", "minimum": 0 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "failure_recovery": {
           "$ref": "#/$defs/evidenceCheck",
@@ -79,7 +80,8 @@
               "duplicate_business_effects": { "type": "integer", "minimum": 0 },
               "state_integrity_failures": { "type": "integer", "minimum": 0 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "disaster_recovery": {
           "$ref": "#/$defs/evidenceCheck",
@@ -91,7 +93,8 @@
               "rto_seconds": { "type": "number", "minimum": 0 },
               "confirmed_audit_loss": { "type": "integer", "minimum": 0 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "kill_switch": {
           "$ref": "#/$defs/evidenceCheck",
@@ -102,7 +105,8 @@
               "propagation_p99_seconds": { "type": "number", "minimum": 0 },
               "cancellation_p95_seconds": { "type": "number", "minimum": 0 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "load": {
           "$ref": "#/$defs/evidenceCheck",
@@ -114,7 +118,8 @@
               "duration_minutes": { "type": "integer", "minimum": 0 },
               "slo_met": { "type": "boolean" }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "policy_audit": {
           "$ref": "#/$defs/evidenceCheck",
@@ -132,7 +137,8 @@
               "critical_false_allows": { "type": "integer", "minimum": 0 },
               "duplicate_business_effects": { "type": "integer", "minimum": 0 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         },
         "independent_qa": {
           "$ref": "#/$defs/evidenceCheck",
@@ -145,7 +151,8 @@
               "critical_findings": { "type": "integer", "minimum": 0 },
               "reviewer": { "type": "string", "minLength": 1 }
             }
-          }]
+          }],
+          "unevaluatedProperties": false
         }
       }
     },
@@ -175,7 +182,6 @@
   "$defs": {
     "evidenceCheck": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["status", "evidence_ref"],
       "properties": {
         "status": { "enum": ["PASS", "HOLD", "FAIL"] },
