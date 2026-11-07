@@ -223,28 +223,40 @@ class DockerSandbox:
                         text=True,
                         env=sandbox_env,
                     )
-                    deadline = time.monotonic() + self.timeout_seconds
-                    while True:
+                    def stop_process(*, force: bool = False) -> None:
                         try:
-                            execution_allowed = cancellation_check()
-                        except Exception:
-                            execution_allowed = False
-                        if not execution_allowed:
-                            try:
-                                if process.poll() is None:
+                            if process.poll() is None:
+                                if force:
+                                    process.kill()
+                                else:
                                     process.terminate()
-                            except ProcessLookupError:
-                                pass
+                        except ProcessLookupError:
+                            pass
+                        if force:
+                            process.communicate()
+                        else:
                             try:
-                                stdout, stderr = process.communicate(timeout=5)
+                                process.communicate(timeout=5)
                             except subprocess.TimeoutExpired:
                                 try:
                                     if process.poll() is None:
                                         process.kill()
                                 except ProcessLookupError:
                                     pass
-                                stdout, stderr = process.communicate()
-                            remove_container()
+                                process.communicate()
+                        remove_container()
+
+                    deadline = time.monotonic() + self.timeout_seconds
+                    while True:
+                        try:
+                            execution_allowed = cancellation_check()
+                        except Exception as exc:
+                            stop_process()
+                            raise RuntimeError(
+                                "Could not verify the task lease during sandbox execution"
+                            ) from exc
+                        if not execution_allowed:
+                            stop_process()
                             return ToolResult(
                                 False,
                                 "Sandbox execution stopped because the task lease was lost or cancelled.",
@@ -258,13 +270,7 @@ class DockerSandbox:
 
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
-                            try:
-                                if process.poll() is None:
-                                    process.kill()
-                            except ProcessLookupError:
-                                pass
-                            stdout, stderr = process.communicate()
-                            remove_container()
+                            stop_process(force=True)
                             return ToolResult(
                                 False,
                                 f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.",
