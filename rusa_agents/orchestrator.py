@@ -492,6 +492,19 @@ class AICodeOrchestrator:
             )
 
             if record.state == TaskState.EXECUTING:
+                developer_result = next(
+                    (item for item in reversed(record.results) if item.role == WorkerRole.DEVELOPER),
+                    None,
+                )
+                if developer_result is None or not developer_result.artifacts:
+                    record.errors.append(
+                        "Developer produced no changed workspace artifacts; automatic completion is not allowed."
+                    )
+                    record.transition(TaskState.VERIFYING)
+                    record.transition(TaskState.AWAITING_APPROVAL)
+                    await self._persist(record)
+
+            if record.state == TaskState.EXECUTING:
                 completed_roles = {
                     result.role for result in previous_attempt_results + record.results
                 }
