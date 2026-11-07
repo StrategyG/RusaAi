@@ -560,53 +560,65 @@ class PostgresTaskQueue:
             )
             return str(existing[0]), False, str(existing[2])
 
+    @staticmethod
+    def _recover_cancelled_in_transaction(conn, batch_size: int = 100) -> int:
+        cur = conn.execute("""
+            WITH cancelled AS (
+                SELECT job.id
+                FROM public.aicode_jobs AS job
+                JOIN public.aicode_job_controls AS control
+                  ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
+                WHERE control.cancel_requested_at IS NOT NULL
+                  AND (
+                      job.status IN ('queued', 'awaiting_approval')
+                      OR (job.status='running' AND job.lease_until < NOW())
+                  )
+                ORDER BY job.id
+                FOR UPDATE OF job SKIP LOCKED
+                LIMIT %s
+            )
+            UPDATE public.aicode_jobs AS job
+            SET status='cancelled',
+                result=CASE
+                    WHEN job.status='running' THEN
+                        COALESCE(job.result, '{}'::jsonb) || jsonb_build_object(
+                            'side_effects', jsonb_build_object(
+                                'git_publication', 'reconciliation_required',
+                                'pull_request_creation', 'reconciliation_required',
+                                'reconciliation_required', true
+                            ),
+                            'cancellation_reconciliation', jsonb_build_object(
+                                'required', true,
+                                'reason', 'worker_lease_expired_during_cancellation'
+                            )
+                        )
+                    ELSE job.result
+                END,
+                last_error=CASE
+                    WHEN job.status='running'
+                    THEN 'Cancellation requested; worker lease expired before acknowledgement'
+                    ELSE job.last_error
+                END,
+                lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                updated_at=NOW()
+            FROM cancelled
+            WHERE job.id=cancelled.id
+        """, (batch_size,))
+        return cur.rowcount
+
+    def recover_cancelled(self, batch_size: int = 100) -> int:
+        """Finalize durable cancellations whose worker lease expired before acknowledgement."""
+        if type(batch_size) is not int or not 1 <= batch_size <= 1000:
+            raise ValueError("batch_size must be an integer between 1 and 1000")
+        with self._connect() as conn:
+            return self._recover_cancelled_in_transaction(conn, batch_size)
+
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
             raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
         lease_token = str(uuid4())
         with self._connect() as conn:
-            conn.execute("""
-                WITH cancelled AS (
-                    SELECT job.id
-                    FROM public.aicode_jobs AS job
-                    JOIN public.aicode_job_controls AS control
-                      ON control.tenant_id=job.tenant_id AND control.task_id=job.task_id
-                    WHERE control.cancel_requested_at IS NOT NULL
-                      AND (
-                          job.status IN ('queued', 'awaiting_approval')
-                          OR (job.status='running' AND job.lease_until < NOW())
-                      )
-                    ORDER BY job.id
-                    FOR UPDATE OF job SKIP LOCKED
-                    LIMIT 100
-                )
-                UPDATE public.aicode_jobs AS job
-                SET status='cancelled',
-                    result=CASE
-                        WHEN job.status='running' THEN
-                            COALESCE(job.result, '{}'::jsonb) || jsonb_build_object(
-                                'side_effects', jsonb_build_object(
-                                    'git_publication', 'reconciliation_required',
-                                    'pull_request_creation', 'reconciliation_required',
-                                    'reconciliation_required', true
-                                ),
-                                'cancellation_reconciliation', jsonb_build_object(
-                                    'required', true,
-                                    'reason', 'worker_lease_expired_during_cancellation'
-                                )
-                            )
-                        ELSE job.result
-                    END,
-                    last_error=CASE
-                        WHEN job.status='running'
-                        THEN 'Cancellation requested; worker lease expired before acknowledgement'
-                        ELSE job.last_error
-                    END,
-                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
-                    updated_at=NOW()
-                FROM cancelled
-                WHERE job.id=cancelled.id
-            """)
+            self._recover_cancelled_in_transaction(conn, 100)
             conn.execute("""
                 WITH candidate AS MATERIALIZED (
                     SELECT id, tenant_id, task_id::text AS task_id
