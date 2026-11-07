@@ -11,6 +11,7 @@ from rusa_agents.devops.store import (
     PostgresInbox,
     PostgresOutboxRelay,
     PostgresWorkflowStore,
+    OutboxLeaseLostError,
     WorkflowIdempotencyConflictError,
 )
 
@@ -210,7 +211,7 @@ def test_outbox_stale_lease_cannot_settle_a_row():
         )
         claimed = relay.claim(destination="commands", limit=1)
         assert len(claimed) == 1
-        with pytest.raises(Exception, match="lease is no longer owned"):
+        with pytest.raises(OutboxLeaseLostError, match="lease is no longer owned"):
             relay.mark_published(
                 outbox_id=claimed[0]["outbox_id"],
                 lease_token=str(uuid4()),
