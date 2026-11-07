@@ -191,7 +191,7 @@ Missing or unverifiable evidence is not treated as success. Human approval is st
 
 | Requirement | Implementation evidence | Production gate |
 |---|---|---|
-| Hierarchical orchestration | Master + six typed workers | Unit/integration tests |
+| Hierarchical orchestration | Master + six typed role-scoped worker invocations in one runtime | Unit/integration tests |
 | Bounded autonomy | Role permissions, allowlists, state machine | Adversarial tests |
 | Tenant isolation | API keys, repository allowlist, tenant-scoped DB keys | Cross-tenant penetration tests |
 | Durable queue | PostgreSQL leases, retries, cancellation | Multi-worker concurrency tests |
