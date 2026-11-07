@@ -130,6 +130,16 @@ def test_gateway_rejects_unknown_tool_arguments(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    "action",
+    ["merge", "deploy", "release", "production_write", "secret_change", "force_push_main"],
+)
+def test_gateway_does_not_expose_protected_external_actions(tmp_path, action):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.execute({"name": action, "arguments": {}}, WorkerRole.DEVELOPER)
+
+
 def test_gateway_atomic_write_creates_expected_content(tmp_path):
     gateway = WorkspaceToolGateway(tmp_path)
     result = gateway.write_file("src/generated.py", "VALUE = 42\n", WorkerRole.DEVELOPER)
