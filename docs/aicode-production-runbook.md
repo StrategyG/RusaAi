@@ -24,9 +24,13 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/002_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_task_results.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
+# Apply only when this database is also the pgvector knowledge database:
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_aicode_job_controls.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–005 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The AICode migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), idempotent intake, and durable cancellation controls. Apply the AICode migrations 001–006 and 008 in order; apply migration 007 only on a pgvector-enabled knowledge database. Migration 008 creates the separate cancellation control table and bounded manual-retry counters. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
