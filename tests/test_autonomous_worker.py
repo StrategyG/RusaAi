@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import pytest
+
 from rusa_agents.autonomous import AutonomousCodeWorker
 from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.tool_gateway import ToolResult
@@ -15,11 +17,14 @@ class StubProvider:
 
 
 class StubGateway:
-    def __init__(self):
+    def __init__(self, results=None):
         self.calls = []
+        self.results = list(results or [])
 
     def execute(self, action, role):
         self.calls.append((action, role))
+        if self.results:
+            return self.results.pop(0)
         return ToolResult(True, "src/main.py", {"count": 1})
 
 
@@ -97,3 +102,107 @@ def test_autonomous_worker_cannot_supply_forged_test_evidence():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert not result.evidence
+
+
+def test_autonomous_worker_does_not_report_success_after_failed_tool():
+    gateway = StubGateway([ToolResult(False, "File not found")])
+    provider = StubProvider(json.dumps({
+        "message": "Inspection complete",
+        "actions": [{"name": "read_file", "arguments": {"path": "missing.py"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "tool"
+    assert any("File not found" in blocker for blocker in result.blockers)
+
+
+def test_autonomous_worker_retries_transient_tool_failure():
+    gateway = StubGateway([
+        ToolResult(False, "temporary unavailable", retryable=True),
+        ToolResult(True, "src/main.py", {"count": 1}),
+    ])
+    provider = StubProvider(json.dumps({
+        "message": "Inspection complete",
+        "actions": [{"name": "list_files", "arguments": {"path": "."}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert result.success
+    assert len(gateway.calls) == 2
+
+
+def test_autonomous_worker_preserves_failed_check_evidence_for_repair():
+    gateway = StubGateway([
+        ToolResult(False, "FAILED test_parser.py::test_invalid_input", {
+            "profile": "pytest", "exit_code": 1, "workspace_digest": "a" * 64
+        })
+    ])
+    provider = StubProvider(json.dumps({
+        "message": "Tests need repair",
+        "actions": [{"name": "run_check", "arguments": {"profile": "pytest"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.TESTER, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "tool"
+    assert result.evidence["check:pytest"]["exit_code"] == 1
+    assert "FAILED test_parser.py" in result.blockers[0]
+
+
+def test_autonomous_worker_does_not_clear_failure_for_a_different_action_argument():
+    gateway = StubGateway([
+        ToolResult(False, "File not found: missing.py"),
+        ToolResult(True, "src/main.py", {"count": 1}),
+    ])
+    provider = StubProvider(json.dumps({
+        "message": "Both reads attempted",
+        "actions": [
+            {"name": "read_file", "arguments": {"path": "missing.py"}},
+            {"name": "read_file", "arguments": {"path": "main.py"}},
+        ],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "tool"
+    assert len(result.blockers) == 1
+    assert "missing.py" in result.blockers[0]
+
+
+def test_autonomous_worker_does_not_report_unchanged_write_as_artifact():
+    gateway = StubGateway([ToolResult(True, "No changes required", {"changed": False})])
+    provider = StubProvider(json.dumps({
+        "message": "No changes needed",
+        "actions": [{"name": "write_file", "arguments": {"path": "src/main.py", "content": "same"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.DEVELOPER, provider, gateway).run(make_task(), []))
+    assert result.success
+    assert result.artifacts == []
+
+
+def test_autonomous_worker_caps_tool_retries_at_two():
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        AutonomousCodeWorker(
+            WorkerRole.ANALYST, StubProvider("{}"), StubGateway(), max_tool_retries=3
+        )
+
+
+def test_autonomous_worker_preserves_policy_failure_classification():
+    gateway = StubGateway([ToolResult(False, "Policy denied", failure_kind="policy")])
+    provider = StubProvider(json.dumps({
+        "message": "Could not inspect file",
+        "actions": [{"name": "list_files", "arguments": {"path": "."}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "policy"
+
+
+def test_autonomous_worker_rejects_non_integer_iteration_limit():
+    with pytest.raises(ValueError, match="integer between 1 and 30"):
+        AutonomousCodeWorker(
+            WorkerRole.ANALYST, StubProvider("{}"), StubGateway(), max_steps=1.5
+        )

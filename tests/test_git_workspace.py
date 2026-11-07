@@ -212,11 +212,20 @@ def test_ci_evidence_requires_all_jobs_from_latest_trusted_suite():
     runs = [
         _github_check_run("Test, lint, and security", suite_id=100, run_id=1001, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=100, run_id=1002, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=100, run_id=1003, head_sha=sha),
         _github_check_run("Test, lint, and security", suite_id=101, run_id=1011, head_sha=sha),
         _github_check_run(
             "Build, test, and scan production images",
             suite_id=101,
             run_id=1012,
+            status="in_progress",
+            conclusion=None,
+            head_sha=sha,
+        ),
+        _github_check_run(
+            "RAG and MCP integration tests",
+            suite_id=101,
+            run_id=1013,
             status="in_progress",
             conclusion=None,
             head_sha=sha,
@@ -234,6 +243,7 @@ def test_ci_evidence_does_not_fall_back_to_an_older_successful_suite():
     runs = [
         _github_check_run("Test, lint, and security", suite_id=200, run_id=2001, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=200, run_id=2002, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=200, run_id=2003, head_sha=sha),
         _github_check_run(
             "Test, lint, and security",
             suite_id=201,
@@ -242,6 +252,7 @@ def test_ci_evidence_does_not_fall_back_to_an_older_successful_suite():
             head_sha=sha,
         ),
         _github_check_run("Build, test, and scan production images", suite_id=201, run_id=2012, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=201, run_id=2013, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
@@ -286,6 +297,7 @@ def test_ci_evidence_rejects_skipped_required_jobs():
             conclusion="skipped",
             head_sha=sha,
         ),
+        _github_check_run("RAG and MCP integration tests", suite_id=400, run_id=4003, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
@@ -298,6 +310,7 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
     sha = "f" * 40
     runs = [
         _github_check_run("Test, lint, and security", suite_id=500, run_id=5001, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=500, run_id=5003, head_sha=sha),
         _github_check_run("Build, test, and scan production images", suite_id=499, run_id=4992, head_sha=sha),
     ]
 
@@ -305,3 +318,14 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+def test_ci_evidence_requires_rag_and_mcp_integration_check():
+    sha = "9" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=600, run_id=6001, head_sha=sha),
+        _github_check_run("Build, test, and scan production images", suite_id=600, run_id=6002, head_sha=sha),
+    ]
+    state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
+    assert state == "pending"
+    assert "RAG and MCP integration tests" in reason

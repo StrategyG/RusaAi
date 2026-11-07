@@ -68,6 +68,7 @@ class WorkerResult:
     artifacts: list[str] = field(default_factory=list)
     evidence: dict[str, Any] = field(default_factory=dict)
     blockers: list[str] = field(default_factory=list)
+    failure_kind: str | None = None
 
 
 @dataclass

@@ -90,6 +90,7 @@ A `WorkerResult` carries:
 - Artifact paths
 - Tool-generated evidence
 - Blockers
+- Typed failure classification: tool, policy, infrastructure, and quality-gate context
 
 Worker messages are provider-agnostic. The host injects an OpenAI-compatible provider; model output is parsed as a strict JSON action envelope. Unknown tools, unknown action fields, unexpected arguments, malformed JSON, and role escalation are rejected.
 
@@ -104,7 +105,11 @@ The gateway exposes only:
 - `git_diff`
 - `run_check`
 
-Path handling rejects traversal, absolute paths, symlinks, environment files, credential names, private-key material, and protected configuration surfaces. File writes are atomic and size-bounded.
+Path handling rejects traversal, absolute paths, symlinks, environment files, credential names, private-key material, and protected configuration surfaces. File writes are atomic and size-bounded. Existing QA baseline files and platform control-plane modules (API authentication/runtime, provider configuration, RAG storage/safety, MCP server, queue, audit, policy, and tool gateway) are write-protected; Developer may create and iteratively edit new task-local tests. A write that leaves file content unchanged is recorded as a no-op and is not counted as a changed artifact.
+
+Tool retries are limited to results explicitly marked retryable, with at most two additional attempts and exponential backoff with full jitter. Deterministic tool errors are not retried. Policy and infrastructure failures are escalated rather than sent through a code-repair cycle.
+
+QA evidence must identify the task, queue attempt, worker role, validation profile, workspace and output SHA-256 digests, unique execution ID, timestamps, sandbox image, and snapshot size. The orchestrator rejects missing or inconsistent provenance and requires all mandatory checks to describe the same task attempt, workspace snapshot, and sandbox image.
 
 The validation sandbox:
 - Runs in a separate container using a pinned image digest in production.
@@ -179,6 +184,7 @@ API authentication maps long random API keys to tenant IDs. Production requires 
 
 A task can be marked successful only when all of the following are true:
 - Every required worker completes without blockers.
+- The Developer produces at least one changed workspace artifact; a no-op implementation is sent for human review.
 - The Tester worker produces a real successful pytest exit code.
 - The Security worker produces real successful Ruff, Bandit, and compile exit codes.
 - A commit is pushed to the task feature branch.
@@ -199,7 +205,7 @@ Missing or unverifiable evidence is not treated as success. Human approval is st
 | Audit integrity | HMAC chain and immutable DB triggers | Tamper and restore tests |
 | Sandbox | Rootless Docker, network disabled, source snapshot | Escape/resource-exhaustion tests |
 | Git safety | Exact origin, task branches, protected paths | Malicious remote/path tests |
-| CI verification | Required GitHub check runs | Live PR check evidence |
+| CI verification | Test/lint/security, RAG/MCP integration, and production image/sandbox/Trivy/Compose jobs | All trusted checks green for the exact PR head SHA |
 | Rate limiting | PostgreSQL tenant counters | Load and bypass tests |
 | Observability | Prometheus API/worker metrics and logs | Dashboard and alert tests |
 | Recovery | Persistent volumes and database schema | Backup/restore drill |

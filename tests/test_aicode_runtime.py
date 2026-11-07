@@ -1,4 +1,8 @@
 import asyncio
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
 
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
@@ -13,13 +17,41 @@ from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
+def stamped_evidence(task, role, evidence):
+    now = datetime.now(timezone.utc).isoformat()
+    stamped = {}
+    for key, value in evidence.items():
+        if not isinstance(value, dict):
+            continue
+        profile = key.removeprefix("check:")
+        item = dict(value)
+        item.setdefault("profile", profile)
+        item.setdefault("worker_role", role.value)
+        item.setdefault("task_id", task.task_id)
+        item.setdefault("attempt", 1)
+        item.setdefault("workspace_digest", "a" * 64)
+        item.setdefault("output_digest", "b" * 64)
+        item.setdefault("execution_id", uuid4().hex)
+        item.setdefault("started_at", now)
+        item.setdefault("completed_at", now)
+        item.setdefault("duration_seconds", 0.0)
+        item.setdefault("image", "sandbox:test")
+        item.setdefault("snapshot_bytes", 1)
+        stamped[key] = item
+    return stamped
+
+
 class StubWorker:
     def __init__(self, role, evidence=None):
         self.role = role
         self.evidence = evidence or {}
 
     async def run(self, task, prior_results):
-        return WorkerResult(role=self.role, summary="ok", success=True, evidence=self.evidence)
+        return WorkerResult(
+            role=self.role, summary="ok", success=True,
+            artifacts=["src/main.py"] if self.role == WorkerRole.DEVELOPER else [],
+            evidence=stamped_evidence(task, self.role, self.evidence),
+        )
 
 
 def task():
@@ -239,6 +271,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"implementation pass {self.calls}",
                 success=True,
+                artifacts=["src/main.py"],
             )
 
     class FlakyTester(StubWorker):
@@ -252,7 +285,10 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence=stamped_evidence(
+                    task, self.role,
+                    {"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                ),
             )
 
     class CountingSecurity(StubWorker):
@@ -297,3 +333,199 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+def test_orchestrator_rejects_boolean_exit_code_as_evidence(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {"check:pytest": {"exit_code": False}}
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("invalid provenance" in error for error in record.errors)
+
+
+def test_orchestrator_rejects_mixed_workspace_evidence(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {
+        "check:pytest": {"exit_code": 0, "workspace_digest": "a" * 64}
+    }
+    configured[-1].evidence = {
+        "check:bandit": {"exit_code": 0, "workspace_digest": "b" * 64},
+        "check:ruff": {"exit_code": 0, "workspace_digest": "b" * 64},
+        "check:compile": {"exit_code": 0, "workspace_digest": "b" * 64},
+    }
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("workspace snapshot" in error for error in record.errors)
+
+
+def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
+    class DiagnosticDeveloper(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.DEVELOPER)
+            self.repair_context = None
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            if self.calls > 1:
+                self.repair_context = next(
+                    (item for item in prior_results if item.failure_kind == "quality_gate"),
+                    None,
+                )
+            return WorkerResult(
+                role=self.role, summary="implemented", success=True, artifacts=["src/main.py"]
+            )
+
+    class OneFailTester(StubWorker):
+        def __init__(self):
+            super().__init__(WorkerRole.TESTER)
+            self.calls = 0
+
+        async def run(self, task, prior_results):
+            self.calls += 1
+            return WorkerResult(
+                role=self.role, summary="pytest report",
+                success=True, evidence=stamped_evidence(
+                    task, self.role,
+                    {"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                ),
+            )
+
+    developer = DiagnosticDeveloper()
+    configured = [
+        StubWorker(WorkerRole.ANALYST), StubWorker(WorkerRole.ARCHITECT),
+        developer, StubWorker(WorkerRole.DEBUGGER), OneFailTester(),
+        StubWorker(WorkerRole.SECURITY, {
+            "check:bandit": {"exit_code": 0},
+            "check:ruff": {"exit_code": 0},
+            "check:compile": {"exit_code": 0},
+        }),
+    ]
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=1,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.SUCCEEDED
+    assert developer.repair_context is not None
+    assert "check:pytest" in " ".join(developer.repair_context.blockers)
+
+
+def test_orchestrator_requires_complete_task_bound_provenance(tmp_path):
+    configured = workers()
+    configured[-2].evidence = {
+        "check:pytest": {
+            "exit_code": 0,
+            "task_id": "another-task",
+        }
+    }
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("invalid provenance" in error for error in record.errors)
+
+
+def test_orchestrator_requires_a_changed_developer_artifact(tmp_path):
+    class NoopDeveloper(StubWorker):
+        async def run(self, task, prior_results):
+            return WorkerResult(role=self.role, summary="No code changes needed", success=True)
+
+    configured = workers()
+    configured[2] = NoopDeveloper(WorkerRole.DEVELOPER)
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("no changed workspace artifacts" in error for error in record.errors)
+    assert not any(result.role == WorkerRole.TESTER for result in record.results)
+
+
+def test_orchestrator_rejects_duplicate_worker_roles():
+    with pytest.raises(ValueError, match="duplicate worker roles"):
+        AICodeOrchestrator([StubWorker(WorkerRole.ANALYST), StubWorker(WorkerRole.ANALYST)])
+
+
+def test_orchestrator_rejects_incomplete_or_cyclic_dag(monkeypatch):
+    cyclic = dict(AICodeOrchestrator.EXECUTION_DAG)
+    cyclic[WorkerRole.ANALYST] = (WorkerRole.ARCHITECT,)
+    cyclic[WorkerRole.ARCHITECT] = (WorkerRole.ANALYST,)
+    monkeypatch.setattr(AICodeOrchestrator, "EXECUTION_DAG", cyclic)
+    with pytest.raises(ValueError, match="dependency cycle"):
+        AICodeOrchestrator(workers())
+
+    incomplete = dict(AICodeOrchestrator.EXECUTION_DAG)
+    del incomplete[WorkerRole.SECURITY]
+    monkeypatch.setattr(AICodeOrchestrator, "EXECUTION_DAG", incomplete)
+    with pytest.raises(ValueError, match="define every pipeline role"):
+        AICodeOrchestrator(workers())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_parallel_workers": 1.5},
+        {"max_parallel_workers": True},
+        {"max_repair_cycles": 1.5},
+        {"max_repair_cycles": True},
+    ],
+)
+def test_orchestrator_rejects_non_integer_execution_budgets(kwargs):
+    with pytest.raises(ValueError):
+        AICodeOrchestrator(workers(), **kwargs)
+
+
+def test_orchestrator_persists_typed_worker_failure(tmp_path):
+    class InfrastructureFailure(StubWorker):
+        async def run(self, task, prior_results):
+            return WorkerResult(
+                role=self.role,
+                summary="workspace I/O unavailable",
+                success=False,
+                blockers=["disk unavailable"],
+                failure_kind="infrastructure",
+            )
+
+    configured = workers()
+    configured[0] = InfrastructureFailure(WorkerRole.ANALYST)
+    memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
+    current_task = task()
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=memory,
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(current_task))
+    stored = memory.get(current_task.task_id, tenant_id="default")
+    assert record.state == TaskState.BLOCKED
+    assert stored["payload"]["results"][0]["failure_kind"] == "infrastructure"
+
+
+def test_invalid_orchestrator_config_has_no_storage_side_effects(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="max_parallel_workers"):
+        AICodeOrchestrator(workers(), max_parallel_workers=1.5)
+    assert not (tmp_path / ".rusa-ai").exists()
