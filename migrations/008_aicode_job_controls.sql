@@ -1,5 +1,5 @@
 -- Durable out-of-band cancellation control and bounded operator retries.
--- Apply after migrations 001-006 as the schema/migration owner.
+-- Apply after the core AICode migrations 001-006 (and after 007 when using one ordered schema).
 BEGIN;
 
 ALTER TABLE public.aicode_jobs
