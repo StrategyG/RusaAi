@@ -227,11 +227,19 @@ jobs:
           mcp_digest=$MCP_DIGEST
           EOF
 
-      - name: Publish GitHub Release and immutable digest manifest
+      - name: Sign release manifest with keyless Sigstore
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle release-manifest.txt.sigstore.json release-manifest.txt
+
+      - name: Publish GitHub Release and signed digest manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already exists. Refusing to mutate published release assets." >&2
+            exit 1
           fi
-          gh release upload "$GITHUB_REF_NAME" release-manifest.txt --clobber
+          gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          gh release upload "$GITHUB_REF_NAME" release-manifest.txt release-manifest.txt.sigstore.json
