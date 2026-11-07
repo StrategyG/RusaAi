@@ -483,16 +483,33 @@ class PostgresTaskQueue:
                 WHERE job.id=cancelled.id
             """)
             conn.execute("""
-                UPDATE aicode_jobs
+                WITH candidate AS MATERIALIZED (
+                    SELECT id, tenant_id, task_id::text AS task_id
+                    FROM public.aicode_jobs
+                    WHERE status='running' AND lease_until < NOW()
+                      AND attempts >= max_attempts
+                    ORDER BY id
+                    LIMIT 1
+                ),
+                locked AS MATERIALIZED (
+                    SELECT candidate.id
+                    FROM candidate
+                    CROSS JOIN LATERAL (
+                        SELECT pg_advisory_xact_lock(
+                            hashtextextended(candidate.tenant_id || ':' || candidate.task_id, 0)
+                        )
+                    ) AS task_lock
+                )
+                UPDATE public.aicode_jobs AS job
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
-                WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
-                  AND NOT EXISTS (
-                      SELECT 1 FROM public.aicode_job_controls AS control
-                      WHERE control.tenant_id=aicode_jobs.tenant_id
-                        AND control.task_id=aicode_jobs.task_id
-                        AND control.cancel_requested_at IS NOT NULL
-                  )
+                FROM locked, public.aicode_job_controls AS control
+                WHERE job.id=locked.id
+                  AND control.tenant_id=job.tenant_id
+                  AND control.task_id=job.task_id
+                  AND control.cancel_requested_at IS NULL
+                  AND job.status='running' AND job.lease_until < NOW()
+                  AND job.attempts >= job.max_attempts
             """)
             row = conn.execute("""
                 WITH candidate AS (
