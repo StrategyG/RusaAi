@@ -8,3 +8,6 @@ pytest>=7.3,<10
 pytest-asyncio>=0.21,<2
 psycopg[binary]>=3.1,<4
 prometheus-client>=0.20,<1
+aio-pika>=9.4,<10
+aiokafka>=0.11,<1
+cryptography>=42,<47
