@@ -137,7 +137,6 @@ def test_outbox_claim_requires_lease_token_to_mark_published():
 
 def test_inbox_deduplicates_replay_and_applies_handler_once():
     tenant_id = f"test-{uuid4()}"
-    store = PostgresWorkflowStore(DSN)
     inbox = PostgresInbox(DSN)
     event = _event(tenant_id)
     calls = []
