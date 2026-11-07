@@ -126,6 +126,12 @@ def _production_database_dsn_errors(dsn: str) -> list[str]:
         errors.append("Sandbox executor database login must be rusa_sandbox_login")
     if not parsed.hostname or not parsed.password:
         errors.append("Sandbox executor database DSN must include a host and password")
+    if any(
+        marker in (parsed.hostname or "").lower()
+        or marker in (parsed.password or "").lower()
+        for marker in ("placeholder", "redacted", "example", "db_host", "secret")
+    ):
+        errors.append("Sandbox executor database DSN must not contain placeholder host/password values")
     if parse_qs(parsed.query).get("sslmode", [""])[-1] != "verify-full":
         errors.append("Sandbox executor database DSN must use sslmode=verify-full")
     return errors
@@ -195,7 +201,11 @@ def create_app(
 
     sandbox = sandbox or DockerSandbox(image=image, snapshot_root=snapshots)
     verifier = verifier or PostgresSandboxLeaseVerifier(database_dsn or "")
-    concurrency = max_concurrency or int(os.getenv("RUSA_SANDBOX_MAX_CONCURRENCY", "2"))
+    concurrency = (
+        max_concurrency
+        if max_concurrency is not None
+        else int(os.getenv("RUSA_SANDBOX_MAX_CONCURRENCY", "2"))
+    )
     if not 1 <= concurrency <= 16:
         raise RuntimeError("RUSA_SANDBOX_MAX_CONCURRENCY must be between 1 and 16")
 

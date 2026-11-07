@@ -1,5 +1,5 @@
 -- Minimal lease-verification capability for the isolated sandbox executor.
--- Apply after migrations 001-006 as a database/schema administrator.
+-- Apply after migrations 001-006; migration 007 (RAG/pgvector) is independent as a database/schema administrator.
 BEGIN;
 
 DO $$

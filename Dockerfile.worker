@@ -10,7 +10,7 @@ COPY rusa_agents ./rusa_agents
 COPY rusa_knowledge ./rusa_knowledge
 ARG RUSA_INSTALL_RAG=0
 RUN python -m pip install --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
-    && python -m pip install . \
+    && python -m pip install ".[github-app]" \
     && if [ "$RUSA_INSTALL_RAG" = "1" ]; then \
          python -m pip install -r requirements-rag-worker.txt; \
        fi
@@ -40,8 +40,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 LD_LIBRARY_PATH=/usr/local/lib RUSA_INSTALL_RAG=${RUSA_INSTALL_RAG}
 ARG DOCKER_CE_CLI_VERSION=5:29.9.3-1~debian.13~trixie
 
-# Install only Docker CLI (not dockerd, containerd, or runc). The worker talks
-# to the separately managed rootless daemon through the mounted Unix socket.
+# Docker CLI is retained for the local-development DockerSandbox path. Production
+# workers use the remote HTTPS executor and receive no Docker socket or DOCKER_HOST.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git \
     && apt-get upgrade -y --no-install-recommends \

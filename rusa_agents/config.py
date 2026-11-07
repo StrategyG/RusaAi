@@ -38,6 +38,9 @@ class RuntimeConfig:
     sandbox_executor_ca_file: str | None
     git_mirror_root: str | None
     github_token: str | None
+    github_app_id: int | None
+    github_app_private_key_file: str | None
+    tenant_github_installations: dict[str, int]
     model_base_url: str | None
     model_name: str
     tenant_repositories: dict[str, list[str]]
@@ -124,6 +127,27 @@ class RuntimeConfig:
         ):
             raise ValueError("RUSA_TENANT_REPOSITORIES must map tenant IDs to repository-name arrays")
 
+        try:
+            tenant_github_installations = json.loads(
+                os.getenv("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON", "{}")
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON must be a JSON object") from exc
+        if not isinstance(tenant_github_installations, dict) or any(
+            not isinstance(tenant, str)
+            or type(installation_id) is not int
+            or installation_id <= 0
+            for tenant, installation_id in tenant_github_installations.items()
+        ):
+            raise ValueError(
+                "RUSA_TENANT_GITHUB_INSTALLATIONS_JSON must map tenant IDs to positive installation IDs"
+            )
+        raw_github_app_id = os.getenv("RUSA_GITHUB_APP_ID", "").strip()
+        try:
+            github_app_id = int(raw_github_app_id) if raw_github_app_id else None
+        except ValueError as exc:
+            raise ValueError("RUSA_GITHUB_APP_ID must be a positive integer") from exc
+
         legacy = os.getenv("RUSA_API_KEY")
         if legacy:
             keys.setdefault(legacy, os.getenv("RUSA_DEFAULT_TENANT", "default"))
@@ -149,6 +173,9 @@ class RuntimeConfig:
             sandbox_executor_ca_file=os.getenv("RUSA_SANDBOX_EXECUTOR_CA_FILE"),
             git_mirror_root=os.getenv("RUSA_GIT_MIRROR_ROOT"),
             github_token=os.getenv("RUSA_GITHUB_TOKEN"),
+            github_app_id=github_app_id,
+            github_app_private_key_file=os.getenv("RUSA_GITHUB_APP_PRIVATE_KEY_FILE"),
+            tenant_github_installations=tenant_github_installations,
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
             tenant_repositories=tenant_repositories,
@@ -241,7 +268,9 @@ class RuntimeConfig:
             "RUSA_AUDIT_HMAC_KEY": self.audit_hmac_key,
             "RUSA_WORKSPACE_ROOT": self.workspace_root,
             "RUSA_GIT_MIRROR_ROOT": self.git_mirror_root,
-            "RUSA_GITHUB_TOKEN": self.github_token,
+            "RUSA_GITHUB_APP_ID": self.github_app_id,
+            "RUSA_GITHUB_APP_PRIVATE_KEY_FILE": self.github_app_private_key_file,
+            "RUSA_TENANT_GITHUB_INSTALLATIONS_JSON": self.tenant_github_installations,
             "RUSA_SANDBOX_IMAGE": self.sandbox_image,
             "RUSA_SANDBOX_EXECUTOR_URL": self.sandbox_executor_url,
             "RUSA_SANDBOX_EXECUTOR_TOKEN": self.sandbox_executor_token,
@@ -253,10 +282,14 @@ class RuntimeConfig:
             or self._looks_placeholder(self.audit_hmac_key)
         ):
             missing.append("RUSA_AUDIT_HMAC_KEY must be a real secret of at least 32 UTF-8 bytes")
-        if self.github_token and (
-            len(self.github_token.encode("utf-8")) < 20 or self._looks_placeholder(self.github_token)
-        ):
-            missing.append("RUSA_GITHUB_TOKEN must be a real fine-grained token, not a placeholder")
+        if self.github_token:
+            missing.append("RUSA_GITHUB_TOKEN is forbidden in production; use GitHub App installation tokens")
+        if self.github_app_id is not None and self.github_app_id <= 0:
+            missing.append("RUSA_GITHUB_APP_ID must be a positive integer")
+        if self.github_app_private_key_file and not Path(self.github_app_private_key_file).is_absolute():
+            missing.append("RUSA_GITHUB_APP_PRIVATE_KEY_FILE must be an absolute mounted secret path")
+        if set(self.tenant_github_installations) != set(self.tenant_repositories):
+            missing.append("RUSA_TENANT_GITHUB_INSTALLATIONS_JSON must map every configured tenant")
         if self.workspace_root and not Path(self.workspace_root).is_absolute():
             missing.append("RUSA_WORKSPACE_ROOT must be an absolute path")
         if self.git_mirror_root and not Path(self.git_mirror_root).is_absolute():

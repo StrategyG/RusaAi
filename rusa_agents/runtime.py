@@ -13,6 +13,7 @@ from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
+from .github_auth import GitHubAppTokenProvider
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
@@ -37,13 +38,22 @@ class AICodeRuntime:
             raise RuntimeError("RUSA_AUDIT_HMAC_KEY is required by the worker runtime")
         self.audit = PostgresAuditLog(self.config.worker_database_url, self.config.audit_hmac_key)
         self.task_policy_audit = PostgresTaskPolicyAudit(self.config.worker_database_url)
+        self.github_token_provider = (
+            GitHubAppTokenProvider.from_env(self.config.tenant_repositories)
+            if self.config.environment == "production"
+            else None
+        )
         self.workspace_manager = GitWorkspaceManager(
             self.config.git_mirror_root,
             self.config.workspace_root,
             github_token=self.config.github_token,
+            token_provider=self.github_token_provider,
         )
         self.provider = OpenAICompatibleProvider()
-        self.publisher = GitHubPublisher(self.config.github_token)
+        self.publisher = GitHubPublisher(
+            self.config.github_token,
+            token_provider=self.github_token_provider,
+        )
         if self.config.environment == "production":
             self.sandbox = SandboxExecutorClient(
                 url=self.config.sandbox_executor_url or "",
@@ -289,6 +299,11 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease)
+            await asyncio.to_thread(
+                self.publisher.prepare_token,
+                job.tenant_id,
+                task.repository.full_name,
+            )
             commit_sha = await asyncio.to_thread(
                 self.queue.publish_if_lease_owned,
                 job.id,
@@ -300,6 +315,7 @@ class AICodeRuntime:
                     task.repository.full_name,
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
+                    tenant_id=job.tenant_id,
                 ),
                 lease_seconds=900,
             )
@@ -319,6 +335,7 @@ class AICodeRuntime:
                         "\n\nAutomated test and security evidence is recorded in the task audit trail. "
                         "This pull request is draft and requires human review before merge."
                     ),
+                    tenant_id=job.tenant_id,
                 ),
                 lost_lease,
             )
@@ -338,6 +355,7 @@ class AICodeRuntime:
                 self.publisher.wait_for_ci(
                     task.repository.full_name, commit_sha,
                     timeout_seconds=ci_timeout, poll_seconds=ci_poll,
+                    tenant_id=job.tenant_id,
                 ),
                 lost_lease,
             )

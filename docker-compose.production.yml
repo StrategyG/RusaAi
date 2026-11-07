@@ -15,6 +15,9 @@ services:
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_GITHUB_TOKEN: ""
+      RUSA_GITHUB_APP_ID: ""
+      RUSA_GITHUB_APP_PRIVATE_KEY_FILE: ""
+      RUSA_TENANT_GITHUB_INSTALLATIONS_JSON: "{}"
       RUSA_SANDBOX_IMAGE: ""
       RUSA_SANDBOX_EXECUTOR_TOKEN: ""
       RUSA_SANDBOX_EXECUTOR_DATABASE_URL: ""
@@ -61,6 +64,10 @@ services:
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: "{}"
       RUSA_METRICS_API_KEY: ""
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_GITHUB_APP_ID: ${RUSA_GITHUB_APP_ID:?Set the GitHub App ID}
+      RUSA_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+      RUSA_TENANT_GITHUB_INSTALLATIONS_JSON: ${RUSA_TENANT_GITHUB_INSTALLATIONS_JSON:?Map each tenant to its GitHub App installation ID}
       RUSA_SANDBOX_EXECUTOR_URL: ${RUSA_SANDBOX_EXECUTOR_URL:-https://sandbox-executor:9101}
       RUSA_SANDBOX_EXECUTOR_TOKEN: ${RUSA_SANDBOX_EXECUTOR_TOKEN:?Set the worker-to-executor capability secret}
       RUSA_SANDBOX_EXECUTOR_CA_FILE: /run/secrets/sandbox-executor-ca.crt
@@ -86,6 +93,7 @@ services:
     volumes:
       - ${RUSA_WORKSPACE_ROOT:?Set RUSA_WORKSPACE_ROOT}:${RUSA_WORKSPACE_ROOT}
       - ${RUSA_GIT_MIRROR_ROOT:?Set RUSA_GIT_MIRROR_ROOT}:${RUSA_GIT_MIRROR_ROOT}
+      - ${RUSA_GITHUB_APP_PRIVATE_KEY_FILE:?Set the GitHub App private key file}:/run/secrets/github-app.pem:ro
       - ${RUSA_SANDBOX_EXECUTOR_CA_FILE:?Set the sandbox executor CA certificate}:/run/secrets/sandbox-executor-ca.crt:ro
     expose:
       - "9100"

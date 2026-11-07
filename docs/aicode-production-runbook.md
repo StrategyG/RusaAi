@@ -11,7 +11,7 @@ This runbook deploys AICode as a production candidate. Complete every preflight 
 - A separate writable snapshot volume shared at the same absolute host/container path with the rootless Docker daemon.
 - Registry containing immutable API, worker, sandbox-executor, and AICode sandbox images.
 - Self-hosted or approved OpenAI-compatible model endpoint.
-- Fine-grained GitHub token restricted to the repository allowlist.
+- GitHub App installed only on the authorized repositories, with a worker-only private key and per-tenant installation mapping.
 - TLS-terminating reverse proxy/ingress, Prometheus-compatible scraper, and alerting.
 
 Do not expose PostgreSQL, worker metrics, or the Docker socket publicly.
@@ -27,12 +27,12 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
-psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_aicode_sandbox_lease_verifier.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_aicode_sandbox_lease_verifier.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–007 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), and append-only task policy events. Apply migrations 001–008 in numeric order. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
-Create two independent login roles using a secret manager for passwords:
+Create three independent login roles using a secret manager for passwords:
 
 ```sql
 CREATE ROLE rusa_api_login LOGIN PASSWORD 'api-managed-secret' IN ROLE rusa_api_runtime;
@@ -41,28 +41,34 @@ CREATE ROLE rusa_sandbox_login LOGIN PASSWORD 'sandbox-managed-secret' IN ROLE r
 GRANT CONNECT ON DATABASE rusa TO rusa_api_login, rusa_worker_login, rusa_sandbox_login;
 ```
 
-Use `rusa_api_login` only in `RUSA_API_DATABASE_URL`, `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, and `rusa_sandbox_login` only in `RUSA_SANDBOX_EXECUTOR_DATABASE_URL`, all with `sslmode=verify-full`. The API container must not receive worker or sandbox DSNs. The worker must not receive the API or sandbox DSN, tenant API keys, or executor private key. The sandbox executor must not receive the worker DSN, GitHub token, model key, or audit HMAC key. Never use the schema owner or a PostgreSQL superuser in application containers.
+Use `rusa_api_login` only in `RUSA_API_DATABASE_URL`, `rusa_worker_login` only in `RUSA_WORKER_DATABASE_URL`, and `rusa_sandbox_login` only in `RUSA_SANDBOX_EXECUTOR_DATABASE_URL`, all with `sslmode=verify-full`. The API container must not receive worker or sandbox DSNs. The worker must not receive the API or sandbox DSN, tenant API keys, or executor private key. The sandbox executor must not receive the worker DSN, GitHub App private key or installation map, model key, or audit HMAC key. Never use the schema owner or a PostgreSQL superuser in application containers.
 
 Runtime permissions:
 - API role: tenant-scoped SELECT, INSERT, UPDATE on jobs; tenant-scoped rate-limit maintenance.
 - Worker role: cross-tenant SELECT/UPDATE on the durable queue; tenant-scoped memory; append to the immutable audit ledger and task policy event table.
 - Sandbox role: EXECUTE only on `rusa_verify_sandbox_lease`; no direct access to job rows, tenant data, or sequences. Its NOLOGIN BYPASSRLS guard can SELECT only the queue table and is not granted to application logins.
-- Neither role can perform DDL, grant privileges, or mutate existing audit records.
+- No runtime role can perform DDL, grant privileges, or mutate existing audit records.
 - The API role cannot read memory or audit tables.
 
 The database policies use transaction-local `rusa.tenant_id` context. The worker may claim jobs across tenants, but its memory operations remain tenant-scoped. Verify these boundaries with `tests/test_postgres_backends.py`; application-level WHERE clauses alone are not sufficient.
 
-## 3. GitHub token permissions
+## 3. GitHub App permissions and installation scoping
 
-Create a fine-grained token scoped only to each authorized repository:
+Create a dedicated GitHub App and install it only on the repositories that AICode is allowed to modify. Grant only:
 - Metadata: Read-only
 - Contents: Read and write
 - Pull requests: Read and write
 - Checks: Read-only
 
-Do not grant Actions administration, repository administration, secrets, environments, workflow write, or organization permissions. Branch protection must prevent direct writes to the default branch and require human review before merge.
+Do not grant Actions administration, repository administration, secrets, environments, workflow write, organization administration, or unrelated permissions. Branch protection must prevent direct writes to the default branch and require human review before merge.
 
-The repository origin must be exactly `https://github.com/{owner}/{repo}.git`. Embedded credentials, SSH remotes, alternate hosts, and redirects are rejected.
+Configure `RUSA_GITHUB_APP_ID`, mount the App private key as a read-only file at `RUSA_GITHUB_APP_PRIVATE_KEY_FILE`, and map each tenant to its own installation ID in `RUSA_TENANT_GITHUB_INSTALLATIONS_JSON`. The runtime rejects a missing tenant installation and rejects repositories outside that tenant's `RUSA_TENANT_REPOSITORIES` allowlist.
+
+For each repository operation, the worker requests a short-lived GitHub App installation token restricted to that one repository and the minimum required permissions. The token is used for mirror fetch, feature-branch push, draft PR creation, and check-run verification; it is not written to Git remotes or logs. Production must not set `RUSA_GITHUB_TOKEN`; that compatibility token is development-only.
+
+Mount the App private key into the worker only, owned by UID 10001 and mode 0400. Never mount it into the API, sandbox executor, or validation containers. Rotate the App private key through the secret manager and restart workers to reload it.
+
+Important residual boundary: the current worker process holds the App private key and the installation-ID map for all configured tenants because it consumes the cross-tenant queue. Repository-scoped, short-lived installation tokens reduce credential lifetime and scope, but do not isolate tenants against a fully compromised worker process. Stronger compromise isolation still requires per-tenant worker identities or a separate credential broker that issues tenant-bound tokens without exposing the App private key to workers.
 
 ## 4. Model endpoint requirements
 
@@ -147,7 +153,9 @@ RUSA_WORKER_DATABASE_URL=postgresql://rusa_worker_login:REDACTED@DB_HOST:5432/ru
 RUSA_AUDIT_HMAC_KEY=AT_LEAST_32_RANDOM_UTF8_BYTES
 RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
-RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
+RUSA_GITHUB_APP_ID=123456
+RUSA_GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github-app.pem
+RUSA_TENANT_GITHUB_INSTALLATIONS_JSON='{"tenant-acme":987654321}'
 RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
 RUSA_SANDBOX_EXECUTOR_URL=https://sandbox-executor:9101
 RUSA_SANDBOX_EXECUTOR_TOKEN=AT_LEAST_32_RANDOM_UTF8_BYTES
@@ -175,7 +183,6 @@ RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
 RUSA_SANDBOX_MAX_CONCURRENCY=2
 RUSA_DOCKER_GID=1001
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
-RUSA_DOCKER_GID=1001
 DOCKER_HOST=unix:///run/docker.sock
 ```
 
@@ -189,14 +196,15 @@ Generate raw API keys with a cryptographically secure generator, give each raw k
 
 The included Compose file is a development/single-host example. It uses a local PostgreSQL service and is not a complete HA production topology. For production:
 1. Replace the Compose PostgreSQL service with managed PostgreSQL.
-2. Use separate `rusa_api_login` and `rusa_worker_login` database users; never reuse the migration owner or a shared runtime login.
-3. Mount persistent mirror/workspace volumes at the configured paths.
-4. Mount the workspace root read/write into the worker and read-only into the sandbox executor.
-5. Mount the dedicated rootless Docker socket only into the sandbox executor; never into the worker.
-6. Mount the separate snapshot root into the executor at the identical host path visible to the rootless daemon.
-7. Mount the executor TLS certificate/key into the executor and the CA certificate into the worker.
-8. Restrict the API to a TLS-terminating reverse proxy and keep worker/executor ports on internal networks only.
-9. Restrict sandbox-executor egress at the host firewall to the managed database endpoint; do not allow general internet egress.
+2. Use separate `rusa_api_login`, `rusa_worker_login`, and `rusa_sandbox_login` database users; never reuse the migration owner or a shared runtime login.
+3. Mount the GitHub App private key read-only into the worker only; do not mount it into API or sandbox-executor.
+4. Mount persistent mirror/workspace volumes at the configured paths.
+5. Mount the workspace root read/write into the worker and read-only into the sandbox executor.
+6. Mount the dedicated rootless Docker socket only into the sandbox executor; never into the worker.
+7. Mount the separate snapshot root into the executor at the identical host path visible to the rootless daemon.
+8. Mount the executor TLS certificate/key into the executor and the CA certificate into the worker.
+9. Restrict the API to a TLS-terminating reverse proxy and keep worker/executor ports on internal networks only.
+10. Restrict sandbox-executor egress at the host firewall to the managed database endpoint; do not allow general internet egress.
 
 For local development only, use the bundled PostgreSQL stack:
 
@@ -277,7 +285,7 @@ Do not declare production certification until:
 - Migration and runtime role permissions are verified.
 - Tenant isolation tests show zero cross-tenant access.
 - Sandbox adversarial and resource exhaustion tests pass, including expired-lease rejection and confirmation that the worker has no Docker socket.
-- GitHub token is least-privilege and branch protection is active.
+- GitHub App permissions are least-privilege, tenant installation mapping is correct, and branch protection is active.
 - Model endpoint is reachable and passes task-quality evaluation.
 - Backup/restore and worker-restart drills pass.
 - Metrics are scraped and alerts are tested.

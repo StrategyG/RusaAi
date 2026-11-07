@@ -28,7 +28,9 @@ dev = [
   "pytest-asyncio>=0.21,<2",
   "ruff>=0.6,<1",
   "bandit>=1.7,<2",
+  "PyJWT[crypto]>=2.8,<3",
 ]
+github-app = ["PyJWT[crypto]>=2.8,<3"]
 model = [
   "torch>=2.2,<3",
   "transformers>=5.10.0,<6",

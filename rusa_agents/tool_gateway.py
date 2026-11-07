@@ -359,14 +359,17 @@ class WorkspaceToolGateway:
 
     PROTECTED_PARTS = {
         ".git", ".env", ".env.local", ".env.production", ".secrets",
-        ".ssh", ".aws", ".azure", "secrets", "credentials",
-        ".gitattributes", ".gitmodules", ".lfsconfig",
+        ".ssh", ".aws", ".azure", ".docker", ".kube", ".gcloud",
+        ".gnupg", ".config", ".terraform", ".venv", "venv", "node_modules",
+        "secrets", "credentials", ".gitattributes", ".gitmodules", ".lfsconfig",
     }
     PROTECTED_PREFIXES = (".github/workflows/",)
     PROTECTED_NAMES = {
         "id_rsa", "id_ed25519", "authorized_keys", "known_hosts",
         "credentials.json", "service-account.json", ".npmrc", ".pypirc",
-        ".netrc", "secrets.json", "token.json", ".gitattributes", ".gitmodules", ".lfsconfig",
+        ".netrc", ".git-credentials", "secrets.json", "token.json",
+        "kubeconfig", "application_default_credentials.json", ".dockerconfigjson",
+        ".gitattributes", ".gitmodules", ".lfsconfig",
     }
     PROTECTED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer", ".der", ".ppk", ".tfstate", ".tfvars"}
     PROTECTED_WRITE_NAMES = {
@@ -377,7 +380,7 @@ class WorkspaceToolGateway:
         "vercel.json", "netlify.toml",
         "setup.py", "setup.cfg", "package.json", "package-lock.json",
         "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
-        "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
+        "pipfile", "pipfile.lock", "cargo.toml", "go.mod", ".git-credentials",
     }
     PROTECTED_WRITE_PREFIXES = (
         ".github/", "migrations/", "schemas/", "llm-project/configs/",

@@ -198,7 +198,10 @@ jobs:
           RUSA_MODEL_NAME: rusa-ai
           RUSA_MODEL_API_KEY: ci-model-key
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
-          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
+          RUSA_GITHUB_TOKEN: ""
+          RUSA_GITHUB_APP_ID: "123456"
+          RUSA_GITHUB_APP_PRIVATE_KEY_FILE: /tmp/github-app.pem
+          RUSA_TENANT_GITHUB_INSTALLATIONS_JSON: '{"tenant-ci":987654321}'
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_SANDBOX_EXECUTOR_URL: https://sandbox-executor:9101
           RUSA_SANDBOX_EXECUTOR_TOKEN: ci-only-sandbox-executor-token-12345678901234567890

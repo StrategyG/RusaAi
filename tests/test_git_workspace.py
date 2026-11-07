@@ -55,7 +55,7 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace_root = tmp_path / "workspaces"
     manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, tenant_id="default": None)
     task = CodingTask(
         objective="test worktree",
         repository=RepositoryTarget(
@@ -135,6 +135,17 @@ def test_publisher_filters_deployment_configuration_paths(tmp_path):
         target = repository / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
+    with pytest.raises(RuntimeError, match="Protected or unsafe path"):
+        GitHubPublisher._safe_changed_paths(repository)
+
+
+def test_publisher_allows_regular_source_changes(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", cwd=repository)
+    target = repository / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("print('safe')")
     assert GitHubPublisher._safe_changed_paths(repository) == ["src/app.py"]
 
 
@@ -155,7 +166,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     git("clone", "--bare", str(source), str(mirror))
 
     manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, tenant_id="default": None)
 
     first = CodingTask(
         objective="first lease attempt",
@@ -327,6 +338,8 @@ def test_publisher_rejects_staged_secret_even_if_worktree_path_is_safe(tmp_path)
     repository = tmp_path / "repository"
     repository.mkdir()
     git("init", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
     (repository / "src.py").write_text("print('safe')")
     git("add", "src.py", cwd=repository)
     git("commit", "-m", "fixture", cwd=repository)
