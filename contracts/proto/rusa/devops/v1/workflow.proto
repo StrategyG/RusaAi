@@ -64,6 +64,7 @@ message ClaimTaskRequest {
   string task_id = 3;
   uint32 attempt = 4;
   string traceparent = 5;
+  string claim_id = 6;
 }
 
 message ClaimTaskResponse {
@@ -84,6 +85,7 @@ message HeartbeatTaskRequest {
   uint32 attempt = 4;
   uint64 lease_epoch = 5;
   string traceparent = 6;
+  string claim_id = 7;
 }
 
 message HeartbeatTaskResponse {
@@ -106,6 +108,7 @@ message ReportTaskProgressRequest {
   string stage = 8;
   string message_id = 9;
   string traceparent = 10;
+  string claim_id = 11;
 }
 
 message ReportTaskProgressResponse {
@@ -126,6 +129,7 @@ message ReportTaskResultRequest {
   string failure_category = 10;
   string side_effect = 11;
   string diagnostic_ref = 12;
+  string claim_id = 13;
 }
 
 message ReportTaskResultResponse {
