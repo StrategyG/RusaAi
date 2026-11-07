@@ -317,6 +317,18 @@ class PostgresInbox:
                 (tenant_id, consumer_id, event["message_id"], _sha256(event)),
             ).fetchone()
             if inserted is None:
+                existing = conn.execute(
+                    """
+                    SELECT envelope_sha256
+                    FROM public.devops_event_inbox
+                    WHERE tenant_id=%s AND consumer_id=%s AND message_id=%s
+                    """,
+                    (tenant_id, consumer_id, event["message_id"]),
+                ).fetchone()
+                if existing is None or existing[0] != _sha256(event):
+                    raise ValueError(
+                        "message_id was replayed with a different event envelope"
+                    )
                 return False
             handler(conn, event)
         return True
