@@ -53,6 +53,7 @@ if [[ "${1:-}" == "compose" ]]; then
   case " $* " in
     *" ps -q api "*) printf 'api-container\n' ;;
     *" ps -q worker "*) printf 'worker-container\n' ;;
+    *" ps -q qa "*) printf 'qa-container\n' ;;
     *" ps -q rusa-mcp "*) printf 'mcp-container\n' ;;
     *) : ;;
   esac
