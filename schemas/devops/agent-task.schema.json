@@ -169,7 +169,8 @@
         "allowed_tools",
         "network_access",
         "write_scope",
-        "approval_required"
+        "approval_required",
+        "budget"
       ],
       "properties": {
         "allowed_tools": {
@@ -179,7 +180,38 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 128
+            "maxLength": 128,
+            "enum": [
+              "alerts.read",
+              "artifact.read",
+              "artifact.write",
+              "audit.read",
+              "build.execute",
+              "deployment.execute",
+              "documentation.write",
+              "evidence.read",
+              "evidence.write",
+              "health.read",
+              "incident.write",
+              "issue.read",
+              "logs.read",
+              "manifest.write",
+              "metrics.read",
+              "plan.write",
+              "policy.read",
+              "release.prepare",
+              "release.read",
+              "repository.branch.write",
+              "repository.read",
+              "runbook.execute",
+              "runbook.read",
+              "sbom.read",
+              "sbom.write",
+              "task.create",
+              "test.execute",
+              "test.write",
+              "traces.read"
+            ]
           }
         },
         "network_access": {
@@ -202,7 +234,8 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 512
+            "maxLength": 512,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
           }
         },
         "approval_required": {
@@ -243,7 +276,16 @@
               "minimum": 1,
               "maximum": 86400
             }
-          }
+          },
+          "required": [
+            "max_cost_usd",
+            "max_tool_calls",
+            "max_runtime_seconds"
+          ]
+        },
+        "approval_ref": {
+          "type": "string",
+          "format": "uri"
         }
       },
       "allOf": [
@@ -470,7 +512,8 @@
             "required": [
               "commit_sha",
               "test_plan_ref",
-              "acceptance_criteria_ref"
+              "acceptance_criteria_ref",
+              "artifact_digest"
             ]
           }
         }
@@ -527,23 +570,9 @@
           "input": {
             "required": [
               "release_manifest_ref",
-              "environment"
+              "environment",
+              "artifact_digest"
             ]
-          },
-          "constraints": {
-            "required": [
-              "approval_scope"
-            ],
-            "properties": {
-              "approval_required": {
-                "const": true
-              },
-              "approval_scope": {
-                "contains": {
-                  "const": "deploy"
-                }
-              }
-            }
           }
         }
       }
@@ -636,6 +665,337 @@
             "properties": {
               "write_scope": {
                 "maxItems": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_plan_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "repository.read",
+                    "issue.read",
+                    "artifact.read",
+                    "task.create",
+                    "plan.write"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_code_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "repository.read",
+                    "issue.read",
+                    "artifact.read",
+                    "repository.branch.write",
+                    "test.write",
+                    "documentation.write"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_build_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "repository.read",
+                    "artifact.read",
+                    "build.execute",
+                    "artifact.write",
+                    "sbom.write"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_test_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "repository.read",
+                    "artifact.read",
+                    "test.execute",
+                    "evidence.write",
+                    "metrics.read"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_release_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "artifact.read",
+                    "evidence.read",
+                    "release.prepare",
+                    "manifest.write",
+                    "sbom.read"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_deploy_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "artifact.read",
+                    "release.read",
+                    "deployment.execute",
+                    "health.read",
+                    "runbook.read"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_operate_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "metrics.read",
+                    "logs.read",
+                    "runbook.read",
+                    "runbook.execute",
+                    "incident.write"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_monitor_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "metrics.read",
+                    "logs.read",
+                    "traces.read",
+                    "alerts.read"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_security_guard_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "allowed_tools": {
+                "items": {
+                  "enum": [
+                    "repository.read",
+                    "issue.read",
+                    "artifact.read",
+                    "evidence.read",
+                    "policy.read",
+                    "audit.read",
+                    "metrics.read",
+                    "logs.read",
+                    "traces.read"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "const": "deploy"
+          },
+          "input": {
+            "properties": {
+              "environment": {
+                "const": "production"
+              }
+            },
+            "required": [
+              "environment"
+            ]
+          }
+        },
+        "required": [
+          "stage",
+          "input"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "required": [
+              "approval_required",
+              "approval_scope",
+              "approval_ref"
+            ],
+            "properties": {
+              "approval_required": {
+                "const": true
+              },
+              "approval_scope": {
+                "contains": {
+                  "const": "deploy"
+                }
+              },
+              "approval_ref": {
+                "type": "string",
+                "format": "uri"
               }
             }
           }
