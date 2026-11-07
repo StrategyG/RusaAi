@@ -588,7 +588,8 @@ async def readiness_check():
     if inference_provider is None:
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
     try:
-        await inference_provider.check_ready()
+        if await inference_provider.check_ready() is not True:
+            raise RuntimeError("Inference provider did not confirm readiness")
     except Exception:
         logger.exception("Inference readiness probe failed")
         raise HTTPException(status_code=503, detail="Inference backend is unavailable") from None
