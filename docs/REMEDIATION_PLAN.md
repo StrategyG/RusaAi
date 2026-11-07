@@ -98,3 +98,31 @@ A score moves only when the evidence in section 2 is linked from this file. This
 ## 6. Limits of this review
 - Repository settings (branch protection, rulesets, secret scanning) were not visible to the reviewer. Scores assume they are not enforced until proven.
 - Only the policy regression test was run, locally, with a minimal runner because pytest is not available in the review environment. Results: 7 of 7 pass against the replacement `policy.py`; the empty-allowlist test fails against the previous `policy.py`. No other test was run. CI on any change is the verifier.
+
+## 7. Implementation tracking — 2026-11-07
+
+This section records delivered code and verification evidence. It does not change the calibrated scores in section 1; section 2 completion evidence is still required.
+
+### Phase 0 and Phase 1 — code-level changes in PR #63
+
+- Commit `8429360c0ecf13bd4ea7f781f49ff5f163938079` added the fail-closed policy correction, explicit environment validation, development principal fix, explicit RAG embedding endpoint, Python 3.12 CI alignment, immutable GitHub Action references, expanded Bandit scope, CODEOWNERS, pull-request checklist, and the migration-ledger correction.
+- The publisher now requires the RAG/MCP integration job as well as the core and production-image jobs before accepting CI evidence.
+- The sandbox compile, Ruff, and Bandit profiles cover the same application packages as CI.
+- External Phase 1 gates remain open. The latest repository read reports `main.protected=false` and no repository rulesets. PR #63 has no submitted review. Secret scanning, push protection, Dependabot, code scanning, and token scope still require owner-side verification.
+
+### Phase 2 — bounded queue lock waits delivered; reliability refactor remains open
+
+- Commit `93f29e05963dd7187bb9ca45b875de8949e2ebc9` adds a 1.5-second PostgreSQL `lock_timeout` to cancel, retry, and heartbeat operations.
+- Heartbeat treats PostgreSQL lock-timeout SQLSTATE `55P03` as a reason to re-check lease ownership without taking a row lock. This is a compatibility measure for the current publisher, which still holds the job row lock during the bounded GitHub push; it is not a substitute for moving remote side effects outside the transaction.
+- Commit `00b86fed6a6f906937f7c962238725589fa2d3bd` makes the new PostgreSQL race tests claim their exact task IDs, avoiding interference from other tenants' queued fixtures.
+- CI run [42372470632](https://github.com/StrategyG/RusaAi/actions/runs/42372470632) passed all three required jobs. The core test job reported 175 passed and 5 skipped; RAG/MCP integration, the full test suite in the isolated sandbox, production image builds, Trivy checks, and production Compose validation also passed.
+
+### Phase 2 — still required
+
+- Move GitHub publication outside the open PostgreSQL transaction, introduce a `publishing` state and fencing token, use deterministic per-task branch names, and reconcile remote branch SHA and existing PR after worker crashes or ambiguous GitHub responses.
+- Preserve attempt history and prior result/error data; replace retry-as-approval with an explicit approval bound to a commit SHA and PR.
+- Read a database-backed worker kill switch on every loop and verify graceful SIGTERM draining.
+- Add chaos tests for worker termination during publication, database disconnects, and GitHub timeouts; prove no duplicate PRs.
+- Complete a backup/restore drill and activate the required operational alerts.
+
+**Score rule:** no score is increased by these progress notes. Reliability and main-branch security remain below their Phase 2 targets until the complete evidence listed in section 2 is linked.
