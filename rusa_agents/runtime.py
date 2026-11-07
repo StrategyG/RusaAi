@@ -444,9 +444,16 @@ class AICodeRuntime:
             "git_publication": side_effect_state(
                 publication_started, publication_finished
             ),
+            "git_publication_cleanup": (
+                "reconciliation_required" if publication_started else "not_required"
+            ),
             "pull_request_creation": side_effect_state(
                 pr_creation_started, pr_creation_finished
             ),
+            "pull_request_cleanup": (
+                "reconciliation_required" if pr_creation_started else "not_required"
+            ),
+            "reconciliation_required": publication_started or pr_creation_started,
         }
         try:
             marked = await asyncio.to_thread(
