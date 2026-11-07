@@ -340,6 +340,18 @@ class WorkspaceToolGateway:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
             raise ValueError("workspace must be an existing directory")
+        self._qa_baseline_paths: set[str] = set()
+        for directory_name in ("tests", "test"):
+            test_root = self.workspace / directory_name
+            if test_root.is_dir() and not test_root.is_symlink():
+                for item in test_root.rglob("*"):
+                    if item.is_file() and not item.is_symlink():
+                        self._qa_baseline_paths.add(
+                            item.relative_to(self.workspace).as_posix().lower()
+                        )
+        for item in self.workspace.iterdir():
+            if item.is_file() and not item.is_symlink() and item.name.lower().startswith("test_"):
+                self._qa_baseline_paths.add(item.relative_to(self.workspace).as_posix().lower())
         self.sandbox = sandbox or DockerSandbox()
         self.max_file_bytes = max_file_bytes
         if knowledge_service is not None and (
@@ -408,10 +420,7 @@ class WorkspaceToolGateway:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
-        existing_qa_baseline = (
-            relative.lower().startswith(("tests/", "test/"))
-            or target.name.lower().startswith("test_")
-        ) and target.exists()
+        existing_qa_baseline = relative.lower() in self._qa_baseline_paths
         if (
             existing_qa_baseline
             or relative.lower() in self.PROTECTED_WRITE_PATHS
