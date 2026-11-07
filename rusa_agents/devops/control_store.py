@@ -90,15 +90,16 @@ class PostgresWorkflowControlStore:
     def __init__(
         self,
         *,
-        api_dsn: str,
-        worker_dsn: str,
+        api_dsn: str | None = None,
+        worker_dsn: str | None = None,
         lease_seconds: int = 30,
         statement_timeout_ms: int = 2000,
     ):
-        if not isinstance(api_dsn, str) or not api_dsn.strip():
-            raise ValueError("API runtime PostgreSQL DSN is required")
-        if not isinstance(worker_dsn, str) or not worker_dsn.strip():
-            raise ValueError("worker runtime PostgreSQL DSN is required")
+        if not (
+            isinstance(api_dsn, str) and api_dsn.strip()
+            or isinstance(worker_dsn, str) and worker_dsn.strip()
+        ):
+            raise ValueError("at least one scoped PostgreSQL runtime DSN is required")
         if isinstance(lease_seconds, bool) or not 1 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be between 1 and 3600")
         if (
@@ -112,7 +113,9 @@ class PostgresWorkflowControlStore:
         self.statement_timeout_ms = statement_timeout_ms
 
     @staticmethod
-    def _connect(dsn: str):
+    def _connect(dsn: str | None):
+        if not dsn:
+            raise PermissionError("this gRPC service profile does not hold the required database role")
         try:
             import psycopg
         except ImportError as exc:
