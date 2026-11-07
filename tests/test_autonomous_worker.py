@@ -15,11 +15,14 @@ class StubProvider:
 
 
 class StubGateway:
-    def __init__(self):
+    def __init__(self, results=None):
         self.calls = []
+        self.results = list(results or [])
 
     def execute(self, action, role):
         self.calls.append((action, role))
+        if self.results:
+            return self.results.pop(0)
         return ToolResult(True, "src/main.py", {"count": 1})
 
 
@@ -97,3 +100,31 @@ def test_autonomous_worker_cannot_supply_forged_test_evidence():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert not result.evidence
+
+
+def test_autonomous_worker_does_not_report_success_after_failed_tool():
+    gateway = StubGateway([ToolResult(False, "File not found")])
+    provider = StubProvider(json.dumps({
+        "message": "Inspection complete",
+        "actions": [{"name": "read_file", "arguments": {"path": "missing.py"}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert not result.success
+    assert result.failure_kind == "tool"
+    assert any("File not found" in blocker for blocker in result.blockers)
+
+
+def test_autonomous_worker_retries_transient_tool_failure():
+    gateway = StubGateway([
+        ToolResult(False, "temporary unavailable"),
+        ToolResult(True, "src/main.py", {"count": 1}),
+    ])
+    provider = StubProvider(json.dumps({
+        "message": "Inspection complete",
+        "actions": [{"name": "list_files", "arguments": {"path": "."}}],
+        "done": True,
+    }))
+    result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
+    assert result.success
+    assert len(gateway.calls) == 2
