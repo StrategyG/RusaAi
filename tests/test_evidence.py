@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
 import pytest
-from rusa_agents.evidence import EvidenceAttestor
 
+from rusa_agents.evidence import EvidenceAttestor
 
 KEY = "enterprise-qa-test-master-key-" + "x" * 32
 
