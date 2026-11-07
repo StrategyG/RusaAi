@@ -80,3 +80,31 @@ def validate_agent_result(payload: dict[str, Any]) -> None:
 
 def validate_workflow_event(payload: dict[str, Any]) -> None:
     validate_contract("workflow_event", payload)
+
+
+def validate_agent_result_for_task(
+    task: dict[str, Any], result: dict[str, Any]
+) -> None:
+    """Validate result identity and immutable evidence against its originating task."""
+    validate_agent_task(task)
+    validate_agent_result(result)
+
+    for field in ("task_id", "workflow_id", "tenant_id", "agent_id", "stage"):
+        if task.get(field) != result.get(field):
+            raise ContractValidationError(
+                f"agent result does not match originating task field: {field}"
+            )
+
+    task_input = task.get("input", {})
+    result_audit = result.get("audit", {})
+    expected_commit = task_input.get("commit_sha")
+    if expected_commit is not None and result_audit.get("source_commit") != expected_commit:
+        raise ContractValidationError(
+            "agent result source_commit does not match the task commit_sha"
+        )
+
+    expected_digest = task_input.get("artifact_digest")
+    if expected_digest is not None and result_audit.get("artifact_digest") != expected_digest:
+        raise ContractValidationError(
+            "agent result artifact_digest does not match the task artifact_digest"
+        )
