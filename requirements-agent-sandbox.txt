@@ -11,3 +11,4 @@ prometheus-client>=0.20,<1
 aio-pika>=9.4,<10
 aiokafka>=0.11,<1
 cryptography>=42,<47
+grpcio-tools>=1.62,<2
