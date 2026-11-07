@@ -856,3 +856,24 @@ def test_draft_pr_creation_rejects_unexpected_head_repository(monkeypatch):
                 f"RUSA-AI-Task-ID: {task_id}",
             )
         )
+
+
+def test_git_command_is_not_spawned_when_lease_is_already_revoked(tmp_path):
+    marker = tmp_path / "command-started"
+    command = [
+        sys.executable,
+        "-c",
+        "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('started')",
+        str(marker),
+    ]
+
+    with pytest.raises(RuntimeError, match="lease was lost or cancelled"):
+        _run_bounded_process(
+            command,
+            cwd=str(tmp_path),
+            env=os.environ.copy(),
+            timeout_seconds=10,
+            cancellation_check=lambda: False,
+        )
+
+    assert not marker.exists()
