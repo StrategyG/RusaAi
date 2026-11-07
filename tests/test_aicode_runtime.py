@@ -47,6 +47,7 @@ class StubWorker:
     async def run(self, task, prior_results):
         return WorkerResult(
             role=self.role, summary="ok", success=True,
+            artifacts=["src/main.py"] if self.role == WorkerRole.DEVELOPER else [],
             evidence=stamped_evidence(task, self.role, self.evidence),
         )
 
@@ -268,6 +269,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"implementation pass {self.calls}",
                 success=True,
+                artifacts=["src/main.py"],
             )
 
     class FlakyTester(StubWorker):
@@ -380,7 +382,9 @@ def test_orchestrator_repair_receives_quality_diagnostics(tmp_path):
                     (item for item in prior_results if item.failure_kind == "quality_gate"),
                     None,
                 )
-            return WorkerResult(role=self.role, summary="implemented", success=True)
+            return WorkerResult(
+                role=self.role, summary="implemented", success=True, artifacts=["src/main.py"]
+            )
 
     class OneFailTester(StubWorker):
         def __init__(self):
@@ -436,3 +440,22 @@ def test_orchestrator_requires_complete_task_bound_provenance(tmp_path):
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.AWAITING_APPROVAL
     assert any("invalid provenance" in error for error in record.errors)
+
+
+def test_orchestrator_requires_a_changed_developer_artifact(tmp_path):
+    class NoopDeveloper(StubWorker):
+        async def run(self, task, prior_results):
+            return WorkerResult(role=self.role, summary="No code changes needed", success=True)
+
+    configured = workers()
+    configured[2] = NoopDeveloper(WorkerRole.DEVELOPER)
+    orchestrator = AICodeOrchestrator(
+        configured,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("no changed workspace artifacts" in error for error in record.errors)
+    assert not any(result.role == WorkerRole.TESTER for result in record.results)
