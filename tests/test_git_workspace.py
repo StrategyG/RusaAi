@@ -614,3 +614,51 @@ def test_draft_pr_creation_race_reconciles_github_422(monkeypatch):
     )
 
     assert url == existing_pr["html_url"]
+
+
+
+def test_draft_pr_recovery_refuses_legacy_lease_specific_head_branch(monkeypatch):
+    task_id = "13572468-2468-4135-8246-813572468135"
+    legacy_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/126",
+        "body": f"Task ID: {task_id}",
+        "head": {"ref": "feature/aicode/old-lease-attempt"},
+        "base": {"ref": "main"},
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [legacy_pr]
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            return FakeResponse()
+
+        async def post(self, *_args, **_kwargs):
+            raise AssertionError("legacy branch PR must be reconciled manually")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(ValueError, match="lease-specific branch"):
+        asyncio.run(
+            publisher.create_or_get_draft_pr(
+                "StrategyG/RusaAi",
+                "feature/aicode/stable-task",
+                "main",
+                "Recovered task",
+                f"Task ID: {task_id}",
+            )
+        )
