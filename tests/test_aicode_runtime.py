@@ -8,6 +8,33 @@ from rusa_agents.contracts import (
     WorkerResult,
     WorkerRole,
 )
+from rusa_agents.evidence import EvidenceAttestor
+
+
+TEST_EVIDENCE_KEY = "qa-test-attestation-key-" + "x" * 32
+TEST_TASK_ID = "00000000-0000-4000-8000-000000000001"
+
+
+def _attestation(
+    profile,
+    role,
+    *,
+    task_id=TEST_TASK_ID,
+    tenant_id="default",
+    exit_code=0,
+    snapshot_sha256="a" * 64,
+):
+    return EvidenceAttestor(TEST_EVIDENCE_KEY).attest(
+        profile=profile,
+        exit_code=exit_code,
+        image="sandbox:test",
+        snapshot_sha256=snapshot_sha256,
+        task_id=task_id,
+        tenant_id=tenant_id,
+        worker_role=role.value,
+    )
+
+
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
@@ -27,15 +54,16 @@ def task():
         objective="Implement AICode",
         repository=RepositoryTarget("StrategyG/RusaAi", "main", "feature/test"),
         acceptance_criteria=["Tests pass", "Security review passes"],
+        task_id=TEST_TASK_ID,
     )
 
 
 def workers(with_evidence=True):
-    evidence = {"check:pytest": {"exit_code": 0}} if with_evidence else {}
+    evidence = {"check:pytest": _attestation("pytest", WorkerRole.TESTER)} if with_evidence else {}
     security = {
-        "check:bandit": {"exit_code": 0},
-        "check:ruff": {"exit_code": 0},
-        "check:compile": {"exit_code": 0},
+        "check:bandit": _attestation("bandit", WorkerRole.SECURITY),
+        "check:ruff": _attestation("ruff", WorkerRole.SECURITY),
+        "check:compile": _attestation("compile", WorkerRole.SECURITY),
     } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
@@ -82,6 +110,8 @@ def test_orchestrator_requires_evidence_before_success(tmp_path):
     orchestrator = AICodeOrchestrator(
         workers(), memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
     )
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.SUCCEEDED
@@ -91,6 +121,8 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
     orchestrator = AICodeOrchestrator(
         workers(False), memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
     )
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.AWAITING_APPROVAL
@@ -98,11 +130,15 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
 
 def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     failing = workers()
-    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    failing[-2].evidence = {
+        "check:pytest": _attestation("pytest", WorkerRole.TESTER, exit_code=1)
+    }
     orchestrator = AICodeOrchestrator(
         failing,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
     )
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.BLOCKED
@@ -113,20 +149,30 @@ def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
 def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
     class HistoryWorker(StubWorker):
         def __init__(self, role):
-            evidence = {}
-            if role == WorkerRole.TESTER:
-                evidence = {"check:pytest": {"exit_code": 0}}
-            elif role == WorkerRole.SECURITY:
-                evidence = {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
-                }
-            super().__init__(role, evidence)
+            super().__init__(role)
             self.seen_prior = []
 
         async def run(self, task, prior_results):
             self.seen_prior = list(prior_results)
+            tenant_id = task.metadata.get("tenant_id", "default")
+            if self.role == WorkerRole.TESTER:
+                self.evidence = {
+                    "check:pytest": _attestation(
+                        "pytest", self.role, task_id=task.task_id, tenant_id=tenant_id
+                    )
+                }
+            elif self.role == WorkerRole.SECURITY:
+                self.evidence = {
+                    "check:bandit": _attestation(
+                        "bandit", self.role, task_id=task.task_id, tenant_id=tenant_id
+                    ),
+                    "check:ruff": _attestation(
+                        "ruff", self.role, task_id=task.task_id, tenant_id=tenant_id
+                    ),
+                    "check:compile": _attestation(
+                        "compile", self.role, task_id=task.task_id, tenant_id=tenant_id
+                    ),
+                }
             return await super().run(task, prior_results)
 
     memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
@@ -159,6 +205,8 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
         history_workers,
         memory=memory,
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
     )
     record = asyncio.run(orchestrator.run(task_with_history))
     assert history_workers[0].seen_prior
@@ -176,6 +224,8 @@ def test_orchestrator_fails_cleanly_if_memory_lookup_fails(tmp_path):
         workers(),
         memory=BrokenMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
     )
     record = asyncio.run(orchestrator.run(task()))
     assert record.state == TaskState.FAILED
@@ -199,16 +249,18 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
     for role in AICodeOrchestrator.PIPELINE:
         if role == WorkerRole.TESTER:
             evidence_workers.append(
-                ParallelWorker(role, {"check:pytest": {"exit_code": 0}})
+                ParallelWorker(
+                    role, {"check:pytest": _attestation("pytest", WorkerRole.TESTER)}
+                )
             )
         elif role == WorkerRole.SECURITY:
             evidence_workers.append(
                 ParallelWorker(
                     role,
                     {
-                        "check:bandit": {"exit_code": 0},
-                        "check:ruff": {"exit_code": 0},
-                        "check:compile": {"exit_code": 0},
+                        "check:bandit": _attestation("bandit", WorkerRole.SECURITY),
+                        "check:ruff": _attestation("ruff", WorkerRole.SECURITY),
+                        "check:compile": _attestation("compile", WorkerRole.SECURITY),
                     },
                 )
             )
@@ -219,6 +271,8 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
         evidence_workers,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
         max_parallel_workers=2,
         max_repair_cycles=0,
     )
@@ -252,7 +306,15 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                 role=self.role,
                 summary=f"test pass {self.calls}",
                 success=True,
-                evidence={"check:pytest": {"exit_code": 1 if self.calls == 1 else 0}},
+                evidence={
+                    "check:pytest": _attestation(
+                        "pytest",
+                        self.role,
+                        task_id=task.task_id,
+                        tenant_id=task.metadata.get("tenant_id", "default"),
+                        exit_code=1 if self.calls == 1 else 0,
+                    )
+                },
             )
 
     class CountingSecurity(StubWorker):
@@ -260,9 +322,9 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
             super().__init__(
                 WorkerRole.SECURITY,
                 {
-                    "check:bandit": {"exit_code": 0},
-                    "check:ruff": {"exit_code": 0},
-                    "check:compile": {"exit_code": 0},
+                    "check:bandit": _attestation("bandit", WorkerRole.SECURITY),
+                    "check:ruff": _attestation("ruff", WorkerRole.SECURITY),
+                    "check:compile": _attestation("compile", WorkerRole.SECURITY),
                 },
             )
             self.calls = 0
@@ -286,6 +348,8 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
         configured,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
         audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
         max_repair_cycles=1,
     )
     record = asyncio.run(orchestrator.run(task()))
@@ -297,3 +361,66 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_orchestrator_rejects_unsigned_worker_claims(tmp_path):
+    unsigned = workers()
+    unsigned[-2].evidence = {"check:pytest": {"exit_code": 0}}
+    orchestrator = AICodeOrchestrator(
+        unsigned,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("Invalid or untrusted QA attestations" in error for error in record.errors)
+
+
+def test_orchestrator_rejects_attestation_from_another_tenant(tmp_path):
+    mismatched = workers()
+    mismatched[-2].evidence = {
+        "check:pytest": _attestation(
+            "pytest", WorkerRole.TESTER, tenant_id="tenant-other"
+        )
+    }
+    orchestrator = AICodeOrchestrator(
+        mismatched,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("check:pytest" in error for error in record.errors)
+
+
+def test_orchestrator_rejects_qa_profiles_for_different_snapshots(tmp_path):
+    mismatched = workers()
+    mismatched[-1].evidence["check:ruff"] = _attestation(
+        "ruff", WorkerRole.SECURITY, snapshot_sha256="b" * 64
+    )
+    orchestrator = AICodeOrchestrator(
+        mismatched,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        evidence_key=TEST_EVIDENCE_KEY,
+        expected_sandbox_image="sandbox:test",
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("same immutable workspace snapshot" in error for error in record.errors)
+
+
+def test_orchestrator_holds_when_evidence_verifier_is_not_configured(tmp_path):
+    orchestrator = AICodeOrchestrator(
+        workers(),
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.AWAITING_APPROVAL
+    assert any("verifier is not configured" in error for error in record.errors)
