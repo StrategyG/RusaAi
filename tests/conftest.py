@@ -27,7 +27,11 @@ def apply_postgres_migrations_for_integration_suite():
         if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
         and (
             int(path.name.split("_", 1)[0]) <= 6
-            or path.name == "008_devops_durable_communication.sql"
+            or path.name in {
+                "008_devops_durable_communication.sql",
+        "009_devops_task_leases_and_cancellation.sql",
+                "009_devops_task_leases_and_cancellation.sql",
+            }
         )
     )
     expected = [
