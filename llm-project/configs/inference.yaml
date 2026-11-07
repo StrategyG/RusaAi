@@ -26,7 +26,8 @@ runtime:
   external_provider:
     supported: true
     endpoint_environment_variable: RUSA_MODEL_BASE_URL
-    selected_when_local_artifact_is_not_configured: true
+    selected_when_local_artifact_is_not_configured_and_endpoint_is_configured: true
+    otherwise_inference_is_unavailable: true
 
 evidence:
   model_manifest_sha256: null
