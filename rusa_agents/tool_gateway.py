@@ -417,6 +417,16 @@ class WorkspaceToolGateway:
             or any(relative.lower().startswith(prefix.lower()) for prefix in self.PROTECTED_WRITE_PREFIXES)
         ):
             raise ToolDenied("Dependency, deployment, schema, and migration files require human review")
+        encoded_content = content.encode("utf-8")
+        if target.exists():
+            if not target.is_file():
+                raise ToolDenied("Write target must be a regular file")
+            if target.stat().st_size == len(encoded_content) and target.read_bytes() == encoded_content:
+                return ToolResult(
+                    True,
+                    f"No changes required for {raw_path}",
+                    {"path": raw_path, "bytes": len(encoded_content), "changed": False},
+                )
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
         try:
@@ -427,7 +437,7 @@ class WorkspaceToolGateway:
         return ToolResult(
             True,
             f"Wrote {raw_path}",
-            {"path": raw_path, "bytes": len(content.encode("utf-8"))},
+            {"path": raw_path, "bytes": len(encoded_content), "changed": True},
         )
 
     def list_files(self, raw_path: str = ".") -> ToolResult:
