@@ -155,7 +155,7 @@ RUSA_DOCKER_GID=1001
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
 
-Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is not forcibly terminated; cancel it through the API or let it reach a safe checkpoint. Existing task status, cancellation, health, and metrics endpoints remain available.
+Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is stopped cooperatively through the task cancellation API. A running task reports `cancellation_requested` until its worker acknowledges the stop; queued and approval-paused tasks become `cancelled` immediately. If a worker crashes while cancellation is pending, lease recovery marks the task cancelled and flags external side effects for reconciliation. Existing task status, cancellation, health, and metrics endpoints remain available.
 
 Generate raw API keys with a cryptographically secure generator, give each raw key only to its client through a secret manager, and configure only its lowercase SHA-256 digest in `RUSA_API_KEYS_JSON`. Each registry claim must include a unique subject, tenant_id, and one or more supported roles (`platform_admin`, `tenant_admin`, `developer`, `read_only`). Production rejects legacy raw `RUSA_API_KEYS` and `RUSA_API_KEY`. Keep the audit HMAC key at least 32 UTF-8 bytes. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
 
@@ -214,7 +214,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments. Manual retry is bounded to three retry cycles per task; transient worker failures use capped exponential backoff with full jitter, while blocked and permanent failures are not automatically retried.
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
@@ -342,7 +342,9 @@ is a secondary operational stream; PostgreSQL is the durable audit record.
 The worker queue role is intentionally a trusted cross-tenant consumer so it
 can claim jobs. Before opening a workspace it validates the row's tenant
 repository allowlist and current lease. Queue mutations remain fenced by
-tenant, worker ID, lease token, running status, and lease expiry. The custom
+tenant, worker ID, lease token, running status, lease expiry, and the independent
+durable cancellation control. Worker tool actions recheck active lease ownership
+before execution and immediately before workspace writes. The custom
 transaction-local `rusa.tenant_id` setting is a defense against accidental
 unscoped SQL, not a cryptographic boundary against arbitrary SQL execution
 under a shared runtime login. Keep all SQL parameterized and do not expose
