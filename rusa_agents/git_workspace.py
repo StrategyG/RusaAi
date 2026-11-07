@@ -71,7 +71,12 @@ class GitWorkspaceManager:
             args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120
         )
 
-    def refresh(self, repository: str, base_branch: str) -> None:
+    def refresh(
+        self,
+        repository: str,
+        base_branch: str,
+        publish_branch: str | None = None,
+    ) -> None:
         owner, repo = repository.split("/", 1)
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
@@ -109,6 +114,33 @@ class GitWorkspaceManager:
             )
             if fetched.returncode:
                 raise RuntimeError(f"Git mirror refresh failed: {fetched.stderr[-2000:]}")
+            if publish_branch:
+                remote_branch = self._run(
+                    [
+                        "git", "-c", "credential.helper=", "--git-dir", str(mirror),
+                        "ls-remote", "--heads", "origin",
+                        f"refs/heads/{publish_branch}",
+                    ],
+                    extra_env=extra_env,
+                )
+                if remote_branch.returncode:
+                    raise RuntimeError(
+                        f"Could not inspect stable task branch: {remote_branch.stderr[-2000:]}"
+                    )
+                if remote_branch.stdout.strip():
+                    fetched_publish_branch = self._run(
+                        [
+                            "git", "-c", "credential.helper=", "--git-dir", str(mirror),
+                            "fetch", "--no-tags", "origin",
+                            f"+refs/heads/{publish_branch}:refs/heads/{publish_branch}",
+                        ],
+                        extra_env=extra_env,
+                    )
+                    if fetched_publish_branch.returncode:
+                        raise RuntimeError(
+                            "Could not refresh stable task branch: "
+                            f"{fetched_publish_branch.stderr[-2000:]}"
+                        )
         finally:
             if askpass_path:
                 askpass_path.unlink(missing_ok=True)
@@ -118,8 +150,17 @@ class GitWorkspaceManager:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo):
             raise ValueError("Invalid repository identity")
         branch = task.repository.work_branch
+        publish_branch = task.metadata.get("publish_branch")
         if not BRANCH_PATTERN.fullmatch(branch) or ".." in branch or "//" in branch:
             raise ValueError("Work branch must be a safe feature/fix/chore/docs branch")
+        if publish_branch is not None and (
+            not isinstance(publish_branch, str)
+            or not BRANCH_PATTERN.fullmatch(publish_branch)
+            or publish_branch in {"main", "master"}
+            or ".." in publish_branch
+            or "//" in publish_branch
+        ):
+            raise ValueError("Stable publish branch must be a safe task feature branch")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,180}", task.repository.base_branch) or ".." in task.repository.base_branch:
             raise ValueError("Base branch is invalid")
         if task.repository.base_branch in {"main", "master"} and branch in {"main", "master"}:
@@ -128,7 +169,14 @@ class GitWorkspaceManager:
         mirror = (self.mirror_root / owner / f"{repo}.git").resolve()
         if self.mirror_root not in mirror.parents or not mirror.is_dir():
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
-        self.refresh(task.repository.full_name, task.repository.base_branch)
+        if publish_branch:
+            self.refresh(
+                task.repository.full_name,
+                task.repository.base_branch,
+                publish_branch,
+            )
+        else:
+            self.refresh(task.repository.full_name, task.repository.base_branch)
         self._run(["git", "--git-dir", str(mirror), "worktree", "prune", "--expire", "now"])
         bare = self._run(["git", "--git-dir", str(mirror), "rev-parse", "--is-bare-repository"])
         if bare.returncode or bare.stdout.strip() != "true":
@@ -159,7 +207,15 @@ class GitWorkspaceManager:
         if existing_branch.returncode == 0:
             command.extend([str(workspace), branch])
         else:
-            command.extend(["-b", branch, str(workspace), task.repository.base_branch])
+            start_point = task.repository.base_branch
+            if publish_branch:
+                existing_publish_branch = self._run([
+                    "git", "--git-dir", str(mirror), "show-ref", "--verify",
+                    f"refs/heads/{publish_branch}",
+                ])
+                if existing_publish_branch.returncode == 0:
+                    start_point = publish_branch
+            command.extend(["-b", branch, str(workspace), start_point])
         created = self._run(command)
         if created.returncode:
             raise RuntimeError(f"Could not create feature worktree: {created.stderr[-3000:]}")
