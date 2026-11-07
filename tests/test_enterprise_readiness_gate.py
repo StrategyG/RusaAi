@@ -13,6 +13,7 @@ def write_junit(
     root = ET.Element("testsuites")
     suite = ET.SubElement(root, "testsuite", name="pytest")
     modules = {
+        "test_enterprise_readiness_gate": 6,
         "test_postgres_rls": 6,
         "test_postgres_backends": 6,
         "test_queue_races": 6,
@@ -231,7 +232,11 @@ def test_automated_gate_aggregates_isolated_junit_reports(tmp_path):
     recovery_junit = tmp_path / "recovery.xml"
     write_junit(
         tenant_junit,
-        only_modules={"test_postgres_rls", "test_postgres_backends"},
+        only_modules={
+            "test_enterprise_readiness_gate",
+            "test_postgres_rls",
+            "test_postgres_backends",
+        },
     )
     write_junit(recovery_junit, only_modules={"test_queue_races"})
 
