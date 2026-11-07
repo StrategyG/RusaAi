@@ -43,7 +43,8 @@ CRITICAL/HIGH findings. A passing job does **not** mean that the images contain
 zero known vulnerabilities; it means no fixable CRITICAL/HIGH finding caused the
 gate to fail.
 
-For PR head commit `4536a1105e761a03be4a0d98c1e1ca06da3e6817`, the raw Trivy
+For the PR #63 CI run on head commit `4536a1105e761a03be4a0d98c1e1ca06da3e6817`
+(image build tag `87fc65592578c793e334ada969e3f15a2d112c75`), the raw Trivy
 reports showed 0 CRITICAL findings and the following HIGH findings:
 
 | Image | HIGH | CRITICAL |
