@@ -381,7 +381,22 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     if not config.api_key_principals and not config.api_keys:
         if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
-        return os.getenv("RUSA_DEFAULT_TENANT", "development")
+        if api_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key",
+            )
+        # Local development without a configured key registry gets an explicit
+        # synthetic identity so task RBAC and audit attribution remain consistent.
+        from rusa_agents.config import ApiPrincipal
+
+        tenant_id = os.getenv("RUSA_DEFAULT_TENANT", "development")
+        request.state.principal = ApiPrincipal(
+            subject="local-development",
+            tenant_id=tenant_id,
+            roles=("tenant_admin",),
+        )
+        return tenant_id
     if not api_key or (
         (config.api_key_principals or config.environment == "production")
         and len(api_key.encode("utf-8")) < 32
@@ -564,7 +579,7 @@ def health_check():
         "status": "healthy",
         "service": "rusa-ai-serve",
         "version": "1.1.0",
-        "environment": os.getenv("ENVIRONMENT", "development"),
+        "environment": os.getenv("ENVIRONMENT", "unconfigured"),
     }
 
 
