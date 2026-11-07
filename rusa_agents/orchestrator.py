@@ -536,8 +536,10 @@ class AICodeOrchestrator:
                     if failed_quality_workers:
                         for result in failed_quality_workers:
                             details = result.blockers or [result.summary or "unspecified quality-worker failure"]
+                            check_names = [key for key in result.evidence if key.startswith("check:")]
+                            check_context = f" ({', '.join(check_names)})" if check_names else ""
                             record.errors.append(
-                                f"{result.role.value} quality worker failed: "
+                                f"{result.role.value} quality worker failed{check_context}: "
                                 + "; ".join(str(item)[:1000] for item in details[:5])[:3000]
                             )
                         evidence_result = None if non_repairable_failures else False
