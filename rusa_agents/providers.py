@@ -190,13 +190,35 @@ class OpenAIChatInferenceProvider:
         return headers
 
     async def check_ready(self) -> bool:
+        """Verify that the configured upstream model is actually available."""
         timeout = httpx.Timeout(10.0, connect=5.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
         ) as client:
-            async with client.stream("GET", f"{self.base_url}/models", headers=self._headers()) as response:
+            async with client.stream(
+                "GET", f"{self.base_url}/models", headers=self._headers()
+            ) as response:
                 response.raise_for_status()
-            return True
+                payload = await _read_limited_json(response, self.max_response_bytes)
+
+        models = payload.get("data")
+        if not isinstance(models, list):
+            raise RuntimeError("Inference provider /models response must contain a data list")
+
+        available_model_ids: set[str] = set()
+        for item in models:
+            if not isinstance(item, dict):
+                raise RuntimeError("Inference provider /models entries must be objects")
+            model_id = item.get("id")
+            if not isinstance(model_id, str) or not model_id.strip():
+                raise RuntimeError("Inference provider /models entry is missing a valid model ID")
+            available_model_ids.add(model_id)
+
+        if self.default_model not in available_model_ids:
+            raise RuntimeError(
+                f"Configured inference model '{self.default_model}' is not available from provider"
+            )
+        return True
 
     async def complete(
         self,
