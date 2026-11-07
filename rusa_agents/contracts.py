@@ -76,6 +76,7 @@ class TaskRecord:
     state: TaskState = TaskState.RECEIVED
     results: list[WorkerResult] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    qa_verdict: dict[str, Any] | None = None
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     TRANSITIONS = {
