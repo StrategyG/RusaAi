@@ -490,3 +490,20 @@ def test_runtime_tracks_noncooperative_child_until_shutdown(monkeypatch):
         assert not runtime._pending_operations
 
     asyncio.run(scenario())
+
+
+
+def test_retry_classifier_separates_transient_and_permanent_http_errors():
+    from types import SimpleNamespace
+
+    assert AICodeRuntime._is_retryable_failure(
+        SimpleNamespace(response=SimpleNamespace(status_code=503))
+    )
+    assert AICodeRuntime._is_retryable_failure(
+        SimpleNamespace(response=SimpleNamespace(status_code=429))
+    )
+    assert not AICodeRuntime._is_retryable_failure(
+        SimpleNamespace(response=SimpleNamespace(status_code=403))
+    )
+    assert not AICodeRuntime._is_retryable_failure(ValueError("invalid task input"))
+    assert AICodeRuntime._is_retryable_failure(TimeoutError("provider timeout"))
