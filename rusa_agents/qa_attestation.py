@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
 import stat
 import tarfile
@@ -25,7 +26,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_TREE = re.compile(r"^[0-9a-f]{40}$")
 _SENSITIVE_PARTS = {
     ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
-    ".azure", ".terraform",
+    ".azure", ".terraform", ".gitattributes", ".gitmodules", ".lfsconfig",
 }
 _SENSITIVE_NAMES = {
     ".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ed25519",
@@ -171,7 +172,7 @@ def extract_snapshot_archive(
 
     if file_count == 0:
         raise SnapshotError("Artifact archive contains no files")
-    for directory, _, _ in __import__("os").walk(root, topdown=False):
+    for directory, _, _ in os.walk(root, topdown=False):
         Path(directory).chmod(0o555)
     return digest_snapshot(root)
 

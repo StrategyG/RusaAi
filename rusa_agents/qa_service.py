@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .qa_attestation import (
     REQUIRED_QA_PROFILES,
@@ -112,6 +112,8 @@ class QAService:
             raise ValueError("QA tenant or task identifier is invalid")
         if not _TREE_SHA.fullmatch(git_tree_sha):
             raise ValueError("Git tree SHA is invalid")
+        if len(archive_bytes) > self.max_upload_bytes:
+            raise ValueError("Artifact archive exceeds the configured upload limit")
 
         with tempfile.TemporaryDirectory(
             prefix="rusa-qa-snapshot-",
@@ -130,7 +132,11 @@ class QAService:
                 result = self.sandbox.run(snapshot, profile)
                 evidence = result.evidence if isinstance(result.evidence, dict) else {}
                 exit_code = evidence.get("exit_code")
-                if type(exit_code) is not int:
+                if (
+                    type(exit_code) is not int
+                    or evidence.get("profile") != profile
+                    or (not result.ok and exit_code == 0)
+                ):
                     exit_code = 127
                 profile_results[profile] = {
                     "exit_code": exit_code,
