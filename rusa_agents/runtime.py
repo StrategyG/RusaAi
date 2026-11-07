@@ -297,6 +297,7 @@ class AICodeRuntime:
 
             def publish_candidate() -> str | None:
                 expected_tree_sha = None
+                expected_artifact_digest = None
                 if qa_client is not None:
                     qa_payload = qa_client.verify_release_verdict(
                         record.qa_verdict,
@@ -304,6 +305,7 @@ class AICodeRuntime:
                         require_pass=True,
                     )
                     expected_tree_sha = qa_payload["git_tree_sha"]
+                    expected_artifact_digest = qa_payload["artifact_digest"]
                 elif self.config.environment == "production":
                     raise RuntimeError(
                         "Production publication requires a signed independent QA verdict"
@@ -314,6 +316,7 @@ class AICodeRuntime:
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
                     expected_tree_sha=expected_tree_sha,
+                    expected_artifact_digest=expected_artifact_digest,
                 )
 
             commit_sha = await asyncio.to_thread(

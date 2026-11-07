@@ -443,6 +443,7 @@ class GitHubPublisher:
         branch: str,
         message: str,
         expected_tree_sha: str | None = None,
+        expected_artifact_digest: str | None = None,
     ) -> str | None:
         root = Path(workspace).resolve(strict=True)
         if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
@@ -460,12 +461,22 @@ class GitHubPublisher:
             added = self._run(["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "add", "--", *changed], str(root))
             if added.returncode:
                 raise RuntimeError(f"Git staging failed: {added.stderr[-3000:]}")
+        if expected_artifact_digest is not None and expected_tree_sha is None:
+            raise ValueError("An artifact digest requires an independently attested Git tree SHA")
         if expected_tree_sha is not None:
             if not re.fullmatch(r"[0-9a-f]{40}", expected_tree_sha):
                 raise ValueError("Expected QA Git tree SHA is invalid")
-            candidate_tree = self._run(["git", "write-tree"], str(root))
-            if candidate_tree.returncode or candidate_tree.stdout.strip() != expected_tree_sha:
+            candidate_archive, candidate_tree_sha = self.prepare_candidate_snapshot(root)
+            if candidate_tree_sha != expected_tree_sha:
                 raise RuntimeError("Candidate Git tree changed after independent QA; publication is blocked")
+            if expected_artifact_digest is not None:
+                if not re.fullmatch(r"[0-9a-f]{64}", expected_artifact_digest):
+                    raise ValueError("Expected QA artifact digest is invalid")
+                from .qa_attestation import digest_snapshot_archive
+
+                candidate_digest = digest_snapshot_archive(candidate_archive)
+                if candidate_digest != expected_artifact_digest:
+                    raise RuntimeError("Candidate artifact digest changed after independent QA; publication is blocked")
         if changed:
             commit = self._run([
                 "git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=RUSA-AI",

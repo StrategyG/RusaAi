@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import tarfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -175,6 +176,24 @@ def extract_snapshot_archive(
     for directory, _, _ in os.walk(root, topdown=False):
         Path(directory).chmod(0o555)
     return digest_snapshot(root)
+
+
+def digest_snapshot_archive(
+    archive_bytes: bytes,
+    *,
+    max_files: int = 20_000,
+    max_total_bytes: int = 100_000_000,
+    max_file_bytes: int = 25_000_000,
+) -> str:
+    """Compute the canonical SHA-256 manifest digest for an untrusted tar snapshot."""
+    with tempfile.TemporaryDirectory(prefix="rusa-artifact-digest-") as temporary:
+        return extract_snapshot_archive(
+            archive_bytes,
+            Path(temporary) / "snapshot",
+            max_files=max_files,
+            max_total_bytes=max_total_bytes,
+            max_file_bytes=max_file_bytes,
+        )
 
 
 def load_private_key(encoded: str) -> Ed25519PrivateKey:

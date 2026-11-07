@@ -13,6 +13,7 @@ from .contracts import CodingTask
 from .qa_attestation import (
     REQUIRED_QA_PROFILES,
     AttestationError,
+    digest_snapshot_archive,
     load_public_key,
     verify_verdict,
 )
@@ -72,6 +73,10 @@ class IndependentQAClient:
             raise QAAttestationError(
                 f"Could not create the immutable candidate artifact snapshot: {exc}"
             ) from exc
+        try:
+            expected_artifact_digest = digest_snapshot_archive(archive)
+        except ValueError as exc:
+            raise QAAttestationError(f"Worker candidate snapshot is invalid: {exc}") from exc
         tenant_id = str(task.metadata.get("tenant_id", "default"))
         headers = {
             "Authorization": f"Bearer {self.service_token}",
@@ -111,6 +116,7 @@ class IndependentQAClient:
                 envelope,
                 task,
                 expected_tree_sha=tree_sha,
+                expected_artifact_digest=expected_artifact_digest,
                 require_pass=False,
             )
         except (ValueError, TypeError, AttestationError) as exc:
@@ -123,25 +129,44 @@ class IndependentQAClient:
         task: CodingTask,
         *,
         expected_tree_sha: str | None = None,
+        expected_artifact_digest: str | None = None,
         require_pass: bool = True,
     ) -> dict[str, Any]:
         if not isinstance(envelope, dict) or not isinstance(envelope.get("payload"), dict):
             raise QAAttestationError("Independent QA verdict is missing")
-        payload = envelope["payload"]
         tenant_id = str(task.metadata.get("tenant_id", "default"))
-        tree_sha = expected_tree_sha or payload.get("git_tree_sha")
+        try:
+            current_archive, current_tree_sha = self.publisher.prepare_candidate_snapshot(
+                self.workspace
+            )
+            current_artifact_digest = digest_snapshot_archive(current_archive)
+        except Exception as exc:
+            raise QAAttestationError(
+                f"Could not recompute the release candidate snapshot: {exc}"
+            ) from exc
+        if expected_tree_sha is not None and current_tree_sha != expected_tree_sha:
+            raise QAAttestationError("Candidate Git tree changed after independent QA")
+        if (
+            expected_artifact_digest is not None
+            and current_artifact_digest != expected_artifact_digest
+        ):
+            raise QAAttestationError("Candidate artifact digest changed after independent QA")
         try:
             verified = verify_verdict(
                 envelope,
                 self.public_key,
                 tenant_id=tenant_id,
                 task_id=task.task_id,
-                git_tree_sha=tree_sha,
+                git_tree_sha=current_tree_sha,
                 key_id=self.key_id,
                 sandbox_image=self.sandbox_image,
             )
         except AttestationError as exc:
             raise QAAttestationError(str(exc)) from exc
+        if verified["artifact_digest"] != current_artifact_digest:
+            raise QAAttestationError(
+                "Signed QA artifact digest does not match the current Git tree snapshot"
+            )
         if set(verified["profiles"]) != set(REQUIRED_QA_PROFILES):
             raise QAAttestationError("Independent QA verdict omitted a mandatory profile")
         if require_pass and verified["verdict"] != "PASS":
