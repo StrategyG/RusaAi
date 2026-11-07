@@ -290,21 +290,52 @@ class PostgresWorkflowControlStore:
             event["attempt"] = attempt
         return event
 
-    def get_run(self, *, tenant_id: str, run_id: str) -> dict[str, Any]:
-        with self._connect(self.api_dsn) as conn:
+    def get_run(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        principal: str | None = None,
+    ) -> dict[str, Any]:
+        dsn = self.worker_dsn if principal else self.api_dsn
+        with self._connect(dsn) as conn:
             self._prepare(conn, tenant_id)
-            return self._workflow_row(conn, tenant_id, run_id)
+            workflow = self._workflow_row(conn, tenant_id, run_id)
+            if principal:
+                assigned = conn.execute(
+                    """
+                    SELECT 1 FROM public.devops_tasks
+                    WHERE tenant_id=%s AND run_id=%s AND agent_id=%s
+                    LIMIT 1
+                    """,
+                    (tenant_id, run_id, principal),
+                ).fetchone()
+                if assigned is None:
+                    raise WorkflowNotFoundError("workflow not found")
+            return workflow
 
     def get_task(
         self,
         *,
         tenant_id: str,
-        run_id: str,
         task_id: str,
+        run_id: str | None = None,
         principal: str | None = None,
     ) -> dict[str, Any]:
-        with self._connect(self.worker_dsn if principal else self.api_dsn) as conn:
+        dsn = self.worker_dsn if principal else self.api_dsn
+        with self._connect(dsn) as conn:
             self._prepare(conn, tenant_id)
+            if run_id is None:
+                row = conn.execute(
+                    """
+                    SELECT run_id FROM public.devops_tasks
+                    WHERE tenant_id=%s AND task_id=%s
+                    """,
+                    (tenant_id, task_id),
+                ).fetchone()
+                if row is None:
+                    raise WorkflowNotFoundError("task not found")
+                run_id = row[0]
             task = self._task_row(conn, tenant_id, run_id, task_id)
             if principal and task["agent_id"] != principal:
                 raise TaskAccessDeniedError("workload is not assigned to this task")
