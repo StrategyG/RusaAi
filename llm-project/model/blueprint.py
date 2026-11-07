@@ -95,11 +95,9 @@ class ProjectBlueprint:
     status: str = "PLANNED"
 
     def validate(self) -> None:
-        if self.status not in {"PLANNED", "IMPLEMENTED", "VERIFIED"}:
-            raise ValueError("status must be PLANNED, IMPLEMENTED, or VERIFIED")
-        if self.status == "VERIFIED":
+        if self.status != "PLANNED":
             raise ValueError(
-                "A blueprint cannot be marked VERIFIED without a versioned model artifact and evaluation evidence"
+                "Blueprint metadata cannot claim implementation or verification without a versioned model artifact and evaluation evidence"
             )
         self.model.validate()
 
