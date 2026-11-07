@@ -53,8 +53,8 @@ class AutonomousCodeWorker:
         retry_base_delay_seconds: float = 0.25,
         retry_max_delay_seconds: float = 4.0,
     ) -> None:
-        if max_steps < 1 or max_steps > 30:
-            raise ValueError("max_steps must be between 1 and 30")
+        if type(max_steps) is not int or not 1 <= max_steps <= 30:
+            raise ValueError("max_steps must be an integer between 1 and 30")
         self.role = role
         self.provider = provider
         self.gateway = gateway
