@@ -47,7 +47,7 @@ jobs:
       - name: Install package and development tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,messaging]"
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Lint
