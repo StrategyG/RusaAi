@@ -464,16 +464,16 @@ class AICodeOrchestrator:
                         result for result in quality_results
                         if not result.success or result.blockers
                     ]
-                    infrastructure_failures = [
+                    non_repairable_failures = [
                         result for result in failed_quality_workers
-                        if result.failure_kind == "infrastructure"
+                        if result.failure_kind in {"infrastructure", "policy"}
                     ]
                     if failed_quality_workers:
                         record.errors.append(
                             "Quality worker execution failed: "
                             + ", ".join(result.role.value for result in failed_quality_workers)
                         )
-                        evidence_result = None if infrastructure_failures else False
+                        evidence_result = None if non_repairable_failures else False
                     else:
                         evidence_result = self._verify_evidence(record)
 
