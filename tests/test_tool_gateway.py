@@ -145,3 +145,28 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+
+def test_gateway_refuses_tools_after_lease_is_lost(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path, execution_guard=lambda: False)
+
+    with pytest.raises(ToolDenied, match="lease"):
+        gateway.execute(
+            {
+                "name": "write_file",
+                "arguments": {"path": "src/unsafe.py", "content": "SHOULD_NOT_WRITE"},
+            },
+            WorkerRole.DEVELOPER,
+        )
+
+    assert not (tmp_path / "src" / "unsafe.py").exists()
+
+
+def test_direct_gateway_write_also_checks_execution_guard(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path, execution_guard=lambda: False)
+
+    with pytest.raises(ToolDenied, match="lease"):
+        gateway.write_file("unsafe.py", "SHOULD_NOT_WRITE", WorkerRole.DEVELOPER)
+
+    assert not (tmp_path / "unsafe.py").exists()
