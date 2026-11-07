@@ -119,6 +119,7 @@ class QAService:
             prefix="rusa-qa-snapshot-",
             dir=self.workspace_root,
         ) as temporary:
+            os.chmod(temporary, 0o2750)
             snapshot = Path(temporary) / "snapshot"
             artifact_digest = extract_snapshot_archive(
                 archive_bytes,
