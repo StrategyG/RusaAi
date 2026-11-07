@@ -7,7 +7,9 @@ from scripts.enterprise_readiness_gate import (
 )
 
 
-def write_junit(path, *, failure_module=None, skipped_module=None, omit_module=None):
+def write_junit(
+    path, *, failure_module=None, skipped_module=None, omit_module=None, only_modules=None
+):
     root = ET.Element("testsuites")
     suite = ET.SubElement(root, "testsuite", name="pytest")
     modules = {
@@ -16,6 +18,8 @@ def write_junit(path, *, failure_module=None, skipped_module=None, omit_module=N
         "test_queue_races": 6,
     }
     for module, count in modules.items():
+        if only_modules is not None and module not in only_modules:
+            continue
         if module == omit_module:
             continue
         for index in range(count):
@@ -220,3 +224,19 @@ def test_certification_fails_when_evidence_run_id_does_not_match(tmp_path):
     assert exit_code == 1
     assert report["status"] == "FAIL"
     assert any("run ID" in item for item in report["blockers"])
+
+
+def test_automated_gate_aggregates_isolated_junit_reports(tmp_path):
+    tenant_junit = tmp_path / "tenant.xml"
+    recovery_junit = tmp_path / "recovery.xml"
+    write_junit(
+        tenant_junit,
+        only_modules={"test_postgres_rls", "test_postgres_backends"},
+    )
+    write_junit(recovery_junit, only_modules={"test_queue_races"})
+
+    report, exit_code = evaluate_automated([tenant_junit, recovery_junit], "a" * 40)
+
+    assert exit_code == 0
+    assert report["automation_status"] == "PASS"
+    assert report["enterprise_readiness_status"] == "HOLD"
