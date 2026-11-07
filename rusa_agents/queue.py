@@ -584,7 +584,9 @@ class PostgresTaskQueue:
                         COALESCE(job.result, '{}'::jsonb) || jsonb_build_object(
                             'side_effects', jsonb_build_object(
                                 'git_publication', 'reconciliation_required',
+                                'git_publication_cleanup', 'reconciliation_required',
                                 'pull_request_creation', 'reconciliation_required',
+                                'pull_request_cleanup', 'reconciliation_required',
                                 'reconciliation_required', true
                             ),
                             'cancellation_reconciliation', jsonb_build_object(
@@ -1095,8 +1097,10 @@ class PostgresTaskQueue:
                             THEN result || jsonb_build_object(
                                 'side_effects', jsonb_build_object(
                                     'git_publication', 'completed',
+                                    'git_publication_cleanup', 'reconciliation_required',
                                     'pull_request_creation', 'completed',
-                                    'pull_request_cleanup', 'reconciliation_required'
+                                    'pull_request_cleanup', 'reconciliation_required',
+                                    'reconciliation_required', true
                                 ),
                                 'cancellation_reconciliation', jsonb_build_object(
                                     'required', true,
