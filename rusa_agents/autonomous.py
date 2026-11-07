@@ -47,6 +47,7 @@ class AutonomousCodeWorker:
         max_steps: int = 12,
         max_actions_per_step: int = 8,
         max_output_chars: int = 12000,
+        max_tool_retries: int = 2,
     ) -> None:
         if max_steps < 1 or max_steps > 30:
             raise ValueError("max_steps must be between 1 and 30")
@@ -56,6 +57,13 @@ class AutonomousCodeWorker:
         self.max_steps = max_steps
         self.max_actions_per_step = max_actions_per_step
         self.max_output_chars = max_output_chars
+        if type(max_actions_per_step) is not int or not 1 <= max_actions_per_step <= 16:
+            raise ValueError("max_actions_per_step must be between 1 and 16")
+        if type(max_output_chars) is not int or not 1000 <= max_output_chars <= 50000:
+            raise ValueError("max_output_chars must be between 1000 and 50000")
+        if type(max_tool_retries) is not int or not 0 <= max_tool_retries <= 3:
+            raise ValueError("max_tool_retries must be between 0 and 3")
+        self.max_tool_retries = max_tool_retries
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
@@ -83,7 +91,9 @@ class AutonomousCodeWorker:
     async def run(self, task: CodingTask, prior_results: list[WorkerResult]) -> WorkerResult:
         allowed = sorted(self.ROLE_TOOLS[self.role])
         history = "\n".join(
-            f"{item.role.value}: {item.summary[:1500]}" for item in prior_results
+            f"{item.role.value}: {item.summary[:1500]} "
+            f"blockers={item.blockers[:5]} failure_kind={item.failure_kind}"
+            for item in prior_results
         ) or "No previous worker reports."
         transcript: list[str] = []
         artifacts: list[str] = []
@@ -133,11 +143,13 @@ class AutonomousCodeWorker:
                     success=False, artifacts=artifacts, evidence=evidence,
                     blockers=["Too many tool actions in one model response."],
                 )
+            tool_failures = []
             for action in actions:
                 if (
                     not isinstance(action, dict)
                     or not isinstance(action.get("name"), str)
                     or set(action) - {"name", "arguments"}
+                    or not isinstance(action.get("arguments", {}), dict)
                 ):
                     return WorkerResult(
                         role=self.role, summary="Malformed tool action.",
@@ -150,14 +162,27 @@ class AutonomousCodeWorker:
                         success=False, artifacts=artifacts, evidence=evidence,
                         blockers=["Worker attempted an operation outside its role permissions."],
                     )
-                try:
-                    result = await asyncio.to_thread(self.gateway.execute, action, self.role)
-                except (ToolDenied, ValueError, OSError) as exc:
-                    return WorkerResult(
-                        role=self.role, summary=f"Tool operation denied: {exc}",
-                        success=False, artifacts=artifacts, evidence=evidence,
-                        blockers=[str(exc)],
-                    )
+                result = None
+                for tool_attempt in range(self.max_tool_retries + 1):
+                    try:
+                        result = await asyncio.to_thread(self.gateway.execute, action, self.role)
+                    except (ToolDenied, ValueError) as exc:
+                        return WorkerResult(
+                            role=self.role, summary=f"Tool operation denied: {exc}",
+                            success=False, artifacts=artifacts, evidence=evidence,
+                            blockers=[str(exc)], failure_kind="policy",
+                        )
+                    except OSError as exc:
+                        tool_failures.append(f"{action['name']}: {type(exc).__name__}: {exc}")
+                        break
+                    if result.ok:
+                        break
+                    tool_failures.append(f"{action['name']}: {result.output[-2000:]}")
+                    if tool_attempt < self.max_tool_retries:
+                        transcript.append(f"TOOL RETRY {action['name']} ({tool_attempt + 1}): {result.output[-2000:]}")
+                if result is None or not result.ok:
+                    transcript.append("TOOL ACTION FAILED; do not claim completion: " + tool_failures[-1])
+                    continue
                 if action["name"] == "write_file" and result.ok:
                     artifacts.append(str(action.get("arguments", {}).get("path", "")))
                 if action["name"] == "run_check":
@@ -172,9 +197,19 @@ class AutonomousCodeWorker:
                         f"TOOL {action['name']} (ok={result.ok}): {result.output[:4000]}"
                     )
             if response["done"]:
+                if tool_failures:
+                    return WorkerResult(
+                        role=self.role,
+                        summary=last_message or "Worker could not complete required tool actions.",
+                        success=False,
+                        artifacts=artifacts,
+                        evidence=evidence,
+                        blockers=tool_failures[:10],
+                        failure_kind="tool",
+                    )
                 return WorkerResult(
                     role=self.role, summary=last_message, success=True,
-                    artifacts=artifacts, evidence={**evidence, **response.get("evidence", {})},
+                    artifacts=artifacts, evidence=evidence,
                 )
         return WorkerResult(
             role=self.role,
