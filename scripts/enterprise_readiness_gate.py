@@ -23,6 +23,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "schemas/enterprise-readiness/erg06-evidence.schema.json"
 
+CONTRACT_SUITES = {
+    "tests/test_enterprise_readiness_gate.py": 5,
+}
 TENANT_SUITES = {
     "tests/test_postgres_rls.py": 5,
     "tests/test_postgres_backends.py": 5,
@@ -134,7 +137,25 @@ def evaluate_automated(
 
     checks: dict[str, Any] = {}
     blockers: list[str] = []
+    contract_statuses: list[str] = []
     statuses: list[str] = []
+
+    contract_details: list[dict[str, Any]] = []
+    for suite_path, minimum in CONTRACT_SUITES.items():
+        stats = _suite_stats(cases, suite_path)
+        status, reasons = _suite_status(stats, minimum)
+        stats["status"] = status
+        contract_details.append(stats)
+        blockers.extend(reasons)
+        contract_statuses.append(status)
+    checks["gate_contract"] = {
+        "status": (
+            "FAIL" if "FAIL" in contract_statuses
+            else "HOLD" if "HOLD" in contract_statuses
+            else "PASS"
+        ),
+        "suites": contract_details,
+    }
 
     tenant_details: list[dict[str, Any]] = []
     for suite_path, minimum in TENANT_SUITES.items():
@@ -178,9 +199,10 @@ def evaluate_automated(
         "scope": "Automated queue lease, retry, fencing, and concurrency regressions.",
     }
 
+    all_statuses = contract_statuses + statuses + recovery_statuses
     automation_status = (
-        "FAIL" if "FAIL" in statuses + recovery_statuses
-        else "HOLD" if "HOLD" in statuses + recovery_statuses
+        "FAIL" if "FAIL" in all_statuses
+        else "HOLD" if "HOLD" in all_statuses
         else "PASS"
     )
     enterprise_status = "FAIL" if automation_status == "FAIL" else "HOLD"
