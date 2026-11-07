@@ -128,13 +128,15 @@ CREATE POLICY devops_outbox_tenant ON public.devops_event_outbox
     FOR INSERT TO rusa_api_runtime, rusa_worker_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
-DROP POLICY IF EXISTS devops_outbox_relay ON public.devops_event_outbox;
+DROP POLICY IF EXISTS devops_outbox_relay_select ON public.devops_event_outbox;
+DROP POLICY IF EXISTS devops_outbox_relay_update ON public.devops_event_outbox;
 CREATE POLICY devops_outbox_relay_select ON public.devops_event_outbox
     FOR SELECT TO rusa_relay_runtime USING (true);
 CREATE POLICY devops_outbox_relay_update ON public.devops_event_outbox
     FOR UPDATE TO rusa_relay_runtime USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS devops_inbox_worker_tenant ON public.devops_event_inbox;
+DROP POLICY IF EXISTS devops_inbox_worker_insert ON public.devops_event_inbox;
+DROP POLICY IF EXISTS devops_inbox_worker_select ON public.devops_event_inbox;
 CREATE POLICY devops_inbox_worker_insert ON public.devops_event_inbox
     FOR INSERT TO rusa_worker_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
@@ -142,16 +144,27 @@ CREATE POLICY devops_inbox_worker_select ON public.devops_event_inbox
     FOR SELECT TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
--- Runtime roles may append but never mutate or delete canonical event history.
-REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_inbox FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
+-- Inbox deduplication receipts are append-only.
+REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_inbox
+    FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
 
-CREATE OR REPLACE FUNCTION public.rusa_devops_append_only() RETURNS trigger
-LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION public.rusa_devops_inbox_immutable() RETURNS trigger
+LANGUAGE plpgsql AS $
 BEGIN
-    RAISE EXCEPTION 'DevOps event history is append-only';
+    RAISE EXCEPTION 'DevOps inbox receipts are append-only';
 END;
-$$;
-REVOKE ALL ON FUNCTION public.rusa_devops_append_only() FROM PUBLIC;
+$;
+REVOKE ALL ON FUNCTION public.rusa_devops_inbox_immutable() FROM PUBLIC;
+
+DROP TRIGGER IF EXISTS trg_devops_inbox_immutable ON public.devops_event_inbox;
+CREATE TRIGGER trg_devops_inbox_immutable
+BEFORE UPDATE OR DELETE ON public.devops_event_inbox
+FOR EACH ROW EXECUTE FUNCTION public.rusa_devops_inbox_immutable();
+
+DROP TRIGGER IF EXISTS trg_devops_inbox_no_truncate ON public.devops_event_inbox;
+CREATE TRIGGER trg_devops_inbox_no_truncate
+BEFORE TRUNCATE ON public.devops_event_inbox
+FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_devops_inbox_immutable();
 
 
 COMMIT;
