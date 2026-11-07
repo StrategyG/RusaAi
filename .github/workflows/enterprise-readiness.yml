@@ -162,6 +162,7 @@ jobs:
             --mode certify \
             --evidence artifacts/staging/erg06-staging-evidence.json \
             --expected-sha "${EXPECTED_SHA}" \
+            --expected-run-id "${EVIDENCE_RUN_ID}" \
             --output artifacts/erg06-certification-report.json
       - name: Upload ERG-06 certification decision
         if: always()
