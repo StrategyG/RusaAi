@@ -1,8 +1,8 @@
 import asyncio
-
-import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
+
+import pytest
 
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
