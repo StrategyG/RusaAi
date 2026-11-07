@@ -8,10 +8,10 @@ from uuid import uuid4
 import pytest
 
 from rusa_agents.devops.store import (
+    OutboxLeaseLostError,
     PostgresInbox,
     PostgresOutboxRelay,
     PostgresWorkflowStore,
-    OutboxLeaseLostError,
     WorkflowIdempotencyConflictError,
 )
 
