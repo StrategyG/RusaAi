@@ -343,6 +343,10 @@ class _FakeChannel:
         assert ensure is False
         return self.queues.setdefault(name, _FakeQueue(name))
 
+    async def get_queue(self, name, *, ensure):
+        assert ensure is False
+        return self.queues.setdefault(name, _FakeQueue(name))
+
 
 @pytest.mark.asyncio
 async def test_topology_declares_quorum_queues_per_capability_and_priority_with_dlq():
@@ -525,3 +529,75 @@ async def test_consumer_requires_explicit_control_queue_permission():
         queue_names=["rusa.commands.control.p0"],
     )
     assert tags == ("consumer-rusa.commands.control.p0",)
+
+@pytest.mark.asyncio
+async def test_scoped_consumer_uses_shared_topology_without_gaining_other_capabilities():
+    _, verifier = _signing_pair()
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+    )
+    channel = _FakeChannel()
+    tags = await consumer.start(
+        channel=channel,
+        topology=RabbitMQTopology(("research", "code", "build")),
+        queue_names=["rusa.commands.research.p2"],
+    )
+    assert tags == ("consumer-rusa.commands.research.p2",)
+    assert set(channel.queues) == {"rusa.commands.research.p2"}
+
+
+@pytest.mark.asyncio
+async def test_consumer_rejects_topology_missing_its_registered_capability():
+    _, verifier = _signing_pair()
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+    )
+    with pytest.raises(ValueError, match="missing a consumer capability"):
+        await consumer.start(
+            channel=_FakeChannel(),
+            topology=RabbitMQTopology(("code",)),
+            queue_names=["rusa.commands.research.p2"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_p0_control_queue_is_subscribed_only_when_explicitly_enabled():
+    _, verifier = _signing_pair()
+    topology = RabbitMQTopology(("research",))
+    consumer = RabbitMQCommandConsumer(
+        consumer_id="research-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+    )
+    with pytest.raises(ValueError, match="outside this consumer"):
+        await consumer.start(
+            channel=_FakeChannel(),
+            topology=topology,
+            queue_names=["rusa.commands.control.p0"],
+        )
+
+    control_consumer = RabbitMQCommandConsumer(
+        consumer_id="control-worker",
+        verifier=verifier,
+        allowed_capabilities=("research",),
+        tenant_authorizer=lambda *_args: True,
+        handler=lambda _event: None,
+        allow_control_queue=True,
+    )
+    tags = await control_consumer.start(
+        channel=_FakeChannel(),
+        topology=topology,
+        queue_names=["rusa.commands.control.p0"],
+    )
+    assert tags == ("consumer-rusa.commands.control.p0",)
+
