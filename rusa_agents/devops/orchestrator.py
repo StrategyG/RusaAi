@@ -293,6 +293,7 @@ class DevOpsDryRunOrchestrator:
         traceparent: str,
         stage: str,
         reason_code: str,
+        state_version: int = 1,
     ) -> dict[str, Any]:
         return self._event(
             event_type="workflow.blocked",
@@ -301,7 +302,7 @@ class DevOpsDryRunOrchestrator:
             traceparent=traceparent,
             producer="rusa_devops_orchestrator",
             payload={
-                "state_version": 1,
+                "state_version": state_version,
                 "stage": stage,
                 "reason_code": reason_code,
             },
@@ -322,6 +323,7 @@ class DevOpsDryRunOrchestrator:
         plan_ref: str | None,
         test_evidence_ref: str | None,
         release_manifest_ref: str | None,
+        environment: str,
     ) -> dict[str, Any]:
         if stage == "plan":
             return {"user_request": user_request}
@@ -354,7 +356,7 @@ class DevOpsDryRunOrchestrator:
         if stage == "deploy":
             return {
                 "release_manifest_ref": release_manifest_ref or f"artifact://dry-run/release/{workflow_id}",
-                "environment": "staging",
+                "environment": environment,
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
             }
@@ -426,6 +428,7 @@ class DevOpsDryRunOrchestrator:
                 plan_ref=plan_ref,
                 test_evidence_ref=test_evidence_ref,
                 release_manifest_ref=release_manifest_ref,
+                environment=self.environment,
             )
             approval_required = stage in {"release", "deploy"}
             approval_scope = [stage] if approval_required else []
