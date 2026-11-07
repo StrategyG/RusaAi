@@ -2,7 +2,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from rusa_agents.contracts import WorkerRole
 from rusa_agents.evidence import EvidenceAttestor
 from rusa_agents.tool_gateway import DockerSandbox, ToolDenied, WorkspaceToolGateway
