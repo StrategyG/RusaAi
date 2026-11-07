@@ -95,10 +95,7 @@ class DockerSandbox:
         """Hash the exact source snapshot mounted into the sandbox."""
         digest = hashlib.sha256()
         for path in sorted(snapshot.rglob("*")):
-            try:
-                metadata = path.stat(follow_symlinks=False)
-            except OSError:
-                continue
+            metadata = path.stat(follow_symlinks=False)
             if not stat.S_ISREG(metadata.st_mode):
                 continue
             relative = path.relative_to(snapshot).as_posix().encode("utf-8")
