@@ -356,11 +356,15 @@ class AICodeOrchestrator:
         task_ids = {item["task_id"] for item in provenance}
         attempts = {item["attempt"] for item in provenance}
         execution_ids = {item["execution_id"] for item in provenance}
+        images = {item["image"] for item in provenance}
+        snapshot_sizes = {item["snapshot_bytes"] for item in provenance}
         if (
             len(digests) != 1
             or task_ids != {record.task.task_id}
             or len(attempts) != 1
             or len(execution_ids) != len(provenance)
+            or len(images) != 1
+            or len(snapshot_sizes) != 1
         ):
             record.errors.append(
                 "Validation evidence does not describe one task attempt and one workspace snapshot."
