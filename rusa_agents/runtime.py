@@ -110,13 +110,14 @@ class AICodeRuntime:
     def _task(job: Job) -> CodingTask:
         data: dict[str, Any] = job.payload
         repository = data["repository"]
-        tenant_suffix = hashlib.sha256(job.tenant_id.encode("utf-8")).hexdigest()[:8]
+        tenant_suffix = hashlib.sha256(job.tenant_id.encode("utf-8")).hexdigest()[:12]
+        lease_suffix = job.lease_token.replace("-", "")[:12]
         return CodingTask(
             objective=data["objective"],
             repository=RepositoryTarget(
                 full_name=repository["full_name"],
                 base_branch=repository.get("base_branch", "main"),
-                work_branch=f"feature/aicode/{tenant_suffix}-{job.task_id[:12]}-{job.lease_token.replace('-', '')[:8]}",
+                work_branch=f"feature/aicode/{tenant_suffix}-{job.task_id}-{lease_suffix}",
             ),
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
