@@ -183,7 +183,7 @@ A task can be marked successful only when all of the following are true:
 - The Security worker produces real successful Ruff, Bandit, and compile exit codes.
 - A commit is pushed to the task feature branch.
 - A draft PR is created or found.
-- Both required GitHub Actions jobs complete successfully.
+- All required GitHub Actions jobs complete successfully on the exact published commit SHA. The current CI workflow has three required jobs: Test, lint, and security; Build, test, and scan production images; and RAG and MCP integration tests.
 
 Missing or unverifiable evidence is not treated as success. Human approval is still required to convert a draft PR to a mergeable PR and merge it. Deployment remains a separate operator-controlled process.
 
