@@ -794,8 +794,9 @@ class PostgresTaskQueue:
         tenant_id: str,
         worker_id: str,
         lease_token: str,
+        result: dict[str, Any] | None = None,
     ) -> bool:
-        """Acknowledge cancellation after the active operation has stopped or been fenced."""
+        """Acknowledge cancellation and persist any external side effects needing reconciliation."""
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             control = self._lock_execution_control(conn, job_id, tenant_id)
@@ -804,12 +805,15 @@ class PostgresTaskQueue:
             cur = conn.execute(
                 """
                 UPDATE public.aicode_jobs
-                SET status='cancelled', lease_owner=NULL, lease_until=NULL,
-                    lease_token=NULL, updated_at=NOW()
+                SET status='cancelled', result=%s::jsonb,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
                 """,
-                (job_id, tenant_id, worker_id, lease_token),
+                (
+                    json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                    job_id, tenant_id, worker_id, lease_token,
+                ),
             )
         return cur.rowcount == 1
 
