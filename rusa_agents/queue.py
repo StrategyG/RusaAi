@@ -249,11 +249,11 @@ class PostgresTaskQueue:
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
                 control_privileges = conn.execute("""
                     SELECT
-                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
-                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
-                        pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
-                        pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
-                        pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
+                        has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
+                        has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
+                        has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
                 """).fetchone()
                 if (
                     not control_privileges
