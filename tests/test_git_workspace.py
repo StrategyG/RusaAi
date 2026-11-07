@@ -316,7 +316,7 @@ def test_draft_pr_recovery_finds_task_pr_from_previous_lease(monkeypatch):
         "state": "open",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/123",
         "body": f"Task ID: {task_id}",
-        "head": {"ref": "feature/aicode/old-lease"},
+        "head": {"ref": "feature/aicode/stable-task"},
         "base": {"ref": "main"},
     }
 
@@ -351,7 +351,7 @@ def test_draft_pr_recovery_finds_task_pr_from_previous_lease(monkeypatch):
     url = asyncio.run(
         publisher.create_or_get_draft_pr(
             "StrategyG/RusaAi",
-            "feature/aicode/new-lease",
+            "feature/aicode/stable-task",
             "main",
             "Recovered task",
             f"Task ID: {task_id}\nRUSA-AI-Task-ID: {task_id}",
@@ -367,7 +367,7 @@ def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
         "state": "closed",
         "html_url": "https://github.com/StrategyG/RusaAi/pull/124",
         "body": f"RUSA-AI-Task-ID: {task_id}",
-        "head": {"ref": "feature/aicode/old-lease"},
+        "head": {"ref": "feature/aicode/stable-task"},
         "base": {"ref": "main"},
     }
 
@@ -400,7 +400,7 @@ def test_draft_pr_recovery_refuses_to_duplicate_closed_task_pr(monkeypatch):
         asyncio.run(
             publisher.create_or_get_draft_pr(
                 "StrategyG/RusaAi",
-                "feature/aicode/new-lease",
+                "feature/aicode/stable-task",
                 "main",
                 "Recovered task",
                 f"RUSA-AI-Task-ID: {task_id}",
