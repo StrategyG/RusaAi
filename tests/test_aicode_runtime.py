@@ -327,3 +327,22 @@ def test_runtime_task_branch_is_stable_across_lease_retries():
     assert first.repository.work_branch == retry.repository.work_branch
     assert first.repository.work_branch == "feature/aicode/a1b2c3d4e5f647899012abcdefabcdef"
     assert first.metadata["lease_token"] != retry.metadata["lease_token"]
+
+
+
+def test_orchestrator_rejects_mismatched_or_boolean_check_evidence():
+    mismatched = WorkerResult(
+        role=WorkerRole.TESTER,
+        summary="claimed success",
+        success=True,
+        evidence={"check:pytest": {"profile": "bandit", "exit_code": 0}},
+    )
+    boolean_exit_code = WorkerResult(
+        role=WorkerRole.TESTER,
+        summary="claimed success",
+        success=True,
+        evidence={"check:pytest": {"profile": "pytest", "exit_code": False}},
+    )
+
+    assert not AICodeOrchestrator._check_passed(mismatched, "check:pytest")
+    assert not AICodeOrchestrator._check_passed(boolean_exit_code, "check:pytest")
