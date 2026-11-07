@@ -514,3 +514,40 @@ def test_publisher_pushes_lease_worktree_to_stable_task_branch(tmp_path, monkeyp
 
     assert sha == stable
     assert attempt_ref.returncode != 0
+
+
+
+def test_workspace_refresh_fetches_existing_stable_publish_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    mirror_root = tmp_path / "mirrors"
+    mirror = mirror_root / "StrategyG" / "RusaAi.git"
+    mirror.parent.mkdir(parents=True)
+    git("clone", "--bare", str(source), str(mirror))
+
+    stable_branch = "feature/aicode/tenant-hash-task-id"
+    (source / "stable.txt").write_text("published")
+    git("add", "stable.txt", cwd=source)
+    git("commit", "-m", "published stable branch", cwd=source)
+    git("branch", stable_branch, cwd=source)
+    expected_sha = git("rev-parse", stable_branch, cwd=source).stdout.strip()
+
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "validate_origin_url",
+        staticmethod(lambda _remote, _repository: None),
+    )
+    manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
+    manager.refresh("StrategyG/RusaAi", "main", stable_branch)
+
+    actual_sha = git(
+        "--git-dir", str(mirror), "rev-parse", f"refs/heads/{stable_branch}"
+    ).stdout.strip()
+    assert actual_sha == expected_sha
