@@ -191,3 +191,40 @@ def test_production_deploy_runs_only_with_explicit_approval_reference():
     assert all(task["input"]["environment"] == "production" for task in deploy_tasks)
     assert all(task["constraints"]["approval_ref"] == _approval_refs()["deploy"] for task in deploy_tasks)
 
+def test_cancelled_stage_emits_task_cancelled_not_task_failed():
+    orchestrator = DevOpsDryRunOrchestrator(
+        agents={
+            AGENT_BY_STAGE["test"]: SyntheticDevOpsAgent(
+                status_by_stage={"test": "cancelled"}
+            )
+        }
+    )
+    report = _run(orchestrator)
+
+    assert report.status == "cancelled"
+    assert any(event["type"] == "task.cancelled" for event in report.events)
+    assert not any(event["type"] == "task.failed" for event in report.events)
+    assert not any(
+        task["stage"] == "release" and task["agent_id"] == AGENT_BY_STAGE["release"]
+        for task in report.tasks
+    )
+
+
+def test_skipped_stage_is_audited_and_stops_downstream_stages():
+    orchestrator = DevOpsDryRunOrchestrator(
+        agents={
+            AGENT_BY_STAGE["test"]: SyntheticDevOpsAgent(
+                status_by_stage={"test": "skipped"}
+            )
+        }
+    )
+    report = _run(orchestrator)
+
+    assert report.status == "blocked"
+    assert any(
+        event["type"] == "audit.recorded"
+        and event["payload"]["action"] == "test.skipped"
+        for event in report.events
+    )
+    assert not any(event["type"] == "task.failed" for event in report.events)
+
