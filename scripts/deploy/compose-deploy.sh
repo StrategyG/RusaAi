@@ -72,12 +72,16 @@ old_worker_image="$(get_env_value RUSA_WORKER_IMAGE)" || { echo "Exactly one RUS
 old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
 old_mcp_image="$(get_env_value RUSA_MCP_IMAGE)" || { echo "Exactly one RUSA_MCP_IMAGE must exist in .env." >&2; exit 64; }
 docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+qa_docker_socket="$(get_env_value RUSA_QA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_QA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+old_qa_sandbox_image="$(get_env_value RUSA_QA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_QA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
 
 [[ "$old_api_image" =~ $API_PATTERN ]] || { echo "Current API image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$old_worker_image" =~ $WORKER_PATTERN ]] || { echo "Current worker image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$old_sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Current sandbox image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$old_mcp_image" =~ $MCP_PATTERN ]] || { echo "Current MCP image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_qa_sandbox_image" =~ $SANDBOX_PATTERN && "$old_qa_sandbox_image" == "$old_sandbox_image" ]] || { echo "QA and worker sandbox rollback digests must match." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
+[[ "$qa_docker_socket" =~ ^/[A-Za-z0-9._/-]+$ && "$qa_docker_socket" != "$docker_socket" ]] || { echo "RUSA_QA_DOCKER_SOCKET must be a separate safe absolute Unix-socket path." >&2; exit 64; }
 
 tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
@@ -85,15 +89,16 @@ cp -p -- "$env_file" "${env_file}.previous"
 chmod 600 "${env_file}.previous"
 
 awk -F= -v api="$api_image" -v worker="$worker_image" -v sandbox="$sandbox_image" -v mcp="$mcp_image" '
-  BEGIN { api_count = 0; worker_count = 0; sandbox_count = 0; mcp_count = 0 }
+  BEGIN { api_count = 0; worker_count = 0; sandbox_count = 0; mcp_count = 0; qa_sandbox_count = 0 }
   $1 == "RUSA_API_IMAGE" { api_count++; print "RUSA_API_IMAGE=" api; next }
   $1 == "RUSA_WORKER_IMAGE" { worker_count++; print "RUSA_WORKER_IMAGE=" worker; next }
   $1 == "RUSA_SANDBOX_IMAGE" { sandbox_count++; print "RUSA_SANDBOX_IMAGE=" sandbox; next }
+  $1 == "RUSA_QA_SANDBOX_IMAGE" { qa_sandbox_count++; print "RUSA_QA_SANDBOX_IMAGE=" sandbox; next }
   $1 == "RUSA_MCP_IMAGE" { mcp_count++; print "RUSA_MCP_IMAGE=" mcp; next }
   { print }
   END {
-    if (api_count != 1 || worker_count != 1 || sandbox_count != 1 || mcp_count != 1) {
-      print "Production .env must contain exactly one API, worker, sandbox, and MCP image setting." > "/dev/stderr"
+    if (api_count != 1 || worker_count != 1 || sandbox_count != 1 || qa_sandbox_count != 1 || mcp_count != 1) {
+      print "Production .env must contain exactly one API, worker, sandbox, QA sandbox, and MCP image setting." > "/dev/stderr"
       exit 42
     }
   }
@@ -112,30 +117,33 @@ compose() {
 
 wait_for_health() {
   local deadline=$((SECONDS + health_timeout))
-  local api_id worker_id mcp_id api_state worker_state mcp_state
+  local api_id worker_id qa_id mcp_id api_state worker_state qa_state mcp_state
   while (( SECONDS < deadline )); do
     api_id="$(compose ps -q api 2>/dev/null || true)"
     worker_id="$(compose ps -q worker 2>/dev/null || true)"
+    qa_id="$(compose ps -q qa 2>/dev/null || true)"
     mcp_id=""
     if [[ "$rag_enabled" == "true" ]]; then
       mcp_id="$(compose ps -q rusa-mcp 2>/dev/null || true)"
     fi
 
-    if [[ -n "$api_id" && -n "$worker_id" ]] && { [[ "$rag_enabled" != "true" ]] || [[ -n "$mcp_id" ]]; }; then
+    if [[ -n "$api_id" && -n "$worker_id" && -n "$qa_id" ]] && { [[ "$rag_enabled" != "true" ]] || [[ -n "$mcp_id" ]]; }; then
       api_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
       worker_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id" 2>/dev/null || echo missing)"
+      qa_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$qa_id" 2>/dev/null || echo missing)"
       mcp_state=healthy
       if [[ "$rag_enabled" == "true" ]]; then
         mcp_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$mcp_id" 2>/dev/null || echo missing)"
       fi
 
-      if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" && "$mcp_state" == "healthy" ]]; then
+      if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" && "$qa_state" == "healthy" && "$mcp_state" == "healthy" ]]; then
         return 0
       fi
       if [[ "$api_state" == "unhealthy" || "$api_state" == "exited" || "$api_state" == "dead" ||
             "$worker_state" == "unhealthy" || "$worker_state" == "exited" || "$worker_state" == "dead" ||
+            "$qa_state" == "unhealthy" || "$qa_state" == "exited" || "$qa_state" == "dead" ||
             "$mcp_state" == "unhealthy" || "$mcp_state" == "exited" || "$mcp_state" == "dead" ]]; then
-        echo "A production container entered a terminal or unhealthy state (API=$api_state, worker=$worker_state, MCP=$mcp_state)." >&2
+        echo "A production container entered a terminal or unhealthy state (API=$api_state, worker=$worker_state, QA=$qa_state, MCP=$mcp_state)." >&2
         return 1
       fi
     fi
@@ -152,21 +160,22 @@ apply_release() {
 
   compose config --quiet || return 1
   if [[ "$rag_enabled" == "true" ]]; then
-    compose pull api worker rusa-mcp || return 1
+    compose pull api worker qa rusa-mcp || return 1
   else
-    compose pull api worker || return 1
+    compose pull api worker qa || return 1
   fi
   DOCKER_HOST="unix://$docker_socket" docker pull "$next_sandbox" || return 1
+  DOCKER_HOST="unix://$qa_docker_socket" docker pull "$next_sandbox" || return 1
   if [[ "$rag_enabled" == "true" ]]; then
-    compose up -d --no-build --remove-orphans api worker rusa-mcp || return 1
+    compose up -d --no-build --remove-orphans api worker qa rusa-mcp || return 1
   else
-    compose up -d --no-build --remove-orphans api worker || return 1
+    compose up -d --no-build --remove-orphans api worker qa || return 1
   fi
   wait_for_health
 }
 
 if apply_release "$api_image" "$worker_image" "$sandbox_image" "$mcp_image"; then
-  echo "RUSA-AI deployment is healthy (RAG/MCP enabled: $rag_enabled)."
+  echo "RUSA-AI deployment is healthy, including independent QA (RAG/MCP enabled: $rag_enabled)."
   echo "Previous immutable image digests are retained in ${env_file}.previous."
   exit 0
 fi
