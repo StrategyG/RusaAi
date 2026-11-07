@@ -311,6 +311,7 @@ class WorkspaceToolGateway:
         return target
 
     def read_file(self, raw_path: str) -> ToolResult:
+        self._assert_execution_allowed()
         target = self._resolve(raw_path)
         if not target.is_file():
             return ToolResult(False, f"File not found: {raw_path}")
@@ -350,6 +351,7 @@ class WorkspaceToolGateway:
         )
 
     def list_files(self, raw_path: str = ".") -> ToolResult:
+        self._assert_execution_allowed()
         target = self.workspace if raw_path == "." else self._resolve(raw_path)
         if not target.exists() or not target.is_dir():
             return ToolResult(False, f"Directory not found: {raw_path}")
@@ -391,6 +393,7 @@ class WorkspaceToolGateway:
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:
+        self._assert_execution_allowed()
         if not GIT_BIN:
             return ToolResult(False, "Git executable is unavailable in the worker image.")
         completed = subprocess.run(  # nosec B603 - fixed argv, absolute executable, shell=False
@@ -407,6 +410,7 @@ class WorkspaceToolGateway:
         return self.knowledge_service, self.knowledge_tenant_id
 
     def _search_knowledge(self, args: dict[str, Any]) -> ToolResult:
+        self._assert_execution_allowed()
         service, tenant_id = self._knowledge_context()
         query = args.get("query")
         collection = args.get("collection", self.knowledge_collection)
