@@ -75,7 +75,11 @@ class AICodeRuntime:
             task.cancel()
         if not pending:
             return
-        _, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+        done, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+        for task in done:
+            self._pending_operations.discard(task)
+            if not task.cancelled():
+                task.exception()
         if still_pending:
             logger.error(
                 "%d child operation(s) remained active after %.1fs shutdown grace",
