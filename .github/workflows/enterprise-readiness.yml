@@ -154,7 +154,8 @@ jobs:
           gh attestation verify \
             artifacts/staging/erg06-staging-evidence.json \
             --repo "${GITHUB_REPOSITORY}" \
-            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/staging-acceptance.yml"
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/staging-acceptance.yml" \
+            --source-digest "${EXPECTED_SHA}"
       - name: Evaluate full ERG-06 certification
         run: |
           python scripts/enterprise_readiness_gate.py \
