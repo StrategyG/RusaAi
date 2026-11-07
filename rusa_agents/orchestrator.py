@@ -77,6 +77,10 @@ class AICodeOrchestrator:
         max_parallel_workers: int = 4,
         max_repair_cycles: int = 2,
     ):
+        roles = [worker.role for worker in workers]
+        if len(roles) != len(set(roles)):
+            duplicates = sorted({role.value for role in roles if roles.count(role) > 1})
+            raise ValueError("duplicate worker roles: " + ", ".join(duplicates))
         self.workers = {worker.role: worker for worker in workers}
         self.policy = policy or AutonomyPolicy()
         self.memory = memory or SQLiteMemory()
@@ -107,6 +111,22 @@ class AICodeOrchestrator:
         for role, dependencies in self.EXECUTION_DAG.items():
             if role not in self.PIPELINE or not set(dependencies).issubset(self.PIPELINE):
                 raise ValueError("execution DAG contains an unknown role dependency")
+        visiting: set[WorkerRole] = set()
+        visited: set[WorkerRole] = set()
+
+        def visit(role: WorkerRole) -> None:
+            if role in visiting:
+                raise ValueError("execution DAG contains a dependency cycle")
+            if role in visited:
+                return
+            visiting.add(role)
+            for dependency in self.EXECUTION_DAG[role]:
+                visit(dependency)
+            visiting.remove(role)
+            visited.add(role)
+
+        for role in self.PIPELINE:
+            visit(role)
 
     @staticmethod
     def _tenant_id(task: CodingTask) -> str:
