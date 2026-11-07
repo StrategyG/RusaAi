@@ -151,14 +151,29 @@ class AICodeRuntime:
             except asyncio.CancelledError:
                 pass
 
-    async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
+    async def _heartbeat(
+        self,
+        job: Job,
+        lost_lease: asyncio.Event,
+        *,
+        interval_seconds: float = 60,
+    ) -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(interval_seconds)
             try:
                 renewed = await asyncio.to_thread(
                     self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
                 )
-            except Exception:
+            except Exception as exc:
+                # A short lock timeout can occur while publication deliberately holds
+                # the task row lock. The publisher has extended that lease; retry the
+                # heartbeat instead of treating lock contention as lease loss.
+                if getattr(exc, "sqlstate", None) == "55P03":
+                    logger.warning(
+                        "Lease heartbeat deferred while queue row is locked for job %s",
+                        job.id,
+                    )
+                    continue
                 logger.exception("Lease heartbeat failed for job %s", job.id)
                 lost_lease.set()
                 return

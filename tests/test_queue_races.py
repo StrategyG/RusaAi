@@ -256,3 +256,50 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
     finally:
         release_publish.set()
         remove_task(task_id, tenant)
+
+
+
+@pytest.mark.parametrize("operation", ["cancel", "retry", "heartbeat"])
+def test_queue_control_operations_respect_row_lock_timeout(operation):
+    queue = make_queue()
+    tenant = f"queue-lock-timeout-{operation}-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "lock timeout"})
+        worker_id = f"lock-timeout-{operation}-worker"
+        job_id, lease_token = claim_specific_task(task_id, tenant, worker_id)
+
+        if operation == "retry":
+            with psycopg.connect(DSN) as connection:
+                connection.execute(
+                    """
+                    UPDATE aicode_jobs
+                    SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL
+                    WHERE task_id=%s AND tenant_id=%s
+                    """,
+                    (task_id, tenant),
+                )
+
+        with psycopg.connect(DSN) as locker:
+            locker.execute(
+                """
+                SELECT id FROM aicode_jobs
+                WHERE task_id=%s AND tenant_id=%s
+                FOR UPDATE
+                """,
+                (task_id, tenant),
+            )
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                if operation == "cancel":
+                    queue.cancel(task_id, tenant, audit_actor="api:lock-timeout-test")
+                elif operation == "retry":
+                    queue.retry(task_id, tenant, audit_actor="api:lock-timeout-test")
+                else:
+                    queue.heartbeat(
+                        job_id, tenant, worker_id, lease_token, lease_seconds=30
+                    )
+            elapsed = time.monotonic() - started
+            assert 1.0 <= elapsed < 5.0
+    finally:
+        remove_task(task_id, tenant)
