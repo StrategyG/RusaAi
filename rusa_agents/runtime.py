@@ -30,6 +30,10 @@ class TaskCancellationRequested(RuntimeError):
     """Raised when the durable task control plane requests cooperative cancellation."""
 
 
+class WorkerShutdownRequested(RuntimeError):
+    """Raised when SIGTERM/SIGINT asks the worker to stop and let the lease recover."""
+
+
 class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
@@ -69,7 +73,10 @@ class AICodeRuntime:
 
 
     async def shutdown(self, timeout_seconds: float = 10.0) -> None:
-        """Cancel and drain tracked child operations before releasing worker resources."""
+        """Stop active work and drain tracked child operations before releasing resources."""
+        shutdown_event = getattr(self, "_shutdown_event", None)
+        if shutdown_event is not None:
+            shutdown_event.set()
         pending = set(self._pending_operations)
         for task in pending:
             task.cancel()
@@ -129,6 +136,26 @@ class AICodeRuntime:
             },
         )
 
+    def _execution_guard(
+        self,
+        job: Job,
+        lost_lease: asyncio.Event,
+        cancel_requested: asyncio.Event,
+    ) -> Callable[[], bool]:
+        def guard() -> bool:
+            shutdown_event = getattr(self, "_shutdown_event", None)
+            if (
+                lost_lease.is_set()
+                or cancel_requested.is_set()
+                or (shutdown_event is not None and shutdown_event.is_set())
+            ):
+                return False
+            return self.queue.owns_lease(
+                job.id, job.tenant_id, self.worker_id, job.lease_token
+            )
+
+        return guard
+
     async def _build_orchestrator(
         self,
         task: CodingTask,
@@ -137,16 +164,13 @@ class AICodeRuntime:
         lost_lease: asyncio.Event,
         cancel_requested: asyncio.Event,
     ) -> tuple[AICodeOrchestrator, str]:
+        execution_guard = self._execution_guard(job, lost_lease, cancel_requested)
         workspace = await asyncio.to_thread(
-            self.workspace_manager.create, task, tenant_id
+            self.workspace_manager.create,
+            task,
+            tenant_id,
+            cancellation_check=execution_guard,
         )
-        def execution_guard() -> bool:
-            if lost_lease.is_set() or cancel_requested.is_set():
-                return False
-            return self.queue.owns_lease(
-                job.id, job.tenant_id, self.worker_id, job.lease_token
-            )
-
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=self.sandbox,
@@ -219,18 +243,36 @@ class AICodeRuntime:
             asyncio.create_task(cancel_requested.wait())
             if cancel_requested is not None else None
         )
-        watchers = [lease_watch] + ([cancel_watch] if cancel_watch is not None else [])
+        shutdown_event = getattr(self, "_shutdown_event", None)
+        shutdown_watch = (
+            asyncio.create_task(shutdown_event.wait())
+            if shutdown_event is not None else None
+        )
+        watchers = [lease_watch]
+        if cancel_watch is not None:
+            watchers.append(cancel_watch)
+        if shutdown_watch is not None:
+            watchers.append(shutdown_watch)
         try:
             await asyncio.wait(
                 {operation_task, *watchers},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            # A completed operation wins the race. The caller performs a fresh
+            # lease/cancel/shutdown check before any subsequent side effect.
+            if operation_task.done():
+                return await operation_task
             if cancel_requested is not None and cancel_requested.is_set():
                 await self._cancel_child(operation_task)
                 raise TaskCancellationRequested("Task cancellation was requested")
             if lost_lease.is_set():
                 await self._cancel_child(operation_task)
                 raise LeaseLostError("Worker lost its task lease; operation cancelled")
+            if shutdown_event is not None and shutdown_event.is_set():
+                await self._cancel_child(operation_task)
+                raise WorkerShutdownRequested(
+                    "Worker shutdown requested; task will be recovered after lease expiry"
+                )
             return await operation_task
         except asyncio.CancelledError:
             await self._cancel_child(operation_task)
@@ -301,6 +343,11 @@ class AICodeRuntime:
         lost_lease: asyncio.Event,
         cancel_requested: asyncio.Event | None = None,
     ) -> None:
+        shutdown_event = getattr(self, "_shutdown_event", None)
+        if shutdown_event is not None and shutdown_event.is_set():
+            raise WorkerShutdownRequested(
+                "Worker shutdown requested; task will be recovered after lease expiry"
+            )
         if cancel_requested is not None and cancel_requested.is_set():
             raise TaskCancellationRequested("Task cancellation was requested")
         if lost_lease.is_set():
@@ -431,7 +478,10 @@ class AICodeRuntime:
             )
 
     async def run_once(self) -> bool:
-        if not self.config.aicode_enabled:
+        shutdown_event = getattr(self, "_shutdown_event", None)
+        if not self.config.aicode_enabled or (
+            shutdown_event is not None and shutdown_event.is_set()
+        ):
             return False
         job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
         if job is None:
@@ -530,10 +580,18 @@ class AICodeRuntime:
 
             await self._assert_lease(job, lost_lease, cancel_requested)
 
+            execution_guard = self._execution_guard(
+                job, lost_lease, cancel_requested
+            )
+
             def publish_if_not_cancelled() -> str | None:
-                if self.queue.is_cancel_requested(job.task_id, job.tenant_id):
-                    raise TaskCancellationRequested(
-                        "Cancellation was requested before Git publication"
+                if not execution_guard():
+                    if self.queue.is_cancel_requested(job.task_id, job.tenant_id):
+                        raise TaskCancellationRequested(
+                            "Cancellation was requested before Git publication"
+                        )
+                    raise LeaseLostError(
+                        "Task lease was lost before Git publication"
                     )
                 return self.publisher.commit_and_push(
                     workspace,
@@ -541,6 +599,7 @@ class AICodeRuntime:
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
                     publish_branch=task.metadata["publish_branch"],
+                    cancellation_check=execution_guard,
                 )
 
             publication_started = True
@@ -645,6 +704,14 @@ class AICodeRuntime:
                 logger.exception("Could not clean successful task workspace %s", task.task_id)
             logger.info("AICode task %s completed: %s", task.task_id, pr_url)
             outcome = "success"
+        except WorkerShutdownRequested:
+            # Do not mark the durable task failed or cancelled. Once child
+            # operations have been asked to stop, lease expiry makes it recoverable.
+            outcome = "shutdown"
+            logger.info(
+                "Worker shutdown interrupted task %s; leaving it for lease recovery",
+                job.task_id,
+            )
         except TaskCancellationRequested:
             outcome = "cancelled"
             await self._acknowledge_cancellation(
@@ -761,6 +828,7 @@ class AICodeRuntime:
         self, poll_seconds: float = 2.0, stop_event: asyncio.Event | None = None
     ) -> None:
         stop_event = stop_event or asyncio.Event()
+        self._shutdown_event = stop_event
         consecutive_errors = 0
         while not stop_event.is_set():
             try:
