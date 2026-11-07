@@ -205,7 +205,7 @@ Missing or unverifiable evidence is not treated as success. Human approval is st
 | Audit integrity | HMAC chain and immutable DB triggers | Tamper and restore tests |
 | Sandbox | Rootless Docker, network disabled, source snapshot | Escape/resource-exhaustion tests |
 | Git safety | Exact origin, task branches, protected paths | Malicious remote/path tests |
-| CI verification | Required GitHub check runs | Live PR check evidence |
+| CI verification | Test/lint/security, RAG/MCP integration, and production image/sandbox/Trivy/Compose jobs | All trusted checks green for the exact PR head SHA |
 | Rate limiting | PostgreSQL tenant counters | Load and bypass tests |
 | Observability | Prometheus API/worker metrics and logs | Dashboard and alert tests |
 | Recovery | Persistent volumes and database schema | Backup/restore drill |
