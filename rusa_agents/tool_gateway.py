@@ -310,6 +310,7 @@ class WorkspaceToolGateway:
         "setup.py", "setup.cfg", "package.json", "package-lock.json",
         "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
         "pipfile", "pipfile.lock", "cargo.toml", "go.mod",
+        "pytest.ini", "tox.ini", "noxfile.py", "conftest.py", ".coveragerc",
     }
     PROTECTED_WRITE_PATHS = {
         "rusa_agents/audit.py", "rusa_agents/autonomous.py",
@@ -319,7 +320,7 @@ class WorkspaceToolGateway:
         "rusa_agents/runtime.py", "rusa_agents/tool_gateway.py",
     }
     PROTECTED_WRITE_PREFIXES = (
-        ".github/", "tests/", "test/", "qa/", "rusa_agents/security/",
+        ".github/", "qa/", "rusa_agents/security/",
         "migrations/", "schemas/", "llm-project/configs/",
         "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
         "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
@@ -407,8 +408,13 @@ class WorkspaceToolGateway:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
+        existing_qa_baseline = (
+            relative.lower().startswith(("tests/", "test/"))
+            or target.name.lower().startswith("test_")
+        ) and target.exists()
         if (
-            relative.lower() in self.PROTECTED_WRITE_PATHS
+            existing_qa_baseline
+            or relative.lower() in self.PROTECTED_WRITE_PATHS
             or target.name.lower() in self.PROTECTED_WRITE_NAMES
             or target.name.lower().startswith(
                 ("requirements", "dockerfile.", "docker-compose.", "compose.")
