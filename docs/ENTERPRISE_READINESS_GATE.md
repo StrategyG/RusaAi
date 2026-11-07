@@ -26,7 +26,7 @@ The repository currently has a code-level PostgreSQL suite for tenant-scoped API
 
 ## 3. Automated CI sub-gate
 
-The separate .github/workflows/enterprise-readiness.yml workflow runs the required suites against its own PostgreSQL 16 service and emits a JUnit report plus a machine-readable ERG-06 report:
+The separate .github/workflows/enterprise-readiness.yml workflow runs the required suites against its own PostgreSQL 16 service, with isolated databases for backend, RLS, and recovery tests to prevent cross-suite data contamination. It emits separate JUnit reports plus a machine-readable ERG-06 report:
 
 - tests/test_postgres_rls.py
 - tests/test_postgres_backends.py
