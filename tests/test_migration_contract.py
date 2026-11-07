@@ -78,3 +78,12 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+def test_cancellation_control_readiness_does_not_require_nonexistent_sequence():
+    queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
+    migration = Path("migrations/008_aicode_job_controls.sql").read_text(encoding="utf-8")
+
+    assert "aicode_job_controls_id_seq" not in queue
+    assert "CREATE TABLE IF NOT EXISTS public.aicode_job_controls" in migration
+    assert "SERIAL" not in migration.upper()
