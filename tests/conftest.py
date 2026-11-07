@@ -39,7 +39,6 @@ def apply_postgres_migrations_for_integration_suite():
             int(path.name.split("_", 1)[0]) <= 6
             or path.name in {
                 "008_devops_durable_communication.sql",
-        "009_devops_task_leases_and_cancellation.sql",
                 "009_devops_task_leases_and_cancellation.sql",
             }
         )
@@ -52,6 +51,7 @@ def apply_postgres_migrations_for_integration_suite():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "008_devops_durable_communication.sql",
+        "009_devops_task_leases_and_cancellation.sql",
     ]
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")
