@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from .contracts import CodingTask
