@@ -5,13 +5,14 @@ not enabled by the core API merely because its package is installed.
 
 ## Runtime requirements
 
-- Python 3.11 or newer.
+- Python 3.12 or newer.
 - PostgreSQL 16 with the pgvector extension available.
 - A dedicated database role with only the privileges granted by
   `migrations/007_rag_knowledge_pgvector.sql`.
-- An OpenAI-compatible embeddings endpoint. The default model is
-  `text-embedding-3-small` with 1536 dimensions; the configured embedding model
-  must return vectors of the configured dimension.
+- An explicitly configured OpenAI-compatible embeddings endpoint via
+  `RUSA_EMBEDDING_BASE_URL`. No third-party endpoint is selected by default.
+  The default model name is `text-embedding-3-small` with 1536 dimensions; the
+  configured embedding model must return vectors of the configured dimension.
 - Per-tenant bearer credentials. Store only SHA-256 digests in
   `RUSA_MCP_TENANT_KEYS`; never put raw tenant tokens in that JSON map.
 
