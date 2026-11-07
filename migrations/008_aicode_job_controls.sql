@@ -37,7 +37,6 @@ REVOKE ALL ON public.aicode_job_controls
 
 GRANT USAGE ON SCHEMA public TO rusa_api_runtime, rusa_worker_runtime;
 GRANT SELECT, INSERT, UPDATE ON public.aicode_job_controls TO rusa_api_runtime;
-GRANT USAGE, SELECT ON SEQUENCE public.aicode_job_controls_id_seq TO rusa_api_runtime;
 GRANT SELECT ON public.aicode_job_controls TO rusa_worker_runtime;
 
 DROP POLICY IF EXISTS aicode_job_controls_api_tenant
