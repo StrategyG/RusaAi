@@ -39,8 +39,8 @@ def valid_evidence(candidate_sha="a" * 40):
         "tenant_isolation": {
             **passed,
             "negative_cases": 25,
-            "cross_tenant_reads": 0,
-            "cross_tenant_writes": 0,
+            "unauthorized_cross_tenant_reads": 0,
+            "unauthorized_cross_tenant_writes": 0,
             "unauthorized_accesses": 0,
         },
         "failure_recovery": {
@@ -163,7 +163,7 @@ def test_certification_passes_only_with_complete_evidence(tmp_path):
 
 def test_certification_fails_on_cross_tenant_access(tmp_path):
     evidence = valid_evidence()
-    evidence["checks"]["tenant_isolation"]["cross_tenant_reads"] = 1
+    evidence["checks"]["tenant_isolation"]["unauthorized_cross_tenant_reads"] = 1
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
 
