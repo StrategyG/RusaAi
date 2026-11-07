@@ -46,7 +46,6 @@ def _cleanup(tenant_id: str) -> None:
     import psycopg
 
     with psycopg.connect(DSN) as conn:
-        conn.execute("DELETE FROM public.devops_event_inbox WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_event_outbox WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_tasks WHERE tenant_id=%s", (tenant_id,))
         conn.execute("DELETE FROM public.devops_workflows WHERE tenant_id=%s", (tenant_id,))
