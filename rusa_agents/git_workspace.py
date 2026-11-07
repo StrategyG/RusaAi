@@ -40,19 +40,6 @@ def _run_bounded_process(
         text=True,
         start_new_session=(os.name == "posix"),
     )
-    try:
-        if not cancellation_check():
-            process.terminate()
-            process.communicate(timeout=3)
-            raise RuntimeError(
-                "Git execution stopped because the task lease was lost or cancelled"
-            )
-    except Exception:
-        if process.poll() is None:
-            process.kill()
-            process.communicate()
-        raise
-
     deadline = time.monotonic() + timeout_seconds
 
     def stop_process() -> tuple[str, str]:
@@ -76,6 +63,19 @@ def _run_bounded_process(
             except ProcessLookupError:
                 pass
             return process.communicate()
+
+    try:
+        initially_allowed = cancellation_check()
+    except Exception as exc:
+        stop_process()
+        raise RuntimeError(
+            "Could not verify the active task lease before Git execution"
+        ) from exc
+    if not initially_allowed:
+        stop_process()
+        raise RuntimeError(
+            "Git execution stopped because the task lease was lost or cancelled"
+        )
 
     while True:
         try:
