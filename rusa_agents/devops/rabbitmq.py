@@ -562,8 +562,8 @@ class RabbitMQCommandConsumer:
         topology: RabbitMQTopology,
         queue_names: Sequence[str],
     ) -> tuple[str, ...]:
-        if set(topology.capabilities) != set(self.allowed_capabilities):
-            raise ValueError("consumer capability scope does not match the declared topology")
+        if not set(self.allowed_capabilities).issubset(topology.capabilities):
+            raise ValueError("declared topology is missing a consumer capability")
         allowed_queue_names = {
             route.queue_name
             for route in RabbitMQTopology(self.allowed_capabilities).routes
