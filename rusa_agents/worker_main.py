@@ -31,6 +31,7 @@ async def serve() -> None:
             loop.add_signal_handler(signum, stop_event.set)
         await runtime.run_forever(stop_event=stop_event)
     finally:
+        await runtime.shutdown()
         await asyncio.to_thread(runtime.close)
 
 
