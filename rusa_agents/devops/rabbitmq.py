@@ -257,7 +257,11 @@ class RabbitMQTopology:
         for capability in self.capabilities:
             if not _CAPABILITY_PATTERN.fullmatch(capability):
                 raise ValueError(f"invalid broker capability: {capability!r}")
-        if isinstance(self.max_deliveries, bool) or self.max_deliveries < 1:
+        if (
+            isinstance(self.max_deliveries, bool)
+            or not isinstance(self.max_deliveries, int)
+            or self.max_deliveries < 1
+        ):
             raise ValueError("max_deliveries must be a positive integer")
         if not self.exchange_name or not self.dead_letter_exchange_name:
             raise ValueError("RabbitMQ exchange names are required")
@@ -444,6 +448,7 @@ class RabbitMQCommandConsumer:
         tenant_authorizer: Callable[[str, str, dict[str, Any]], bool],
         handler: Callable[[dict[str, Any]], Any],
         prefetch_count: int = 16,
+        allow_control_queue: bool = False,
     ):
         if not consumer_id or len(consumer_id) > 128:
             raise ValueError("consumer_id must contain 1..128 characters")
@@ -457,6 +462,7 @@ class RabbitMQCommandConsumer:
         self.tenant_authorizer = tenant_authorizer
         self.handler = handler
         self.prefetch_count = prefetch_count
+        self.allow_control_queue = allow_control_queue
 
     async def handle_message(self, message: Any) -> str:
         try:
@@ -487,15 +493,6 @@ class RabbitMQCommandConsumer:
             )
             if producer_id != event["producer"]:
                 raise MessageAuthenticationError("signed producer identity does not match envelope")
-            authorized = self.tenant_authorizer(
-                self.consumer_id,
-                event["tenant_id"],
-                event,
-            )
-            if inspect.isawaitable(authorized):
-                authorized = await authorized
-            if authorized is not True:
-                raise MessageAuthenticationError("consumer is not authorized for event tenant")
         except (
             ContractValidationError,
             CommandRoutingError,
@@ -506,6 +503,22 @@ class RabbitMQCommandConsumer:
             UnicodeDecodeError,
             json.JSONDecodeError,
         ):
+            await message.reject(requeue=False)
+            return "rejected"
+
+        try:
+            authorized = self.tenant_authorizer(
+                self.consumer_id,
+                event["tenant_id"],
+                event,
+            )
+            if inspect.isawaitable(authorized):
+                authorized = await authorized
+        except Exception:
+            # A policy/identity service outage is transient; do not execute or discard.
+            await message.nack(requeue=True)
+            return "requeued"
+        if authorized is not True:
             await message.reject(requeue=False)
             return "rejected"
 
@@ -529,13 +542,18 @@ class RabbitMQCommandConsumer:
         topology: RabbitMQTopology,
         queue_names: Sequence[str],
     ) -> tuple[str, ...]:
-        declared = await topology.declare(channel)
+        allowed_queue_names = {
+            route.queue_name
+            for route in RabbitMQTopology(self.allowed_capabilities).routes
+            if route.priority != "P0" or self.allow_control_queue
+        }
         await channel.set_qos(prefetch_count=self.prefetch_count)
         consumer_tags: list[str] = []
         for queue_name in queue_names:
-            queue = declared.queues.get(queue_name)
-            if queue is None or queue_name.endswith(".dlq"):
-                raise ValueError(f"queue is not a configured command queue: {queue_name}")
+            if queue_name not in allowed_queue_names:
+                raise ValueError(f"queue is outside this consumer's capability scope: {queue_name}")
+            # Consumers passively resolve pre-provisioned queues; they cannot create topology.
+            queue = await channel.get_queue(queue_name, ensure=False)
             consumer_tags.append(await queue.consume(self.handle_message, no_ack=False))
         return tuple(consumer_tags)
 
