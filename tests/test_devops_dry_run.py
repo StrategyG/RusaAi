@@ -230,3 +230,8 @@ def test_skipped_stage_is_audited_and_stops_downstream_stages():
     )
     assert not any(event["type"] == "task.failed" for event in report.events)
 
+def test_dry_run_agent_registry_is_immutable():
+    orchestrator = DevOpsDryRunOrchestrator()
+    with pytest.raises(TypeError):
+        orchestrator.agents[AGENT_BY_STAGE["plan"]] = SyntheticDevOpsAgent()
+
