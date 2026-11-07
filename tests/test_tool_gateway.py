@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from rusa_agents.contracts import WorkerRole
-from rusa_agents.tool_gateway import DockerSandbox, SandboxExecutorClient, ToolDenied, WorkspaceToolGateway
+from rusa_agents.tool_gateway import (
+    DockerSandbox,
+    SandboxExecutorClient,
+    ToolDenied,
+    WorkspaceToolGateway,
+)
 
 
 def test_gateway_rejects_path_traversal(tmp_path):

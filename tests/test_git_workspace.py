@@ -172,7 +172,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
             "StrategyG/RusaAi", "main", "feature/aicode/lease-second"
         ),
         acceptance_criteria=["isolated workspace"],
-        task_id="same-task",
+        task_id="00000000-0000-4000-8000-000000000002",
         metadata={"lease_token": "lease-two"},
     )
 

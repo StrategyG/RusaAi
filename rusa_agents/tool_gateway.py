@@ -388,36 +388,12 @@ class WorkspaceToolGateway:
     def __init__(
         self,
         workspace: str | Path,
-        sandbox: DockerSandbox | None = None,
-        max_file_bytes: int = 1_000_000,
-        knowledge_service: Any | None = None,
-        knowledge_tenant_id: str | None = None,
-        knowledge_collection: str = "agent",
-        sandbox_context: dict[str, str] | None = None,
-    ) -> None:
-        self.workspace = Path(workspace).resolve(strict=True)
-        if not self.workspace.is_dir():
-            raise ValueError("workspace must be an existing directory")
-        self.sandbox = sandbox or DockerSandbox()
-        self.sandbox_context = dict(sandbox_context or {})
-        self.max_file_bytes = max_file_bytes
-        if knowledge_service is not None and (
-            not isinstance(knowledge_tenant_id, str)
-            or not knowledge_tenant_id.strip()
-        ):
-            raise ValueError("knowledge tenant identity must come from the authenticated task")
-        self.knowledge_service = knowledge_service
-        self.knowledge_tenant_id = knowledge_tenant_id
-        self.knowledge_collection = knowledge_collection
-
-    def __init__(
-        self,
-        workspace: str | Path,
         sandbox: DockerSandbox | SandboxExecutorClient | None = None,
         max_file_bytes: int = 1_000_000,
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        sandbox_context: dict[str, str] | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -429,6 +405,7 @@ class WorkspaceToolGateway:
         except OSError as exc:
             raise ValueError("workspace root must be a real, non-symlink directory") from exc
         self.sandbox = sandbox or DockerSandbox()
+        self.sandbox_context = dict(sandbox_context or {})
         self.max_file_bytes = max_file_bytes
         if knowledge_service is not None and (
             not isinstance(knowledge_tenant_id, str)
