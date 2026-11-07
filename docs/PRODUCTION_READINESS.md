@@ -81,7 +81,7 @@ A dedicated implementation is proposed in draft PR #60. It adds an automated Pos
 The automated check is limited to the exact PostgreSQL/RLS and queue-recovery suites executed on the candidate commit. A green automated check is not enterprise certification.
 
 Outstanding certification evidence:
-- Staging adversarial tenant-isolation tests against deployed tenant identities.
+- Staging adversarial tenant-isolation tests against deployed tenant identities, distinguishing unauthorized access from the documented cross-tenant queue-consumer permission.
 - A verified tenant-bound worker identity or credential-broker boundary; the shared queue worker is intentionally trusted to consume queue rows across tenants.
 - At least 100 recoverable-fault simulations with recovery >=95%, zero duplicate business effects, and consistent state.
 - Backup/restore drill meeting RPO <=5 minutes and RTO <=60 minutes, with zero confirmed loss of acknowledged audit events.
