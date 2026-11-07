@@ -402,7 +402,7 @@ class GitHubPublisher:
                         "Could not safely reconcile task PR: search exceeded 1000 pull requests"
                     )
                 if closed_match:
-                    raise RuntimeError(
+                    raise ValueError(
                         "A previous pull request for this task is closed; manual reconciliation is required"
                     )
                 return None
