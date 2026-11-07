@@ -267,12 +267,10 @@ class PostgresTaskQueue:
                 policy_rows = conn.execute("""
                     SELECT tablename, policyname, roles, cmd, qual, with_check
                     FROM pg_policies
-                    WHERE schemaname='public' AND policyname = ANY(%s)
+                    WHERE schemaname='public' AND tablename = ANY(%s)
                 """, ([
-                    "aicode_jobs_api_tenant", "aicode_jobs_worker_queue",
-                    "aicode_job_controls_api_tenant", "aicode_job_controls_worker_read",
-                    "aicode_rate_limits_api_tenant", "aicode_memory_worker_tenant",
-                    "aicode_audit_worker_only",
+                    "aicode_jobs", "aicode_job_controls", "aicode_rate_limits",
+                    "aicode_memory", "aicode_audit_events",
                 ],)).fetchall()
                 policies = {
                     (row[0], row[1]): (tuple(row[2] or ()), row[3], row[4], row[5])
