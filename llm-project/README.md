@@ -13,7 +13,7 @@ Status: PLANNED (scaffold only; serving adapters are implemented separately)
 - `eval/`: planned only; no model benchmark or safety-evaluation harness
 - `serve/`: implemented FastAPI gateway and optional Transformers/vLLM adapters
 - `tools/`: planned only; agent tool execution lives in `rusa_agents/`
-- `configs/`: example configuration files, not evidence of trained model settings
+- `configs/`: non-executable planning metadata; the serving runtime uses environment configuration and verified artifacts
 
 ## Model summary
 
