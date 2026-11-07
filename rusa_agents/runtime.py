@@ -122,7 +122,11 @@ class AICodeRuntime:
             acceptance_criteria=data["acceptance_criteria"],
             context=data.get("context", ""),
             task_id=job.task_id,
-            metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
+            metadata={
+                "tenant_id": job.tenant_id,
+                "lease_token": job.lease_token,
+                "publish_branch": f"feature/aicode/{tenant_suffix}-{job.task_id}",
+            },
         )
 
     async def _build_orchestrator(
@@ -496,7 +500,7 @@ class AICodeRuntime:
                     job,
                     task,
                     "; ".join(record.errors) or "Human intervention required",
-                    {"branch": task.repository.work_branch},
+                    {"branch": task.metadata["publish_branch"]},
                 )
                 outcome = "awaiting_approval"
                 return True
@@ -532,6 +536,7 @@ class AICodeRuntime:
                     task.repository.full_name,
                     task.repository.work_branch,
                     f"feat(aicode): {task.objective[:120]}",
+                    publish_branch=task.metadata["publish_branch"],
                 )
 
             publication_started = True
@@ -554,7 +559,7 @@ class AICodeRuntime:
             pr_url = await self._await_with_lease(
                 self.publisher.create_or_get_draft_pr(
                     task.repository.full_name,
-                    task.repository.work_branch,
+                    task.metadata["publish_branch"],
                     task.repository.base_branch,
                     f"AICode: {task.objective[:180]}",
                     (
@@ -600,7 +605,7 @@ class AICodeRuntime:
                     {
                         "pull_request_url": pr_url,
                         "commit_sha": commit_sha,
-                        "branch": task.repository.work_branch,
+                        "branch": task.metadata["publish_branch"],
                     },
                 )
                 outcome = "awaiting_approval"
@@ -624,7 +629,8 @@ class AICodeRuntime:
                 {
                     "pull_request_url": pr_url,
                     "commit_sha": commit_sha,
-                    "branch": task.repository.work_branch,
+                    "branch": task.metadata["publish_branch"],
+                    "workspace_branch": task.repository.work_branch,
                 },
             )
             if not completed:
