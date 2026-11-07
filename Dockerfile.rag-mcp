@@ -1,4 +1,4 @@
-FROM python:3.11-slim-trixie AS builder
+FROM python:3.12.16-slim-trixie AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,8 +19,8 @@ RUN python -m pip install --no-cache-dir --upgrade \
     && python -m pip check \
     && python -m pip uninstall -y setuptools wheel jaraco.context \
     && python -m pip uninstall -y pip \
-    && rm -rf /usr/local/lib/python3.11/ensurepip \
-    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.11 \
+    && rm -rf /usr/local/lib/python3.12/ensurepip \
+    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
     && python - <<'PY'
 from importlib.metadata import PackageNotFoundError, version
 
@@ -59,7 +59,7 @@ COPY --from=builder /usr/local /usr/local
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
 
-RUN ldd /usr/local/bin/python3.11 | tee /tmp/python-ldd \
+RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
