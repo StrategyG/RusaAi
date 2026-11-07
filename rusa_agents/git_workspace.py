@@ -398,7 +398,7 @@ class GitHubPublisher:
                     if len(items) < 100:
                         break
                 else:
-                    raise RuntimeError(
+                    raise ValueError(
                         "Could not safely reconcile task PR: search exceeded 1000 pull requests"
                     )
                 if closed_match:
