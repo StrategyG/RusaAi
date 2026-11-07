@@ -318,6 +318,14 @@ class WorkspaceToolGateway:
         "rusa_agents/memory.py", "rusa_agents/orchestrator.py",
         "rusa_agents/policy.py", "rusa_agents/queue.py",
         "rusa_agents/runtime.py", "rusa_agents/tool_gateway.py",
+        "rusa_agents/config.py", "rusa_agents/providers.py",
+        "rusa_agents/http_limits.py", "rusa_agents/metrics.py",
+        "rusa_agents/rate_limit.py", "rusa_agents/worker_main.py",
+        "rusa_agents/workers.py",
+        "llm-project/serve/app.py", "llm-project/serve/model_runtime.py",
+        "rusa_knowledge/embeddings.py", "rusa_knowledge/safety.py",
+        "rusa_knowledge/service.py", "rusa_knowledge/store.py",
+        "rusa_mcp/client.py", "rusa_mcp/server.py",
     }
     PROTECTED_WRITE_PREFIXES = (
         ".github/", "qa/", "rusa_agents/security/",
