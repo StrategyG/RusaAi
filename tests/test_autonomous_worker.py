@@ -199,3 +199,10 @@ def test_autonomous_worker_preserves_policy_failure_classification():
     result = asyncio.run(AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway).run(make_task(), []))
     assert not result.success
     assert result.failure_kind == "policy"
+
+
+def test_autonomous_worker_rejects_non_integer_iteration_limit():
+    with pytest.raises(ValueError, match="integer between 1 and 30"):
+        AutonomousCodeWorker(
+            WorkerRole.ANALYST, StubProvider("{}"), StubGateway(), max_steps=1.5
+        )
