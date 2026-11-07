@@ -476,6 +476,12 @@ def test_orchestrator_rejects_incomplete_or_cyclic_dag(monkeypatch):
     with pytest.raises(ValueError, match="dependency cycle"):
         AICodeOrchestrator(workers())
 
+    incomplete = dict(AICodeOrchestrator.EXECUTION_DAG)
+    del incomplete[WorkerRole.SECURITY]
+    monkeypatch.setattr(AICodeOrchestrator, "EXECUTION_DAG", incomplete)
+    with pytest.raises(ValueError, match="define every pipeline role"):
+        AICodeOrchestrator(workers())
+
 
 @pytest.mark.parametrize(
     "kwargs",
