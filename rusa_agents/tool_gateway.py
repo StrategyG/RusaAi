@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -86,7 +87,13 @@ class DockerSandbox:
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
 
-    def run(self, workspace: Path, profile: str) -> ToolResult:
+    def run(
+        self,
+        workspace: Path,
+        profile: str,
+        *,
+        cancellation_check: Callable[[], bool] | None = None,
+    ) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:
@@ -180,28 +187,91 @@ class DockerSandbox:
                 self.image,
                 *self.PROFILES[profile],
             ]
-            try:
-                completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
-                    command,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
-                    env={key: value for key, value in os.environ.items()
-                         if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
-                )
-            except FileNotFoundError as exc:
-                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-            except subprocess.TimeoutExpired:
+            sandbox_env = {
+                key: value for key, value in os.environ.items()
+                if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}
+            }
+
+            def remove_container() -> None:
                 try:
                     subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
                         [DOCKER_BIN, "rm", "-f", container_name],
-                        check=False, capture_output=True, text=True, timeout=30,
-                        env={key: value for key, value in os.environ.items()
-                             if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        env=sandbox_env,
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+
+            try:
+                if cancellation_check is None:
+                    completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout_seconds,
+                        env=sandbox_env,
+                    )
+                else:
+                    process = subprocess.Popen(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=sandbox_env,
+                    )
+                    deadline = time.monotonic() + self.timeout_seconds
+                    while True:
+                        try:
+                            execution_allowed = cancellation_check()
+                        except Exception:
+                            execution_allowed = False
+                        if not execution_allowed:
+                            process.terminate()
+                            try:
+                                stdout, stderr = process.communicate(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                stdout, stderr = process.communicate()
+                            remove_container()
+                            return ToolResult(
+                                False,
+                                "Sandbox execution stopped because the task lease was lost or cancelled.",
+                                {
+                                    "profile": profile,
+                                    "cancelled": True,
+                                    "image": self.image,
+                                    "snapshot_bytes": totals[0],
+                                },
+                            )
+
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            process.kill()
+                            stdout, stderr = process.communicate()
+                            remove_container()
+                            return ToolResult(
+                                False,
+                                f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.",
+                                {"profile": profile, "timeout": True},
+                            )
+                        try:
+                            stdout, stderr = process.communicate(
+                                timeout=min(1.0, remaining)
+                            )
+                            completed = subprocess.CompletedProcess(
+                                command, process.returncode, stdout, stderr
+                            )
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
+            except FileNotFoundError as exc:
+                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
+            except subprocess.TimeoutExpired:
+                remove_container()
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
             output = (completed.stdout + "\n" + completed.stderr)[-20000:]
             return ToolResult(
@@ -390,7 +460,11 @@ class WorkspaceToolGateway:
         }
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
-        return self.sandbox.run(self.workspace, profile)
+        return self.sandbox.run(
+            self.workspace,
+            profile,
+            cancellation_check=self.execution_guard,
+        )
 
     def git_diff(self) -> ToolResult:
         self._assert_execution_allowed()
