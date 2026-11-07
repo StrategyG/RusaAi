@@ -277,8 +277,7 @@ def test_cancel_has_a_bounded_row_lock_wait():
     locked, release = Event(), Event()
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "bounded cancel"})
-        job = queue.claim("cancel-lock-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
+        job_id, lease_token = claim_specific_task(task_id, tenant, "cancel-lock-worker")
         with ThreadPoolExecutor(max_workers=1) as pool:
             holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
             assert locked.wait(timeout=5)
@@ -302,9 +301,8 @@ def test_retry_has_a_bounded_row_lock_wait():
         assert queue.enqueue(
             task_id, tenant, {"objective": "bounded retry"}, max_attempts=1
         )
-        job = queue.claim("retry-lock-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
-        assert queue.fail(job.id, tenant, "retry-lock-worker", job.lease_token, "test failure")
+        job_id, lease_token = claim_specific_task(task_id, tenant, "retry-lock-worker")
+        assert queue.fail(job_id, tenant, "retry-lock-worker", lease_token, "test failure")
         assert queue.get(task_id, tenant)["status"] == "failed"
         with ThreadPoolExecutor(max_workers=1) as pool:
             holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
@@ -327,18 +325,17 @@ def test_heartbeat_does_not_false_lose_lease_during_publication_lock():
     locked, release = Event(), Event()
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "heartbeat lock contention"})
-        job = queue.claim("heartbeat-lock-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
+        job_id, lease_token = claim_specific_task(task_id, tenant, "heartbeat-lock-worker")
         with ThreadPoolExecutor(max_workers=1) as pool:
             holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
             assert locked.wait(timeout=5)
             assert queue.heartbeat(
-                job.id, tenant, "heartbeat-lock-worker", job.lease_token, 180
+                job_id, tenant, "heartbeat-lock-worker", lease_token, 180
             ) is True
             release.set()
             holder.result(timeout=5)
         assert queue.owns_lease(
-            job.id, tenant, "heartbeat-lock-worker", job.lease_token
+            job_id, tenant, "heartbeat-lock-worker", lease_token
         )
     finally:
         release.set()
