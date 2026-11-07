@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
     CodingTask,
@@ -79,6 +81,20 @@ def test_policy_protects_production_actions():
     assert policy.evaluate("deploy").requires_approval
     assert not policy.evaluate("disable_audit").allowed
     assert policy.evaluate("repo_read", RiskLevel.CRITICAL).requires_approval
+
+
+@pytest.mark.parametrize("action", sorted(AutonomyPolicy.PROTECTED_ACTIONS))
+def test_policy_requires_approval_for_every_protected_action(action):
+    decision = AutonomyPolicy().evaluate(action)
+    assert not decision.allowed
+    assert decision.requires_approval
+
+
+@pytest.mark.parametrize("action", sorted(AutonomyPolicy.DENIED_ACTIONS))
+def test_policy_never_allows_prohibited_actions(action):
+    decision = AutonomyPolicy().evaluate(action)
+    assert not decision.allowed
+    assert not decision.requires_approval
 
 
 def test_memory_persists_task(tmp_path):
