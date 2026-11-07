@@ -551,3 +551,66 @@ def test_workspace_refresh_fetches_existing_stable_publish_branch(tmp_path, monk
         "--git-dir", str(mirror), "rev-parse", f"refs/heads/{stable_branch}"
     ).stdout.strip()
     assert actual_sha == expected_sha
+
+
+
+def test_draft_pr_creation_race_reconciles_github_422(monkeypatch):
+    task_id = "fedcba98-7654-4321-8765-fedcba987654"
+    existing_pr = {
+        "state": "open",
+        "html_url": "https://github.com/StrategyG/RusaAi/pull/125",
+        "body": f"RUSA-AI-Task-ID: {task_id}",
+        "head": {"ref": "feature/aicode/stable-task"},
+        "base": {"ref": "main"},
+    }
+    request = httpx.Request(
+        "POST", "https://api.github.com/repos/StrategyG/RusaAi/pulls"
+    )
+    conflict = httpx.HTTPStatusError(
+        "GitHub reports an existing open pull request",
+        request=request,
+        response=httpx.Response(422, request=request),
+    )
+
+    class FakeResponse:
+        def __init__(self, payload=None, error=None):
+            self.payload = payload
+            self.error = error
+
+        def raise_for_status(self):
+            if self.error:
+                raise self.error
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            self.lookups = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, **_kwargs):
+            self.lookups += 1
+            return FakeResponse([] if self.lookups == 1 else [existing_pr])
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(error=conflict)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    publisher = GitHubPublisher("test-token")
+    url = asyncio.run(
+        publisher.create_or_get_draft_pr(
+            "StrategyG/RusaAi",
+            "feature/aicode/stable-task",
+            "main",
+            "Recovered task",
+            f"RUSA-AI-Task-ID: {task_id}",
+        )
+    )
+
+    assert url == existing_pr["html_url"]
