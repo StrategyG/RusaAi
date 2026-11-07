@@ -243,7 +243,7 @@ class PostgresTaskQueue:
                     "aicode_memory", "aicode_audit_events",
                 }:
                     raise RuntimeError(
-                        "Production RLS migration is incomplete; apply migrations/008_aicode_job_controls.sql"
+                        "Production RLS migration is incomplete; apply migrations/004_aicode_tenant_rls.sql and migrations/008_aicode_job_controls.sql"
                     )
                 if any(not enabled or not forced for enabled, forced in states.values()):
                     raise RuntimeError("Production RLS must be enabled and forced on all AICode tables")
@@ -252,14 +252,13 @@ class PostgresTaskQueue:
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
-                        pg_has_sequence_privilege('rusa_api_login', 'public.aicode_job_controls_id_seq', 'USAGE'),
                         pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
                         pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
                 """).fetchone()
                 if (
                     not control_privileges
-                    or not all(control_privileges[:5])
-                    or control_privileges[5]
+                    or not all(control_privileges[:4])
+                    or control_privileges[4]
                 ):
                     raise RuntimeError(
                         "Cancellation control grants must allow API SELECT/INSERT/UPDATE "
@@ -284,7 +283,7 @@ class PostgresTaskQueue:
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError(
                         "Production tenant/cancellation RLS policies are missing; "
-                        "apply migrations/008_aicode_job_controls.sql"
+                        "apply migrations/004_aicode_tenant_rls.sql and migrations/008_aicode_job_controls.sql"
                     )
 
                 roles = conn.execute("""
