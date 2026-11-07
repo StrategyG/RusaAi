@@ -256,3 +256,90 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
     finally:
         release_publish.set()
         remove_task(task_id, tenant)
+
+
+
+def hold_task_row_lock(task_id: str, tenant_id: str, locked: Event, release: Event) -> None:
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "SELECT id FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s FOR UPDATE",
+            (task_id, tenant_id),
+        ).fetchone()
+        locked.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("test row lock was not released")
+
+
+def test_cancel_has_a_bounded_row_lock_wait():
+    queue = make_queue()
+    tenant = f"queue-cancel-lock-timeout-{uuid4().hex}"
+    task_id = str(uuid4())
+    locked, release = Event(), Event()
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "bounded cancel"})
+        job = queue.claim("cancel-lock-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
+            assert locked.wait(timeout=5)
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                queue.cancel(task_id, tenant)
+            assert time.monotonic() - started < 4
+            release.set()
+            holder.result(timeout=5)
+    finally:
+        release.set()
+        remove_task(task_id, tenant)
+
+
+def test_retry_has_a_bounded_row_lock_wait():
+    queue = make_queue()
+    tenant = f"queue-retry-lock-timeout-{uuid4().hex}"
+    task_id = str(uuid4())
+    locked, release = Event(), Event()
+    try:
+        assert queue.enqueue(
+            task_id, tenant, {"objective": "bounded retry"}, max_attempts=1
+        )
+        job = queue.claim("retry-lock-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.fail(job.id, tenant, "retry-lock-worker", job.lease_token, "test failure")
+        assert queue.get(task_id, tenant)["status"] == "failed"
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
+            assert locked.wait(timeout=5)
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                queue.retry(task_id, tenant)
+            assert time.monotonic() - started < 4
+            release.set()
+            holder.result(timeout=5)
+    finally:
+        release.set()
+        remove_task(task_id, tenant)
+
+
+def test_heartbeat_does_not_false_lose_lease_during_publication_lock():
+    queue = make_queue()
+    tenant = f"queue-heartbeat-lock-timeout-{uuid4().hex}"
+    task_id = str(uuid4())
+    locked, release = Event(), Event()
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "heartbeat lock contention"})
+        job = queue.claim("heartbeat-lock-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            holder = pool.submit(hold_task_row_lock, task_id, tenant, locked, release)
+            assert locked.wait(timeout=5)
+            assert queue.heartbeat(
+                job.id, tenant, "heartbeat-lock-worker", job.lease_token, 180
+            ) is True
+            release.set()
+            holder.result(timeout=5)
+        assert queue.owns_lease(
+            job.id, tenant, "heartbeat-lock-worker", job.lease_token
+        )
+    finally:
+        release.set()
+        remove_task(task_id, tenant)

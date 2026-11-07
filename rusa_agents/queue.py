@@ -51,6 +51,11 @@ class PostgresTaskQueue:
         conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
 
     @staticmethod
+    def _set_control_lock_timeout(conn) -> None:
+        """Bound control-plane row-lock waits so cancel/retry/heartbeat cannot hang."""
+        conn.execute("SET LOCAL lock_timeout = '1500ms'")
+
+    @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
         if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
@@ -399,15 +404,25 @@ class PostgresTaskQueue:
     ) -> bool:
         if not lease_token or not 15 <= lease_seconds <= 3600:
             raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
-        with self._connect() as conn:
-            self._set_tenant(conn, tenant_id)
-            cur = conn.execute("""
-                UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+        try:
+            with self._connect() as conn:
+                self._set_tenant(conn, tenant_id)
+                self._set_control_lock_timeout(conn)
+                cur = conn.execute("""
+                    UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
-            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
-        return cur.rowcount == 1
+                """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
+            return cur.rowcount == 1
+        except Exception as exc:
+            # Publication currently holds the job row lock while GitHub is called.
+            # If heartbeat collides with that bounded critical section, confirm the
+            # lease is still live without taking a row lock; do not falsely fence
+            # the worker. The Phase 2 publisher refactor will remove this exception.
+            if getattr(exc, "sqlstate", None) != "55P03":
+                raise
+            return self.owns_lease(job_id, tenant_id, worker_id, lease_token)
 
     def publish_if_lease_owned(
         self,
@@ -618,6 +633,7 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            self._set_control_lock_timeout(conn)
             row = conn.execute("""
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
@@ -638,6 +654,7 @@ class PostgresTaskQueue:
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
+            self._set_control_lock_timeout(conn)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
                     lease_until=NULL, lease_token=NULL, updated_at=NOW()
