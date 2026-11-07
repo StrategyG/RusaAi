@@ -276,7 +276,7 @@ class WorkspaceToolGateway:
         "rusa_agents/runtime.py", "rusa_agents/tool_gateway.py",
     }
     PROTECTED_WRITE_PREFIXES = (
-        ".github/", "tests/", "test/", "qa/", "rusa_agents/security/",
+        ".github/", "tests/", "test/", "qa/", "rusa_agents/",
         "migrations/", "schemas/", "llm-project/configs/",
         "deploy/", "deployment/", "infra/", "infrastructure/", "terraform/",
         "k8s/", "kubernetes/", "helm/", "systemd/", ".devcontainer/",
