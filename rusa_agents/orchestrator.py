@@ -6,6 +6,7 @@ import asyncio
 
 from .audit import AuditLog
 from .contracts import CodingTask, TaskRecord, TaskState, WorkerResult, WorkerRole
+from .evidence import EvidenceAttestor
 from .memory import SQLiteMemory
 from .metrics import WORKER_STEPS
 from .policy import AutonomyPolicy
@@ -76,6 +77,8 @@ class AICodeOrchestrator:
         audit: AuditLog | None = None,
         max_parallel_workers: int = 4,
         max_repair_cycles: int = 2,
+        evidence_key: str | bytes | None = None,
+        expected_sandbox_image: str | None = None,
     ):
         self.workers = {worker.role: worker for worker in workers}
         self.policy = policy or AutonomyPolicy()
@@ -87,6 +90,8 @@ class AICodeOrchestrator:
             raise ValueError("max_repair_cycles must be between 0 and 5")
         self.max_parallel_workers = max_parallel_workers
         self.max_repair_cycles = max_repair_cycles
+        self.evidence_attestor = EvidenceAttestor(evidence_key) if evidence_key else None
+        self.expected_sandbox_image = expected_sandbox_image
 
         missing = set(self.PIPELINE) - set(self.workers)
         if missing:
@@ -213,11 +218,6 @@ class AICodeOrchestrator:
         )
         await self._persist(record)
 
-    @staticmethod
-    def _check_passed(result: WorkerResult, key: str) -> bool:
-        evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
-
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
             (item for item in reversed(record.results) if item.role == WorkerRole.TESTER),
@@ -231,12 +231,13 @@ class AICodeOrchestrator:
             record.errors.append("Tester or security worker did not produce a result.")
             return None
         required = [
-            (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
-        ] + [
-            (security, key) for key in self.REQUIRED_SECURITY_EVIDENCE
+            (tester, "check:pytest", "pytest", WorkerRole.TESTER),
+            (security, "check:bandit", "bandit", WorkerRole.SECURITY),
+            (security, "check:ruff", "ruff", WorkerRole.SECURITY),
+            (security, "check:compile", "compile", WorkerRole.SECURITY),
         ]
         missing = [
-            key for worker_result, key in required
+            key for worker_result, key, _, _ in required
             if key not in worker_result.evidence
         ]
         if missing:
@@ -244,10 +245,45 @@ class AICodeOrchestrator:
                 "Missing mandatory verification evidence: " + ", ".join(missing)
             )
             return None
-        failed = [
-            key for worker_result, key in required
-            if not self._check_passed(worker_result, key)
-        ]
+        if self.evidence_attestor is None:
+            record.errors.append("QA evidence verifier is not configured; release is held.")
+            return None
+
+        snapshot_digests: set[str] = set()
+        run_ids: set[str] = set()
+        invalid: list[str] = []
+        failed: list[str] = []
+        for worker_result, key, profile, expected_role in required:
+            evidence = worker_result.evidence.get(key)
+            valid = self.evidence_attestor.verify(
+                evidence,
+                expected_profile=profile,
+                expected_worker_role=expected_role.value,
+                expected_task_id=record.task.task_id,
+                expected_tenant_id=self._tenant_id(record.task),
+                expected_image=self.expected_sandbox_image,
+            )
+            if not valid:
+                invalid.append(key)
+                continue
+            snapshot_digests.add(evidence["snapshot_sha256"])
+            run_ids.add(evidence["run_id"])
+            if evidence["exit_code"] != 0:
+                failed.append(key)
+
+        if invalid:
+            record.errors.append(
+                "Invalid or untrusted QA attestations: " + ", ".join(invalid)
+            )
+            return False
+        if len(run_ids) != len(required):
+            record.errors.append("QA evidence contains a duplicate sandbox run identifier.")
+            return False
+        if len(snapshot_digests) != 1:
+            record.errors.append(
+                "QA profiles did not validate the same immutable workspace snapshot."
+            )
+            return False
         if failed:
             record.errors.append("Validation checks failed: " + ", ".join(failed))
             return False
