@@ -447,3 +447,46 @@ def test_heartbeat_retries_transient_database_errors(monkeypatch):
     assert runtime.queue.heartbeats == 2
     assert cancel_requested.is_set()
     assert not lost_lease.is_set()
+
+
+
+def test_runtime_tracks_noncooperative_child_until_shutdown(monkeypatch):
+    runtime = object.__new__(AICodeRuntime)
+    original_cancel_child = AICodeRuntime._cancel_child
+
+    async def short_cancel(task, timeout_seconds=10.0):
+        await original_cancel_child(task, timeout_seconds=0.01)
+
+    monkeypatch.setattr(
+        AICodeRuntime, "_cancel_child", staticmethod(short_cancel)
+    )
+
+    async def scenario():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        cancel_requested = asyncio.Event()
+
+        async def operation():
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                await release.wait()
+
+        async def request_cancel():
+            await started.wait()
+            cancel_requested.set()
+
+        trigger = asyncio.create_task(request_cancel())
+        with pytest.raises(TaskCancellationRequested):
+            await runtime._await_with_lease(
+                operation(), asyncio.Event(), cancel_requested
+            )
+        await trigger
+        assert len(runtime._pending_operations) == 1
+
+        release.set()
+        await runtime.shutdown(timeout_seconds=1)
+        assert not runtime._pending_operations
+
+    asyncio.run(scenario())
