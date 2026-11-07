@@ -240,7 +240,7 @@ Rollback:
 ## 11. Release gate
 
 Do not declare production certification until:
-- PR head CI passes, including PostgreSQL integration tests and both image builds.
+- PR head CI passes on the exact head SHA, including PostgreSQL integration tests, RAG/MCP integration tests, and the production-image build/scan job for API, worker, sandbox, and RAG/MCP images.
 - Migration and runtime role permissions are verified.
 - Tenant isolation tests show zero cross-tenant access.
 - Sandbox adversarial and resource exhaustion tests pass.
