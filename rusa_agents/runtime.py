@@ -34,6 +34,7 @@ class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
         self.config.validate_worker()
+        self._pending_operations: set[asyncio.Task[Any]] = set()
         if not self.config.worker_database_url or not self.config.workspace_root or not self.config.git_mirror_root:
             raise RuntimeError("Database, workspace root, and Git mirror root are required")
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
@@ -66,6 +67,21 @@ class AICodeRuntime:
                 database_url=knowledge_dsn,
             )
 
+
+    async def shutdown(self, timeout_seconds: float = 10.0) -> None:
+        """Cancel and drain tracked child operations before releasing worker resources."""
+        pending = set(self._pending_operations)
+        for task in pending:
+            task.cancel()
+        if not pending:
+            return
+        _, still_pending = await asyncio.wait(pending, timeout=timeout_seconds)
+        if still_pending:
+            logger.error(
+                "%d child operation(s) remained active after %.1fs shutdown grace",
+                len(still_pending),
+                timeout_seconds,
+            )
 
     def close(self) -> None:
         """Release optional retrieval resources during worker shutdown."""
@@ -177,6 +193,18 @@ class AICodeRuntime:
     ) -> Any:
         """Race work against lease loss and durable cancellation without orphaning asyncio tasks."""
         operation_task = asyncio.create_task(operation)
+        pending_operations = getattr(self, "_pending_operations", None)
+        if pending_operations is None:
+            pending_operations = set()
+            self._pending_operations = pending_operations
+        pending_operations.add(operation_task)
+
+        def release_operation(task: asyncio.Task) -> None:
+            pending_operations.discard(task)
+            if not task.cancelled():
+                task.exception()
+
+        operation_task.add_done_callback(release_operation)
         lease_watch = asyncio.create_task(lost_lease.wait())
         cancel_watch = (
             asyncio.create_task(cancel_requested.wait())
