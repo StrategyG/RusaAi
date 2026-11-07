@@ -119,6 +119,7 @@ def test_security_guard_is_cross_cutting_and_read_only():
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
         "environment": "staging",
+        "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
         "evidence_refs": ["evidence://release/verification"],
     }
@@ -136,6 +137,7 @@ def test_deploy_task_requires_approval_and_deploy_scope():
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
         "environment": "production",
+        "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
     }
     payload["constraints"].update(
@@ -262,6 +264,7 @@ def test_production_deploy_requires_human_approval_reference():
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
         "environment": "production",
+        "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
     }
     payload["constraints"].update(
