@@ -154,11 +154,11 @@ REVOKE UPDATE, DELETE, TRUNCATE ON public.devops_event_inbox
     FROM PUBLIC, rusa_api_runtime, rusa_worker_runtime;
 
 CREATE OR REPLACE FUNCTION public.rusa_devops_inbox_immutable() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $rusa$
 BEGIN
     RAISE EXCEPTION 'DevOps inbox receipts are append-only';
 END;
-$;
+$rusa$;
 REVOKE ALL ON FUNCTION public.rusa_devops_inbox_immutable() FROM PUBLIC;
 
 DROP TRIGGER IF EXISTS trg_devops_inbox_immutable ON public.devops_event_inbox;
