@@ -187,6 +187,11 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
     worker_dsn = psycopg.conninfo.make_conninfo(
         DSN, user="rusa_worker_login", password=worker_password
     )
+
+    # Exercise the exact fail-closed startup checks with both production login roles.
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    PostgresTaskQueue(api_dsn).initialize()
+    PostgresTaskQueue(worker_dsn).initialize()
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     key_a = "tenant-a-integration-key-000000000000000000000000"
