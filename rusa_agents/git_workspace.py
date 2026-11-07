@@ -278,12 +278,18 @@ class GitWorkspaceManager:
             raise FileNotFoundError(f"Pre-fetched bare mirror not found for {task.repository.full_name}")
         if cancellation_check is not None and not cancellation_check():
             raise RuntimeError("Workspace creation stopped because the task lease is inactive")
-        if publish_branch:
+        if publish_branch and cancellation_check is not None:
             self.refresh(
                 task.repository.full_name,
                 task.repository.base_branch,
                 publish_branch,
                 cancellation_check=cancellation_check,
+            )
+        elif publish_branch:
+            self.refresh(
+                task.repository.full_name,
+                task.repository.base_branch,
+                publish_branch,
             )
         elif cancellation_check is not None:
             self.refresh(
