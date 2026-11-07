@@ -1,6 +1,8 @@
 """Shared test import setup and PostgreSQL migration bootstrap."""
+import importlib.util
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVE_PATH = ROOT / "llm-project" / "serve"
 if str(SERVE_PATH) not in sys.path:
     sys.path.insert(0, str(SERVE_PATH))
+
+
+if importlib.util.find_spec("grpc_tools") is not None:
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_devops_proto.py")],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
