@@ -128,40 +128,40 @@ class PostgresWorkflowStore:
     def append_outbox_event(
         self,
         *,
+        conn: Any,
         tenant_id: str,
         event: dict[str, Any],
         destination: str = "events",
         aggregate_version: int,
     ) -> None:
-        """Append a validated event in the caller's tenant transaction."""
+        """Append a validated event using the caller's existing transaction."""
         validate_workflow_event(event)
         if event.get("tenant_id") != tenant_id:
             raise ValueError("event tenant_id does not match authenticated tenant")
         if destination not in {"commands", "events"}:
             raise ValueError("destination must be commands or events")
-        if not isinstance(aggregate_version, int) or aggregate_version < 1:
+        if isinstance(aggregate_version, bool) or not isinstance(aggregate_version, int) or aggregate_version < 1:
             raise ValueError("aggregate_version must be a positive integer")
-        with self._connect() as conn:
-            self._set_tenant(conn, tenant_id)
-            conn.execute(
-                """
-                INSERT INTO public.devops_event_outbox
-                    (tenant_id, run_id, task_id, attempt, message_id,
-                     destination, event_type, aggregate_version, envelope)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                """,
-                (
-                    tenant_id,
-                    event["run_id"],
-                    event.get("task_id"),
-                    event.get("attempt"),
-                    event["message_id"],
-                    destination,
-                    event["type"],
-                    aggregate_version,
-                    _canonical_json(event),
-                ),
-            )
+        self._set_tenant(conn, tenant_id)
+        conn.execute(
+            """
+            INSERT INTO public.devops_event_outbox
+                (tenant_id, run_id, task_id, attempt, message_id,
+                 destination, event_type, aggregate_version, envelope)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (
+                tenant_id,
+                event["run_id"],
+                event.get("task_id"),
+                event.get("attempt"),
+                event["message_id"],
+                destination,
+                event["type"],
+                aggregate_version,
+                _canonical_json(event),
+            ),
+        )
 
 
 class PostgresOutboxRelay:
