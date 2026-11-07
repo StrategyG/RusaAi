@@ -7,9 +7,9 @@ and acknowledge them only after a broker publisher-confirm response.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import hashlib
 import json
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID, uuid4
 
