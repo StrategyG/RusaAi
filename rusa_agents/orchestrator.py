@@ -88,10 +88,10 @@ class AICodeOrchestrator:
         self.policy = policy or AutonomyPolicy()
         self.memory = memory or SQLiteMemory()
         self.audit = audit or AuditLog()
-        if not 1 <= max_parallel_workers <= 32:
-            raise ValueError("max_parallel_workers must be between 1 and 32")
-        if not 0 <= max_repair_cycles <= 5:
-            raise ValueError("max_repair_cycles must be between 0 and 5")
+        if type(max_parallel_workers) is not int or not 1 <= max_parallel_workers <= 32:
+            raise ValueError("max_parallel_workers must be an integer between 1 and 32")
+        if type(max_repair_cycles) is not int or not 0 <= max_repair_cycles <= 5:
+            raise ValueError("max_repair_cycles must be an integer between 0 and 5")
         self.max_parallel_workers = max_parallel_workers
         self.max_repair_cycles = max_repair_cycles
 
@@ -111,6 +111,8 @@ class AICodeOrchestrator:
             name: AgentManager(name, roles, self.workers)
             for name, roles in self.MANAGER_ROLES.items()
         }
+        if set(self.EXECUTION_DAG) != set(self.PIPELINE):
+            raise ValueError("execution DAG must define every pipeline role exactly once")
         for role, dependencies in self.EXECUTION_DAG.items():
             if role not in self.PIPELINE or not set(dependencies).issubset(self.PIPELINE):
                 raise ValueError("execution DAG contains an unknown role dependency")
