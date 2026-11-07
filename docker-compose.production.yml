@@ -30,8 +30,6 @@ services:
       RUSA_QA_SANDBOX_IMAGE: ""
       RUSA_QA_DOCKER_SOCKET: ""
       RUSA_QA_DOCKER_GID: ""
-      RUSA_QA_WORKSPACE_ROOT: ""
-      RUSA_QA_WORKSPACE_GID: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
@@ -75,8 +73,12 @@ services:
       RUSA_QA_SERVICE_TOKEN: ${RUSA_QA_SERVICE_TOKEN:?Set the worker-to-QA service token}
       RUSA_QA_PUBLIC_KEY_B64: ${RUSA_QA_PUBLIC_KEY_B64:?Set the QA Ed25519 public key}
       RUSA_QA_PRIVATE_KEY_B64: ""
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
       RUSA_QA_KEY_ID: ${RUSA_QA_KEY_ID:?Set the QA signing key ID}
       RUSA_QA_SANDBOX_IMAGE: ${RUSA_QA_SANDBOX_IMAGE:?Set the pinned QA sandbox image}
+      RUSA_QA_WORKSPACE_ROOT: ""
+      RUSA_QA_WORKSPACE_GID: ""
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -127,10 +129,25 @@ services:
       RUSA_WORKER_DATABASE_URL: ""
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      RUSA_API_KEY: ""
+      RUSA_API_KEYS: "{}"
+      RUSA_API_KEYS_JSON: "{}"
+      RUSA_METRICS_API_KEY: ""
       RUSA_GITHUB_TOKEN: ""
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_MODEL_API_KEY: ""
+      RUSA_EMBEDDING_API_KEY: ""
+      RUSA_MCP_TENANT_KEYS: "{}"
+      RUSA_SANDBOX_IMAGE: ""
+      RUSA_WORKSPACE_ROOT: ""
+      RUSA_GIT_MIRROR_ROOT: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
       RUSA_QA_URL: ""
+      RUSA_QA_DOCKER_SOCKET: ""
+      RUSA_QA_DOCKER_GID: ""
+      RUSA_QA_WORKSPACE_GID: ""
+      POSTGRES_PASSWORD: ""
       DOCKER_HOST: unix:///run/qa-docker.sock
     read_only: true
     security_opt: ["no-new-privileges:true"]
