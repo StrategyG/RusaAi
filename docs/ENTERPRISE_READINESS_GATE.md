@@ -104,7 +104,7 @@ Thresholds enforced by the evaluator:
 
 The check named **ERG-06 automated tenant-isolation and recovery gate** should be configured as a required status check for pull requests targeting main. Repository branch protection/rulesets and required environment reviewers are owner-controlled settings and must be configured separately; adding a workflow does not enable branch protection automatically.
 
-The workflow_dispatch certification path requires the exact candidate SHA and the run ID of a successful workflow named RUSA-AI Staging Acceptance. It downloads the erg06-staging-evidence artifact, verifies the source run SHA/workflow/conclusion, verifies the GitHub artifact attestation, and evaluates the JSON evidence. Configure the enterprise-readiness GitHub Environment with required reviewers before using this path.
+The workflow_dispatch certification path requires the exact candidate SHA and the run ID of a successful workflow named RUSA-AI Staging Acceptance. It downloads the erg06-staging-evidence artifact, verifies the source run SHA/workflow/conclusion, verifies the GitHub artifact attestation against the expected signer workflow at .github/workflows/staging-acceptance.yml, and evaluates the JSON evidence. Configure the enterprise-readiness GitHub Environment with required reviewers before using this path.
 
 The full certification result must be reviewed against the evidence artifact and the exact candidate SHA before Phase 6 promotion. The current GitHub integration does not change branch protection, repository secrets, environment protection rules, database roles, or production infrastructure.
 
