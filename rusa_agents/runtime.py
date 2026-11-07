@@ -500,7 +500,11 @@ class AICodeRuntime:
                     job,
                     task,
                     "; ".join(record.errors) or "Human intervention required",
-                    {"branch": task.metadata["publish_branch"]},
+                    {
+                        "branch": task.repository.work_branch,
+                        "publish_branch": task.metadata["publish_branch"],
+                        "published": False,
+                    },
                 )
                 outcome = "awaiting_approval"
                 return True
