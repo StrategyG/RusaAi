@@ -55,7 +55,7 @@ def test_workspace_manager_creates_and_cleans_tenant_worktree(tmp_path, monkeypa
 
     workspace_root = tmp_path / "workspaces"
     manager = GitWorkspaceManager(str(mirror_root), str(workspace_root))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, work_branch=None: None)
     task = CodingTask(
         objective="test worktree",
         repository=RepositoryTarget(
@@ -155,7 +155,7 @@ def test_workspaces_are_isolated_by_lease_token(tmp_path, monkeypatch):
     git("clone", "--bare", str(source), str(mirror))
 
     manager = GitWorkspaceManager(str(mirror_root), str(tmp_path / "workspaces"))
-    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch: None)
+    monkeypatch.setattr(manager, "refresh", lambda repository, base_branch, work_branch=None: None)
 
     first = CodingTask(
         objective="first lease attempt",
@@ -330,3 +330,27 @@ def test_ci_evidence_requires_rag_mcp_job_even_when_other_jobs_pass():
 
     assert state == "pending"
     assert "RAG and MCP integration tests" in reason
+
+
+
+def test_publisher_refuses_to_publish_an_empty_task_branch(tmp_path):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git("init", "--initial-branch=main", cwd=repository)
+    git("config", "user.name", "Test", cwd=repository)
+    git("config", "user.email", "test@example.invalid", cwd=repository)
+    (repository / "README.md").write_text("base")
+    git("add", "README.md", cwd=repository)
+    git("commit", "-m", "initial", cwd=repository)
+    git("remote", "add", "origin", "https://github.com/StrategyG/RusaAi.git")
+    git("checkout", "-b", "feature/aicode/empty-task", cwd=repository)
+
+    publisher = GitHubPublisher("test-token")
+    with pytest.raises(RuntimeError, match="empty task branch"):
+        publisher.commit_and_push(
+            str(repository),
+            "StrategyG/RusaAi",
+            "feature/aicode/empty-task",
+            "empty task",
+            "main",
+        )
