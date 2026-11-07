@@ -369,3 +369,38 @@ def test_agent_result_must_match_originating_task_attempt():
     with pytest.raises(ContractValidationError, match="attempt"):
         validate_agent_result_for_task(task, result)
 
+def test_release_task_requires_the_commit_that_produced_its_artifact():
+    payload = _task()
+    payload.update(agent_id="rusa_release_agent", stage="release")
+    payload["input"] = {
+        "commit_sha": "a" * 40,
+        "artifact_digest": "sha256:" + "b" * 64,
+        "test_evidence_ref": "evidence://tests/verified",
+        "sbom_ref": "artifact://sbom/verified",
+    }
+    payload["constraints"]["allowed_tools"] = [
+        "artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read"
+    ]
+    validate_agent_task(payload)
+    payload["input"].pop("commit_sha")
+    with pytest.raises(ContractValidationError, match="commit_sha"):
+        validate_agent_task(payload)
+
+
+def test_deploy_task_requires_source_commit_and_immutable_digest():
+    payload = _task()
+    payload.update(agent_id="rusa_deploy_agent", stage="deploy")
+    payload["input"] = {
+        "release_manifest_ref": "artifact://release/manifest",
+        "environment": "staging",
+        "commit_sha": "a" * 40,
+        "artifact_digest": "sha256:" + "b" * 64,
+    }
+    payload["constraints"]["allowed_tools"] = [
+        "artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read"
+    ]
+    validate_agent_task(payload)
+    payload["input"].pop("commit_sha")
+    with pytest.raises(ContractValidationError, match="commit_sha"):
+        validate_agent_task(payload)
+
