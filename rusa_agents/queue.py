@@ -252,13 +252,14 @@ class PostgresTaskQueue:
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'SELECT'),
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'INSERT'),
                         pg_has_table_privilege('rusa_api_login', 'public.aicode_job_controls', 'UPDATE'),
+                        pg_has_sequence_privilege('rusa_api_login', 'public.aicode_job_controls_id_seq', 'USAGE'),
                         pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'SELECT'),
                         pg_has_table_privilege('rusa_worker_login', 'public.aicode_job_controls', 'UPDATE')
                 """).fetchone()
                 if (
                     not control_privileges
-                    or not all(control_privileges[:4])
-                    or control_privileges[4]
+                    or not all(control_privileges[:5])
+                    or control_privileges[5]
                 ):
                     raise RuntimeError(
                         "Cancellation control grants must allow API SELECT/INSERT/UPDATE "
