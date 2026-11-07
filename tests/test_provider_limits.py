@@ -190,3 +190,54 @@ def test_inference_provider_rejects_stream_without_terminal_reason():
     with pytest.raises(RuntimeError, match="without a finish reason"):
         asyncio.run(collect())
 
+def test_inference_provider_readiness_requires_configured_model():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/v1/models"
+        return httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "model-a"}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.example/v1",
+        default_model="model-a",
+        transport=httpx.MockTransport(handler),
+    )
+    assert asyncio.run(provider.check_ready()) is True
+
+
+def test_inference_provider_readiness_rejects_missing_configured_model():
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "different-model"}]},
+            request=request,
+        )
+    )
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.example/v1",
+        default_model="model-a",
+        transport=transport,
+    )
+    with pytest.raises(RuntimeError, match="not available"):
+        asyncio.run(provider.check_ready())
+
+
+def test_inference_provider_readiness_rejects_empty_model_registry():
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"object": "list", "data": []},
+            request=request,
+        )
+    )
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.example/v1",
+        default_model="model-a",
+        transport=transport,
+    )
+    with pytest.raises(RuntimeError, match="not available"):
+        asyncio.run(provider.check_ready())
+
