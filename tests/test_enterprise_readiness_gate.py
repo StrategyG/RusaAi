@@ -144,7 +144,7 @@ def test_automated_gate_fails_when_recovery_regression_fails(tmp_path):
 
 
 def test_certification_holds_without_staging_evidence(tmp_path):
-    report, exit_code = evaluate_certification(tmp_path / "missing.json", "a" * 40)
+    report, exit_code = evaluate_certification(tmp_path / "missing.json", "a" * 40, 123)
 
     assert exit_code == 2
     assert report["status"] == "HOLD"
@@ -154,7 +154,7 @@ def test_certification_passes_only_with_complete_evidence(tmp_path):
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(valid_evidence()), encoding="utf-8")
 
-    report, exit_code = evaluate_certification(evidence_path, "a" * 40)
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 123)
 
     assert exit_code == 0
     assert report["status"] == "PASS"
@@ -167,7 +167,7 @@ def test_certification_fails_on_cross_tenant_access(tmp_path):
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
 
-    report, exit_code = evaluate_certification(evidence_path, "a" * 40)
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 123)
 
     assert exit_code == 1
     assert report["status"] == "FAIL"
@@ -180,7 +180,7 @@ def test_certification_fails_below_recovery_threshold(tmp_path):
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
 
-    report, exit_code = evaluate_certification(evidence_path, "a" * 40)
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 123)
 
     assert exit_code == 1
     assert report["status"] == "FAIL"
@@ -191,7 +191,7 @@ def test_certification_fails_when_evidence_targets_another_commit(tmp_path):
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(valid_evidence("b" * 40)), encoding="utf-8")
 
-    report, exit_code = evaluate_certification(evidence_path, "a" * 40)
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 123)
 
     assert exit_code == 1
     assert report["status"] == "FAIL"
@@ -204,8 +204,19 @@ def test_certification_holds_until_provenance_is_verified(tmp_path):
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
 
-    report, exit_code = evaluate_certification(evidence_path, "a" * 40)
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 123)
 
     assert exit_code == 2
     assert report["status"] == "HOLD"
     assert any("attestation" in item for item in report["blockers"])
+
+
+def test_certification_fails_when_evidence_run_id_does_not_match(tmp_path):
+    evidence_path = tmp_path / "evidence.json"
+    evidence_path.write_text(json.dumps(valid_evidence()), encoding="utf-8")
+
+    report, exit_code = evaluate_certification(evidence_path, "a" * 40, 456)
+
+    assert exit_code == 1
+    assert report["status"] == "FAIL"
+    assert any("run ID" in item for item in report["blockers"])
