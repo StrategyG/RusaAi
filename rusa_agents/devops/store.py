@@ -166,7 +166,7 @@ class PostgresWorkflowStore:
 
 
 class PostgresOutboxRelay:
-    """Cross-tenant relay primitive; connect with the dedicated relay DB role."""
+    """Cross-tenant relay primitive; connect only with the dedicated relay DB role."""
 
     def __init__(self, relay_dsn: str):
         if not isinstance(relay_dsn, str) or not relay_dsn.strip():
