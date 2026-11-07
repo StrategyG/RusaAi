@@ -11,6 +11,7 @@
     "tenant_id",
     "agent_id",
     "stage",
+    "attempt",
     "status",
     "output",
     "audit"
@@ -58,6 +59,10 @@
         "operate",
         "monitor"
       ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
     },
     "status": {
       "type": "string",
