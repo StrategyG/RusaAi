@@ -618,6 +618,40 @@ class GitHubPublisher:
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
+        def same_repository(repository_info: Any) -> bool:
+            full_name = (
+                repository_info.get("full_name")
+                if isinstance(repository_info, dict) else None
+            )
+            return (
+                isinstance(full_name, str)
+                and full_name.casefold() == repository.casefold()
+            )
+
+        def validated_pr_url(item: dict[str, Any]) -> str:
+            url = item.get("html_url")
+            if not isinstance(url, str):
+                raise RuntimeError("GitHub returned a pull request without a URL")
+            parsed = urlparse(url)
+            parts = parsed.path.strip("/").split("/")
+            owner, repo_name = repository.split("/", 1)
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname != "github.com"
+                or parsed.port not in {None, 443}
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or len(parts) != 4
+                or parts[0].casefold() != owner.casefold()
+                or parts[1].casefold() != repo_name.casefold()
+                or parts[2] != "pull"
+                or not parts[3].isdigit()
+            ):
+                raise RuntimeError("GitHub returned a pull request URL outside the authorized repository")
+            return url
+
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             async def find_existing() -> str | None:
                 closed_match: str | None = None
@@ -640,8 +674,10 @@ class GitHubPublisher:
                     for item in items:
                         if not isinstance(item, dict):
                             continue
-                        head_ref = (item.get("head") or {}).get("ref")
-                        base_ref = (item.get("base") or {}).get("ref")
+                        head = item.get("head") or {}
+                        base_item = item.get("base") or {}
+                        head_ref = head.get("ref")
+                        base_ref = base_item.get("ref")
                         item_body = item.get("body") or ""
                         matches_task = bool(
                             task_id
@@ -654,9 +690,16 @@ class GitHubPublisher:
                         )
                         matches_branch = head_ref == branch and base_ref == base
                         if matches_branch:
+                            if not same_repository(head.get("repo")) or not same_repository(
+                                base_item.get("repo")
+                            ):
+                                raise ValueError(
+                                    "Existing task pull request is not rooted in the authorized "
+                                    "repository; manual reconciliation is required"
+                                )
                             if item.get("state") == "open":
-                                return item.get("html_url")
-                            closed_match = item.get("html_url") or closed_match
+                                return validated_pr_url(item)
+                            closed_match = validated_pr_url(item)
                         elif matches_task:
                             # A legacy per-lease PR cannot be assumed to contain the
                             # stable publication branch's current commit.
@@ -697,7 +740,29 @@ class GitHubPublisher:
                     if existing_url:
                         return existing_url
                 raise
-            return created.json()["html_url"]
+
+            created_payload = created.json()
+            created_head = (
+                created_payload.get("head") or {}
+                if isinstance(created_payload, dict) else {}
+            )
+            created_base = (
+                created_payload.get("base") or {}
+                if isinstance(created_payload, dict) else {}
+            )
+            if (
+                not isinstance(created_payload, dict)
+                or created_payload.get("state") != "open"
+                or created_payload.get("draft") is not True
+                or created_head.get("ref") != branch
+                or created_base.get("ref") != base
+                or not same_repository(created_head.get("repo"))
+                or not same_repository(created_base.get("repo"))
+            ):
+                raise RuntimeError(
+                    "GitHub did not create the expected draft PR for the authorized task branch"
+                )
+            return validated_pr_url(created_payload)
 
 
     @staticmethod
