@@ -462,3 +462,51 @@ def test_new_lease_worktree_starts_from_existing_stable_publish_branch(tmp_path,
     assert (workspace / "recovered-change.txt").read_text() == "already published"
 
     manager.cleanup(task, "tenant-a")
+
+
+
+def test_publisher_pushes_lease_worktree_to_stable_task_branch(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Test", cwd=source)
+    git("config", "user.email", "test@example.invalid", cwd=source)
+    (source / "README.md").write_text("base")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "initial", cwd=source)
+
+    remote = tmp_path / "remote.git"
+    git("clone", "--bare", str(source), str(remote))
+    workspace = tmp_path / "workspace"
+    git("clone", str(remote), str(workspace))
+    git("checkout", "-b", "feature/aicode/attempt-branch", cwd=workspace)
+    git("config", "user.name", "Test", cwd=workspace)
+    git("config", "user.email", "test@example.invalid", cwd=workspace)
+    (workspace / "change.py").write_text("print('recovered safely')\n")
+
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "validate_origin_url",
+        staticmethod(lambda _remote, _repository: None),
+    )
+    publisher = GitHubPublisher("test-token")
+    sha = publisher.commit_and_push(
+        str(workspace),
+        "StrategyG/RusaAi",
+        "feature/aicode/attempt-branch",
+        "test: publish stable task head",
+        publish_branch="feature/aicode/stable-task-branch",
+    )
+
+    stable = git(
+        "--git-dir", str(remote), "rev-parse",
+        "refs/heads/feature/aicode/stable-task-branch",
+    ).stdout.strip()
+    attempt_ref = git(
+        "--git-dir", str(remote), "show-ref", "--verify",
+        "refs/heads/feature/aicode/attempt-branch",
+        check=False,
+    )
+
+    assert sha == stable
+    assert attempt_ref.returncode != 0
