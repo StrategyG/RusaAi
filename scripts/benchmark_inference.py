@@ -66,7 +66,7 @@ async def stream_request(
 ) -> dict[str, object]:
     started = time.perf_counter()
     first_token: float | None = None
-    usage: dict[str, int] = {}
+    usage: dict[str, int] | None = None
     chunks = 0
     async with client.stream("POST", url, headers=headers, json=payload) as response:
         if response.status_code != 200:
@@ -81,8 +81,15 @@ async def stream_request(
             event = json.loads(data)
             if "error" in event:
                 raise RuntimeError(str(event["error"]))
-            if "usage" in event and event["usage"]:
-                usage = event["usage"]
+            if "usage" in event and event["usage"] is not None:
+                candidate_usage = event["usage"]
+                if not isinstance(candidate_usage, dict):
+                    raise RuntimeError("Serving API returned malformed token usage")
+                for field in ("prompt_tokens", "completion_tokens"):
+                    value = candidate_usage.get(field)
+                    if value is not None and (type(value) is not int or value < 0):
+                        raise RuntimeError(f"Serving API returned invalid {field}")
+                usage = candidate_usage
             choices = event.get("choices", [])
             if choices:
                 delta = choices[0].get("delta", {}).get("content", "")
@@ -94,8 +101,8 @@ async def stream_request(
     return {
         "latency_seconds": elapsed,
         "ttft_seconds": first_token,
-        "completion_tokens": usage.get("completion_tokens", 0),
-        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens") if usage is not None else None,
+        "prompt_tokens": usage.get("prompt_tokens") if usage is not None else None,
         "chunks": chunks,
     }
 
@@ -152,8 +159,23 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
     successes = [item for item in results if item.get("ok")]
     latencies = [float(item["latency_seconds"]) for item in successes]
     ttfts = [float(item["ttft_seconds"]) for item in successes if item.get("ttft_seconds") is not None]
-    completion_tokens = sum(int(item.get("completion_tokens", 0)) for item in successes)
-    prompt_tokens = sum(int(item.get("prompt_tokens", 0)) for item in successes)
+    completion_usage = [
+        item["completion_tokens"] for item in successes
+        if type(item.get("completion_tokens")) is int
+    ]
+    prompt_usage = [
+        item["prompt_tokens"] for item in successes
+        if type(item.get("prompt_tokens")) is int
+    ]
+    completion_tokens = (
+        sum(completion_usage) if successes and len(completion_usage) == len(successes) else None
+    )
+    prompt_tokens = (
+        sum(prompt_usage) if successes and len(prompt_usage) == len(successes) else None
+    )
+    usage_coverage = (
+        round(len(completion_usage) / len(successes), 6) if successes else None
+    )
     report = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -178,7 +200,11 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             "request_throughput_per_second": round(len(successes) / wall_seconds, 4) if wall_seconds else 0,
             "completion_tokens": completion_tokens,
             "prompt_tokens": prompt_tokens,
-            "completion_tokens_per_second": round(completion_tokens / wall_seconds, 4) if wall_seconds else 0,
+            "token_usage_reporting_coverage": usage_coverage,
+            "completion_tokens_per_second": (
+                round(completion_tokens / wall_seconds, 4)
+                if completion_tokens is not None and wall_seconds else None
+            ),
             "latency_seconds": {
                 "p50": percentile(latencies, 0.50),
                 "p95": percentile(latencies, 0.95),
@@ -195,7 +221,7 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
         "limitations": [
             "This is a bounded smoke benchmark, not a sustained production load or soak test.",
             "No warmup requests are included; compare runs with identical hardware, model, prompts, and settings.",
-            "Token throughput uses usage reported by the serving API.",
+            "Token counts and token throughput are null unless every successful request reports valid usage; missing usage is not treated as zero.",
         ],
     }
     return report
