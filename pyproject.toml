@@ -29,6 +29,10 @@ dev = [
   "ruff>=0.6,<1",
   "bandit>=1.7,<2",
 ]
+messaging = [
+  "aio-pika>=9.4,<10",
+  "cryptography>=42,<47",
+]
 model = [
   "torch>=2.2,<3",
   "transformers>=5.10.0,<6",
