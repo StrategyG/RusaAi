@@ -99,6 +99,7 @@ class AutonomousCodeWorker:
         artifacts: list[str] = []
         evidence: dict[str, Any] = {}
         last_message = ""
+        unresolved_tool_failures: dict[str, str] = {}
         for step in range(self.max_steps):
             system_prompt = (
                 f"You are the {self.role.value} worker in RUSA-AI AICode. "
@@ -143,7 +144,6 @@ class AutonomousCodeWorker:
                     success=False, artifacts=artifacts, evidence=evidence,
                     blockers=["Too many tool actions in one model response."],
                 )
-            tool_failures = []
             for action in actions:
                 if (
                     not isinstance(action, dict)
@@ -173,15 +173,16 @@ class AutonomousCodeWorker:
                             blockers=[str(exc)], failure_kind="policy",
                         )
                     except OSError as exc:
-                        tool_failures.append(f"{action['name']}: {type(exc).__name__}: {exc}")
+                        unresolved_tool_failures[action["name"]] = f"{action['name']}: {type(exc).__name__}: {exc}"
                         break
                     if result.ok:
+                        unresolved_tool_failures.pop(action["name"], None)
                         break
-                    tool_failures.append(f"{action['name']}: {result.output[-2000:]}")
+                    unresolved_tool_failures[action["name"]] = f"{action['name']}: {result.output[-2000:]}"
                     if tool_attempt < self.max_tool_retries:
                         transcript.append(f"TOOL RETRY {action['name']} ({tool_attempt + 1}): {result.output[-2000:]}")
                 if result is None or not result.ok:
-                    transcript.append("TOOL ACTION FAILED; do not claim completion: " + tool_failures[-1])
+                    transcript.append("TOOL ACTION FAILED; do not claim completion: " + unresolved_tool_failures[action["name"]])
                     continue
                 if action["name"] == "write_file" and result.ok:
                     artifacts.append(str(action.get("arguments", {}).get("path", "")))
@@ -197,14 +198,14 @@ class AutonomousCodeWorker:
                         f"TOOL {action['name']} (ok={result.ok}): {result.output[:4000]}"
                     )
             if response["done"]:
-                if tool_failures:
+                if unresolved_tool_failures:
                     return WorkerResult(
                         role=self.role,
                         summary=last_message or "Worker could not complete required tool actions.",
                         success=False,
                         artifacts=artifacts,
                         evidence=evidence,
-                        blockers=tool_failures[:10],
+                        blockers=list(unresolved_tool_failures.values())[:10],
                         failure_kind="tool",
                     )
                 return WorkerResult(
