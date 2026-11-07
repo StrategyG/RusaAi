@@ -216,7 +216,13 @@ class AICodeOrchestrator:
     @staticmethod
     def _check_passed(result: WorkerResult, key: str) -> bool:
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        expected_profile = key.removeprefix("check:")
+        return (
+            isinstance(evidence, dict)
+            and evidence.get("profile") == expected_profile
+            and type(evidence.get("exit_code")) is int
+            and evidence["exit_code"] == 0
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
