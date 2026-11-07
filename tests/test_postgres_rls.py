@@ -30,6 +30,7 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            "007_aicode_job_controls.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -369,3 +370,53 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+
+def test_task_controls_are_tenant_scoped_and_worker_read_only():
+    import psycopg
+
+    task_a, task_b = str(uuid4()), str(uuid4())
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
+            (task_a, "control-tenant-a", '{"objective":"a"}'),
+        )
+        conn.execute(
+            "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
+            (task_b, "control-tenant-b", '{"objective":"b"}'),
+        )
+        conn.execute(
+            "INSERT INTO aicode_job_controls(tenant_id, task_id) VALUES (%s, %s), (%s, %s)",
+            ("control-tenant-a", task_a, "control-tenant-b", task_b),
+        )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", "control-tenant-a")
+        visible = conn.execute(
+            "SELECT tenant_id FROM aicode_job_controls"
+        ).fetchall()
+        assert visible == [("control-tenant-a",)]
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE aicode_job_controls SET cancel_epoch=cancel_epoch+1 "
+                    "WHERE tenant_id=%s",
+                    ("control-tenant-b",),
+                )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", "control-tenant-a")
+        visible = {
+            row[0] for row in conn.execute(
+                "SELECT tenant_id FROM aicode_job_controls"
+            ).fetchall()
+        }
+        assert {"control-tenant-a", "control-tenant-b"}.issubset(visible)
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE aicode_job_controls SET cancel_epoch=cancel_epoch+1 "
+                    "WHERE tenant_id=%s",
+                    ("control-tenant-a",),
+                )
