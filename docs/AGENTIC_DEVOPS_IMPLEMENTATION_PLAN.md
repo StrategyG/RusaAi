@@ -37,7 +37,9 @@ match a proposed directory layout.
 
 The DevOps Orchestrator is the workflow coordinator, not a ninth specialist.
 The Security Guard is cross-cutting and is not part of the eight-stage
-delivery chain.
+delivery chain. The ten system-wide agent roles, orchestrator authority
+boundary, and ADR-COMM-001 envelope mapping are documented in
+[DEVOPS_AGENT_INTEGRATION.md](DEVOPS_AGENT_INTEGRATION.md).
 
 ## Phase 1 — contract foundation (this change)
 
