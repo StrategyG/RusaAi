@@ -333,9 +333,14 @@ class GitHubPublisher:
         message: str,
         base_branch: str | None = None,
     ) -> str:
+        if (
+            not BRANCH_PATTERN.fullmatch(branch)
+            or ".." in branch
+            or "//" in branch
+            or branch in {"main", "master"}
+        ):
+            raise ValueError("Publishing is restricted to safe task feature branches")
         root = Path(workspace).resolve(strict=True)
-        if not BRANCH_PATTERN.fullmatch(branch) or branch in {"main", "master"}:
-            raise ValueError("Publishing is restricted to task feature branches")
         top_level = self._run(["git", "rev-parse", "--show-toplevel"], str(root))
         if top_level.returncode or Path(top_level.stdout.strip()).resolve() != root:
             raise RuntimeError("Workspace is not the expected Git worktree")
