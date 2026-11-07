@@ -376,7 +376,7 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
 def test_task_controls_are_tenant_scoped_and_worker_read_only():
     import psycopg
 
-    task_a, task_b = str(uuid4()), str(uuid4())
+    task_a, task_b, task_c = str(uuid4()), str(uuid4()), str(uuid4())
     with connect() as conn:
         conn.execute(
             "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
@@ -387,16 +387,24 @@ def test_task_controls_are_tenant_scoped_and_worker_read_only():
             (task_b, "control-tenant-b", '{"objective":"b"}'),
         )
         conn.execute(
+            "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
+            (task_c, "control-tenant-a", '{"objective":"api control insert"}'),
+        )
+        conn.execute(
             "INSERT INTO aicode_job_controls(tenant_id, task_id) VALUES (%s, %s), (%s, %s)",
             ("control-tenant-a", task_a, "control-tenant-b", task_b),
         )
 
     with connect() as conn:
         set_role_and_tenant(conn, "rusa_api_runtime", "control-tenant-a")
+        conn.execute(
+            "INSERT INTO aicode_job_controls(tenant_id, task_id) VALUES (%s, %s)",
+            ("control-tenant-a", task_c),
+        )
         visible = conn.execute(
             "SELECT tenant_id FROM aicode_job_controls"
         ).fetchall()
-        assert visible == [("control-tenant-a",)]
+        assert set(visible) == {("control-tenant-a",)}
         denied = conn.execute(
             "UPDATE aicode_job_controls SET cancel_epoch=cancel_epoch+1 "
             "WHERE tenant_id=%s",
