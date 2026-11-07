@@ -1087,6 +1087,28 @@ class PostgresWorkflowControlStore:
                             """,
                             (tenant_id, run_id),
                         )
+                        completion_event = self._event(
+                            tenant_id=tenant_id,
+                            run_id=run_id,
+                            task_id=None,
+                            attempt=None,
+                            event_type="audit.recorded",
+                            payload={
+                                "action": "workflow.cancelled",
+                                "outcome": "cancelled",
+                                "resource_ref": f"workflow://{run_id}",
+                                "state_version": run_version,
+                            },
+                            correlation_id=correlation_id,
+                            traceparent=traceparent,
+                        )
+                        self._append_event(
+                            conn,
+                            tenant_id=tenant_id,
+                            event=completion_event,
+                            destination="events",
+                            aggregate_version=run_version,
+                        )
             else:
                 event = self._event(
                     tenant_id=tenant_id,
@@ -1390,6 +1412,28 @@ class PostgresWorkflowControlStore:
                     WHERE tenant_id=%s AND run_id=%s
                     """,
                     (tenant_id, run_id),
+                )
+                completion_event = self._event(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    task_id=None,
+                    attempt=None,
+                    event_type="audit.recorded",
+                    payload={
+                        "action": "workflow.cancelled",
+                        "outcome": "cancelled",
+                        "resource_ref": f"workflow://{run_id}",
+                        "state_version": run_version,
+                    },
+                    correlation_id=run_id,
+                    traceparent=traceparent,
+                )
+                self._append_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    event=completion_event,
+                    destination="events",
+                    aggregate_version=run_version,
                 )
                 status = "cancelled"
             else:
