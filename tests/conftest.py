@@ -25,7 +25,10 @@ def apply_postgres_migrations_for_integration_suite():
     migrations = sorted(
         path for path in migration_dir.glob("*.sql")
         if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
-        and int(path.name.split("_", 1)[0]) <= 7
+        and (
+            int(path.name.split("_", 1)[0]) <= 6
+            or path.name == "008_devops_durable_communication.sql"
+        )
     )
     expected = [
         "001_aicode_core.sql",
