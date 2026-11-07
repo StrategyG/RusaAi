@@ -173,3 +173,52 @@ def test_workflow_store_rejects_event_from_another_tenant():
             request={"objective": "must-not-persist"},
             initial_event=event,
         )
+
+def test_inbox_rejects_same_message_id_with_different_envelope():
+    tenant_id = f"test-{uuid4()}"
+    inbox = PostgresInbox(DSN)
+    event = _event(tenant_id)
+    conflicting = {**event, "payload": {**event["payload"], "priority": "P1"}}
+    try:
+        assert inbox.process_once(
+            tenant_id=tenant_id,
+            consumer_id="conflict-test",
+            event=event,
+            handler=lambda conn, received: None,
+        ) is True
+        with pytest.raises(ValueError, match="different event envelope"):
+            inbox.process_once(
+                tenant_id=tenant_id,
+                consumer_id="conflict-test",
+                event=conflicting,
+                handler=lambda conn, received: None,
+            )
+    finally:
+        _cleanup(tenant_id)
+
+
+def test_outbox_stale_lease_cannot_settle_a_row():
+    tenant_id = f"test-{uuid4()}"
+    store = PostgresWorkflowStore(DSN)
+    relay = PostgresOutboxRelay(DSN)
+    try:
+        store.submit_workflow(
+            tenant_id=tenant_id,
+            idempotency_key="stale-lease-test",
+            request={"objective": "fencing"},
+            initial_event=_event(tenant_id),
+        )
+        claimed = relay.claim(destination="commands", limit=1)
+        assert len(claimed) == 1
+        with pytest.raises(Exception, match="lease is no longer owned"):
+            relay.mark_published(
+                outbox_id=claimed[0]["outbox_id"],
+                lease_token=str(uuid4()),
+            )
+        relay.mark_published(
+            outbox_id=claimed[0]["outbox_id"],
+            lease_token=claimed[0]["lease_token"],
+        )
+    finally:
+        _cleanup(tenant_id)
+
