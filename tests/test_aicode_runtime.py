@@ -100,7 +100,7 @@ def test_orchestrator_does_not_certify_missing_evidence(tmp_path):
 
 def test_orchestrator_blocks_failed_validation_evidence(tmp_path):
     failing = workers()
-    failing[-2].evidence = {"check:pytest": {"exit_code": 1}}
+    failing[-2].evidence = {"check:pytest": {"profile": "pytest", "exit_code": 1}}
     orchestrator = AICodeOrchestrator(
         failing,
         memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
