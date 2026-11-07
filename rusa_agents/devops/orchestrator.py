@@ -12,7 +12,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any
 from uuid import uuid4
 
 from .contracts import (
@@ -45,12 +45,6 @@ DOMAIN_EVENT_BY_STAGE = {
 SECURITY_GUARD_ID = "rusa_security_guard_agent"
 DEFAULT_SOURCE_COMMIT = "a" * 40
 DEFAULT_ARTIFACT_DIGEST = "sha256:" + "b" * 64
-
-
-class DevOpsAgent(Protocol):
-    """Minimal interface used by the dry-run coordinator."""
-
-    def run(self, task: dict[str, Any]) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -99,11 +93,13 @@ class SyntheticDevOpsAgent:
         status_by_stage: Mapping[str, str] | None = None,
         monitor_feedback: bool = False,
         source_commit: str = DEFAULT_SOURCE_COMMIT,
+        source_commit_by_stage: Mapping[str, str] | None = None,
         artifact_digest: str = DEFAULT_ARTIFACT_DIGEST,
     ):
         self.status_by_stage = dict(status_by_stage or {})
         self.monitor_feedback = monitor_feedback
         self.source_commit = source_commit
+        self.source_commit_by_stage = dict(source_commit_by_stage or {})
         self.artifact_digest = artifact_digest
 
     def run(self, task: dict[str, Any]) -> dict[str, Any]:
@@ -157,7 +153,9 @@ class SyntheticDevOpsAgent:
             "model_id": "synthetic/dry-run-agent",
         }
         if stage == "code" or "commit_sha" in task_input:
-            audit["source_commit"] = task_input.get("commit_sha", self.source_commit)
+            audit["source_commit"] = self.source_commit_by_stage.get(
+                stage, task_input.get("commit_sha", self.source_commit)
+            )
         if stage in {"build", "test", "release", "deploy"} or "artifact_digest" in task_input:
             audit["artifact_digest"] = task_input.get("artifact_digest", self.artifact_digest)
 
@@ -186,7 +184,7 @@ class DevOpsDryRunOrchestrator:
         policy_version: str = "dry-run-policy-v1",
         environment: str = "staging",
         approval_refs: Mapping[str, str] | None = None,
-        agents: Mapping[str, DevOpsAgent] | None = None,
+        agents: Mapping[str, SyntheticDevOpsAgent] | None = None,
     ):
         if environment not in {"staging", "production"}:
             raise ValueError("dry-run environment must be staging or production")
@@ -195,11 +193,16 @@ class DevOpsDryRunOrchestrator:
         self.policy_version = policy_version
         self.environment = environment
         self.approval_refs = dict(approval_refs or {})
-        self.agents: dict[str, DevOpsAgent] = {
+        self.agents: dict[str, SyntheticDevOpsAgent] = {
             **{agent_id: SyntheticDevOpsAgent() for agent_id in AGENT_BY_STAGE.values()},
             SECURITY_GUARD_ID: SyntheticDevOpsAgent(),
         }
-        self.agents.update(agents or {})
+        for agent_id, agent in (agents or {}).items():
+            if agent_id not in self.agents:
+                raise ValueError(f"unknown dry-run agent identity: {agent_id}")
+            if type(agent) is not SyntheticDevOpsAgent:
+                raise TypeError("dry-run accepts SyntheticDevOpsAgent fixtures only")
+            self.agents[agent_id] = agent
 
     def _task(
         self,
