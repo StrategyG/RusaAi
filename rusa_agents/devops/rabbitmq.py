@@ -15,6 +15,7 @@ import json
 import random
 import re
 import ssl
+from datetime import datetime, timezone
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -43,6 +44,10 @@ class MessageAuthenticationError(ValueError):
     """A signed command does not match its trusted producer or tenant context."""
 
 
+class CommandExpiredError(MessageAuthenticationError):
+    """A command arrived after its absolute execution deadline."""
+
+
 def canonical_event_bytes(event: dict[str, Any]) -> bytes:
     """Serialize an event deterministically for detached signing and transport."""
     validate_workflow_event(event)
@@ -52,6 +57,13 @@ def canonical_event_bytes(event: dict[str, Any]) -> bytes:
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
+
+
+def _deadline_expired(value: str) -> bool:
+    deadline = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if deadline.tzinfo is None:
+        raise ValueError("task deadline must include a timezone")
+    return deadline <= datetime.now(timezone.utc)
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -449,6 +461,7 @@ class RabbitMQCommandConsumer:
         handler: Callable[[dict[str, Any]], Any],
         prefetch_count: int = 16,
         allow_control_queue: bool = False,
+        max_message_bytes: int = 1_048_576,
     ):
         if not consumer_id or len(consumer_id) > 128:
             raise ValueError("consumer_id must contain 1..128 characters")
@@ -456,6 +469,8 @@ class RabbitMQCommandConsumer:
             raise TypeError("tenant_authorizer and handler callbacks are required")
         if isinstance(prefetch_count, bool) or not 1 <= prefetch_count <= 1024:
             raise ValueError("prefetch_count must be between 1 and 1024")
+        if isinstance(max_message_bytes, bool) or not 1 <= max_message_bytes <= 16_777_216:
+            raise ValueError("max_message_bytes must be between 1 byte and 16 MiB")
         self.consumer_id = consumer_id
         self.verifier = verifier
         self.allowed_capabilities = tuple(allowed_capabilities)
@@ -463,9 +478,12 @@ class RabbitMQCommandConsumer:
         self.handler = handler
         self.prefetch_count = prefetch_count
         self.allow_control_queue = allow_control_queue
+        self.max_message_bytes = max_message_bytes
 
     async def handle_message(self, message: Any) -> str:
         try:
+            if not isinstance(message.body, bytes) or len(message.body) > self.max_message_bytes:
+                raise MessageAuthenticationError("command body is missing or exceeds the size limit")
             event = json.loads(message.body.decode("utf-8"))
             if not isinstance(event, dict):
                 raise MessageAuthenticationError("command body must be a JSON object")
@@ -487,6 +505,8 @@ class RabbitMQCommandConsumer:
                 raise MessageAuthenticationError("event type header does not match envelope")
             if headers.get("x-rusa-schema-version") != event["schema_version"]:
                 raise MessageAuthenticationError("schema version header does not match envelope")
+            if event["type"] == "task.request" and _deadline_expired(event["payload"]["deadline_at"]):
+                raise CommandExpiredError("task command has expired")
             producer_id = self.verifier.verify(
                 message.body,
                 headers.get("x-rusa-jws"),
@@ -542,6 +562,8 @@ class RabbitMQCommandConsumer:
         topology: RabbitMQTopology,
         queue_names: Sequence[str],
     ) -> tuple[str, ...]:
+        if set(topology.capabilities) != set(self.allowed_capabilities):
+            raise ValueError("consumer capability scope does not match the declared topology")
         allowed_queue_names = {
             route.queue_name
             for route in RabbitMQTopology(self.allowed_capabilities).routes
@@ -580,9 +602,13 @@ class RabbitMQOutboxDispatcher:
         max_delay_seconds: int = 60,
         jitter: Callable[[int, int], int] = random.randint,
     ):
-        if not 1 <= max_attempts <= 100:
+        if isinstance(max_attempts, bool) or not 1 <= max_attempts <= 100:
             raise ValueError("max_attempts must be between 1 and 100")
-        if not 0 <= base_delay_seconds <= max_delay_seconds <= 86400:
+        if (
+            isinstance(base_delay_seconds, bool)
+            or isinstance(max_delay_seconds, bool)
+            or not 0 <= base_delay_seconds <= max_delay_seconds <= 86400
+        ):
             raise ValueError("invalid outbox retry delay bounds")
         self.relay = relay
         self.publisher = publisher
@@ -609,6 +635,8 @@ class RabbitMQOutboxDispatcher:
                     self.base_delay_seconds * (2**exponent),
                 )
                 delay = self.jitter(0, delay_cap) if delay_cap else 0
+                if isinstance(delay, bool) or not isinstance(delay, int) or not 0 <= delay <= delay_cap:
+                    raise ValueError("retry jitter must return an integer within the backoff cap")
                 try:
                     status = await asyncio.to_thread(
                         self.relay.retry,
