@@ -400,3 +400,42 @@ def test_cancel_racing_with_retryable_failure_is_linearizable():
         assert current and current["status"] == "cancelled"
     finally:
         remove_task(task_id, tenant)
+
+
+def test_cancel_approval_paused_task_flags_existing_draft_pr_for_reconciliation():
+    queue = make_queue()
+    tenant = f"queue-cancel-approval-{uuid4().hex}"
+    task_id = str(uuid4())
+    pr_url = "https://github.com/StrategyG/RusaAi/pull/999"
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant,
+            {"objective": "approval pause with draft PR"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("cancel-approval-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.await_approval(
+            job.id,
+            tenant,
+            "cancel-approval-worker",
+            job.lease_token,
+            "CI needs human review",
+            {
+                "pull_request_url": pr_url,
+                "commit_sha": "c" * 40,
+                "branch": "feature/aicode/stable-task",
+            },
+        )
+
+        assert queue.cancel(task_id, tenant)
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["result"]["pull_request_url"] == pr_url
+        assert current["result"]["side_effects"]["pull_request_cleanup"] == (
+            "reconciliation_required"
+        )
+        assert current["result"]["cancellation_reconciliation"]["required"] is True
+    finally:
+        remove_task(task_id, tenant)
