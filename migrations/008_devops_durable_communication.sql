@@ -12,7 +12,7 @@ $$;
 ALTER ROLE rusa_relay_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
 
 CREATE TABLE IF NOT EXISTS public.devops_workflows (
-    run_id UUID PRIMARY KEY,
+    run_id TEXT PRIMARY KEY CHECK (length(run_id) BETWEEN 1 AND 128),
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
     idempotency_key TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 256),
     request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[a-f0-9]{64}$'),
@@ -31,8 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_devops_workflows_tenant_created
     ON public.devops_workflows(tenant_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.devops_tasks (
-    task_id UUID PRIMARY KEY,
-    run_id UUID NOT NULL,
+    task_id TEXT PRIMARY KEY CHECK (length(task_id) BETWEEN 1 AND 128),
+    run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 1 AND 128),
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
     agent_id TEXT NOT NULL CHECK (length(agent_id) BETWEEN 1 AND 128),
     stage TEXT NOT NULL CHECK (length(stage) BETWEEN 1 AND 64),
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.devops_event_outbox (
     outbox_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
     run_id UUID NOT NULL,
-    task_id UUID,
+    task_id TEXT CHECK (task_id IS NULL OR length(task_id) BETWEEN 1 AND 128),
     attempt INTEGER CHECK (attempt IS NULL OR attempt > 0),
     message_id TEXT NOT NULL CHECK (length(message_id) BETWEEN 1 AND 128),
     destination TEXT NOT NULL CHECK (destination IN ('commands', 'events')),
