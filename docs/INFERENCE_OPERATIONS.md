@@ -70,7 +70,7 @@ Values above are initial configuration examples, not capacity guarantees. Measur
 7. Confirm response usage counts are present and streaming terminates with data: [DONE].
 8. The manifest generator and runtime accept safetensors weights only; convert any pickle-based checkpoint through a trusted, isolated conversion workflow before intake.
 
-If any readiness check fails, keep the instance out of the load balancer. If a local artifact path is configured but the artifact cannot be verified or loaded, the application does not silently substitute another model. If no local artifact path is configured, a reachable RUSA_MODEL_BASE_URL provider is required instead.
+If any readiness check fails, keep the instance out of the load balancer. If a local artifact path is configured but the artifact cannot be verified or loaded, the application does not silently substitute another model. If no local artifact path is configured, a reachable RUSA_MODEL_BASE_URL provider that lists the configured RUSA_MODEL_NAME from GET /models is required instead.
 
 ## 5. API smoke test
 
