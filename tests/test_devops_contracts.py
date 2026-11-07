@@ -57,6 +57,7 @@ def _result() -> dict:
         "tenant_id": "tenant-demo",
         "agent_id": "rusa_test_agent",
         "stage": "test",
+        "attempt": 1,
         "status": "passed",
         "output": {
             "summary": "Required test evidence is available.",
@@ -346,3 +347,25 @@ def test_workflow_completed_event_requires_result_digest():
     payload["type"] = "workflow.completed"
     payload["payload"] = {"state_version": 8, "result_ref": "artifact://workflow/result", "sha256": "a" * 64}
     validate_workflow_event(payload)
+
+def test_agent_task_requires_attempt_identity():
+    payload = _task()
+    payload.pop("attempt")
+    with pytest.raises(ContractValidationError, match="attempt"):
+        validate_agent_task(payload)
+
+
+def test_agent_result_requires_attempt_identity():
+    payload = _result()
+    payload.pop("attempt")
+    with pytest.raises(ContractValidationError, match="attempt"):
+        validate_agent_result(payload)
+
+
+def test_agent_result_must_match_originating_task_attempt():
+    task, result = _matching_test_task_and_result()
+    task["attempt"] = 2
+    result["attempt"] = 1
+    with pytest.raises(ContractValidationError, match="attempt"):
+        validate_agent_result_for_task(task, result)
+
