@@ -140,6 +140,17 @@ class PostgresTaskQueue:
                         "Production idempotency index is missing; "
                         "apply migrations/006_aicode_idempotency.sql"
                     )
+                retry_columns = conn.execute("""
+                    SELECT COUNT(*) = 2
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='aicode_jobs'
+                      AND column_name = ANY(%s)
+                """, (["manual_retry_count", "max_manual_retries"],)).fetchone()
+                if not retry_columns or not retry_columns[0]:
+                    raise RuntimeError(
+                        "Production bounded manual retry policy is missing; "
+                        "apply migrations/007_aicode_job_controls.sql"
+                    )
                 result_column = conn.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
@@ -263,6 +274,12 @@ class PostgresTaskQueue:
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT")
+            conn.execute(
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS manual_retry_count INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.execute(
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS max_manual_retries INTEGER NOT NULL DEFAULT 3"
+            )
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_aicode_jobs_idempotency
                 ON aicode_jobs(tenant_id, idempotency_key)
@@ -521,12 +538,13 @@ class PostgresTaskQueue:
         *,
         lease_seconds: int = 900,
     ) -> str | None:
-        """Hold the queue row lock across remote publication to prevent lease handoff races.
+        """Fence a bounded Git publication against lease handoff.
 
-        The bounded Git operation runs while the active lease row is locked. A replacement
-        worker uses SKIP LOCKED and cannot reclaim this task until publication has finished.
-        The lease is extended before publication and refreshed again before the transaction
-        releases the row. The publisher must use a task/lease-specific branch.
+        The active job row is locked while the bounded push runs, so a replacement worker
+        cannot reclaim the task mid-publication. Cancellation intent lives in a separate
+        control row and can be committed without waiting for this publication lock. A push
+        already in flight when cancellation commits is an external side effect that requires
+        reconciliation; callers must use a stable task branch and publication identity.
         """
         if (
             type(job_id) is not int
@@ -806,10 +824,12 @@ class PostgresTaskQueue:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 UPDATE aicode_jobs
-                SET status='queued', attempts=0, available_at=NOW(), result=NULL,
-                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
+                SET status='queued', attempts=0, manual_retry_count=manual_retry_count+1,
+                    available_at=NOW(), result=NULL, lease_owner=NULL, lease_until=NULL,
+                    lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
                   AND status IN ('awaiting_approval', 'failed')
+                  AND manual_retry_count < max_manual_retries
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
