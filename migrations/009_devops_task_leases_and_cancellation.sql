@@ -39,6 +39,7 @@ ALTER TABLE public.devops_tasks
 
 ALTER TABLE public.devops_tasks
     ADD COLUMN IF NOT EXISTS lease_owner TEXT,
+    ADD COLUMN IF NOT EXISTS lease_claim_id TEXT,
     ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
 
@@ -49,9 +50,11 @@ ALTER TABLE public.devops_tasks
 ALTER TABLE public.devops_tasks
     ADD CONSTRAINT devops_tasks_lease_consistency
     CHECK (
-        (lease_owner IS NULL AND lease_until IS NULL)
+        (lease_owner IS NULL AND lease_claim_id IS NULL AND lease_until IS NULL)
         OR
         (lease_owner IS NOT NULL AND length(lease_owner) BETWEEN 1 AND 128
+            AND lease_claim_id IS NOT NULL
+            AND length(lease_claim_id) BETWEEN 1 AND 128
             AND lease_until IS NOT NULL)
     );
 
