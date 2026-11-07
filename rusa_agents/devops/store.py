@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from .contracts import validate_workflow_event
+from .contracts import validate_agent_task, validate_workflow_event
 
 
 class WorkflowIdempotencyConflictError(ValueError):
@@ -61,22 +61,34 @@ class PostgresWorkflowStore:
         tenant_id: str,
         idempotency_key: str,
         request: dict[str, Any],
+        initial_task: dict[str, Any],
         initial_event: dict[str, Any],
     ) -> tuple[str, bool]:
-        """Persist a workflow and its first command atomically.
+        """Persist a workflow, its first canonical task, and its command atomically.
 
-        Returns (run_id, created). Replaying the same key and body returns the
-        original run. Reusing the key with a different body is rejected.
+        Returns (run_id, created). Replaying the same key, request, and task
+        returns the original run. Reusing the key with a different request or
+        task contract is rejected.
         """
         validate_workflow_event(initial_event)
+        validate_agent_task(initial_task)
         if initial_event.get("tenant_id") != tenant_id:
             raise ValueError("event tenant_id does not match authenticated tenant")
+        if initial_task.get("tenant_id") != tenant_id:
+            raise ValueError("task tenant_id does not match authenticated tenant")
         if initial_event.get("type") != "task.request":
             raise ValueError("initial workflow event must be task.request")
+        if (
+            initial_task.get("workflow_id") != initial_event["run_id"]
+            or initial_task.get("task_id") != initial_event.get("task_id")
+            or initial_task.get("attempt") != initial_event.get("attempt")
+        ):
+            raise ValueError("initial task identity does not match its command envelope")
         if not idempotency_key or len(idempotency_key) > 256:
             raise ValueError("idempotency_key must contain 1..256 characters")
         run_id = initial_event["run_id"]
         request_hash = _sha256(request)
+        task_json = _canonical_json(initial_task)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             inserted = conn.execute(
@@ -104,8 +116,38 @@ class PostgresWorkflowStore:
                     raise WorkflowIdempotencyConflictError(
                         "idempotency key was already used for a different request body"
                     )
+                existing_task = conn.execute(
+                    """
+                    SELECT task
+                    FROM public.devops_tasks
+                    WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                    """,
+                    (tenant_id, existing[0], initial_task["task_id"]),
+                ).fetchone()
+                if existing_task is None or _canonical_json(existing_task[0]) != task_json:
+                    raise WorkflowIdempotencyConflictError(
+                        "idempotency key was replayed with a different initial task contract"
+                    )
                 return str(existing[0]), False
 
+            conn.execute(
+                """
+                INSERT INTO public.devops_tasks
+                    (task_id, run_id, tenant_id, agent_id, stage, attempt,
+                     deadline_at, task)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                (
+                    initial_task["task_id"],
+                    run_id,
+                    tenant_id,
+                    initial_task["agent_id"],
+                    initial_task["stage"],
+                    initial_task["attempt"],
+                    initial_task.get("deadline_at"),
+                    task_json,
+                ),
+            )
             conn.execute(
                 """
                 INSERT INTO public.devops_event_outbox
