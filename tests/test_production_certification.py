@@ -245,6 +245,28 @@ def test_release_manifest_accepts_approved_unexpired_high_exception() -> None:
     validate_release_manifest(payload, now=NOW)
 
 
+def test_release_manifest_rejects_unapproved_exception() -> None:
+    payload = release_manifest()
+    scan = payload["artifacts"][0]["vulnerability_scan"]
+    scan["counts"]["high"] = 1
+    scan["disposition"] = "EXCEPTION"
+    scan["exceptions"] = [
+        {
+            "finding_id": "CVE-2026-12345",
+            "severity": "HIGH",
+            "owner": "security-owner",
+            "rationale": "Temporary exception pending approval.",
+            "expires_at": "2026-12-01T00:00:00Z",
+            "approval_ref": "approval://security/CVE-2026-12345",
+            "approved": False,
+            "approved_by": "security-reviewer",
+            "approved_at": "2026-11-08T10:00:00Z",
+        }
+    ]
+    with pytest.raises(CertificationContractError, match="is not approved"):
+        validate_release_manifest(payload, now=NOW)
+
+
 def test_release_manifest_rejects_expired_exception() -> None:
     payload = release_manifest()
     scan = payload["artifacts"][0]["vulnerability_scan"]

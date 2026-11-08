@@ -178,6 +178,10 @@ def validate_release_manifest(
             if len(finding_ids) != len(set(finding_ids)):
                 errors.append(f"{label}: vulnerability exception finding IDs must be unique")
             for exception in exceptions:
+                if exception["approved"] is not True:
+                    errors.append(
+                        f"{label}: vulnerability exception {exception['finding_id']} is not approved"
+                    )
                 approval_time = datetime.fromisoformat(
                     exception["approved_at"].replace("Z", "+00:00")
                 )
