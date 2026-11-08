@@ -104,6 +104,8 @@ The inspected code defines:
 6. Never index bearer tokens, OAuth codes, refresh tokens, API keys, cookies, private keys or raw secrets.
 7. Preserve provider, account/tenant, principal, scope, timestamp and source provenance for collected data.
 8. A catalog entry or successful discovery call does not prove a live provider connection or permission to read its content.
+9. The inspected UGAI policy has a hard-deny set for service authorization/confirmation/disconnection, Drive file read/create, Drive write-approval status, and Cloudbrowser task read/list tools. Do not bypass these restrictions by copying the IM19 tool schema into RUSA.
+10. Treat MCP tool schema, tool annotation and resource metadata as capability evidence only; do not convert a discovered tool into an agent permission automatically.
 
 ### MCP-to-agent knowledge map
 
