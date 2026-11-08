@@ -38,6 +38,8 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
     """Validate metadata before embedding or persistence; never store embedded credentials."""
     if not isinstance(metadata, dict):
         raise ValueError("document metadata must be a JSON object")
+    if "agent_ids" in metadata and metadata.get("agent_ids") and "knowledge_scope" not in metadata:
+        raise ValueError("knowledge_scope must be explicit when agent_ids are present")
     knowledge_scope = metadata.get("knowledge_scope", "shared")
     if not isinstance(knowledge_scope, str) or knowledge_scope not in {"shared", "agent_specific"}:
         raise ValueError("knowledge_scope must be shared or agent_specific")
