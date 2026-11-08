@@ -169,7 +169,9 @@ The coding model must reliably honor JSON-object response format. The model endp
 | `/metrics` | GET | Authenticated Prometheus API metrics |
 | `/v1/chat/completions` | POST | OpenAI-compatible non-streaming chat |
 | `/v1/validate-task` | POST | A2A task envelope validation |
+| `/v1/auth/session` | GET | Resolve tenant identity and roles from an API key |
 | `/v1/aicode/tasks` | POST | Tenant-scoped task intake |
+| `/v1/aicode/tasks` | GET | Tenant-scoped task history with status filter and pagination |
 | `/v1/aicode/tasks/{task_id}` | GET | Tenant-scoped task status |
 | `/v1/aicode/tasks/{task_id}` | DELETE | Cancel queued/running/awaiting task |
 

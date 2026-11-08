@@ -39,6 +39,36 @@ services:
       retries: 3
     networks: [rusa-internal, rusa-egress]
 
+  web:
+    image: ${RUSA_WEB_IMAGE:?Set RUSA_WEB_IMAGE to an immutable web image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      RUSA_API_BASE_URL: http://api:8000
+      RUSA_WEB_SESSION_SECRET: ${RUSA_WEB_SESSION_SECRET:?Set RUSA_WEB_SESSION_SECRET using a secret manager}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.next/cache:rw,noexec,nosuid,size=64m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal]
+
   worker:
     image: ${RUSA_WORKER_IMAGE:?Set RUSA_WORKER_IMAGE to an immutable worker image digest}
     pull_policy: always

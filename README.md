@@ -207,5 +207,13 @@ Production deployment requires managed PostgreSQL, tenant repository allowlists,
 
 ---
 
+## Web Control Center
+
+A tenant-scoped Next.js Control Center is available in the `web/` directory. It connects to the FastAPI application through server-side route handlers, keeps tenant API keys in encrypted HttpOnly sessions, and provides task intake/history, task review visibility, chat inference, agent capability views, artifact references, and service health.
+
+Set `RUSA_WEB_SESSION_SECRET` to a random value of at least 32 characters. Start the local stack with `docker compose up --build`, then open http://localhost:3000. Sign in using a tenant API key with the required task permissions. See `docs/UI_CONTROL_CENTER.md` for the API mapping and current capability boundaries.
+
+The web interface does not add approve/reject actions because the current backend does not expose an approval-decision endpoint. The eight-stage DevOps lifecycle is labeled as an architecture target until the corresponding runtime agents and APIs are implemented.
+
 ## License
 No `LICENSE` file is currently present in this repository. Licensing is therefore unresolved; confirm the intended terms with the repository owner and commit the corresponding license file before redistribution.

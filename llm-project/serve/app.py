@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -374,6 +374,27 @@ class AICodeTaskResponse(BaseModel):
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
     return authenticate_api_key(request, api_key)
+
+
+
+@app.get("/v1/auth/session")
+def read_api_session(
+    request: Request,
+    tenant_id: str = Depends(verify_api_key),
+):
+    """Return the identity bound to the supplied tenant API key; never return the key."""
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        return {
+            "subject": f"local-development:{tenant_id}",
+            "tenant_id": tenant_id,
+            "roles": ["tenant_admin"],
+        }
+    return {
+        "subject": principal.subject,
+        "tenant_id": principal.tenant_id,
+        "roles": list(principal.roles),
+    }
 
 
 def authenticate_api_key(request: Request, api_key: str | None, *, require_key: bool = False) -> str:
@@ -889,6 +910,37 @@ def create_aicode_task(
         tenant_id=tenant_id,
         work_branch_prefix=work_branch_prefix,
     )
+
+
+@app.get("/v1/aicode/tasks")
+def list_aicode_tasks(
+    request: Request,
+    status_filter: Literal[
+        "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"
+    ] | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, le=100000),
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """List only the authenticated tenant's recent AICode tasks."""
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        audit_api_task(request, tenant_id, "*", "task.list", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        return queue.list(
+            tenant_id,
+            status_filter=status_filter,
+            limit=limit,
+            offset=offset,
+            audit_actor=_api_task_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Could not list AICode tasks")
+        audit_api_task(request, tenant_id, "*", "task.list", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
 
 
 @app.get("/v1/aicode/tasks/{task_id}")

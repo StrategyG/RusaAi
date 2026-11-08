@@ -511,3 +511,67 @@ def test_inference_rejects_unconfigured_model(monkeypatch):
 
     assert response.status_code == 404
 
+
+
+
+def test_api_session_returns_tenant_bound_identity(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    response = client.get(
+        "/v1/auth/session",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "subject": "legacy:tenant-alpha",
+        "tenant_id": "tenant-alpha",
+        "roles": ["tenant_admin"],
+    }
+
+
+def test_aicode_task_list_is_tenant_scoped_and_filterable(monkeypatch):
+    class StubQueue:
+        def list(
+            self, tenant_id, *, status_filter=None, limit=50, offset=0, audit_actor=None
+        ):
+            assert tenant_id == "tenant-alpha"
+            assert status_filter == "queued"
+            assert audit_actor == "api:legacy:tenant-alpha"
+            return {
+                "items": [{
+                    "task_id": "00000000-0000-4000-8000-000000000001",
+                    "tenant_id": tenant_id,
+                    "payload": {"objective": "Tenant-scoped task"},
+                    "result": None,
+                    "status": "queued",
+                    "attempts": 0,
+                    "max_attempts": 3,
+                    "last_error": None,
+                    "created_at": "2026-11-09T00:00:00+00:00",
+                    "updated_at": "2026-11-09T00:00:00+00:00",
+                }],
+                "total": 1,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", StubQueue(), raising=False)
+    response = client.get(
+        "/v1/aicode/tasks?status=queued&limit=10&offset=0",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["tenant_id"] == "tenant-alpha"
+
+
+def test_aicode_task_list_rejects_unknown_status(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    response = client.get(
+        "/v1/aicode/tasks?status=deploying",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 422
