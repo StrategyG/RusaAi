@@ -118,3 +118,19 @@ A training run is not a production release. Before promotion:
 - Complete the repository's production certification, rollback, backup/restore, monitoring, and operator approval gates.
 
 A model may propose an action; only the deterministic runtime and policy layer can authorize it. Merge, deploy, release, secret changes, permission changes, and destructive operations remain human-controlled.
+
+
+## Manual GitHub Actions GPU training
+
+The repository includes a manually triggered workflow at `.github/workflows/agent-sft-training.yml`. It is deliberately not triggered by pushes or pull requests.
+
+Before running it:
+
+1. Register a trusted self-hosted GitHub Actions runner with the labels `self-hosted`, `linux`, `x64`, `cuda`, and `gpu`.
+2. Provide an NVIDIA CUDA driver, a CUDA-compatible PyTorch/bitsandbytes stack, at least 24 GiB GPU VRAM for the committed 4,096-token configuration, and sufficient host RAM and disk (64 GiB RAM and 80 GiB free disk are the recommended starting point).
+3. Configure the GitHub Actions environment `rusa-model-training` with required reviewers if GPU usage needs approval.
+4. Open Actions → **RUSA-AI Agent SFT GPU Training** → Run workflow, and explicitly set `confirm_gpu_run=true`.
+
+The workflow installs the isolated training dependencies, checks GPU capacity, validates the train/evaluation splits, runs QLoRA, and runs the held-out contract/safety evaluator. The evaluator fails the workflow if the configured promotion metrics are not met. An adapter and evaluation report are uploaded as a short-lived **unpromoted candidate artifact** for review; they are not committed to Git, merged into a base model, deployed, or certified for production.
+
+The workflow requires a runner with the exact labels above. If no eligible runner is online, the job remains queued; no CPU fallback is attempted.
