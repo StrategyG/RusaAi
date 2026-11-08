@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 
-from rusa_agents.devops.contracts import ContractValidationError
 from rusa_agents.devops.agent_runtime import (
     AgentApprovalRequiredError,
     AgentAuthorizationError,
@@ -17,6 +16,7 @@ from rusa_agents.devops.agent_runtime import (
     ScopedToolGateway,
     ToolInvocationDeniedError,
 )
+from rusa_agents.devops.contracts import ContractValidationError
 
 
 def _task(
