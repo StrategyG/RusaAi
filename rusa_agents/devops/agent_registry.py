@@ -80,6 +80,9 @@ _CODE_FORBIDDEN_NAMES = frozenset(
         ".env",
         ".env.local",
         ".env.production",
+        ".env.example",
+        ".gitignore",
+        ".dockerignore",
         ".gitattributes",
         ".gitmodules",
         ".lfsconfig",
@@ -105,12 +108,20 @@ _CODE_FORBIDDEN_NAMES = frozenset(
         "setup.py",
         "setup.cfg",
         "makefile",
+        "containerfile",
+        "procfile",
+        "serverless.yml",
+        "vercel.json",
+        "netlify.toml",
+        "pipfile",
+        "pipfile.lock",
     }
 )
 _CODE_FORBIDDEN_PARTS = frozenset(
     {
         ".git",
         ".github",
+        ".devcontainer",
         ".env",
         ".secrets",
         "secrets",
