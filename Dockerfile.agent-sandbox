@@ -42,7 +42,7 @@ RUN apt-get update \
 
 COPY --from=builder /usr/local /usr/local
 
-RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && pytest --version \
     && ruff --version \
