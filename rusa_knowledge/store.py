@@ -135,7 +135,8 @@ class PostgresKnowledgeStore:
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
                     ),
                     to_regclass('public.rusa_knowledge_documents_scope_idx') IS NOT NULL,
-                    to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL
+                    to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL,
+                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL
                 """
             ).fetchone()
         return bool(row and all(row))
