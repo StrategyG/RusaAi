@@ -18,3 +18,12 @@ def test_agent_scope_migration_adds_metadata_indexes():
     assert "metadata->'agent_ids'" in migration
     assert "BEGIN;" in migration
     assert "COMMIT;" in migration
+
+
+def test_project_scope_migration_adds_partial_lookup_index():
+    migration = Path("migrations/009_rag_project_scope_index.sql").read_text(encoding="utf-8")
+    assert "rusa_knowledge_documents_project_scope_idx" in migration
+    assert "metadata->>'project_id'" in migration
+    assert "knowledge_scope' = 'agent_specific'" in migration
+    assert "BEGIN;" in migration
+    assert "COMMIT;" in migration
