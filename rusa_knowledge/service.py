@@ -84,7 +84,16 @@ class KnowledgeService:
         if len(normalized) > 2_000_000:
             raise ValueError("document content exceeds the 2 million character limit")
         reject_credential_material(normalized)
-        validate_document_metadata(source_uri, title, metadata or {})
+        metadata_payload = dict(metadata or {})
+        embedding_model = getattr(self.embeddings, "model", None)
+        embedding_dimensions = getattr(self.embeddings, "dimensions", None)
+        if isinstance(embedding_model, str) and embedding_model:
+            metadata_payload["embedding_model"] = embedding_model
+        if type(embedding_dimensions) is int and embedding_dimensions > 0:
+            metadata_payload["embedding_dimensions"] = embedding_dimensions
+        metadata_payload["chunk_size_chars"] = chunk_size
+        metadata_payload["chunk_overlap_chars"] = overlap
+        validate_document_metadata(source_uri, title, metadata_payload)
         chunks = chunk_text(normalized, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             raise ValueError("document did not produce any searchable chunks")
@@ -102,7 +111,7 @@ class KnowledgeService:
             source_uri=source_uri,
             title=title,
             content_hash=digest,
-            metadata=metadata or {},
+            metadata=metadata_payload,
             chunks=chunks,
             embeddings=vectors,
         )
