@@ -119,6 +119,9 @@ def _grant(task: dict, **overrides) -> ExecutionPolicyGrant:
         "approved_refs": frozenset(
             [constraints["approval_ref"]] if "approval_ref" in constraints else []
         ),
+        "allowed_branches": frozenset({"feature/rusa-devops/test"}) if "repository.branch.write" in constraints["allowed_tools"] else frozenset(),
+        "allowed_runbooks": frozenset({task["input"]["runbook_ref"]}) if "runbook.execute" in constraints["allowed_tools"] else frozenset(),
+        "allowed_environments": frozenset({task["input"]["environment"]}) if task["stage"] == "deploy" else frozenset(),
         "max_cost_usd": budget["max_cost_usd"],
         "max_tool_calls": budget["max_tool_calls"],
         "max_runtime_seconds": budget["max_runtime_seconds"],
@@ -326,6 +329,58 @@ def test_task_budget_cannot_exceed_policy_engine_grant():
             authenticated_principal="rusa_plan_agent",
             policy_grant=_grant(task, max_tool_calls=task["constraints"]["budget"]["max_tool_calls"] - 1),
         )
+
+
+def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
+    task = _task(
+        "code",
+        "rusa_code_agent",
+        tools=["repository.branch.write"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_code_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert __import__("asyncio").run(
+        gateway.invoke("repository.branch.write", {"branch": "feature/rusa-devops/test"})
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="feature-branch allowlist"):
+        __import__("asyncio").run(
+            gateway.invoke("repository.branch.write", {"branch": "main"})
+        )
+
+
+def test_operate_runbook_execution_is_limited_to_the_task_runbook():
+    task = _task(
+        "operate",
+        "rusa_operate_agent",
+        tools=["runbook.read", "runbook.execute"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_operate_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert __import__("asyncio").run(
+        gateway.invoke(
+            "runbook.execute",
+            {"runbook_ref": task["input"]["runbook_ref"], "action": "restart-approved-service"},
+        )
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="runbook is outside"):
+        __import__("asyncio").run(
+            gateway.invoke(
+                "runbook.execute",
+                {"runbook_ref": "artifact://runbooks/unapproved", "action": "restart"},
+            )
+        )
+
+
 
 
 class _FakeToolInvoker:
