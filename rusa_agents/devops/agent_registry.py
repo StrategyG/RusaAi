@@ -351,8 +351,7 @@ def authorize_agent_task(
     """
     if not isinstance(authenticated_principal, str) or not authenticated_principal:
         raise AgentAuthorizationError("authenticated agent principal is required")
-    principal_policy = AGENT_POLICIES.get(authenticated_principal)
-    if principal_policy is None:
+    if authenticated_principal not in AGENT_POLICIES:
         raise AgentAuthorizationError("authenticated agent identity is not registered")
     if not isinstance(task, dict) or task.get("agent_id") != authenticated_principal:
         raise AgentAuthorizationError("authenticated principal does not match task agent_id")
