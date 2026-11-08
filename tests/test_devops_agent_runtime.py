@@ -139,6 +139,20 @@ def test_registry_contains_eight_specialists_and_cross_cutting_security_guard():
     assert {profile.stage for profile in registry.profiles if profile.stage} == {
         "plan", "code", "build", "test", "release", "deploy", "operate", "monitor"
     }
+    expected = {
+        "rusa_plan_agent": {"repository.read", "issue.read", "artifact.read", "task.create", "plan.write"},
+        "rusa_code_agent": {"repository.read", "issue.read", "artifact.read", "repository.branch.write", "test.write", "documentation.write"},
+        "rusa_build_agent": {"repository.read", "artifact.read", "build.execute", "artifact.write", "sbom.write"},
+        "rusa_test_agent": {"repository.read", "artifact.read", "test.execute", "evidence.write", "metrics.read"},
+        "rusa_release_agent": {"artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read"},
+        "rusa_deploy_agent": {"artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read"},
+        "rusa_operate_agent": {"metrics.read", "logs.read", "runbook.read", "runbook.execute", "incident.write"},
+        "rusa_monitor_agent": {"metrics.read", "logs.read", "traces.read", "alerts.read"},
+        "rusa_security_guard_agent": {"repository.read", "issue.read", "artifact.read", "evidence.read", "policy.read", "audit.read", "metrics.read", "logs.read", "traces.read"},
+    }
+    assert {
+        profile.agent_id: set(profile.allowed_tools) for profile in registry.profiles
+    } == expected
     guard = registry.profile_for("rusa_security_guard_agent")
     assert guard.stage is None
     assert guard.read_only is True
