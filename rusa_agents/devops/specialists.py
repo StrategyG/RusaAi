@@ -462,6 +462,10 @@ class PlanAgentExecutor:
                 )
                 artifact_refs.append(reference)
                 artifact_digests[name] = reference.rsplit("/", 1)[-1]
+            artifact_map = {
+                name: reference
+                for name, reference in zip(_plan_documents(plan), artifact_refs, strict=True)
+            }
             evidence = {
                 "schema_version": 1,
                 "tenant_id": task["tenant_id"],
@@ -476,6 +480,7 @@ class PlanAgentExecutor:
                     ).encode("utf-8")
                 ).hexdigest(),
                 "artifact_refs": artifact_refs,
+                "artifacts": artifact_map,
                 "artifact_sha256": artifact_digests,
                 "created_at": _timestamp(),
             }
@@ -679,19 +684,42 @@ class CodeAgentExecutor:
         timeout = _timeout_seconds(task)
         tenant_id = task["tenant_id"]
         repository = task["input"]["repository"]
+        plan_ref = task["input"]["plan_ref"]
+        acceptance_ref = task["input"]["acceptance_criteria_ref"]
         try:
-            plan_bytes = self.artifact_store.get(tenant_id, task["input"]["plan_ref"])
+            plan_evidence = self.artifact_store.get_json(
+                tenant_id, task["input"]["plan_evidence_ref"]
+            )
+            plan_bytes = self.artifact_store.get(tenant_id, plan_ref)
+            acceptance_bytes = self.artifact_store.get(tenant_id, acceptance_ref)
             plan_context = plan_bytes.decode("utf-8")
+            acceptance_context = acceptance_bytes.decode("utf-8")
             if len(plan_bytes) > 32_000:
-                raise SpecialistExecutionError(
-                    "plan artifact exceeds the Code Agent context limit"
-                )
+                raise ValueError("plan artifact exceeds the Code Agent context limit")
+            artifacts = plan_evidence.get("artifacts", {})
+            digests = plan_evidence.get("artifact_sha256", {})
+            if (
+                plan_evidence.get("schema_version") != 1
+                or plan_evidence.get("tenant_id") != tenant_id
+                or plan_evidence.get("workflow_id") != task["workflow_id"]
+                or plan_evidence.get("agent_id") != PLAN_AGENT
+                or artifacts.get("plan.md") != plan_ref
+                or artifacts.get("acceptance-criteria.md") != acceptance_ref
+                or digests.get("plan.md") != hashlib.sha256(plan_bytes).hexdigest()
+                or digests.get("acceptance-criteria.md")
+                != hashlib.sha256(acceptance_bytes).hexdigest()
+                or any(item not in acceptance_context for item in task["input"]["acceptance_criteria"])
+            ):
+                raise ValueError("Plan provenance does not match this workflow and its criteria")
         except (ArtifactStoreError, ValueError, UnicodeDecodeError, OSError):
             return _failure(
                 task,
                 started_at=started,
-                code="code.plan_artifact_invalid",
-                message="Code Agent could not verify and read its tenant-scoped plan artifact.",
+                code="code.plan_evidence_mismatch",
+                message=(
+                    "Code Agent requires tenant-scoped Plan Agent evidence that binds "
+                    "the plan and acceptance criteria to this workflow."
+                ),
                 failure_category="PERMANENT",
             )
 
