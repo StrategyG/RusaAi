@@ -73,8 +73,24 @@ Do not paste service-role keys or database passwords into chat, Git, issue comme
 
 ## 4. RAG ingestion — strict source-pinned flow
 
-1. Place the exact four owner-approved Markdown originals under `docs/knowledge-seed/sources/` (this path is Git-ignored).
-2. Verify manifest SHA-256 and run the no-write preflight:
+The owner-supplied archive `RUSA_AI_RAG_Source_and_20_Agent_Packs.zip` contains the four original Markdown sources, a source/section manifest, and 20 pre-generated agent pack previews. The archive is not a database and contains no embeddings.
+
+1. Upload/copy the ZIP into the Codespace workspace without committing it to Git.
+2. Verify the archive against the repository's pinned source manifest and curated 20-agent map. This is read-only and makes no database or embedding calls:
+
+```bash
+rusa-knowledge-bundle --archive /path/to/RUSA_AI_RAG_Source_and_20_Agent_Packs.zip
+```
+
+3. Only after successful verification, extract the four original source files into the Git-ignored `docs/knowledge-seed/sources/` directory:
+
+```bash
+rusa-knowledge-bundle --archive /path/to/RUSA_AI_RAG_Source_and_20_Agent_Packs.zip --extract
+```
+
+The verifier checks all four source byte counts and SHA-256 hashes, all 20 profile IDs/headings against the repository map, every raw extracted-section SHA-256, each pack's provenance frontmatter, ZIP path/symlink/duplicate-member safety, and bounded archive sizes. It also reports the normalized section hash used by the current miner. The pre-generated pack preview's raw section hash and the current miner's normalized content hash are intentionally reported separately; do not treat them as the same digest.
+
+4. Run the four-document no-write preflight:
 
 ```bash
 python -m rusa_knowledge.seed
