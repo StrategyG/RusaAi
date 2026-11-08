@@ -44,7 +44,7 @@ COPY --from=builder /usr/local /usr/local
 COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser . /app
 
-RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
