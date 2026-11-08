@@ -1,0 +1,26 @@
+# Development-only PostgreSQL/pgvector. Not a production deployment.
+# Start: docker compose -f docker-compose.free.yml up -d
+# Stop:  docker compose -f docker-compose.free.yml down
+# Keep data: do NOT pass --volumes when stopping.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rusa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${RUSA_DEV_DB_PASSWORD:-rusa_dev_only_change_me}
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - rusa-free-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rusa"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  rusa-free-postgres:
