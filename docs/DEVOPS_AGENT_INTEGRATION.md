@@ -81,6 +81,14 @@ Security Guard and Monitor are read-only identities. Empty `write_scope` does no
 
 Successful Code results require a source commit. Successful Build, Test, Release, and Deploy results require source commit and immutable artifact digest. Build, Test, Release, and Deploy task inputs carry the expected source commit; Test, Release, and Deploy also carry the expected artifact digest. Result validation compares those values with originating task inputs. Evidence from another commit or digest cannot satisfy the current release gate.
 
+The Phase 4A execution registry in `rusa_agents/devops/agent_registry.py`
+defines the tool ceiling and write-scope policy for each specialist. The gRPC
+control plane validates that policy against the authenticated SPIFFE principal
+before returning or claiming a task, and the PostgreSQL claim transaction
+rechecks it while holding the task row lock. This makes the registry a
+fail-closed capability ceiling; tenant/resource authorization, approval,
+budget, deadline, and cancellation checks remain separate mandatory gates.
+
 ## 6. Human approval boundaries
 
 - Code Agent writes only to isolated feature branch/worktree.
