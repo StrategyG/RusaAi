@@ -594,7 +594,7 @@ export default function RusaControlCenter() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
       setNotice("Task diterima kembali oleh antrean.");
-      await refreshTasks();
+      await refreshTasks(taskOffset, taskFilter);
       await openTask(taskId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Retry failed.");
