@@ -1,5 +1,5 @@
 aio-pika>=9.4,<10
 aiokafka>=0.11,<1
-cryptography>=42,<47
+cryptography>=50.0.0,<51
 grpcio>=1.62,<2
 protobuf>=5.26,<7
