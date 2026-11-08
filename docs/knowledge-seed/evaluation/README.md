@@ -14,9 +14,21 @@
 
 The current offline evaluator accepts either `relevant_document_ids` or stable `relevant_source_uris`. Source URI labels can be curated before database-generated UUIDs exist. Use exactly one label type per case.
 
-## Example evaluator call
+## Run the reviewed set
 
-After the relevant knowledge packs are ingested, load the reviewed cases for one agent and call `evaluate_retrieval(cases, retrieve, k=5)`. The retrieval callback must use the same tenant, agent ID, and project scope as the worker runtime. Do not evaluate a role with an administrator or unscoped retriever.
+Store the reviewed cases as JSONL (one case object per line). After the relevant knowledge packs are ingested, run the existing CLI with the same tenant and visibility filters used by the worker:
+
+```bash
+rusa-knowledge evaluate \\
+  --dataset ./analyst-gold.jsonl \\
+  --tenant-id '<authorized-rusa-tenant>' \\
+  --collection agent \\
+  --agent-id aicode-analyst \\
+  --project-id strategyg--rusaai \\
+  --k 5
+```
+
+Use the actual agent ID from the curated profile and omit `--project-id` for agent-wide knowledge. Omit `--agent-id` only when intentionally evaluating shared-only knowledge. The CLI reports the exact tenant, collection, agent, and project filters alongside Recall@K, MRR@K, and NDCG@K. The operator-supplied filters are not an authenticated worker principal; run the evaluation only with an authorized tenant and a restricted knowledge database role.
 
 ## Required evaluation dimensions
 
