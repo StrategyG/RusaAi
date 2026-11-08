@@ -21,8 +21,8 @@ MAX_TOTAL_UNCOMPRESSED = 2 * 1024 * 1024
 MAX_MEMBERS = 64
 MAX_MEMBER_BYTES = 1 * 1024 * 1024
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-HEADING_RE = re.compile(r"^(#{1,6})[ \\t]+(.+?)[ \\t]*#*[ \\t]*$")
-FRONTMATTER_RE = re.compile(r"\\A---\\n(.*?)\\n---(?:\\n|\\Z)", re.DOTALL)
+HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
 
 
 def _sha256(data: bytes) -> str:
@@ -35,7 +35,7 @@ def _safe_member(info: zipfile.ZipInfo) -> str:
     mode = info.external_attr >> 16
     if (
         not name
-        or "\\\\" in name
+        or "\\" in name
         or path.is_absolute()
         or any(part in {"", ".", ".."} for part in path.parts)
         or stat.S_ISLNK(mode)
@@ -100,16 +100,16 @@ def _extract_sections(source: str, targets: list[str]) -> str:
     for previous, current in zip(selected, selected[1:]):
         if current[0] < previous[1]:
             raise ValueError("agent map contains overlapping source heading sections")
-    sections = ["\\n".join(lines[start:end]).strip() for start, end, _ in selected]
+    sections = ["\n".join(lines[start:end]).strip() for start, end, _ in selected]
     if any(not section for section in sections):
         raise ValueError("agent source section is empty")
-    return "\\n\\n".join(sections)
+    return "\n\n".join(sections)
 
 
 def _normalize(text: str) -> str:
-    text = text.replace("\\x00", " ").replace("\\r\\n", "\\n").replace("\\r", "\\n")
-    text = re.sub(r"[ \\t]+", " ", text)
-    text = re.sub(r"\\n{3,}", "\\n\\n", text)
+    text = text.replace("\x00", " ").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
@@ -122,8 +122,8 @@ def _chunk_count(text: str, size: int = 1200, overlap: int = 180) -> int:
         end = min(start + size, length)
         if end < length:
             candidates = (
-                normalized.rfind("\\n\\n", start + size // 2, end),
-                normalized.rfind("\\n", start + size // 2, end),
+                normalized.rfind("\n\n", start + size // 2, end),
+                normalized.rfind("\n", start + size // 2, end),
                 normalized.rfind(". ", start + size // 2, end),
                 normalized.rfind(" ", start + size // 2, end),
             )
