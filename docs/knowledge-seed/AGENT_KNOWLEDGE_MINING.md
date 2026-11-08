@@ -259,10 +259,13 @@ The current feature branch adds agent- and project-aware retrieval:
 - vector and lexical candidates are filtered to shared records plus records whose agent_ids contain the authenticated worker scope and whose optional project_id matches;
 - document reads and collection counts apply the same visibility filter;
 - worker tools do not accept model-selected collection, agent_id or project_id arguments;
+- collection counts and reads apply the same visibility boundary;
 - general RUSA Knowledge MCP requests without an authenticated agent identity see shared records only;
-- metadata validation distinguishes shared and agent_specific records and validates project identifiers.
+- metadata validation distinguishes shared and agent_specific records and validates project identifiers;
+- migration 010 snapshots prior document metadata, chunk text and embeddings when the content/title/metadata fingerprint changes; identical re-ingestion does not create a duplicate version;
+- historical version reads intersect the current document policy with the historical version policy, preventing project or agent scope changes from widening access to old snapshots.
 
-These are code changes in the open feature branch, not a merged or production deployment. Authenticated per-agent MCP principals, immutable source-version history, live database ingestion and end-to-end production verification remain outstanding. The inspected RUSA path still has no reranker and uses character-based 1200-character chunks with 180-character overlap.
+These are code changes in the open feature branch, not a merged or production deployment. Authenticated per-agent MCP principals, live database ingestion and end-to-end production verification remain outstanding. The inspected RUSA path still has no reranker and uses character-based 1200-character chunks with 180-character overlap.
 
 Therefore the branch establishes an initial per-runtime-worker and per-project retrieval boundary, while the full 20 documented architecture/lifecycle profiles remain catalogued for later explicit runtime binding.
 
@@ -273,7 +276,7 @@ Therefore the branch establishes an initial per-runtime-worker and per-project r
 3. **Agent metadata filters — implemented in this feature branch.** Both vector and lexical candidates use the shared-or-agent_ids filter before rank fusion; document reads and collection counts apply the same filter.
 4. **Tenant + agent + project isolation — implemented in this feature branch for AICode workers.** Tenant RLS is retained; the host derives project scope from the already-authorized repository, and project-bound agent-specific records are visible only to that agent in that project. PostgreSQL integration tests cover cross-agent and cross-project denial. This is an application-level project metadata filter, not a separate project-level RLS policy.
 5. **Collection selection — worker model argument removed in this branch.** The worker uses the configured collection. Standalone MCP retains its existing collection argument but has no agent identity and can only retrieve shared records.
-6. **Immutable source version history — outstanding.** Re-ingestion still replaces chunks for the stable source URI; source snapshots and version history need a separate migration.
+6. **Immutable source version history — implemented in this feature branch.** Migration 010 stores immutable prior metadata and chunk/embedding snapshots. History reads require both the current and historical visibility policies; production deployment and retention operations remain outstanding.
 7. **Per-agent evaluation sets — partially prepared.** The evaluator accepts stable `relevant_source_uris` labels before database UUIDs exist. The 20-profile source map supplies stable agent document URIs, but relevance judgments still require human review after a successful preflight.
 8. **Vector store — retain pgvector.** No measured evidence justifies a second vector database.
 9. **MCP source sync — outstanding.** The current catalog is mined from repository code/docs, not live remote MCP resources. Add live connectors only after endpoint, principal, scopes, allowlist and approval are configured.
