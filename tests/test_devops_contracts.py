@@ -5,6 +5,7 @@ from rusa_agents.devops.contracts import (
     validate_agent_result,
     validate_agent_result_for_task,
     validate_agent_task,
+    validate_plan_output,
     validate_workflow_event,
 )
 
@@ -99,6 +100,37 @@ def _event() -> dict:
 
 def test_agent_task_contract_accepts_stage_specific_plan_task():
     validate_agent_task(_task())
+
+def test_plan_output_contract_accepts_structured_plan_and_rejects_unknown_fields():
+    payload = {
+        "schema_version": 1,
+        "summary": "A bounded delivery plan.",
+        "goal": "Deliver an independently verifiable change.",
+        "scope": {"in_scope": ["Implement endpoint"], "out_of_scope": ["Change retention"]},
+        "requirements": {"functional": [], "nonfunctional": []},
+        "tasks": [{
+            "id": "TASK-CODE-1",
+            "title": "Implement endpoint",
+            "description": "Implement the bounded endpoint.",
+            "stage": "code",
+            "agent_id": "rusa_code_agent",
+            "depends_on": [],
+            "acceptance_criteria": ["Cross-tenant access is denied."],
+        }],
+        "acceptance_criteria": [{
+            "id": "AC-AUTH-1",
+            "criterion": "Cross-tenant access is denied.",
+            "verification": "Run an integration test.",
+        }],
+        "dependencies": [],
+        "risks": [],
+        "approval_recommended": False,
+        "approval_reasons": [],
+    }
+    validate_plan_output(payload)
+    payload["unapproved_field"] = "must be rejected"
+    with pytest.raises(ContractValidationError, match="unapproved_field"):
+        validate_plan_output(payload)
 
 def test_agent_task_contract_rejects_missing_schema_version():
     payload = _task()
@@ -231,6 +263,7 @@ def test_packaged_contract_schemas_match_repository_sources():
         "agent-task.schema.json",
         "agent-result.schema.json",
         "workflow-event.schema.json",
+        "plan-output.schema.json",
     ):
         assert (packaged_dir / filename).read_bytes() == (
             repository_dir / filename
