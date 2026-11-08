@@ -13,7 +13,7 @@ download_flags="--retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 2
 
 expat_archive="expat-2.10.0.tar.xz"
 curl $download_flags \
-  "https://github.com/libexpat/libexpat/releases/download/R_2_10_0/$expat_archive" \
+  "https://downloads.sourceforge.net/project/expat/expat/2.10.0/$expat_archive" \
   --output "$expat_archive"
 echo "c624ba2998fc65df1163a49641ff3f9ab73138b11641d92c86bee0fb01b1bc7f  $expat_archive" \
   | sha256sum --check --status
