@@ -363,7 +363,8 @@ async def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
     )
     gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
     assert await gateway.invoke(
-        "repository.branch.write", {"branch": "feature/rusa-devops/test"}
+        "repository.branch.write",
+        {"repository": "StrategyG/RusaAi", "branch": "feature/rusa-devops/test"},
     ) == {"ok": True}
     with pytest.raises(ToolInvocationDeniedError, match="feature-branch allowlist"):
         await gateway.invoke("repository.branch.write", {"repository": "StrategyG/RusaAi", "branch": "main"})
@@ -411,6 +412,7 @@ async def test_scoped_gateway_enforces_tool_path_network_and_call_budget():
         tools=["plan.write", "repository.read"],
         write_scope=["plans/"],
     )
+    task["constraints"]["budget"]["max_tool_calls"] = 1
     grant = DevOpsAgentRegistry().authorize(
         task,
         authenticated_tenant_id="tenant-a",
