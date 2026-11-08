@@ -54,3 +54,35 @@ HOLD for supply-chain signature evidence.
 - Persist verifier output as immutable evidence and bind its digest into the
   release manifest.
 - Keep promotion blocked when any verification is missing or fails.
+
+
+## GitHub SLSA provenance verification
+
+The certification package also exposes `verify_github_slsa_provenance`. It
+uses `gh attestation verify` against the immutable OCI image digest and
+requires the expected GitHub repository, signer workflow, certificate
+identity, OIDC issuer, and SLSA v1 predicate type. GitHub CLI performs the
+cryptographic attestation verification; the wrapper additionally confirms
+that the verified statement contains the exact requested SHA-256 subject.
+
+Example:
+
+```python
+from rusa_agents.certification import verify_github_slsa_provenance
+
+provenance = verify_github_slsa_provenance(
+    image="ghcr.io/strategyg/rusa-ai-api",
+    digest="sha256:<64 lowercase hexadecimal characters>",
+    repository="StrategyG/RusaAi",
+    signer_workflow="StrategyG/RusaAi/.github/workflows/release.yml",
+    certificate_identity=(
+        "https://github.com/StrategyG/RusaAi/.github/workflows/release.yml"
+        "@refs/tags/v1.0.0"
+    ),
+)
+```
+
+The helper does not treat arbitrary predicate fields as trusted identity.
+GitHub's certificate identity and verified timestamp are the cryptographically
+verified identity evidence. Provenance still requires a trusted builder
+workflow whose execution cannot be influenced by untrusted caller input.
