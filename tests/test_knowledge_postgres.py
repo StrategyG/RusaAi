@@ -384,3 +384,149 @@ def test_project_scope_validation_rejects_untrusted_identifier(knowledge_store):
             agent_id="aicode-analyst",
             project_id="../other-project",
         )
+
+
+def test_reingestion_snapshots_previous_version_and_is_idempotent(knowledge_store):
+    store, _ = knowledge_store
+    tenant_id = "tenant-version-history"
+    source_uri = "kb://version-history/guide"
+    metadata = {"knowledge_scope": "shared", "agent_ids": []}
+    document_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Versioned guide",
+        content_hash="a" * 64,
+        metadata=metadata,
+        chunks=["original knowledge content before revision"],
+        embeddings=[_unit_vector(0)],
+    )
+    updated_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Versioned guide",
+        content_hash="b" * 64,
+        metadata=metadata,
+        chunks=["updated knowledge content after revision"],
+        embeddings=[_unit_vector(0)],
+    )
+    assert updated_id == document_id
+
+    versions = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert len(versions) == 1
+    historical = store.get_document_version(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        version_id=versions[0]["version_id"],
+    )
+    assert historical is not None
+    assert "original knowledge content" in historical["content"]
+
+    current = store.get_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert current is not None
+    assert "updated knowledge content" in current["content"]
+
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Versioned guide",
+        content_hash="b" * 64,
+        metadata=metadata,
+        chunks=["updated knowledge content after revision"],
+        embeddings=[_unit_vector(0)],
+    )
+    assert len(store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )) == 1
+
+
+def test_historical_version_visibility_intersects_current_and_snapshot_scope(knowledge_store):
+    store, _ = knowledge_store
+    tenant_id = "tenant-version-scope"
+    source_uri = "kb://version-scope/analyst-alpha"
+    document_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Analyst Alpha Notes",
+        content_hash="c" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-alpha",
+        },
+        chunks=["alpha source knowledge version one"],
+        embeddings=[_unit_vector(0)],
+    )
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Analyst Alpha Notes",
+        content_hash="d" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-alpha",
+        },
+        chunks=["alpha source knowledge version two"],
+        embeddings=[_unit_vector(0)],
+    )
+    alpha_versions = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    )
+    assert len(alpha_versions) == 1
+
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri=source_uri,
+        title="Analyst Beta Notes",
+        content_hash="e" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-beta",
+        },
+        chunks=["beta source knowledge after project move"],
+        embeddings=[_unit_vector(0)],
+    )
+    assert store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    ) == []
+    assert store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        agent_id="aicode-analyst",
+        project_id="project-beta",
+    ) == []
+    assert store.get_document_version(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        version_id=alpha_versions[0]["version_id"],
+        agent_id="aicode-analyst",
+        project_id="project-beta",
+    ) is None
