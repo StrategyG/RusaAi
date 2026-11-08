@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 rusa-knowledge = "rusa_knowledge.cli:main"
+rusa-agent-knowledge = "rusa_knowledge.agent_mining:main"
 
 [project.optional-dependencies]
 dev = [
