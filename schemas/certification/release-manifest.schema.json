@@ -252,7 +252,7 @@
           "minLength": 1
         },
         "approved": {
-          "const": true
+          "type": "boolean"
         },
         "approved_by": {
           "type": "string",
