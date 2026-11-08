@@ -29,9 +29,9 @@ This directory is ignored by Git to avoid publishing internal source material.
 
 ## 2. Prepare the knowledge database
 
-The existing RUSA RAG implementation uses PostgreSQL 16 with pgvector and 1536-dimensional embeddings. It uses the existing `migrations/007_rag_knowledge_pgvector.sql`; this seed does not introduce Qdrant or a second vector store.
+The existing RUSA RAG implementation uses PostgreSQL 16 with pgvector and 1536-dimensional embeddings. It retains the existing vector store and adds `migrations/008_rag_agent_scope_indexes.sql` for the shared/agent-specific metadata filters; this seed does not introduce Qdrant or a second vector store.
 
-Apply the migration using a database owner/administrator connection to the dedicated knowledge database. Then configure a restricted non-superuser login that can assume the `rusa_knowledge_worker` role.
+Apply migrations `007_rag_knowledge_pgvector.sql` and `008_rag_agent_scope_indexes.sql`, in that order, using a database owner/administrator connection to the dedicated knowledge database. Then configure a restricted non-superuser login that can assume the `rusa_knowledge_worker` role.
 
 Set these environment variables outside the repository, using a secret manager where appropriate:
 
