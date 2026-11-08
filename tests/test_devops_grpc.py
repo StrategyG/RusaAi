@@ -158,12 +158,21 @@ def test_spiffe_identity_binds_principal_and_tenant_from_mtls_certificate():
         _auth_context("spiffe://evil.example/tenant/tenant-a/service/rusa_code_agent"),
         _auth_context("spiffe://rusa.ai/tenant/tenant-a/service/unknown_agent"),
         _auth_context("spiffe://rusa.ai/service/rusa_code_agent"),
+        _auth_context("spiffe://rusa.ai//tenant/tenant-a/service/rusa_code_agent"),
+        _auth_context("spiffe://rusa.ai/tenant/tenant-a/service/rusa_code_agent/"),
+        _auth_context("spiffe://rusa.ai/tenant/tenant%2Da/service/rusa_code_agent"),
         _auth_context(_spiffe(), extra_sans=("spiffe://rusa.ai/tenant/tenant-a/service/rusa_test_agent",)),
     ],
 )
 def test_spiffe_resolver_rejects_untrusted_or_ambiguous_identity(auth_context):
     with pytest.raises(IdentityAuthenticationError):
         SpiffeIdentityResolver(trust_domain="rusa.ai").resolve(auth_context)
+
+
+def test_empty_principal_registry_does_not_fall_back_to_default_permissions():
+    resolver = SpiffeIdentityResolver(trust_domain="rusa.ai", principal_methods={})
+    with pytest.raises(IdentityAuthenticationError):
+        resolver.resolve(_auth_context(_spiffe()))
 
 
 def test_all_ten_system_agents_have_read_only_or_orchestrator_scopes():
