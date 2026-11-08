@@ -126,6 +126,29 @@ The worker connects using its restricted worker login, then explicitly assumes
 the non-login `rusa_knowledge_worker` role for each knowledge-store transaction.
 Do not grant the knowledge role to an API login or a general application role.
 
+## Container image vulnerability triage
+
+The CI workflow reports every CRITICAL and HIGH finding for the API, agent
+sandbox, worker, and knowledge MCP images. Its blocking step uses Trivy
+`--ignore-unfixed`, so a green gate means no currently fixable CRITICAL/HIGH
+finding was detected; it does **not** mean the images are vulnerability-free.
+
+The 2026-11-08 scan for this feature branch used Debian 13.7 (trixie) and
+reported 0 CRITICAL findings and 51 HIGH in the API image, 56 HIGH in the
+sandbox image, 55 HIGH in the worker image, and 51 HIGH in the knowledge MCP
+image. The report includes upstream Debian package findings such as util-linux
+and acl issues that Debian currently lists as vulnerable or postponed for
+trixie. Review the full Trivy report for each release; do not suppress these
+findings or treat the green fixable-only gate as production security approval.
+
+Useful upstream status references:
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-76642
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-54369
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-9538
+
+Rebuild and rescan when Debian publishes fixed trixie packages or when the
+runtime base image is deliberately changed and compatibility-tested.
+
 ## Operational boundaries
 
 - The RAG/MCP runtime is optional and isolated from the core inference API.
