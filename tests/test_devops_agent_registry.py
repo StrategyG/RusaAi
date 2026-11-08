@@ -42,6 +42,8 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "code": {
             "repository": "StrategyG/RusaAi",
             "plan_ref": "artifact://plans/plan-1",
+            "plan_evidence_ref": "evidence://plans/plan-evidence-1",
+            "acceptance_criteria_ref": "artifact://acceptance/criteria-1",
             "acceptance_criteria": ["All required tests pass."],
         },
         "build": {
