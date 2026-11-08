@@ -73,7 +73,10 @@ def _b64url_encode(value: bytes) -> str:
 def _b64url_decode(value: str) -> bytes:
     if not value or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
         raise MessageAuthenticationError("malformed detached JWS segment")
-    return base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
+    decoded = base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
+    if _b64url_encode(decoded) != value:
+        raise MessageAuthenticationError("detached JWS segment is not canonically encoded")
+    return decoded
 
 
 class DetachedJwsSigner:
