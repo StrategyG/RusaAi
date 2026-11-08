@@ -27,3 +27,14 @@ def test_project_scope_migration_adds_partial_lookup_index():
     assert "knowledge_scope' = 'agent_specific'" in migration
     assert "BEGIN;" in migration
     assert "COMMIT;" in migration
+
+
+def test_document_version_history_migration_adds_tenant_scoped_snapshot_tables():
+    migration = Path("migrations/010_rag_knowledge_version_history.sql").read_text(encoding="utf-8")
+    assert "rusa_knowledge_document_versions" in migration
+    assert "rusa_knowledge_version_chunks" in migration
+    assert "version_fingerprint" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "rusa_knowledge_document_versions_tenant_isolation" in migration
+    assert "rusa_knowledge_version_chunks_tenant_isolation" in migration
