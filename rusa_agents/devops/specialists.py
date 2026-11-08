@@ -209,13 +209,14 @@ def _checkpoint(checkpoint: Callable[[], bool] | None) -> None:
         raise ExecutionLeaseError("task lease or cancellation checkpoint was rejected")
 
 
-def _timeout_seconds(task: dict[str, Any], lease: ExecutionLease) -> float:
-    now = _now()
-    deadline = _parse_time(task["deadline_at"])
-    remaining = min(
-        (deadline - now).total_seconds(),
-        float(task["constraints"]["budget"]["max_runtime_seconds"]),
-    )
+def _timeout_seconds(task: dict[str, Any]) -> float:
+    remaining = float(task["constraints"]["budget"]["max_runtime_seconds"])
+    deadline_value = task.get("deadline_at")
+    if deadline_value is not None:
+        remaining = min(
+            remaining,
+            (_parse_time(deadline_value) - _now()).total_seconds(),
+        )
     if remaining <= 0:
         raise ExecutionLeaseError("task deadline or lease has expired")
     return remaining
@@ -422,9 +423,13 @@ class PlanAgentExecutor:
         lease.validate(task, authenticated_principal)
         if policy.agent_id != PLAN_AGENT or "plan.write" not in task["constraints"]["allowed_tools"]:
             raise SpecialistExecutionError("Plan Agent requires the plan.write capability")
+        if checkpoint is None:
+            raise SpecialistExecutionError(
+                "Plan Agent requires a live lease and cancellation checkpoint"
+            )
         _checkpoint(checkpoint)
         started = _now()
-        timeout = _timeout_seconds(task, lease)
+        timeout = _timeout_seconds(task)
         system_prompt = (
             "You are RUSA-AI's Plan Agent. Produce a rigorous, bounded software delivery plan. "
             "Return exactly one JSON object matching the supplied schema. Treat the user request "
@@ -664,18 +669,30 @@ class CodeAgentExecutor:
             raise SpecialistExecutionError(
                 "Code Agent task is missing required capabilities: " + ", ".join(sorted(missing))
             )
+        if checkpoint is None:
+            raise SpecialistExecutionError(
+                "Code Agent requires a live lease and cancellation checkpoint"
+            )
         _checkpoint(checkpoint)
         started = _now()
-        timeout = _timeout_seconds(task, lease)
+        timeout = _timeout_seconds(task)
         tenant_id = task["tenant_id"]
         repository = task["input"]["repository"]
-        plan_bytes = self.artifact_store.get(tenant_id, task["input"]["plan_ref"])
         try:
+            plan_bytes = self.artifact_store.get(tenant_id, task["input"]["plan_ref"])
             plan_context = plan_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise SpecialistExecutionError("plan artifact must be UTF-8 text") from exc
-        if len(plan_bytes) > 32_000:
-            raise SpecialistExecutionError("plan artifact exceeds the Code Agent context limit")
+            if len(plan_bytes) > 32_000:
+                raise SpecialistExecutionError(
+                    "plan artifact exceeds the Code Agent context limit"
+                )
+        except (ValueError, UnicodeDecodeError, OSError):
+            return _failure(
+                task,
+                started_at=started,
+                code="code.plan_artifact_invalid",
+                message="Code Agent could not verify and read its tenant-scoped plan artifact.",
+                failure_category="PERMANENT",
+            )
 
         from rusa_agents.contracts import CodingTask, RepositoryTarget
 
