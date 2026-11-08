@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -77,17 +78,30 @@ class ExecutionPolicyGrant:
     max_runtime_seconds: int = 1
 
     def __post_init__(self) -> None:
-        if not self.tenant_id or not self.principal or not self.policy_version:
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.tenant_id, self.principal, self.policy_version)
+        ):
             raise ValueError("policy grant tenant, principal, and version are required")
-        if isinstance(self.max_cost_usd, bool) or self.max_cost_usd < 0:
-            raise ValueError("policy max_cost_usd must be non-negative")
-        if isinstance(self.max_tool_calls, bool) or self.max_tool_calls < 0:
-            raise ValueError("policy max_tool_calls must be non-negative")
+        if (
+            isinstance(self.max_cost_usd, bool)
+            or not isinstance(self.max_cost_usd, (int, float))
+            or not math.isfinite(self.max_cost_usd)
+            or self.max_cost_usd < 0
+        ):
+            raise ValueError("policy max_cost_usd must be finite and non-negative")
+        if (
+            isinstance(self.max_tool_calls, bool)
+            or not isinstance(self.max_tool_calls, int)
+            or self.max_tool_calls < 0
+        ):
+            raise ValueError("policy max_tool_calls must be a non-negative integer")
         if (
             isinstance(self.max_runtime_seconds, bool)
+            or not isinstance(self.max_runtime_seconds, int)
             or self.max_runtime_seconds < 1
         ):
-            raise ValueError("policy max_runtime_seconds must be positive")
+            raise ValueError("policy max_runtime_seconds must be a positive integer")
         if not isinstance(self.network_access, bool):
             raise ValueError("policy network_access must be boolean")
         if not isinstance(self.allowed_tools, frozenset):
@@ -98,6 +112,8 @@ class ExecutionPolicyGrant:
             raise TypeError("policy network destinations must be an immutable frozenset")
         if not isinstance(self.approved_scopes, frozenset) or not isinstance(self.approved_refs, frozenset):
             raise TypeError("policy approvals must use immutable frozensets")
+        if any(not isinstance(ref, str) or not ref for ref in self.approved_refs):
+            raise ValueError("policy approval reference is invalid")
         if not isinstance(self.allowed_branches, frozenset):
             raise TypeError("policy branches must use an immutable frozenset")
         if not isinstance(self.allowed_runbooks, frozenset):
@@ -462,6 +478,16 @@ class DevOpsAgentRegistry:
             raise AgentCapabilityDeniedError("network destinations are invalid when network_access is false")
 
         budget = constraints["budget"]
+        if (
+            isinstance(budget["max_cost_usd"], bool)
+            or not isinstance(budget["max_cost_usd"], (int, float))
+            or not math.isfinite(budget["max_cost_usd"])
+            or isinstance(budget["max_tool_calls"], bool)
+            or not isinstance(budget["max_tool_calls"], int)
+            or isinstance(budget["max_runtime_seconds"], bool)
+            or not isinstance(budget["max_runtime_seconds"], int)
+        ):
+            raise AgentBudgetExceededError("task budget contains an invalid numeric value")
         if (
             budget["max_cost_usd"] > policy_grant.max_cost_usd
             or budget["max_tool_calls"] > policy_grant.max_tool_calls
