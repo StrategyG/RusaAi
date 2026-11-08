@@ -15,10 +15,10 @@ from typing import Any
 from .chunking import chunk_text, normalize_text
 from .safety import reject_credential_material, validate_document_metadata
 from .seed import (
-    prepare_seed_documents,
     SLUG_PATTERN,
     SOURCE_ID_PATTERN,
     TENANT_PATTERN,
+    prepare_seed_documents,
 )
 from .store import COLLECTION_PATTERN
 
