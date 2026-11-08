@@ -403,6 +403,14 @@ class PostgresWorkflowControlStore:
                     state_version=state_version + 1,
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                  AND (
+                      status='queued'
+                      OR (
+                          status IN ('accepted','running')
+                          AND (lease_until IS NULL OR lease_until <= clock_timestamp())
+                      )
+                  )
+                  AND (deadline_at IS NULL OR deadline_at > clock_timestamp())
                 RETURNING state_version, lease_epoch, lease_until, deadline_at, status
                 """,
                 (
@@ -414,6 +422,8 @@ class PostgresWorkflowControlStore:
                     task_id,
                 ),
             ).fetchone()
+            if updated is None:
+                return self._claim_response(task, workflow, accepted=False)
 
             if workflow["status"] == "queued":
                 run_version = workflow["state_version"] + 1
@@ -555,7 +565,9 @@ class PostgresWorkflowControlStore:
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND lease_owner=%s
-                  AND lease_claim_id=%s AND lease_until > clock_timestamp()
+                  AND lease_claim_id=%s
+                  AND lease_until > clock_timestamp()
+                  AND (deadline_at IS NULL OR deadline_at > clock_timestamp())
                 RETURNING lease_until
                 """,
                 (
@@ -732,6 +744,9 @@ class PostgresWorkflowControlStore:
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND state_version=%s
                   AND lease_owner=%s AND lease_claim_id=%s
+                  AND lease_until > clock_timestamp()
+                  AND (deadline_at IS NULL OR deadline_at > clock_timestamp())
+                RETURNING state_version
                 """,
                 (
                     new_version,
@@ -744,7 +759,22 @@ class PostgresWorkflowControlStore:
                     worker_id,
                     claim_id,
                 ),
-            )
+            ).fetchone()
+            if updated is None:
+                response = {
+                    "accepted": False,
+                    "state_version": task["state_version"],
+                }
+                self._save_rpc_receipt(
+                    conn,
+                    tenant_id=tenant_id,
+                    task_id=task_id,
+                    method="ReportTaskProgress",
+                    message_id=message_id,
+                    request_hash=request_hash,
+                    response=response,
+                )
+                return response
             correlation_id, _ = self._event_context(conn, tenant_id, run_id, task_id)
             event = self._event(
                 tenant_id=tenant_id,
@@ -912,6 +942,13 @@ class PostgresWorkflowControlStore:
                 WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                   AND attempt=%s AND lease_epoch=%s AND state_version=%s
                   AND lease_owner=%s AND lease_claim_id=%s
+                  AND lease_until > clock_timestamp()
+                  AND (
+                      %s = 'cancelled'
+                      OR deadline_at IS NULL
+                      OR deadline_at > clock_timestamp()
+                  )
+                RETURNING state_version
                 """,
                 (
                     task_status,
@@ -926,8 +963,25 @@ class PostgresWorkflowControlStore:
                     expected_state_version,
                     worker_id,
                     claim_id,
+                    status,
                 ),
-            )
+            ).fetchone()
+            if updated is None:
+                response = {
+                    "accepted": False,
+                    "state_version": task["state_version"],
+                    "status": task["status"],
+                }
+                self._save_rpc_receipt(
+                    conn,
+                    tenant_id=tenant_id,
+                    task_id=task_id,
+                    method="ReportTaskResult",
+                    message_id=message_id,
+                    request_hash=request_hash,
+                    response=response,
+                )
+                return response
             correlation_id, _ = self._event_context(conn, tenant_id, run_id, task_id)
             event: dict[str, Any] | None = None
             destination = "events"
