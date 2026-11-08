@@ -64,7 +64,16 @@ def test_devops_lease_migration_has_complete_fencing_and_replay_constraints():
 
     assert migration.count("COMMIT;") == 1
     assert "cancel_request_sha256 ~ '^[a-f0-9]{64}$'" in migration
-    assert migration.count("request_sha256 ~ '^[a-f0-9]{64}$'") == 2
+    assert migration.count("request_sha256 ~ '^[a-f0-9]{64}
+    assert "lease_claim_id" in migration
+    assert "lease_until TIMESTAMPTZ" in migration
+    assert "side_effect IN ('NONE', 'APPLIED', 'UNKNOWN')" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_run_cancellations" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_task_rpc_receipts" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+
+") == 3
     assert "lease_claim_id" in migration
     assert "lease_until TIMESTAMPTZ" in migration
     assert "side_effect IN ('NONE', 'APPLIED', 'UNKNOWN')" in migration
