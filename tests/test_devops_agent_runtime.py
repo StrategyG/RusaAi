@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from rusa_agents.devops.contracts import ContractValidationError
 from rusa_agents.devops.agent_runtime import (
     AgentApprovalRequiredError,
     AgentAuthorizationError,
@@ -439,6 +440,40 @@ async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_dest
     assert await gateway.invoke("repository.read", {"url": "https://pypi.org/"}) == {"ok": True}
 
 
+@pytest.mark.asyncio
+async def test_production_deploy_gateway_requires_the_exact_approved_environment_and_reference():
+    task = _task(
+        "deploy",
+        "rusa_deploy_agent",
+        tools=["artifact.read", "release.read", "deployment.execute"],
+        environment="production",
+        approval_required=True,
+        approval_scope=["deploy"],
+        approval_ref="approval://change/123",
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_deploy_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    with pytest.raises(AgentApprovalRequiredError):
+        await gateway.invoke(
+            "deployment.execute",
+            {"environment": "production", "approval_ref": "approval://change/other"},
+        )
+    with pytest.raises(ToolInvocationDeniedError, match="environment"):
+        await gateway.invoke(
+            "deployment.execute",
+            {"environment": "staging", "approval_ref": "approval://change/123"},
+        )
+    assert await gateway.invoke(
+        "deployment.execute",
+        {"environment": "production", "approval_ref": "approval://change/123"},
+    ) == {"ok": True}
+
+
 class _FailingPlanHandler:
     async def execute(self, context):
         task = context.task
@@ -482,6 +517,68 @@ async def test_runtime_validates_handler_result_against_the_originating_task():
     )
     assert result["status"] == "failed"
     assert result["task_id"] == task["task_id"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_validates_result_against_immutable_task_snapshot():
+    class MutatingHandler:
+        async def execute(self, context):
+            context.task["task_id"] = "forged-task-id"
+            return {
+                "schema_version": 1,
+                "task_id": "forged-task-id",
+                "workflow_id": context.task["workflow_id"],
+                "tenant_id": context.task["tenant_id"],
+                "agent_id": context.task["agent_id"],
+                "stage": context.task["stage"],
+                "attempt": context.task["attempt"],
+                "status": "failed",
+                "output": {
+                    "summary": "A handler attempted to rewrite task identity.",
+                    "artifact_refs": [],
+                    "evidence_refs": [],
+                    "findings": [
+                        {"severity": "high", "code": "identity_tamper", "message": "Task identity was changed."}
+                    ],
+                },
+                "audit": {
+                    "started_at": "2026-11-08T00:00:00Z",
+                    "completed_at": "2026-11-08T00:00:01Z",
+                    "policy_version": context.grant.policy_version,
+                },
+            }
+
+    task = _task()
+    registry = DevOpsAgentRegistry()
+    registry.register("rusa_plan_agent", MutatingHandler())
+    with pytest.raises(ContractValidationError, match="task_id"):
+        await DevOpsAgentRuntime(registry).execute(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task),
+            tool_delegate=_FakeToolInvoker(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_expired_task_deadline_before_handler_execution():
+    class MustNotRunHandler:
+        async def execute(self, _context):
+            raise AssertionError("expired task handler must not execute")
+
+    task = _task()
+    task["deadline_at"] = "2000-01-01T00:00:00Z"
+    registry = DevOpsAgentRegistry()
+    registry.register("rusa_plan_agent", MustNotRunHandler())
+    with pytest.raises(AgentBudgetExceededError, match="deadline"):
+        await DevOpsAgentRuntime(registry).execute(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task),
+            tool_delegate=_FakeToolInvoker(),
+        )
 
 
 def test_runtime_fails_closed_when_a_specialist_handler_is_not_registered():
