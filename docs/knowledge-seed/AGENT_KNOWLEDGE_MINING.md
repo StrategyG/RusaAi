@@ -240,24 +240,25 @@ The authenticated server/runtime must inject agent_id. The model must not choose
 
 The base implementation inspected in StrategyG/RusaAi uses PostgreSQL 16 + pgvector with 1536-dimensional embeddings, vector plus PostgreSQL full-text retrieval, and weighted RRF (0.7 vector / 0.3 lexical). It stores document metadata but its base search path filters by tenant and collection only; it does not apply agent_id or project metadata filters. The base worker gateway also accepted a model-selected collection value.
 
-The current feature branch adds the first agent-scope enforcement slice:
+The current feature branch adds agent- and project-aware retrieval:
 - trusted WorkerRole is converted by the host gateway to a server-owned scope ID such as aicode-analyst;
-- vector and lexical candidates are filtered to shared records plus records whose agent_ids contain that scope;
-- document reads apply the same visibility filter;
-- worker tools no longer accept a model-selected collection argument;
+- the authorized repository target is normalized by the host to a stable project scope such as strategyg--rusaai;
+- vector and lexical candidates are filtered to shared records plus records whose agent_ids contain the authenticated worker scope and whose optional project_id matches;
+- document reads and collection counts apply the same visibility filter;
+- worker tools do not accept model-selected collection, agent_id or project_id arguments;
 - general RUSA Knowledge MCP requests without an authenticated agent identity see shared records only;
-- metadata validation distinguishes shared and agent_specific records.
+- metadata validation distinguishes shared and agent_specific records and validates project identifiers.
 
-These are code changes in the open feature branch, not a merged or production deployment. Project-level filtering, authenticated per-agent MCP principals, immutable source-version history, live database ingestion and end-to-end production verification remain outstanding. The inspected RUSA path still has no reranker and uses character-based 1200-character chunks with 180-character overlap.
+These are code changes in the open feature branch, not a merged or production deployment. Authenticated per-agent MCP principals, immutable source-version history, live database ingestion and end-to-end production verification remain outstanding. The inspected RUSA path still has no reranker and uses character-based 1200-character chunks with 180-character overlap.
 
-Therefore the branch establishes an initial per-runtime-worker retrieval boundary, while the full 20 documented architecture/lifecycle profiles remain catalogued for later explicit runtime binding.
+Therefore the branch establishes an initial per-runtime-worker and per-project retrieval boundary, while the full 20 documented architecture/lifecycle profiles remain catalogued for later explicit runtime binding.
 
 ### Remaining engineering work and status
 
 1. **Worker agent identity — implemented in this feature branch.** The host derives AICode scope IDs from WorkerRole. Authenticated agent principals for standalone MCP clients are still not implemented; those requests remain shared-only.
 2. **Profile registry — catalogued, not yet a runtime registry.** Ten canonical, eight lifecycle, two cross-cutting and six AICode worker profiles are recorded in agent_profiles.yaml. The six AICode scopes are intentionally not auto-merged with the documented architecture roles.
-3. **Agent metadata filters — implemented in this feature branch.** Both vector and lexical candidates use the shared-or-agent_ids filter before rank fusion; document reads apply the same filter.
-4. **Tenant + agent isolation — worker tenant RLS plus agent filter implemented in the branch and covered by a PostgreSQL integration test.** Project-level scope and a separate project-level RLS boundary remain outstanding.
+3. **Agent metadata filters — implemented in this feature branch.** Both vector and lexical candidates use the shared-or-agent_ids filter before rank fusion; document reads and collection counts apply the same filter.
+4. **Tenant + agent + project isolation — implemented in this feature branch for AICode workers.** Tenant RLS is retained; the host derives project scope from the already-authorized repository, and project-bound agent-specific records are visible only to that agent in that project. PostgreSQL integration tests cover cross-agent and cross-project denial. This is an application-level project metadata filter, not a separate project-level RLS policy.
 5. **Collection selection — worker model argument removed in this branch.** The worker uses the configured collection. Standalone MCP retains its existing collection argument but has no agent identity and can only retrieve shared records.
 6. **Immutable source version history — outstanding.** Re-ingestion still replaces chunks for the stable source URI; source snapshots and version history need a separate migration.
 7. **Per-agent evaluation sets — outstanding.** Retrieval intents are defined; manually reviewed gold labels and actual indexed document IDs must be created after ingestion.
