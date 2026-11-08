@@ -11,6 +11,7 @@ from typing import Any
 from rusa_agents.certification.artifact_verification import ArtifactVerificationError
 
 _SHA256_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
+_SOURCE_DIGEST_RE = re.compile(r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$")
 _SLSA_V1 = "https://slsa.dev/provenance/v1"
 
 
@@ -20,6 +21,7 @@ def verify_github_slsa_provenance(
     digest: str,
     repository: str,
     signer_workflow: str,
+    source_digest: str,
     certificate_identity: str,
     oidc_issuer: str = "https://token.actions.githubusercontent.com",
     timeout_seconds: int = 60,
@@ -40,6 +42,8 @@ def verify_github_slsa_provenance(
         raise ValueError("repository must use owner/name form")
     if not signer_workflow.strip() or not certificate_identity.strip():
         raise ValueError("signer_workflow and certificate_identity must not be empty")
+    if not _SOURCE_DIGEST_RE.fullmatch(source_digest):
+        raise ValueError("source_digest must be a 40- or 64-character lowercase Git commit SHA")
     if not oidc_issuer.startswith("https://"):
         raise ValueError("oidc_issuer must be an HTTPS URL")
     if not 1 <= timeout_seconds <= 180:
@@ -58,6 +62,8 @@ def verify_github_slsa_provenance(
         repository,
         "--signer-workflow",
         signer_workflow,
+        "--source-digest",
+        source_digest,
         "--cert-identity",
         certificate_identity,
         "--cert-oidc-issuer",
@@ -120,6 +126,7 @@ def verify_github_slsa_provenance(
         "verified": True,
         "repository": repository,
         "signer_workflow": signer_workflow,
+        "source_digest": source_digest,
         "certificate_identity": certificate_identity,
         "oidc_issuer": oidc_issuer,
         "predicate_type": _SLSA_V1,
