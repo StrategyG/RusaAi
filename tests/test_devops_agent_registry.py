@@ -31,7 +31,9 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "code": CODE_AGENT,
         "build": BUILD_AGENT,
         "test": TEST_AGENT,
+        "release": RELEASE_AGENT,
         "deploy": DEPLOY_AGENT,
+        "operate": OPERATE_AGENT,
         "monitor": MONITOR_AGENT,
     }[stage]
     inputs = {
