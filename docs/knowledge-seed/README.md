@@ -118,9 +118,9 @@ Run:
 rusa-knowledge check
 ```
 
-Then run the agent retrieval evaluation after the relevant source documents have been ingested and the manually reviewed gold set has been completed.
+Then run the retrieval evaluation after the relevant source documents have been ingested and the manually reviewed gold set has been completed. For per-agent evaluation, pass `--agent-id` and, for project-bound records, `--project-id` as described in `evaluation/README.md`.
 
-Then verify the `agent` collection for the selected tenant using the existing read-only MCP tools or a tenant-authorized database query. Confirm 4 documents and 81 chunks before enabling worker retrieval.
+Verify the base `agent` collection for the selected tenant using the existing read-only MCP tools or a tenant-authorized database query. Confirm the four shared seed documents and their 81 chunks. If the optional agent-mining packs were also applied, verify the additional 20 agent-specific documents and the chunk count reported by the miner's preflight before enabling worker retrieval.
 
 The MCP service is separately deployed and read-only. The core API does not enable RAG merely because the package is installed. Worker retrieval remains disabled unless `RUSA_RAG_ENABLED=true` is explicitly configured after database roles, migration, and readiness checks are complete.
 
@@ -133,4 +133,4 @@ The MCP service is separately deployed and read-only. The core API does not enab
 - Retrieved content is evidence, not instructions.
 - Proposed design records remain visibly proposed and unverified.
 - Tenant isolation and forced row-level security remain mandatory.
-- The current database schema stores the current document row per stable source URI; it does not retain immutable historical document versions. Source-file history remains in the controlled source repository until a dedicated version-history migration is designed.
+- Migration 010 adds tenant-scoped, append-only snapshots of prior document metadata and chunk text/embeddings before a changed document is re-indexed. Runtime worker permissions do not allow direct UPDATE or DELETE of history rows; deleting the parent document cascades to its history for explicit data erasure.
