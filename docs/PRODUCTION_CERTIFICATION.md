@@ -37,10 +37,11 @@ The release manifest binds:
 
 1. Repository, exact 40-character source commit, tag/ref, build workflow, run
    ID, and builder identity.
-3. API, worker, and sandbox images by immutable `sha256:` digest.
-4. A signature and provenance attestation reference for every image.
-5. An SPDX JSON or CycloneDX JSON SBOM reference and SHA-256 digest per image, bound to that image digest.
-6. A vulnerability scan bound to the exact image digest, including scanner
+2. API, worker, and sandbox images by immutable `sha256:` digest.
+3. A signature and provenance attestation reference for every image.
+4. An SPDX JSON or CycloneDX JSON SBOM reference and SHA-256 digest per image,
+   bound to that image digest.
+5. A vulnerability scan bound to the exact image digest, including scanner
    database time, severity counts, disposition, and any approved High finding
    exceptions.
 
