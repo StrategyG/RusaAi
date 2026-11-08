@@ -607,6 +607,7 @@ class PostgresWorkflowControlStore:
     ) -> dict[str, int]:
         """Fence expired worker leases and publish recovery facts atomically.
 
+        Lock workflow before task, matching every other control-plane mutation.
         An ordinary expired lease becomes an ambiguous task failure; the
         orchestrator must reconcile its possible side effects before retrying.
         A task whose run is already cancelling remains cancel_requested and
@@ -617,39 +618,43 @@ class PostgresWorkflowControlStore:
         swept = {"failed": 0, "reconciliation_required": 0}
         with self._connect(self.worker_dsn) as conn:
             self._prepare(conn, tenant_id)
-            expired = conn.execute(
+            candidates = conn.execute(
                 """
-                SELECT t.task_id, t.run_id, t.attempt, t.stage, t.lease_epoch,
-                       t.state_version, t.status, w.status, w.cancel_epoch
-                FROM public.devops_tasks AS t
-                JOIN public.devops_workflows AS w
-                  ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
-                WHERE t.tenant_id=%s
-                  AND t.status IN ('accepted','running','validating','cancel_requested')
-                  AND t.lease_until IS NOT NULL
-                  AND t.lease_until <= clock_timestamp()
-                ORDER BY t.lease_until, t.task_id
+                SELECT run_id, task_id
+                FROM public.devops_tasks
+                WHERE tenant_id=%s
+                  AND status IN ('accepted','running','validating','cancel_requested')
+                  AND lease_until IS NOT NULL
+                  AND lease_until <= clock_timestamp()
+                ORDER BY lease_until, task_id
                 LIMIT %s
-                FOR UPDATE OF t, w SKIP LOCKED
                 """,
                 (tenant_id, limit),
             ).fetchall()
 
-            for (
-                task_id,
-                run_id,
-                attempt,
-                stage,
-                lease_epoch,
-                old_version,
-                task_status,
-                run_status,
-                cancel_epoch,
-            ) in expired:
+            for run_id, task_id in candidates:
+                # All control-plane writers lock the workflow before its task.
+                workflow = self._workflow_row(conn, tenant_id, run_id, lock=True)
+                expired = conn.execute(
+                    """
+                    SELECT attempt, stage, lease_epoch, state_version, status
+                    FROM public.devops_tasks
+                    WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                      AND status IN ('accepted','running','validating','cancel_requested')
+                      AND lease_until IS NOT NULL
+                      AND lease_until <= clock_timestamp()
+                    FOR UPDATE
+                    """,
+                    (tenant_id, run_id, task_id),
+                ).fetchone()
+                if expired is None:
+                    continue
+
+                attempt, stage, lease_epoch, old_version, task_status = expired
                 new_version = old_version + 1
                 is_cancelling = (
                     task_status == "cancel_requested"
-                    or run_status == "cancel_requested"
+                    or workflow["status"] == "cancel_requested"
                 )
                 conn.execute(
                     """
@@ -662,7 +667,6 @@ class PostgresWorkflowControlStore:
                         lease_until=NULL,
                         updated_at=clock_timestamp()
                     WHERE tenant_id=%s AND run_id=%s AND task_id=%s
-                      AND lease_until <= clock_timestamp()
                     """,
                     (
                         "cancel_requested" if is_cancelling else "failed",
