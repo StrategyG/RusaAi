@@ -188,3 +188,22 @@ def test_get_document_passes_agent_scope_to_store():
     )
     assert result["document_id"] == "00000000-0000-0000-0000-000000000001"
     assert store.get_document_args["agent_id"] == "aicode-security"
+
+
+def test_search_rejects_invalid_agent_scope_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="architecture",
+            agent_id="analyst/../security",
+        )
+    except ValueError as exc:
+        assert "agent_id is invalid" in str(exc)
+    else:
+        raise AssertionError("invalid agent scope was accepted")
+    assert embeddings.inputs == []
+    assert store.search_args is None
