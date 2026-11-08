@@ -331,7 +331,8 @@ def test_task_budget_cannot_exceed_policy_engine_grant():
         )
 
 
-def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
+@pytest.mark.asyncio
+async def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
     task = _task(
         "code",
         "rusa_code_agent",
@@ -344,16 +345,15 @@ def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
         policy_grant=_grant(task),
     )
     gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
-    assert __import__("asyncio").run(
-        gateway.invoke("repository.branch.write", {"branch": "feature/rusa-devops/test"})
+    assert await gateway.invoke(
+        "repository.branch.write", {"branch": "feature/rusa-devops/test"}
     ) == {"ok": True}
     with pytest.raises(ToolInvocationDeniedError, match="feature-branch allowlist"):
-        __import__("asyncio").run(
-            gateway.invoke("repository.branch.write", {"branch": "main"})
-        )
+        await gateway.invoke("repository.branch.write", {"branch": "main"})
 
 
-def test_operate_runbook_execution_is_limited_to_the_task_runbook():
+@pytest.mark.asyncio
+async def test_operate_runbook_execution_is_limited_to_the_task_runbook():
     task = _task(
         "operate",
         "rusa_operate_agent",
@@ -366,18 +366,14 @@ def test_operate_runbook_execution_is_limited_to_the_task_runbook():
         policy_grant=_grant(task),
     )
     gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
-    assert __import__("asyncio").run(
-        gateway.invoke(
-            "runbook.execute",
-            {"runbook_ref": task["input"]["runbook_ref"], "action": "restart-approved-service"},
-        )
+    assert await gateway.invoke(
+        "runbook.execute",
+        {"runbook_ref": task["input"]["runbook_ref"], "action": "restart-approved-service"},
     ) == {"ok": True}
     with pytest.raises(ToolInvocationDeniedError, match="runbook is outside"):
-        __import__("asyncio").run(
-            gateway.invoke(
-                "runbook.execute",
-                {"runbook_ref": "artifact://runbooks/unapproved", "action": "restart"},
-            )
+        await gateway.invoke(
+            "runbook.execute",
+            {"runbook_ref": "artifact://runbooks/unapproved", "action": "restart"},
         )
 
 
