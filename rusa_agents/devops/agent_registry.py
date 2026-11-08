@@ -186,6 +186,7 @@ _POLICIES = {
         allowed_tools=frozenset(
             {
                 "repository.read",
+                "issue.read",
                 "repository.branch.write",
                 "artifact.read",
                 "test.write",
@@ -200,6 +201,7 @@ _POLICIES = {
         allowed_tools=frozenset(
             {
                 "repository.read",
+                "artifact.read",
                 "build.execute",
                 "artifact.write",
                 "sbom.write",
