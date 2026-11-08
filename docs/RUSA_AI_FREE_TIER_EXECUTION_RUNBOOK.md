@@ -106,9 +106,20 @@ python -m rusa_knowledge.agent_mining
 The pinned map currently yields 20 agent documents and 60 chunks with the current 1200/180 chunker. The miner recomputes normalized section hashes and preserves source line locators; it does not ingest the pre-generated pack preview files directly.
 
 7. Review source statuses: architecture/catalog are unspecified, ADR and lifecycle are proposed; all are currently UNVERIFIED and NOT_VERIFIED for implementation. Do not relabel them as implemented.
-8. Only after approval, run the explicit `--apply` command with the actual authorized tenant ID.
-9. Preserve ingestion output, hashes, counts, and database readiness report as evidence.
-10. Run RAG evaluation with a human-reviewed gold set. Do not claim quality based only on successful ingestion.
+8. Only after source review, database readiness, embedding-cost approval, and tenant authorization, apply the shared source corpus:
+
+```bash
+python -m rusa_knowledge.seed --tenant-id '<authorized-rusa-tenant>' --apply
+```
+
+9. Apply the 20 agent-specific documents as a separate, auditable operation:
+
+```bash
+python -m rusa_knowledge.agent_mining --tenant-id '<authorized-rusa-tenant>' --apply
+```
+
+10. Preserve ingestion output, hashes, counts, and database readiness report as evidence.
+11. Run RAG evaluation with a human-reviewed gold set. Do not claim quality based only on successful ingestion.
 
 No embeddings or database rows are created by source preflight. The 20 agent packs are curated extractions from the supplied source documents, not 20 independently verified implementations.
 
