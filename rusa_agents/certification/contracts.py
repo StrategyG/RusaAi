@@ -130,6 +130,11 @@ def validate_release_manifest(
     current = _utc_now(now)
     for artifact in artifacts:
         label = artifact["name"]
+        image_suffix = label.replace("_", "-")
+        expected_image = f"ghcr.io/{repository.split('/', 1)[0].lower()}/rusa-ai-{image_suffix}"
+        if artifact["image"] != expected_image:
+            errors.append(f"{label}: image reference is outside the expected RUSA-AI registry path")
+
         signature = artifact["signature"]
         if signature["verified"] is not True:
             errors.append(f"{label}: image signature is not verified")
@@ -142,9 +147,22 @@ def validate_release_manifest(
         if provenance["source_commit"].lower() != commit_sha:
             errors.append(f"{label}: provenance commit does not match release source commit")
 
+        sbom = artifact["sbom"]
+        if sbom["subject_digest"] != artifact["digest"]:
+            errors.append(f"{label}: SBOM subject digest does not match image digest")
+
         scan = artifact["vulnerability_scan"]
         if scan["subject_digest"] != artifact["digest"]:
             errors.append(f"{label}: vulnerability scan subject digest does not match image digest")
+        scanned_at = datetime.fromisoformat(scan["scanned_at"].replace("Z", "+00:00"))
+        database_updated_at = datetime.fromisoformat(
+            scan["database_updated_at"].replace("Z", "+00:00")
+        )
+        if scanned_at.astimezone(timezone.utc) > current:
+            errors.append(f"{label}: vulnerability scan timestamp is in the future")
+        if database_updated_at.astimezone(timezone.utc) > scanned_at.astimezone(timezone.utc):
+            errors.append(f"{label}: scanner database timestamp is later than the scan")
+
         counts = scan["counts"]
         if counts["critical"] > 0:
             errors.append(f"{label}: Critical vulnerabilities block release")
@@ -186,6 +204,7 @@ def evaluate_production_certification(
     *,
     expected_commit_sha: str,
     expected_release_manifest_digest: str,
+    expected_repository: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Return PASS/HOLD/FAIL for an exact candidate and release-manifest digest.
@@ -212,6 +231,8 @@ def evaluate_production_certification(
 
     if candidate_sha != expected_commit_sha.lower():
         failures.append("certification candidate SHA does not match the expected commit")
+    if expected_repository and candidate["repository"] != expected_repository:
+        failures.append("certification repository does not match the expected repository")
     if candidate["release_manifest_ref"]["digest"] != expected_release_manifest_digest:
         failures.append("release manifest digest does not match the expected immutable digest")
     if payload["source"]["attestation_verified"] is not True:

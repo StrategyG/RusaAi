@@ -78,11 +78,12 @@
     "sbom": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["format", "uri", "digest", "generated_by"],
+      "required": ["format", "uri", "digest", "subject_digest", "generated_by"],
       "properties": {
         "format": { "enum": ["SPDX-JSON", "CycloneDX-JSON"] },
         "uri": { "type": "string", "minLength": 1 },
         "digest": { "$ref": "#/$defs/sha256" },
+        "subject_digest": { "$ref": "#/$defs/sha256" },
         "generated_by": { "type": "string", "minLength": 1 }
       }
     },

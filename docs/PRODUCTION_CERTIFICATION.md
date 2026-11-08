@@ -40,12 +40,12 @@ The release manifest binds:
 2. A signature record for the manifest itself.
 3. API, worker, and sandbox images by immutable `sha256:` digest.
 4. A signature and provenance attestation reference for every image.
-5. An SPDX JSON or CycloneDX JSON SBOM reference and SHA-256 digest per image.
+5. An SPDX JSON or CycloneDX JSON SBOM reference and SHA-256 digest per image, bound to that image digest.
 6. A vulnerability scan bound to the exact image digest, including scanner
    database time, severity counts, disposition, and any approved High finding
    exceptions.
 
-The manifest requires API, worker, and sandbox artifacts. Additional
+The manifest requires API, worker, and sandbox artifacts under the repository-owned GHCR namespace. SBOM and vulnerability scan subjects must match the exact image digest. Scanner database timestamps cannot post-date the scan. Additional
 `rag_mcp` artifacts may be recorded. Artifact names must be unique.
 
 ### Vulnerability disposition
@@ -112,6 +112,7 @@ result = evaluate_production_certification(
     certification_record,
     expected_commit_sha=candidate_sha,
     expected_release_manifest_digest=manifest_digest,
+    expected_repository="StrategyG/RusaAi",
 )
 ```
 

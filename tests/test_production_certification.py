@@ -51,6 +51,7 @@ def release_manifest() -> dict[str, object]:
                     "format": "SPDX-JSON",
                     "uri": f"oci://ghcr.io/strategyg/rusa-ai-sbom/{name}",
                     "digest": "sha256:" + "5" * 64,
+                    "subject_digest": digest,
                     "generated_by": "BuildKit",
                 },
                 "vulnerability_scan": {
@@ -168,6 +169,13 @@ def test_release_manifest_requires_its_own_signature() -> None:
         validate_release_manifest(payload, now=NOW)
 
 
+def test_release_manifest_rejects_image_outside_expected_registry_path() -> None:
+    payload = release_manifest()
+    payload["artifacts"][0]["image"] = "ghcr.io/untrusted/rusa-ai-api"
+    with pytest.raises(CertificationContractError, match="outside the expected RUSA-AI registry path"):
+        validate_release_manifest(payload, now=NOW)
+
+
 def test_release_manifest_rejects_provenance_from_another_commit() -> None:
     payload = release_manifest()
     payload["artifacts"][0]["provenance"]["source_commit"] = "b" * 40
@@ -179,6 +187,13 @@ def test_release_manifest_rejects_unverified_image_signature() -> None:
     payload = release_manifest()
     payload["artifacts"][1]["signature"]["verified"] = False
     with pytest.raises(CertificationContractError, match="signature is not verified"):
+        validate_release_manifest(payload, now=NOW)
+
+
+def test_release_manifest_rejects_sbom_for_different_image_digest() -> None:
+    payload = release_manifest()
+    payload["artifacts"][0]["sbom"]["subject_digest"] = "sha256:" + "9" * 64
+    with pytest.raises(CertificationContractError, match="SBOM subject digest"):
         validate_release_manifest(payload, now=NOW)
 
 
@@ -252,6 +267,7 @@ def test_certification_passes_only_for_exact_commit_and_manifest_with_signoffs()
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "PASS"
@@ -265,6 +281,7 @@ def test_certification_holds_when_human_signoff_is_missing() -> None:
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "HOLD"
@@ -278,6 +295,7 @@ def test_certification_fails_when_evidence_targets_another_commit() -> None:
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "FAIL"
@@ -291,6 +309,7 @@ def test_certification_fails_when_release_manifest_digest_changes() -> None:
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "FAIL"
@@ -304,6 +323,7 @@ def test_certification_holds_if_evidence_attestation_is_not_verified() -> None:
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "HOLD"
@@ -317,6 +337,7 @@ def test_certification_fails_if_any_required_control_fails() -> None:
         payload,
         expected_commit_sha=COMMIT,
         expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
         now=NOW,
     )
     assert result["status"] == "FAIL"
