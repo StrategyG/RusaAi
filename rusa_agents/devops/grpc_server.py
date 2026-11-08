@@ -14,15 +14,14 @@ from urllib.parse import unquote, urlsplit
 
 import grpc
 
+from .contracts import ContractValidationError
 from .control_store import (
-    CONTROL_SERVICE_ID,
     PostgresWorkflowControlStore,
     RpcReplayConflictError,
     TaskAccessDeniedError,
     TaskStateConflictError,
     WorkflowNotFoundError,
 )
-from .contracts import ContractValidationError
 from .store import WorkflowIdempotencyConflictError
 
 
@@ -209,7 +208,7 @@ class WorkflowControlServicer:
                 grpc.StatusCode.UNAUTHENTICATED,
                 "a trusted mTLS workload identity is required",
             )
-            raise AssertionError("context.abort must terminate the RPC")
+            raise AssertionError("context.abort must terminate the RPC") from None
         if method not in identity.allowed_methods:
             await self._abort(
                 context,
