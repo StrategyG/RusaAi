@@ -139,7 +139,7 @@ export default function Home() {
 
   const canCreate = session?.roles.some((role) => ["platform_admin", "tenant_admin", "developer"].includes(role)) ?? false;
   const canControl = session?.roles.some((role) => ["platform_admin", "tenant_admin"].includes(role)) ?? false;
-  const canUseChat = session?.roles.some((role) => ["platform_admin", "tenant_admin", "developer"].includes(role)) ?? false;
+  const canUseChat = Boolean(session);
 
   const counts = useMemo(() => ({
     active: tasks.filter((task) => ["queued", "running"].includes(task.status)).length,
@@ -495,7 +495,7 @@ export default function Home() {
             {page === "Chat" && (
               <section className="panel chat-panel">
                 <div className="panel-header"><div><div className="panel-title">RUSA AI Chat</div><div className="panel-subtitle">POST /v1/chat/completions · non-streaming mode</div></div><Sparkles size={18} className="text-sky-300" /></div>
-                {!canUseChat && <div className="inline-alert mb-3">Role tenant Anda tidak memiliki inference permission. Hubungi administrator tenant.</div>}
+                {!canUseChat && <div className="inline-alert mb-3">Permintaan inference tetap divalidasi oleh autentikasi dan rate limit RUSA API.</div>}
                 <div className="chat-history">
                   {chatMessages.map((message, index) => <div className={"chat-bubble " + message.role} key={index}>{message.content}</div>)}
                   {chatBusy && <div className="chat-bubble assistant">RUSA AI sedang memproses…</div>}
