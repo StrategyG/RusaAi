@@ -173,6 +173,62 @@ class KnowledgeService:
             project_id=project_id,
         )
 
+    def list_document_versions(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.list_document_versions(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    def get_document_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.get_document_version(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            version_id=version_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            max_chars=max_chars,
+        )
+
     def list_collections(
         self,
         *,
