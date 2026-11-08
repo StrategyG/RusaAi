@@ -17,9 +17,16 @@ match a proposed directory layout.
   security) are not the same as the eight DevOps lifecycle agents.
 - Existing A2A task envelope schema is a separate protocol contract and is
   not silently replaced by these DevOps-specific contracts.
-- RabbitMQ, Kafka, durable workflow outbox/event log, gRPC/Protobuf RPC,
-  message signing, and an independent DevOps Orchestrator are not yet
-  implemented by this foundation.
+- Phase 3A (PR #66) adds the dedicated PostgreSQL DevOps workflow/task
+  store, transactional outbox/inbox, tenant-scoped idempotency, and relay
+  lease fencing. The existing AICode `aicode_jobs` queue remains unchanged.
+- Phase 3B/3C/3D (PR #67) add RabbitMQ command transport, Kafka event-log
+  adapters, Ed25519 detached-JWS signing, and the internal mTLS/SPIFFE
+  WorkflowControl gRPC service with task claims, lease heartbeats, state
+  fencing, idempotent RPC receipts, and cancellation epochs.
+- These are durable transport/control-plane primitives. A production
+  RabbitMQ/Kafka cluster, deployed relay process, and fully automated
+  eight-stage worker fleet are not provisioned by PR #67.
 
 ## Agent registry
 
@@ -92,16 +99,32 @@ package-level triage. This phase is a simulation, not production certification.
 
 ## Phase 3 — durable workflow and inter-agent communication
 
-- Select and implement the workflow store and transactional outbox.
-- Add durable command queue and event log as separately governed channels.
-- Implement idempotent consumers, at-least-once delivery, dead-letter
-  quarantine, lease epoch/state-version fencing and cancellation epochs.
-- Add RPC deadlines, trace propagation, service identity and message
-  signing/verification.
-- Keep replay and analytics paths unable to execute tools.
+**Implemented in the stacked PR #66/#67 sequence:**
+
+- **3A — canonical state:** PostgreSQL workflow/task tables, tenant isolation,
+  idempotent intake, transactional outbox/inbox, and relay lease fencing.
+- **3B — commands:** RabbitMQ capability/priority routing, isolated P0
+  cancellation queue, signed persistent messages, publisher confirms, manual
+  acknowledgements, bounded redelivery, and per-queue DLQs.
+- **3C — event log:** Kafka lifecycle/policy/audit publishing, tenant/run
+  partitioning, authenticated consumers, and replay-safe projections.
+- **3D — control plane:** mTLS/SPIFFE workload identity, scoped API/worker
+  database credentials, RPC deadlines, task claim IDs, lease epochs,
+  heartbeats, state-version fencing, idempotent progress/result receipts,
+  and monotonic cancellation epochs.
+- **3E — reliability validation:** CI covers redelivery, replay, cancellation,
+  lease expiry, tenant isolation, partial failure, and side-effect
+  reconciliation.
+
+The implementation deliberately does not provision a production broker
+cluster, start a production outbox relay/worker pool, or claim that all eight
+specialist agents are fully automated. A task consumer must obtain an accepted
+durable claim before executing or acknowledging a task request.
 
 **Exit criteria:** crash/restart, redelivery, replay, cancel, and partial
 failure tests preserve canonical workflow state without duplicate effects.
+Production rollout still requires broker operations, workload certificate/key
+rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 
 ## Phase 4 — specialist execution and QA
 
