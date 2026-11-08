@@ -18,7 +18,8 @@
       "implementation_status": "NOT_VERIFIED",
       "agent_ids": [],
       "agent_names": [],
-      "sha256": "e47b9d89c672d326563d581f97f2bdbaa0b1e4b4b0f42df898fadef390d59766"
+      "sha256": "e47b9d89c672d326563d581f97f2bdbaa0b1e4b4b0f42df898fadef390d59766",
+      "knowledge_scope": "shared"
     },
     {
       "source_id": "RUSA-AGENT-001",
@@ -45,7 +46,8 @@
         "MEMORY & KNOWLEDGE AGENT",
         "EVALUATION & REPORTING AGENT"
       ],
-      "sha256": "43da306c109b1f768586fc2ff518a13f246a4d6543bce449dab8fef7e309e8e5"
+      "sha256": "43da306c109b1f768586fc2ff518a13f246a4d6543bce449dab8fef7e309e8e5",
+      "knowledge_scope": "shared"
     },
     {
       "source_id": "RUSA-COMM-001",
@@ -67,7 +69,8 @@
         "Worker",
         "QA"
       ],
-      "sha256": "1679cbf22c1d0d2ad5647ac2183f845fd10a5d8b3b8a658bee7b8dd2f4feab35"
+      "sha256": "1679cbf22c1d0d2ad5647ac2183f845fd10a5d8b3b8a658bee7b8dd2f4feab35",
+      "knowledge_scope": "shared"
     },
     {
       "source_id": "RUSA-DEVOPS-001",
@@ -105,7 +108,8 @@
         "RUSA DevOps Orchestrator",
         "RUSA Security Guard Agent"
       ],
-      "sha256": "8a059de15bcb144163f365c794f5642de0e6b15ecadd4a545452939a61548ada"
+      "sha256": "8a059de15bcb144163f365c794f5642de0e6b15ecadd4a545452939a61548ada",
+      "knowledge_scope": "shared"
     }
   ]
 }
