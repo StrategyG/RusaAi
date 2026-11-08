@@ -93,6 +93,14 @@ _CODE_FORBIDDEN_NAMES = frozenset(
         ".npmrc",
         ".pypirc",
         ".netrc",
+        "credentials.json",
+        "service-account.json",
+        "secrets.json",
+        "token.json",
+        "id_rsa",
+        "id_ed25519",
+        "authorized_keys",
+        "known_hosts",
         "dockerfile",
         "docker-compose.yml",
         "docker-compose.yaml",
@@ -370,6 +378,16 @@ def authorize_agent_task(
         raise AgentAuthorizationError("network destinations are not permitted for this agent identity")
 
     write_scope = constraints["write_scope"]
+    if (
+        policy.agent_id == CODE_AGENT
+        and requested_tools.intersection(
+            {"repository.branch.write", "test.write", "documentation.write"}
+        )
+        and not write_scope
+    ):
+        raise AgentAuthorizationError(
+            "Code Agent write capabilities require a non-empty task-scoped write_scope"
+        )
     if policy.read_only and write_scope:
         raise AgentAuthorizationError("read-only agent identities cannot receive write_scope")
     for raw_scope in write_scope:
