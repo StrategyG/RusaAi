@@ -3,8 +3,11 @@ FROM python:3.12.16-slim-trixie AS builder
 WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+COPY docker/build-patched-native-libs.sh /tmp/build-patched-native-libs.sh
+RUN sh /tmp/build-patched-native-libs.sh
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
     && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -29,8 +32,9 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     LD_LIBRARY_PATH=/usr/local/lib
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libexpat1 libffi8 libssl3t64 libbz2-1.0 liblzma5 libsqlite3-0 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
+    && apt-get install -y --no-install-recommends ca-certificates libffi8 libssl3t64 libbz2-1.0 liblzma5 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
+    && apt-get purge -y libexpat1 libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/* \
     && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
     && ldconfig \
@@ -44,6 +48,13 @@ RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
+
+import pyexpat, sqlite3
+if pyexpat.EXPAT_VERSION != "expat_2.10.0":
+    raise SystemExit(f"Unpatched Expat runtime: {pyexpat.EXPAT_VERSION}")
+if sqlite3.sqlite_version_info < (3, 54, 1):
+    raise SystemExit(f"Unpatched SQLite runtime: {sqlite3.sqlite_version}")
+print(f"Patched native libraries active: {pyexpat.EXPAT_VERSION}; SQLite {sqlite3.sqlite_version}")
 
 for package in ("pip", "setuptools", "wheel", "jaraco.context"):
     try:
