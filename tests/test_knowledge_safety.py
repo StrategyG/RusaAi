@@ -51,3 +51,29 @@ def test_rejects_metadata_over_utf8_byte_limit():
 def test_rejects_provider_api_credentials():
     with pytest.raises(ValueError, match="provider API credential"):
         reject_credential_material("embedding_api_key=sk-proj-" + ("x" * 36))
+
+
+def test_agent_specific_metadata_requires_valid_agent_ids():
+    with pytest.raises(ValueError, match="requires at least one agent_id"):
+        validate_document_metadata(
+            "file:///agent.md", "Agent Notes", {"knowledge_scope": "agent_specific"}
+        )
+
+    validate_document_metadata(
+        "file:///agent.md",
+        "Analyst Notes",
+        {"knowledge_scope": "agent_specific", "agent_ids": ["aicode-analyst"]},
+    )
+
+
+def test_rejects_invalid_agent_scope_metadata():
+    with pytest.raises(ValueError, match="knowledge_scope"):
+        validate_document_metadata(
+            "file:///agent.md", "Notes", {"knowledge_scope": "global_everything"}
+        )
+    with pytest.raises(ValueError, match="agent_ids"):
+        validate_document_metadata(
+            "file:///agent.md",
+            "Notes",
+            {"knowledge_scope": "agent_specific", "agent_ids": ["analyst/security"]},
+        )
