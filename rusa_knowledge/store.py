@@ -125,7 +125,9 @@ class PostgresKnowledgeStore:
                     EXISTS (
                         SELECT 1 FROM pg_roles
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
-                    )
+                    ),
+                    to_regclass('public.rusa_knowledge_documents_scope_idx') IS NOT NULL,
+                    to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL
                 """
             ).fetchone()
         return bool(row and all(row))
