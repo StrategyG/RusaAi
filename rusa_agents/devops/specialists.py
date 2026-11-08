@@ -737,6 +737,14 @@ class CodeAgentExecutor:
         _checkpoint(checkpoint)
         started = _now()
         timeout = _timeout_seconds(task)
+        if task["constraints"]["approval_required"]:
+            return _failure(
+                task,
+                started_at=started,
+                code="code.approval_required",
+                message="Code Agent cannot execute while the task is marked as awaiting human approval.",
+                status="blocked",
+            )
         tenant_id = task["tenant_id"]
         repository = task["input"]["repository"]
         plan_ref = task["input"]["plan_ref"]
@@ -758,6 +766,9 @@ class CodeAgentExecutor:
                 or plan_evidence.get("tenant_id") != tenant_id
                 or plan_evidence.get("workflow_id") != task["workflow_id"]
                 or plan_evidence.get("agent_id") != PLAN_AGENT
+                or plan_evidence.get("approval_required") is True
+                or bool(plan_evidence.get("approval_scopes"))
+                or plan_evidence.get("approval_ref") is not None
                 or artifacts.get("plan.md") != plan_ref
                 or artifacts.get("acceptance-criteria.md") != acceptance_ref
                 or digests.get("plan.md") != hashlib.sha256(plan_bytes).hexdigest()
