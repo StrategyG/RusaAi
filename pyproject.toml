@@ -58,6 +58,7 @@ asyncio_mode = "auto"
 addopts = "-ra"
 
 [tool.ruff]
+extend-exclude = ["rusa_agents/devops/generated/**"]
 target-version = "py310"
 line-length = 100
 
