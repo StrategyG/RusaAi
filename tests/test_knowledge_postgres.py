@@ -19,6 +19,7 @@ def knowledge_store():
     migration = open("migrations/007_rag_knowledge_pgvector.sql", encoding="utf-8").read()
     agent_scope_indexes = open("migrations/008_rag_agent_scope_indexes.sql", encoding="utf-8").read()
     project_scope_index = open("migrations/009_rag_project_scope_index.sql", encoding="utf-8").read()
+    version_history = open("migrations/010_rag_knowledge_version_history.sql", encoding="utf-8").read()
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
@@ -28,6 +29,7 @@ def knowledge_store():
         admin.execute(migration)
         admin.execute(agent_scope_indexes)
         admin.execute(project_scope_index)
+        admin.execute(version_history)
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
                 sql.Identifier(role_name),
