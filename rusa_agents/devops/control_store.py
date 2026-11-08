@@ -695,7 +695,6 @@ class PostgresWorkflowControlStore:
                             "outcome": "reconciliation_required",
                             "resource_ref": f"task://{task_id}/{attempt}",
                             "state_version": new_version,
-                            "cancel_epoch": cancel_epoch,
                         },
                         correlation_id=correlation_id,
                         traceparent=traceparent,
