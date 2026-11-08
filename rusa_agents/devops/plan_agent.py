@@ -505,7 +505,10 @@ class PlanAgent:
             ("risk-assessment.md", self._render_risks(plan), "text/markdown"),
         ]
         approval_required = (
-            constraints["approval_required"] or plan["approval_recommended"]
+            constraints["approval_required"]
+            or plan["approval_recommended"]
+            or bool(plan["approval_reasons"])
+            or any(item["approval_required"] for item in plan["risks"])
         )
         if approval_required:
             artifacts.append(
@@ -528,6 +531,8 @@ class PlanAgent:
                         name=name,
                         content=content,
                         content_type=content_type,
+                        source_commit=task["input"].get("commit_sha"),
+                        parent_refs=task["input"].get("evidence_refs", []),
                     )
                 )
         except Exception:
