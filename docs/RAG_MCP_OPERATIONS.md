@@ -65,7 +65,7 @@ For per-agent evaluation, pass the agent filter; add the project filter when
 the relevant documents are project-bound:
 
 ```bash
-rusa-knowledge evaluate --dataset ./analyst-gold.jsonl --tenant-id tenant-a --collection agent --agent-id aicode-analyst --project-id strategyg--rusaai --k 5
+rusa-knowledge evaluate --dataset ./rusa-plan-gold.jsonl --tenant-id tenant-a --collection agent --agent-id rusa_plan_agent --k 5
 ```
 
 Omit `--agent-id` for shared-only evaluation. The report includes the tenant,
