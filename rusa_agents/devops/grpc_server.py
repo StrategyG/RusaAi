@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import grpc
 
+from .agent_registry import AgentAuthorizationError, authorize_agent_task
 from .contracts import ContractValidationError
 from .control_store import (
     PostgresWorkflowControlStore,
@@ -327,6 +328,25 @@ class WorkflowControlServicer:
     def _stage_principal(principal: str) -> str | None:
         return principal if principal in STAGE_AGENT_IDS else None
 
+    async def _authorize_stage_task(
+        self,
+        context: Any,
+        *,
+        task: dict[str, Any],
+        principal: str,
+    ) -> None:
+        try:
+            authorize_agent_task(
+                task,
+                authenticated_principal=principal,
+            )
+        except (AgentAuthorizationError, ContractValidationError):
+            await self._abort(
+                context,
+                grpc.StatusCode.PERMISSION_DENIED,
+                "task capability policy denied this workload",
+            )
+
     async def GetRun(self, request: Any, context: Any):
         pb, _ = self._modules()
         identity = await self._identity(
@@ -367,6 +387,12 @@ class WorkflowControlServicer:
             task_id=request.task_id,
             principal=self._stage_principal(identity.principal),
         )
+        if identity.principal in STAGE_AGENT_IDS:
+            await self._authorize_stage_task(
+                context,
+                task=task["task"],
+                principal=identity.principal,
+            )
         from google.protobuf.json_format import ParseDict
 
         response = pb.GetTaskResponse(
@@ -400,6 +426,18 @@ class WorkflowControlServicer:
                 grpc.StatusCode.PERMISSION_DENIED,
                 "only a registered lifecycle stage agent can claim a task",
             )
+        assigned_task = await self._call(
+            context,
+            self.store.get_task,
+            tenant_id=identity.tenant_id,
+            task_id=request.task_id,
+            principal=identity.principal,
+        )
+        await self._authorize_stage_task(
+            context,
+            task=assigned_task["task"],
+            principal=identity.principal,
+        )
         claimed = await self._call(
             context,
             self.store.claim_task,
