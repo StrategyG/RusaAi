@@ -91,7 +91,7 @@ if expat_version != "expat_2.10.0":
 if sqlite3.sqlite_version_info < (3, 54, 1):
     raise SystemExit(f"Unpatched SQLite runtime: {sqlite3.sqlite_version}")
 linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
-linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so.0")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so")
 print(f"Patched native libraries active: Expat {expat_version}; SQLite {sqlite3.sqlite_version}")
 
 for package in ("pip", "setuptools", "wheel", "jaraco.context"):
