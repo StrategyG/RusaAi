@@ -17,6 +17,7 @@ def knowledge_store():
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
     migration = open("migrations/007_rag_knowledge_pgvector.sql", encoding="utf-8").read()
+    agent_scope_indexes = open("migrations/008_rag_agent_scope_indexes.sql", encoding="utf-8").read()
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
@@ -24,6 +25,7 @@ def knowledge_store():
         # The test database is dedicated to CI. The migration is idempotent and must
         # never drop existing application tables or data.
         admin.execute(migration)
+        admin.execute(agent_scope_indexes)
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
                 sql.Identifier(role_name),
@@ -147,3 +149,98 @@ def test_knowledge_store_readiness_rejects_bypassrls_database_identity():
         assert store.check_ready() is False
     finally:
         store.close()
+
+
+def test_agent_scoped_retrieval_includes_shared_and_own_knowledge_only(knowledge_store):
+    store, _ = knowledge_store
+    shared_id = store.ingest_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        source_uri="kb://agent-scope/shared",
+        title="Shared knowledge",
+        content_hash="c" * 64,
+        metadata={"knowledge_scope": "shared", "agent_ids": []},
+        chunks=["scope needle shared architecture evidence"],
+        embeddings=[_unit_vector(0)],
+    )
+    analyst_id = store.ingest_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        source_uri="kb://agent-scope/analyst",
+        title="Analyst private knowledge",
+        content_hash="d" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+        },
+        chunks=["scope needle analyst-only task analysis evidence"],
+        embeddings=[_unit_vector(0)],
+    )
+    security_id = store.ingest_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        source_uri="kb://agent-scope/security",
+        title="Security private knowledge",
+        content_hash="e" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-security"],
+        },
+        chunks=["scope needle security-only threat analysis evidence"],
+        embeddings=[_unit_vector(0)],
+    )
+
+    analyst_results = store.search(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        query="scope needle",
+        query_embedding=_unit_vector(0),
+        limit=10,
+        agent_id="aicode-analyst",
+    )
+    analyst_ids = {item["document_id"] for item in analyst_results}
+    assert shared_id in analyst_ids
+    assert analyst_id in analyst_ids
+    assert security_id not in analyst_ids
+
+    shared_results = store.search(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        query="scope needle",
+        query_embedding=_unit_vector(0),
+        limit=10,
+    )
+    shared_result_ids = {item["document_id"] for item in shared_results}
+    assert shared_id in shared_result_ids
+    assert analyst_id not in shared_result_ids
+    assert security_id not in shared_result_ids
+
+    assert store.get_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        document_id=analyst_id,
+        agent_id="aicode-analyst",
+    ) is not None
+    assert store.get_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        document_id=analyst_id,
+        agent_id="aicode-security",
+    ) is None
+    assert store.get_document(
+        tenant_id="tenant-agent-scope",
+        collection="agent",
+        document_id=security_id,
+    ) is None
+
+
+def test_agent_id_validation_rejects_untrusted_invalid_identifier(knowledge_store):
+    store, _ = knowledge_store
+    with pytest.raises(ValueError, match="agent_id is invalid"):
+        store.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="needle",
+            query_embedding=_unit_vector(0),
+            agent_id="analyst/../../security",
+        )
