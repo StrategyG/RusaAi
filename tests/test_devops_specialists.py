@@ -443,8 +443,8 @@ async def test_code_agent_rejects_plan_evidence_that_is_still_awaiting_approval(
         checkpoint=lambda: True,
     )
 
-    assert outcome.result["status"] == "failed"
-    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_evidence_mismatch"
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_approval_pending"
     assert manager.created_task is None
 
 
