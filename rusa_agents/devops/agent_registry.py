@@ -110,6 +110,7 @@ _CODE_FORBIDDEN_NAMES = frozenset(
 _CODE_FORBIDDEN_PARTS = frozenset(
     {
         ".git",
+        ".github",
         ".env",
         ".secrets",
         "secrets",
@@ -283,9 +284,15 @@ def _safe_relative_scope(value: str) -> str:
 def _code_scope_is_allowed(scope: str) -> bool:
     normalized = scope.lower()
     parts = tuple(part.lower() for part in normalized.rstrip("/").split("/"))
-    if any(part in _CODE_FORBIDDEN_PARTS for part in parts):
+    if any(
+        part in _CODE_FORBIDDEN_PARTS or part.startswith(".env")
+        for part in parts
+    ):
         return False
-    if parts and parts[-1] in _CODE_FORBIDDEN_NAMES:
+    if parts and (
+        parts[-1] in _CODE_FORBIDDEN_NAMES
+        or parts[-1].startswith(("requirements", "dockerfile.", "docker-compose.", "compose."))
+    ):
         return False
     if any(normalized.startswith(prefix) for prefix in _CODE_FORBIDDEN_PREFIXES):
         return False
