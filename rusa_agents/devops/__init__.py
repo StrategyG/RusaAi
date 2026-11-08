@@ -7,6 +7,21 @@ from .contracts import (
     validate_agent_task,
     validate_workflow_event,
 )
+from .agent_runtime import (
+    AgentApprovalRequiredError,
+    AgentAuthorizationError,
+    AgentBudgetExceededError,
+    AgentCapabilityDeniedError,
+    AgentExecutionGrant,
+    AgentExecutionContext,
+    AgentHandlerNotRegisteredError,
+    AgentProfile,
+    DevOpsAgentRegistry,
+    DevOpsAgentRuntime,
+    ExecutionPolicyGrant,
+    ScopedToolGateway,
+    ToolInvocationDeniedError,
+)
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
 from .store import (
     OutboxLeaseLostError,
@@ -17,6 +32,19 @@ from .store import (
 )
 
 __all__ = [
+    "AgentApprovalRequiredError",
+    "AgentAuthorizationError",
+    "AgentBudgetExceededError",
+    "AgentCapabilityDeniedError",
+    "AgentExecutionGrant",
+    "AgentExecutionContext",
+    "AgentHandlerNotRegisteredError",
+    "AgentProfile",
+    "DevOpsAgentRegistry",
+    "DevOpsAgentRuntime",
+    "ExecutionPolicyGrant",
+    "ScopedToolGateway",
+    "ToolInvocationDeniedError",
     "ContractValidationError",
     "OutboxLeaseLostError",
     "PostgresInbox",
