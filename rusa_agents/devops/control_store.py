@@ -1243,17 +1243,16 @@ class PostgresWorkflowControlStore:
                         """,
                         (tenant_id, run_id),
                     ).fetchone()[0]
-                    unknown_effects = conn.execute(
+                    unresolved_effects = conn.execute(
                         """
                         SELECT count(*)
                         FROM public.devops_tasks
                         WHERE tenant_id=%s AND run_id=%s
-                          AND status='cancelled'
-                          AND COALESCE(side_effect, 'UNKNOWN') <> 'NONE'
+                          AND COALESCE(side_effect, 'NONE') <> 'NONE'
                         """,
                         (tenant_id, run_id),
                     ).fetchone()[0]
-                    if remaining == 0 and unknown_effects == 0:
+                    if remaining == 0 and unresolved_effects == 0:
                         run_version = workflow["state_version"] + 1
                         conn.execute(
                             """
@@ -1268,7 +1267,8 @@ class PostgresWorkflowControlStore:
                             """
                             UPDATE public.devops_run_cancellations
                             SET status='completed', completed_at=clock_timestamp()
-                            WHERE tenant_id=%s AND run_id=%s AND status='requested'
+                            WHERE tenant_id=%s AND run_id=%s
+                              AND status IN ('requested','reconciliation_required')
                             """,
                             (tenant_id, run_id),
                         )
@@ -1460,8 +1460,17 @@ class PostgresWorkflowControlStore:
                 """,
                 (tenant_id, run_id),
             ).fetchall()
+            prior_side_effects = conn.execute(
+                """
+                SELECT count(*)
+                FROM public.devops_tasks
+                WHERE tenant_id=%s AND run_id=%s
+                  AND COALESCE(side_effect, 'NONE') <> 'NONE'
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
             active_leases = 0
-            reconciliation_required = False
+            reconciliation_required = prior_side_effects > 0
             now = datetime.now(timezone.utc)
             for task_id, attempt, old_version, old_status, lease_owner, old_lease_until in tasks:
                 new_task_version = old_version + 1
