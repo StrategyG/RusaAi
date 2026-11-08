@@ -33,7 +33,11 @@ def _task(
     approval_ref: str | None = None,
 ) -> dict:
     inputs = {
-        "plan": {"user_request": "Prepare a bounded delivery plan."},
+        "plan": {
+            "user_request": "Prepare a bounded delivery plan.",
+            "repository": "StrategyG/RusaAi",
+            "plan_ref": "artifact://plans/current",
+        },
         "code": {
             "repository": "StrategyG/RusaAi",
             "plan_ref": "artifact://plans/current",
@@ -124,6 +128,12 @@ def _grant(task: dict, **overrides) -> ExecutionPolicyGrant:
             [constraints["approval_ref"]] if "approval_ref" in constraints else []
         ),
         "allowed_branches": frozenset({"feature/rusa-devops/test"}) if "repository.branch.write" in constraints["allowed_tools"] else frozenset(),
+        "allowed_repositories": frozenset({task["input"]["repository"]}) if "repository" in task["input"] else frozenset(),
+        "allowed_artifact_refs": frozenset(
+            value
+            for key, value in task["input"].items()
+            if key.endswith("_ref") and isinstance(value, str)
+        ) | frozenset(task["input"].get("evidence_refs", [])),
         "allowed_runbooks": frozenset({task["input"]["runbook_ref"]}) if "runbook.execute" in constraints["allowed_tools"] else frozenset(),
         "allowed_environments": frozenset({task["input"]["environment"]}) if task["stage"] == "deploy" else frozenset(),
         "max_cost_usd": budget["max_cost_usd"],
@@ -356,7 +366,7 @@ async def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
         "repository.branch.write", {"branch": "feature/rusa-devops/test"}
     ) == {"ok": True}
     with pytest.raises(ToolInvocationDeniedError, match="feature-branch allowlist"):
-        await gateway.invoke("repository.branch.write", {"branch": "main"})
+        await gateway.invoke("repository.branch.write", {"repository": "StrategyG/RusaAi", "branch": "main"})
 
 
 @pytest.mark.asyncio
@@ -415,7 +425,7 @@ async def test_scoped_gateway_enforces_tool_path_network_and_call_budget():
     with pytest.raises(ToolInvocationDeniedError, match="outside the task execution grant"):
         await gateway.invoke("deployment.execute", {"environment": "staging"})
     with pytest.raises(AgentBudgetExceededError):
-        await gateway.invoke("repository.read", {})
+        await gateway.invoke("repository.read", {"repository": "StrategyG/RusaAi"})
 
 
 @pytest.mark.asyncio
@@ -442,8 +452,14 @@ async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_dest
     with pytest.raises(ValueError, match="unsafe path"):
         await gateway.invoke("test.write", {"path": "test-reports/../../secrets"})
     with pytest.raises(ToolInvocationDeniedError, match="network destination"):
-        await gateway.invoke("repository.read", {"url": "https://evil.example/"})
-    assert await gateway.invoke("repository.read", {"url": "https://pypi.org/"}) == {"ok": True}
+        await gateway.invoke(
+            "repository.read",
+            {"repository": "StrategyG/RusaAi", "url": "https://evil.example/"},
+        )
+    assert await gateway.invoke(
+        "repository.read",
+        {"repository": "StrategyG/RusaAi", "url": "https://pypi.org/"},
+    ) == {"ok": True}
 
 
 @pytest.mark.asyncio
@@ -467,16 +483,16 @@ async def test_production_deploy_gateway_requires_the_exact_approved_environment
     with pytest.raises(AgentApprovalRequiredError):
         await gateway.invoke(
             "deployment.execute",
-            {"environment": "production", "approval_ref": "approval://change/other"},
+            {"environment": "production", "approval_ref": "approval://change/other", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
         )
     with pytest.raises(ToolInvocationDeniedError, match="environment"):
         await gateway.invoke(
             "deployment.execute",
-            {"environment": "staging", "approval_ref": "approval://change/123"},
+            {"environment": "staging", "approval_ref": "approval://change/123", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
         )
     assert await gateway.invoke(
         "deployment.execute",
-        {"environment": "production", "approval_ref": "approval://change/123"},
+        {"environment": "production", "approval_ref": "approval://change/123", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
     ) == {"ok": True}
 
 
