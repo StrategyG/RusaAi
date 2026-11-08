@@ -166,6 +166,8 @@ def test_code_agent_cannot_escalate_to_deployment_or_production_tools():
     "scope",
     [
         "migrations/010_new_policy.sql",
+        "src/migrations/010_new_policy.sql",
+        "src/infra/terraform/main.tf",
         ".github/workflows/ci.yml",
         "src/.env.production",
         "src/credentials/token.json",
