@@ -637,7 +637,7 @@ class PostgresWorkflowControlStore:
                 workflow = self._workflow_row(conn, tenant_id, run_id, lock=True)
                 expired = conn.execute(
                     """
-                    SELECT attempt, stage, lease_epoch, state_version, status
+                    SELECT attempt, lease_epoch, state_version, status
                     FROM public.devops_tasks
                     WHERE tenant_id=%s AND run_id=%s AND task_id=%s
                       AND status IN ('accepted','running','validating','cancel_requested')
@@ -650,7 +650,7 @@ class PostgresWorkflowControlStore:
                 if expired is None:
                     continue
 
-                attempt, stage, lease_epoch, old_version, task_status = expired
+                attempt, lease_epoch, old_version, task_status = expired
                 new_version = old_version + 1
                 is_cancelling = (
                     task_status == "cancel_requested"
