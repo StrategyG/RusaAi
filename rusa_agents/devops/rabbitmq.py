@@ -31,7 +31,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from .contracts import ContractValidationError, validate_workflow_event
 from .store import OutboxLeaseLostError, PostgresOutboxRelay
 
-
 PRIORITIES = ("P1", "P2", "P3")
 _CAPABILITY_PATTERN = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
 
