@@ -44,15 +44,15 @@ type TaskFilter = "all" | "active" | "queued" | "running" | "awaiting_approval" 
 
 const PAGE_META: Record<PageId, { title: string; eyebrow: string; description: string }> = {
   overview: { title: "Command Center", eyebrow: "CONTROL PLANE", description: "Ringkasan tenant, task queue, dan kesiapan layanan berdasarkan data yang benar-benar tersedia." },
-  orchestrator: { title: "Orchestrator", eyebrow: "WORKFLOW CONTROL", description: "Pisahkan workflow Supreme Orchestrator pada dokumen arsitektur dari pipeline AICode yang benar-benar ada di source code." },
+  orchestrator: { title: "Orchestrator", eyebrow: "WORKFLOW CONTROL", description: "Bandingkan pipeline AICode aktual, kontrak komunikasi All Agents, schema A2A repository, dan ADR komunikasi yang masih diusulkan." },
   tasks: { title: "AICode Tasks", eyebrow: "EXECUTION WORKSPACE", description: "Kelola task coding tenant-scoped melalui endpoint AICode yang tersedia." },
   approvals: { title: "Approval Center", eyebrow: "HUMAN GOVERNANCE", description: "Pantau task yang menunggu review manusia tanpa mengarang aksi approve atau reject yang belum tersedia." },
   agents: { title: "Agent Workspace", eyebrow: "AGENT INTELLIGENCE", description: "Lihat 7 komponen runtime yang terdefinisi di kode dan 10 peran agent dalam dokumen arsitektur." },
   devops: { title: "Agentic DevOps", eyebrow: "LIFECYCLE WORKSPACE", description: "Delapan tahap lifecycle sesuai dokumen DevOps, dengan status implementasi yang dibedakan secara eksplisit." },
   chat: { title: "RUSA AI Chat", eyebrow: "MODEL INTERFACE", description: "Inference melalui RUSA API dengan model discovery dan streaming bila provider mendukungnya." },
-  knowledge: { title: "Memory & Knowledge", eyebrow: "KNOWLEDGE PLANE", description: "Taksonomi memori sesuai spesifikasi agent; operasi CRUD dan retrieval belum diekspos oleh API saat ini." },
-  repository: { title: "Repository & Artifacts", eyebrow: "EVIDENCE LAYER", description: "Tampilkan referensi artefak dan evidence yang dikembalikan task, bukan file browser yang belum tersedia." },
-  evaluation: { title: "Evaluation & Reporting", eyebrow: "QUALITY INTELLIGENCE", description: "Definisi KPI dari dokumen agent dipisahkan dari metrik aktual yang belum tersedia sebagai API evaluasi." },
+  knowledge: { title: "Memory & Knowledge", eyebrow: "KNOWLEDGE PLANE", description: "Pisahkan task memory yang aktif, retrieval RAG/MCP opsional, dan lima kategori memori pada kontrak arsitektur." },
+  repository: { title: "Repository & Artifacts", eyebrow: "EVIDENCE LAYER", description: "Tampilkan referensi hasil task yang benar-benar dikembalikan API; bukti worker terperinci belum tersedia melalui task detail." },
+  evaluation: { title: "Evaluation & Reporting", eyebrow: "QUALITY INTELLIGENCE", description: "Bedakan KPI agent yang masih berupa kontrak, retrieval evaluation offline, dan telemetry operasional Prometheus." },
   governance: { title: "Governance & Policy", eyebrow: "SECURITY CONTROL", description: "Identitas tenant, role, permission task, dan batas tindakan yang didefinisikan di backend." },
   observability: { title: "Observability", eyebrow: "PLATFORM HEALTH", description: "Liveness, readiness, dan metrics operator. Progres task saat ini menggunakan polling, bukan WebSocket." },
   pillars: { title: "RUSA AI Product Pillars", eyebrow: "PRODUCT ARCHITECTURE", description: "Empat pilar utama RUSA AI dan batas integrasi yang benar-benar terlihat di repository." },
@@ -194,7 +194,7 @@ const KPI_GROUPS = [
 
 const PILLARS = [
   { name: "AI Autonomous Software Engineering & DevOps", status: "Partial integration", detail: "AICode task intake, orchestrator, worker pipeline, task state, retry, cancellation, dan evidence payload.", evidence: "FastAPI /v1/aicode/tasks dan rusa_agents runtime." },
-  { name: "RUSA Intelligence", status: "Partial integration", detail: "Inference API dan model discovery tersedia. Memory, knowledge retrieval, dan agent evaluation belum diekspos pada web API.", evidence: "FastAPI /v1/chat/completions dan /v1/models." },
+  { name: "RUSA Intelligence", status: "Partial integration", detail: "Inference API, model discovery, AICode runtime, tenant-scoped task memory, serta optional RAG/pgvector dan read-only MCP tersedia pada lapisan berbeda. Knowledge browser dan agent scorecard belum diekspos pada web API.", evidence: "FastAPI /v1/chat/completions dan /v1/models; rusa_agents memory; optional rusa_knowledge/rusa_mcp." },
   { name: "RUSA Business", status: "Architecture defined", detail: "Business operations automation, research, dan company analysis belum memiliki UI/API pada scope repository yang diperiksa.", evidence: "RUSA_AI_Architecture.md." },
   { name: "RUSA Ecosystem", status: "Architecture defined", detail: "Marketplace, developer API, external integrations, dan agent ecosystem belum memiliki UI/API pada scope repository yang diperiksa.", evidence: "RUSA_AI_Architecture.md." }
 ];
@@ -928,9 +928,14 @@ export default function RusaControlCenter() {
                 </Panel>
                 <Panel title="Inter-agent communication target" subtitle="ADR-COMM-001 · status: Diusulkan">
                   <div className="rc-comm-grid">
-                    {[["RPC", "gRPC + Protobuf", "Short synchronous internal requests"], ["Command queue", "RabbitMQ or equivalent", "Durable targeted delegation"], ["Event log", "Kafka or equivalent", "Lifecycle, policy, and audit facts"], ["Gateway stream", "WebSocket + cursor", "Progress projection and reconnect"]].map(([name, protocol, detail]) => <div className="rc-comm-card" key={name}><strong>{name}</strong><Badge tone="warning">Proposed</Badge><span>{protocol}</span><small>{detail}</small></div>)}
+                    {[["External API", "HTTPS + JSON", "POST /runs → 202; GET /runs/{id}; POST /runs/{id}/cancel idempotently"], ["RPC", "gRPC + Protobuf", "Short synchronous internal calls with explicit deadlines"], ["Command queue", "RabbitMQ or equivalent", "Durable targeted delegation, competing consumers, confirms, manual ACK, DLQ"], ["Event log", "Kafka or equivalent", "Lifecycle, policy, and audit facts via transactional outbox"], ["Gateway stream", "WebSocket + cursor", "Progress projection, reconnect, replay or snapshot"], ["Canonical state", "Workflow store + outbox", "Atomic run/state/outbox persistence; gateway serves a projection"]].map(([name, protocol, detail]) => <div className="rc-comm-card" key={name}><strong>{name}</strong><Badge tone="warning">Proposed</Badge><span>{protocol}</span><small>{detail}</small></div>)}
                   </div>
-                  <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> ADR-COMM-001 masih berstatus Diusulkan. UI tidak menganggap RabbitMQ, Kafka, gRPC, /runs, outbox, atau WebSocket sudah aktif.</div>
+                  <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> ADR-COMM-001 masih berstatus Diusulkan. RabbitMQ dan Kafka adalah baseline yang diusulkan; tidak ada bukti deployment aktif untuk gRPC, /runs, outbox, broker, event log, atau WebSocket pada API web saat ini.</div>
+                </Panel>
+                <Panel title="Three distinct agent communication contracts" subtitle="Do not silently map one schema or status vocabulary to another">
+                  <div className="rc-contract-grid"><div><strong>All Agents · conceptual contract v1.0</strong><span>Request fields: task_id, parent_task_id, source_agent, target_agent, objective, context, constraints, allowed_tools, priority, approval_required, acceptance_criteria, deadline. Response fields: agent, status, summary, artifacts, evidence, risks, unresolved_issues, next_actions.</span></div><div><strong>Repository validator · executable schema</strong><span>schemas/a2a/task-envelope.schema.json uses protocol_version=1.0, from/to agent identities, task, policy, and current message types. POST /v1/validate-task validates only this schema.</span></div><div><strong>ADR-COMM-001 · proposed envelope</strong><span>schema_version=1, tenant_id, run_id, task_id, attempt, correlation_id, traceparent, producer, occurred_at, and payload; it is not the schema used by the current validator.</span></div><div><strong>Current AICode task API</strong><span>Tenant task list states: {AICODE_API_STATUSES.join(", ")}. This API state model is separate from lifecycle-stage and conceptual agent status vocabularies.</span></div></div>
+                  <div className="rc-detail-columns"><div><h3>All Agents conceptual statuses</h3><div className="rc-chip-row">{ALL_AGENT_TASK_STATUSES.map((status) => <Badge key={status} tone="neutral">{status}</Badge>)}</div></div><div><h3>Agentic DevOps stage statuses</h3><div className="rc-chip-row">{DEVOPS_TASK_STATUSES.map((status) => <Badge key={status} tone="neutral">{status}</Badge>)}</div></div></div>
+                  <div className="rc-detail-section"><h3>Message type vocabularies</h3><p><strong>Current repository schema:</strong> {CURRENT_A2A_MESSAGE_TYPES.join(" · ")}</p><p><strong>ADR proposal:</strong> {ADR_A2A_MESSAGE_TYPES.join(" · ")}</p></div>
                 </Panel>
               </div>
             )}
@@ -955,9 +960,11 @@ export default function RusaControlCenter() {
             )}
 
             {page === "approvals" && (
-              <Panel title="Human review queue" subtitle={approvalTasks.length + " awaiting_approval records loaded (maximum 100)"}>
-                <div className="rc-alert rc-alert-warning"><ShieldAlert size={17} /> Backend menyediakan state awaiting_approval dan endpoint retry, tetapi belum menyediakan approve/reject endpoint atau approval record. Karena itu UI sengaja tidak menampilkan tombol approve/reject maupun retry dari halaman ini. Keputusan harus dilakukan melalui proses governance yang benar-benar tercatat.</div>
-                {approvalTasks.length === 0 ? <EmptyState title="Tidak ada task menunggu review" detail="Tidak ditemukan record awaiting_approval pada 100 hasil pertama." /> : <div className="rc-approval-list">{approvalTasks.map((task) => <div className="rc-approval-row" key={task.task_id}><div className="rc-status-icon"><ShieldAlert size={17} /></div><div className="rc-grow"><strong>{taskObjective(task)}</strong><small>{task.task_id} · {task.payload?.repository?.full_name || "Repository not provided"}</small><small>Updated {formatDate(task.updated_at)} · attempt {task.attempts}/{task.max_attempts}</small></div><Badge tone="warning">Awaiting approval</Badge><button className="rc-btn rc-btn-ghost" onClick={() => void openTask(task.task_id)}>Review evidence <ArrowRight size={14} /></button></div>)}</div>}
+              <Panel title="Human review queue" subtitle={"Showing " + approvalTasks.length + " of " + approvalTotal + " awaiting_approval records · maximum 100 per refresh"}>
+                <div className="rc-alert rc-alert-warning"><ShieldAlert size={17} /> Backend menyediakan state awaiting_approval dan endpoint retry, tetapi belum menyediakan approval decision endpoint atau approval record. Retry bukan approval. UI tidak menyediakan approve/reject atau retry dari antrean ini.</div>
+                {approvalError && <div className="rc-alert rc-alert-danger"><AlertTriangle size={15} /> Refresh gagal: {approvalError}{approvalFetchedAt ? " · Snapshot terakhir berhasil " + formatDate(approvalFetchedAt) : " · Belum ada snapshot berhasil."}</div>}
+                {approvalTasks.length === 0 ? <EmptyState title={approvalError ? "Approval queue unavailable" : "Tidak ada task menunggu review"} detail={approvalError || "Tidak ditemukan record awaiting_approval pada hasil yang dimuat."} /> : <div className="rc-approval-list">{approvalTasks.map((task) => <div className="rc-approval-row" key={task.task_id}><div className="rc-status-icon"><ShieldAlert size={17} /></div><div className="rc-grow"><strong>{taskObjective(task)}</strong><small>{task.task_id} · {task.payload?.repository?.full_name || "Repository not provided"}</small><small>Updated {formatDate(task.updated_at)} · attempt {task.attempts}/{task.max_attempts}</small></div><Badge tone="warning">Awaiting approval</Badge><button className="rc-btn rc-btn-ghost" onClick={() => void openTask(task.task_id)}>Inspect task <ArrowRight size={14} /></button></div>)}</div>}
+                {approvalFetchedAt && !approvalError && <div className="rc-note">Last successful refresh: {formatDate(approvalFetchedAt)}. The API total is tenant-scoped; the UI loads at most 100 records for inspection.</div>}
               </Panel>
             )}
 
@@ -975,20 +982,25 @@ export default function RusaControlCenter() {
 
             {page === "devops" && (
               <div className="rc-stack">
-                <Panel title="Eight-stage Agentic DevOps lifecycle" subtitle="Stage definitions from RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE.md">
+                <Panel title="Eight-stage Agentic DevOps lifecycle" subtitle="Proposed Architecture v1.0 · stage definitions from RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE.md">
                   <div className="rc-lifecycle-layout">
-                    <div className="rc-stage-list">{DEVOPS_STAGES.map((stage, index) => <button className={"rc-stage-item" + (activeStage?.id === stage.id ? " active" : "")} key={stage.id} onClick={() => setActiveStage(stage)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{stage.name}</strong><small>{stage.id}</small></div><Badge tone="neutral">Spec</Badge></button>)}</div>
+                    <div className="rc-stage-list">{DEVOPS_STAGES.map((stage, index) => <button className={"rc-stage-item" + (activeStage?.id === stage.id ? " active" : "")} key={stage.id} onClick={() => setActiveStage(stage)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{stage.name}</strong><small>{stage.id}</small></div><Badge tone="warning">Proposed</Badge></button>)}</div>
                     {activeStage && <div className="rc-stage-detail"><div className="rc-eyebrow">{activeStage.id}</div><h2>{activeStage.name} Agent</h2><p>{activeStage.purpose}</p><div className="rc-detail-columns"><div><h3>Inputs</h3><ul>{activeStage.inputs.map((item) => <li key={item}>{item}</li>)}</ul></div><div><h3>Outputs</h3><ul>{activeStage.outputs.map((item) => <li key={item}>{item}</li>)}</ul></div></div><h3>Exit criteria</h3><ul>{activeStage.exit.map((item) => <li key={item}>{item}</li>)}</ul><div className="rc-alert rc-alert-warning"><LockKeyhole size={15} /> Authority boundary: {activeStage.boundary}</div></div>}
                   </div>
                 </Panel>
                 <Panel title="Cross-stage orchestration and security controls" subtitle="Separate controls defined outside the eight primary lifecycle agents">
                   <div className="rc-comm-grid">
-                    <div className="rc-comm-card"><strong>rusa_devops_orchestrator</strong><Badge tone="neutral">Cross-stage design</Badge><span>Delegation and handoff</span><small>Distributes work, manages dependencies, forwards stage outputs, and stops the flow when a gate fails.</small></div>
-                    <div className="rc-comm-card"><strong>rusa_security_guard_agent</strong><Badge tone="neutral">Cross-stage design</Badge><span>Security, privacy, policy, audit</span><small>Checks secret scanning, supply-chain provenance, tenant isolation, authorization, data privacy, and prompt/tool risks.</small></div>
+                    <div className="rc-comm-card"><strong>rusa_devops_orchestrator</strong><Badge tone="neutral">Cross-stage design</Badge><span>Workflow coordination</span><small>Splits work, manages dependencies, forwards validated stage outputs/evidence, chooses repair handoffs, and stops the normal path when a gate fails.</small></div>
+                    <div className="rc-comm-card"><strong>rusa_security_guard_agent</strong><Badge tone="neutral">Cross-stage design</Badge><span>Cross-stage security guard</span><small>Checks secret scanning, dependency/container vulnerabilities, tenant isolation, authorization/audit, privacy, supply-chain provenance, model/tool permissions, prompt injection/untrusted input, and retention/deletion policy.</small></div>
                   </div>
-                  <div className="rc-alert rc-alert-warning"><ShieldAlert size={16} /> Human approver is a human decision-maker, not a ninth agent. Protected-branch merge, critical infrastructure changes, and production deployment require the approval defined by policy.</div>
+                  <div className="rc-alert rc-alert-warning"><ShieldAlert size={16} /> Human approver is a decision-maker, not a ninth agent. The source document requires human approval for protected-branch merge, branch-protection/permission changes, production deployment where policy requires it, risky or irreversible migrations, data/resource deletion, secret/identity/security-policy changes, spend/capacity above budget, and publishing private assets to Social.</div>
                 </Panel>
-                <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> Delapan stage ini adalah spesifikasi lifecycle. Backend AICode saat ini menjalankan worker roles Analyst, Architect, Developer, Debugger, Tester, dan Security; belum ada lifecycle registry/API untuk mengklaim delapan stage tersebut aktif.</div>
+                <Panel title="Lifecycle gates and feedback loop" subtitle="Handoff rules from the proposed Agentic DevOps architecture">
+                  <div className="rc-step-grid">{["PLAN", "CODE", "BUILD", "TEST", "RELEASE", "DEPLOY", "OPERATE", "MONITOR"].map((stage, index) => <div className="rc-step" key={stage}><span>{String(index + 1).padStart(2, "0")}</span><strong>{stage}</strong></div>)}</div>
+                  <div className="rc-alert rc-alert-warning"><Workflow size={16} /> Plan approval gates Code; required tests must pass before Release; release approval gates Deploy; Monitor and Operate findings feed the next Plan. A failed gate stops the normal path and routes to repair or human review.</div>
+                  <div className="rc-contract-grid"><div><strong>Evidence handoff</strong><span>Every handoff carries artifact and evidence references, not only a text summary.</span></div><div><strong>Re-test after repair</strong><span>Code repair creates a new commit/artifact; tests must rerun against that exact version. Old evidence cannot certify new changes.</span></div><div><strong>Auditability</strong><span>Decisions, retries, approvals, and cancellations are recorded.</span></div><div><strong>Feedback loop</strong><span>Monitor and Operate send recurring issues and improvements back to Plan.</span></div></div>
+                </Panel>
+                <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> Delapan stage ini berstatus Proposed Architecture. Backend AICode saat ini menjalankan worker roles Analyst, Architect, Developer, Debugger, Tester, dan Security; belum ada lifecycle registry/API untuk mengklaim delapan stage tersebut aktif.</div>
               </div>
             )}
 
@@ -1008,26 +1020,31 @@ export default function RusaControlCenter() {
                 <Panel title="Memory taxonomy" subtitle="Five categories defined in Memory & Knowledge Agent specification">
                   <div className="rc-memory-grid">{MEMORY_TYPES.map((item) => <article className="rc-memory-card" key={item.name}><div className="rc-agent-icon"><Database size={17} /></div><strong>{item.name}</strong><p>{item.detail}</p><small>{item.purpose}</small><Badge tone="neutral">Architecture contract</Badge></article>)}</div>
                 </Panel>
-                <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> Tidak ditemukan endpoint web/backend untuk memory CRUD, semantic retrieval, indexing, retention, atau source management pada API yang diperiksa. UI ini menampilkan taxonomy dan batas implementasi; tidak membuat data memori palsu.</div>
+                <Panel title="Implemented memory and knowledge components" subtitle="Separate the current runtime stores from the architecture taxonomy">
+                  <div className="rc-contract-grid"><div><strong>AICode task memory</strong><span>SQLiteMemory for development/single-node and PostgresMemory for multi-worker production; tenant-scoped task history and prior worker results.</span></div><div><strong>Optional RAG knowledge store</strong><span>PostgreSQL + pgvector with vector/full-text hybrid retrieval; ingestion is available through the rusa-knowledge CLI.</span></div><div><strong>Read-only MCP tools</strong><span>search_knowledge · get_document · list_collections. Tenant identity comes from the authenticated bearer token, not a caller-supplied tenant ID.</span></div><div><strong>Worker integration</strong><span>Optional build/runtime capability; include RAG dependencies and set RUSA_RAG_ENABLED=true after migration and restricted DB-role setup. It is not enabled by default.</span></div></div>
+                  <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> The core web API has no generic memory CRUD or knowledge browser. RAG/MCP exists as an optional separate service and read-only worker tool surface; it does not implement all five memory categories as separate stores.</div>
+                </Panel>
               </div>
             )}
 
             {page === "repository" && (
               <div className="rc-stack">
-                <Panel title="Artifact references" subtitle={"References extracted from " + loadedCount + " loaded task records"}>
-                  {artifacts.length ? <div className="rc-artifact-list">{artifacts.map(({ task, artifact }, index) => <div className="rc-artifact-row" key={task.task_id + artifact + index}><div className="rc-agent-icon"><Package size={17} /></div><div className="rc-grow"><strong>{artifact}</strong><small>{taskObjective(task)} · {task.task_id}</small></div><button className="rc-btn rc-btn-ghost" onClick={() => void openTask(task.task_id)}>Task details</button></div>)}</div> : <EmptyState title="No artifact references in this page" detail="Task result belum mengembalikan array artifacts pada 25 record yang sedang dimuat." />}
+                <Panel title="Execution references" subtitle={"References extracted from " + loadedCount + " loaded task records"}>
+                  {taskReferences.length ? <div className="rc-artifact-list">{taskReferences.map(({ task, reference }, index) => <div className="rc-artifact-row" key={task.task_id + reference.kind + index}><div className="rc-agent-icon"><Package size={17} /></div><div className="rc-grow"><strong>{reference.kind}</strong><small>{taskObjective(task)} · {task.task_id}</small>{reference.href ? <a className="rc-text-btn" href={reference.href} target="_blank" rel="noreferrer">{reference.value} <ArrowRight size={13} /></a> : <code className="rc-mono">{reference.value}</code>}</div><button className="rc-btn rc-btn-ghost" onClick={() => void openTask(task.task_id)}>Task details</button></div>)}</div> : <EmptyState title="No execution references in this page" detail="Successful task results expose references only after the runtime returns a pull request URL, commit SHA, or branch." />}
                 </Panel>
-                <Panel title="Evidence keys" subtitle="Evidence values are displayed as references/data, not represented as verified file downloads">
-                  {evidenceItems.length ? <div className="rc-evidence-list">{evidenceItems.map((item, index) => <div className="rc-evidence-row" key={item.task.task_id + item.key + index}><div className="rc-grow"><strong>{item.key}</strong><small>{taskObjective(item.task)} · {item.task.task_id}</small><code>{typeof item.value === "string" ? item.value : jsonText(item.value)}</code></div></div>)}</div> : <EmptyState title="No evidence keys in this page" detail="Evidence akan muncul jika worker mengembalikannya pada task result." />}
+                <Panel title="Evidence and artifact access boundary" subtitle="Current API visibility">
+                  <div className="rc-contract-grid"><div><strong>Exposed in task result</strong><span>pull_request_url · commit_sha · branch</span></div><div><strong>Not exposed in task detail</strong><span>Per-worker evidence bundle, immutable artifact download, digest lookup, and provenance verification</span></div><div><strong>Runtime persistence</strong><span>Worker results are saved through tenant-scoped AICode memory and audit paths; there is no browser-facing evidence API.</span></div><div><strong>Repository layer</strong><span>RUSA Repository remains the architecture evidence/artifact layer, not a file browser implemented by this UI.</span></div></div>
                 </Panel>
-                <div className="rc-alert rc-alert-warning"><Archive size={16} /> RUSA Repository pada dokumen lifecycle adalah evidence/artifact layer. Dedicated browse, download, provenance verification, and digest lookup API belum tersedia pada backend web yang diperiksa.</div>
               </div>
             )}
 
             {page === "evaluation" && (
               <div className="rc-stack">
                 <div className="rc-kpi-grid">{KPI_GROUPS.map((group) => <Panel key={group.name} title={group.name} subtitle="Metric definitions from agent specification"><ul className="rc-kpi-list">{group.items.map((item) => <li key={item}><span>{item}</span><Badge tone="neutral">Defined</Badge></li>)}</ul></Panel>)}</div>
-                <div className="rc-alert rc-alert-warning"><Gauge size={16} /> Evaluation & Reporting API, scorecard storage, historical trend, cost attribution, and evaluation jobs are not exposed by the current web API. No KPI values are fabricated.</div>
+                <Panel title="Implemented evaluation and telemetry primitives" subtitle="These are narrower than the ten-agent Evaluation & Reporting role contract">
+                  <div className="rc-contract-grid"><div><strong>Offline RAG retrieval evaluation</strong><span>rusa-knowledge evaluate computes Recall@K, MRR@K, and NDCG@K from a manually curated JSONL relevance dataset. This is an offline CLI, not a live dashboard.</span></div><div><strong>API / AICode Prometheus metrics</strong><span>API request count/duration, AICode task outcome/duration, worker-step count, and tool-execution count are instrumented.</span></div><div><strong>Worker metrics listener</strong><span>The worker process exposes its own Prometheus listener on internal port 9100; it is separate from the API /metrics process and is not queried by this web page.</span></div><div><strong>Not yet implemented as a reporting product</strong><span>Agent scorecard jobs, historical evaluation reports, model quality dashboards, cost attribution, and approved-improvement tracking are not exposed by the current web API.</span></div></div>
+                </Panel>
+                <div className="rc-alert rc-alert-warning"><Gauge size={16} /> The KPI groups above are definitions from the Evaluation & Reporting Agent specification. The page does not calculate or fabricate those scores.</div>
               </div>
             )}
 
@@ -1037,8 +1054,11 @@ export default function RusaControlCenter() {
                   <Panel title="Authenticated principal" subtitle="Resolved from encrypted session via RUSA API">
                     <div className="rc-identity-list"><div><span>Subject</span><strong>{session.subject}</strong></div><div><span>Tenant ID</span><strong>{session.tenant_id}</strong></div><div><span>Roles</span><strong>{session.roles.join(", ")}</strong></div></div>
                   </Panel>
-                  <Panel title="Role permission matrix" subtitle="TASK_ROLE_PERMISSIONS and INFERENCE_ALLOWED_ROLES in backend source">
-                    <div className="rc-permission-list">{Object.entries(ROLE_PERMISSIONS).map(([role, permissions]) => <div key={role}><strong>{role}</strong><span>{permissions.join(" · ")}</span></div>)}</div>
+                  <Panel title="Task API permissions" subtitle="TASK_ROLE_PERMISSIONS from llm-project/serve/app.py">
+                    <div className="rc-permission-list">{Object.entries(TASK_ROLE_PERMISSIONS).map(([role, permissions]) => <div key={role}><strong>{role}</strong><span>{permissions.join(" · ")}</span></div>)}</div>
+                  </Panel>
+                  <Panel title="Inference and operator access" subtitle="Separate backend checks; not part of task RBAC">
+                    <div className="rc-permission-list"><div><strong>Inference</strong><span>{INFERENCE_ALLOWED_ROLES.join(" · ")}</span></div><div><strong>Operator metrics</strong><span>Role {METRICS_ALLOWED_ROLE} plus server-side RUSA_METRICS_API_KEY; the metrics API key is not a tenant API key.</span></div></div>
                   </Panel>
                 </div>
                 <Panel title="Default autonomy policy boundaries" subtitle="Source-defined AutonomyPolicy defaults; deployment overrides are not queried by this UI">
@@ -1055,18 +1075,24 @@ export default function RusaControlCenter() {
                   <Panel title="Health response" subtitle="Backend readiness details">
                     <pre className="rc-code">{jsonText(health || { status: "not_loaded" })}</pre>
                   </Panel>
-                  <Panel title="Metrics endpoint" subtitle="Operator-only GET /metrics · platform_admin role">
+                  <Panel title="API process metrics" subtitle="GET /metrics · platform_admin plus server-side RUSA_METRICS_API_KEY">
                     {!isPlatformAdmin ? <EmptyState title="Operator permission required" detail="Metrics endpoint hanya tersedia untuk platform_admin." /> : metricsError ? <div className="rc-alert rc-alert-warning">{metricsError}</div> : <><div className="rc-metrics-meta"><Badge tone={metricsText ? "success" : "warning"}>{metricsText ? "Fetched" : "Not fetched"}</Badge><small>{metricsFetchedAt ? formatDate(metricsFetchedAt) : "No fetch timestamp"}</small></div><MetricPreview text={metricsText} /><button className="rc-btn rc-btn-ghost" onClick={() => void refreshMetrics()}><RefreshCw size={14} /> Refresh metrics</button></>}
                   </Panel>
                 </div>
+                <Panel title="Worker metrics listener" subtitle="Separate process and private scrape surface">
+                  <div className="rc-contract-grid"><div><strong>Listener</strong><span>RUSA_METRICS_PORT defaults to 9100; Compose exposes port 9100 only on the internal Docker network.</span></div><div><strong>Scope</strong><span>Worker-step and tool-execution metrics are emitted by the worker process, not aggregated into the API process /metrics response.</span></div><div><strong>Web access</strong><span>No browser-facing worker-metrics proxy or aggregation endpoint is implemented in this Control Center.</span></div><div><strong>Security boundary</strong><span>Do not publish the worker metrics port publicly; scrape it only from an approved internal monitoring service.</span></div></div>
+                </Panel>
                 <Panel title="Telemetry delivery status" subtitle="Distinguish current behavior from ADR target">
-                  <div className="rc-delivery-grid"><div><Badge tone="success">Current</Badge><strong>HTTP polling</strong><span>Task list: 10 seconds · Health: 30 seconds</span></div><div><Badge tone="warning">Proposed</Badge><strong>WebSocket + cursor</strong><span>ADR-COMM-001 describes replay/reconnect; no web socket endpoint is present in current app.</span></div><div><Badge tone="warning">Proposed</Badge><strong>Event log</strong><span>Kafka/outbox projection is an ADR target, not a verified deployment fact.</span></div></div>
+                  <div className="rc-delivery-grid"><div><Badge tone="success">Current</Badge><strong>HTTP polling</strong><span>Task list: 10 seconds · Health: 30 seconds · Tenant total: 30 seconds</span></div><div><Badge tone="info">Current</Badge><strong>API metrics</strong><span>GET /metrics is the API process registry; worker metrics are a separate internal listener.</span></div><div><Badge tone="warning">Proposed</Badge><strong>WebSocket + cursor</strong><span>ADR-COMM-001 describes replay/reconnect; no external WebSocket endpoint is present in current app.</span></div><div><Badge tone="warning">Proposed</Badge><strong>Event log + outbox</strong><span>Kafka/outbox projection is an ADR target, not a verified deployment fact.</span></div></div>
                 </Panel>
               </div>
             )}
 
             {page === "pillars" && (
-              <div className="rc-pillar-detail-grid">{PILLARS.map((pillar, index) => <article className="rc-pillar-detail" key={pillar.name}><div className="rc-pillar-number">0{index + 1}</div><Badge tone={pillar.status === "Partial integration" ? "warning" : "neutral"}>{pillar.status}</Badge><h2>{pillar.name}</h2><p>{pillar.detail}</p><div className="rc-note">Evidence: {pillar.evidence}</div></article>)}</div>
+              <div className="rc-stack">
+                <div className="rc-pillar-detail-grid">{PILLARS.map((pillar, index) => <article className="rc-pillar-detail" key={pillar.name}><div className="rc-pillar-number">0{index + 1}</div><Badge tone={pillar.status === "Partial integration" ? "warning" : "neutral"}>{pillar.status}</Badge><h2>{pillar.name}</h2><p>{pillar.detail}</p><div className="rc-note">Evidence: {pillar.evidence}</div></article>)}</div>
+                <div className="rc-alert rc-alert-warning"><Layers3 size={16} /> The four product pillars above follow RUSA_AI_Architecture.md. The DevOps lifecycle document separately names RUSA Repository and RUSA Social as delivery/evidence and optional publishing layers, while RUSA Platform Foundation is cross-cutting; those labels do not replace the four product pillars.</div>
+              </div>
             )}
 
             {page === "developer" && (
@@ -1077,7 +1103,7 @@ export default function RusaControlCenter() {
                 <Panel title="A2A task envelope validator" subtitle="POST /v1/validate-task · JSON Schema Draft 2020-12">
                   <form onSubmit={validateEnvelope} className="rc-validator">
                     <label>Envelope JSON<textarea spellCheck={false} maxLength={262144} value={envelopeText} onChange={(event) => { setEnvelopeText(event.target.value); setValidation(null); }} /></label>
-                    <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">Schema source: schemas/a2a/task-envelope.schema.json. This validator checks the repository's current A2A envelope contract, not the separate proposed envelope in ADR-COMM-001 and not the AICode create-task request body.</span></div>
+                    <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">This endpoint validates only schemas/a2a/task-envelope.schema.json (protocol_version=1.0). It does not validate the All Agents conceptual task contract, the ADR-COMM-001 proposed schema_version=1 envelope, or the AICode create-task request body.</span></div>
                   </form>
                   {validationError && <div className="rc-alert rc-alert-danger">{validationError}</div>}
                   {validation && <div className={"rc-validation-result " + (validation.valid ? "valid" : "invalid")}><div><Badge tone={validation.valid ? "success" : "danger"}>{validation.valid ? "VALID" : "INVALID"}</Badge><strong>{validation.valid ? "Envelope accepted by schema validator" : "Schema validation errors"}</strong></div>{validation.errors.length > 0 && <ul>{validation.errors.map((item, index) => <li key={index}>{item}</li>)}</ul>}</div>}
@@ -1112,7 +1138,7 @@ export default function RusaControlCenter() {
             {selectedTask.payload?.context && <div className="rc-detail-section"><h3>Context</h3><p>{selectedTask.payload.context}</p></div>}
             {selectedTask.payload?.acceptance_criteria && <div className="rc-detail-section"><h3>Acceptance criteria</h3><ul>{selectedTask.payload.acceptance_criteria.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
             {selectedTask.last_error && <div className="rc-alert rc-alert-danger"><AlertTriangle size={15} /> {selectedTask.last_error}</div>}
-            <div className="rc-detail-section"><h3>Result payload and worker evidence</h3><pre className="rc-code">{jsonText(selectedTask.result || { status: "No result payload yet" })}</pre></div>
+            <div className="rc-detail-section"><h3>Execution result payload</h3><pre className="rc-code">{jsonText(selectedTask.result || { status: "No result payload yet" })}</pre><div className="rc-alert rc-alert-warning"><FileCheck2 size={15} /> Successful AICode task results currently expose pull_request_url, commit_sha, and branch. Per-worker evidence is persisted by the runtime memory/audit path but is not returned by the current task-detail API.</div></div>
             <div className="rc-modal-actions"><div className="rc-note">Actions are shown only when supported by current role and task state.</div>{canControl && selectedTask.status === "failed" && <button className="rc-btn rc-btn-ghost" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry failed task</button>}{canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && <button className="rc-btn rc-btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}</div>
           </section>
         </div>
