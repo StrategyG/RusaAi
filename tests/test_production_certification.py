@@ -365,6 +365,35 @@ def test_certification_holds_if_evidence_attestation_is_not_verified() -> None:
     assert any("attestation" in blocker for blocker in result["blockers"])
 
 
+
+def test_certification_holds_when_evidence_observation_is_in_the_future() -> None:
+    payload = certification_record()
+    payload["checks"]["backup_restore"]["observed_at"] = "2026-11-08T12:00:01Z"
+    result = evaluate_production_certification(
+        payload,
+        expected_commit_sha=COMMIT,
+        expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
+        now=NOW,
+    )
+    assert result["status"] == "HOLD"
+    assert any("backup_restore" in blocker and "future" in blocker for blocker in result["blockers"])
+
+
+def test_certification_holds_when_document_generation_is_in_the_future() -> None:
+    payload = certification_record()
+    payload["generated_at"] = "2026-11-08T12:00:01Z"
+    result = evaluate_production_certification(
+        payload,
+        expected_commit_sha=COMMIT,
+        expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
+        now=NOW,
+    )
+    assert result["status"] == "HOLD"
+    assert any("generation timestamp" in blocker for blocker in result["blockers"])
+
+
 def test_certification_fails_if_any_required_control_fails() -> None:
     payload = certification_record()
     payload["checks"]["tenant_isolation"]["status"] = "FAIL"
