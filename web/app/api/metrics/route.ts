@@ -22,7 +22,9 @@ export async function GET() {
     if (
       identity.subject !== session.subject ||
       identity.tenant_id !== session.tenantId ||
-      !Array.isArray(identity.roles)
+      !Array.isArray(identity.roles) ||
+      identity.roles.length === 0 ||
+      !identity.roles.every((role: unknown) => ["platform_admin", "tenant_admin", "developer", "read_only"].includes(String(role)))
     ) {
       return NextResponse.json({ error: "Session identity changed or is invalid. Sign in again." }, { status: 401 });
     }

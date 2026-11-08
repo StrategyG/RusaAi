@@ -28,8 +28,10 @@ export async function GET() {
     if (
       typeof identity.subject !== "string" ||
       typeof identity.tenant_id !== "string" ||
-      !Array.isArray(identity.roles) ||
-      !identity.roles.every((role: unknown) => typeof role === "string") ||
+      identity.subject.length === 0 || identity.subject.length > 128 ||
+      identity.tenant_id.length === 0 || identity.tenant_id.length > 128 ||
+      !Array.isArray(identity.roles) || identity.roles.length === 0 ||
+      !identity.roles.every((role: unknown) => ["platform_admin", "tenant_admin", "developer", "read_only"].includes(String(role))) ||
       identity.subject !== session.subject ||
       identity.tenant_id !== session.tenantId
     ) {
@@ -63,7 +65,8 @@ export async function POST(request: NextRequest) {
   try {
     const response = await fetch(backendBaseUrl() + "/v1/auth/session", {
       headers: { "X-API-Key": apiKey },
-      cache: "no-store"
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) {
       return NextResponse.json(
@@ -75,8 +78,10 @@ export async function POST(request: NextRequest) {
     if (
       typeof identity.subject !== "string" ||
       typeof identity.tenant_id !== "string" ||
-      !Array.isArray(identity.roles) ||
-      !identity.roles.every((role: unknown) => typeof role === "string")
+      identity.subject.length === 0 || identity.subject.length > 128 ||
+      identity.tenant_id.length === 0 || identity.tenant_id.length > 128 ||
+      !Array.isArray(identity.roles) || identity.roles.length === 0 ||
+      !identity.roles.every((role: unknown) => ["platform_admin", "tenant_admin", "developer", "read_only"].includes(String(role)))
     ) {
       return NextResponse.json({ error: "RUSA API returned an invalid identity." }, { status: 502 });
     }
@@ -92,7 +97,10 @@ export async function POST(request: NextRequest) {
     });
     result.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
     return result;
-  } catch {
+  } catch (cause) {
+    if (cause instanceof Error && cause.message.includes("safe browser-cookie size")) {
+      return NextResponse.json({ error: "The encrypted session would exceed the safe browser-cookie size." }, { status: 400 });
+    }
     return NextResponse.json(
       { error: "Could not reach RUSA API or session encryption is not configured." },
       { status: 503 }

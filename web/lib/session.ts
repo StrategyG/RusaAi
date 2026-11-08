@@ -37,9 +37,6 @@ export async function issueSessionToken(apiKey: string, identity: SessionIdentit
     .setIssuedAt()
     .setExpirationTime("8h")
     .encrypt(encryptionKey());
-  if (token.length > 3800) {
-    throw new Error("Encrypted session token exceeds the safe browser-cookie size.");
-  }
   return token;
 }
 
