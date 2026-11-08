@@ -342,6 +342,7 @@ def _result(
     started_at: datetime,
     handoff: dict[str, str] | None = None,
     source_commit: str | None = None,
+    approval_ref: str | None = None,
 ) -> dict[str, Any]:
     audit: dict[str, Any] = {
         "started_at": _timestamp(started_at),
@@ -367,6 +368,8 @@ def _result(
         },
         "audit": audit,
     }
+    if approval_ref is not None:
+        result["output"]["approval_ref"] = approval_ref
     if handoff is not None:
         result["handoff"] = handoff
     validate_agent_result_for_task(task, result)
@@ -466,6 +469,35 @@ class PlanAgentExecutor:
                 name: reference
                 for name, reference in zip(_plan_documents(plan), artifact_refs, strict=True)
             }
+            approval_scopes = sorted(
+                set(task["constraints"].get("approval_scope", []))
+                | set(plan["approval_scopes"])
+            )
+            approval_required = (
+                task["constraints"]["approval_required"] or bool(plan["approval_scopes"])
+            )
+            approval_ref: str | None = None
+            if approval_required:
+                approval_request = {
+                    "schema_version": 1,
+                    "tenant_id": task["tenant_id"],
+                    "workflow_id": task["workflow_id"],
+                    "task_id": task["task_id"],
+                    "attempt": task["attempt"],
+                    "agent_id": PLAN_AGENT,
+                    "status": "pending",
+                    "approval_scopes": approval_scopes,
+                    "policy_version": task["audit"]["policy_version"],
+                    "created_at": _timestamp(),
+                    "notice": "Pending human decision; this record is not an approval.",
+                }
+                approval_ref = self.artifact_store.put_json(
+                    task["tenant_id"], approval_request, namespace="artifact"
+                )
+                artifact_refs.append(approval_ref)
+                artifact_map["approval-request.json"] = approval_ref
+                artifact_digests["approval-request.json"] = approval_ref.rsplit("/", 1)[-1]
+
             evidence = {
                 "schema_version": 1,
                 "tenant_id": task["tenant_id"],
@@ -482,25 +514,48 @@ class PlanAgentExecutor:
                 "artifact_refs": artifact_refs,
                 "artifacts": artifact_map,
                 "artifact_sha256": artifact_digests,
+                "approval_required": approval_required,
+                "approval_scopes": approval_scopes,
+                "approval_ref": approval_ref,
                 "created_at": _timestamp(),
             }
             evidence_ref = self.artifact_store.put_json(
                 task["tenant_id"], evidence, namespace="evidence"
             )
-            result = _result(
-                task,
-                status="passed",
-                summary=(
-                    f"Plan created with {len(plan['requirements'])} requirements, "
-                    f"{len(plan['tasks'])} DAG tasks, {len(plan['acceptance_criteria'])} "
-                    "acceptance criteria, and a recorded risk assessment."
-                ),
-                artifact_refs=artifact_refs,
-                evidence_refs=[evidence_ref],
-                findings=[],
-                started_at=started,
-                handoff={"next_agent": CODE_AGENT, "event": "plan.completed"},
-            )
+            if approval_required:
+                result = _result(
+                    task,
+                    status="needs_approval",
+                    summary=(
+                        "Plan artifacts were created, but the workflow is held for human approval. "
+                        "No Code Agent handoff was issued."
+                    ),
+                    artifact_refs=artifact_refs,
+                    evidence_refs=[evidence_ref],
+                    findings=[{
+                        "severity": "high",
+                        "code": "plan.approval_required",
+                        "message": "A human approval decision is required before downstream execution.",
+                        "evidence_ref": approval_ref,
+                    }],
+                    started_at=started,
+                    approval_ref=approval_ref,
+                )
+            else:
+                result = _result(
+                    task,
+                    status="passed",
+                    summary=(
+                        f"Plan created with {len(plan['requirements'])} requirements, "
+                        f"{len(plan['tasks'])} DAG tasks, {len(plan['acceptance_criteria'])} "
+                        "acceptance criteria, and a recorded risk assessment."
+                    ),
+                    artifact_refs=artifact_refs,
+                    evidence_refs=[evidence_ref],
+                    findings=[],
+                    started_at=started,
+                    handoff={"next_agent": CODE_AGENT, "event": "plan.completed"},
+                )
             return SpecialistOutcome(result=result)
         except ExecutionLeaseError:
             raise
