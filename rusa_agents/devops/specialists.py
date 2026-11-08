@@ -762,13 +762,22 @@ class CodeAgentExecutor:
             artifacts = plan_evidence.get("artifacts", {})
             digests = plan_evidence.get("artifact_sha256", {})
             if (
+                plan_evidence.get("approval_required") is True
+                or bool(plan_evidence.get("approval_scopes"))
+                or plan_evidence.get("approval_ref") is not None
+            ):
+                return _failure(
+                    task,
+                    started_at=started,
+                    code="code.plan_approval_pending",
+                    message="The referenced Plan Agent evidence is awaiting human approval.",
+                    status="blocked",
+                )
+            if (
                 plan_evidence.get("schema_version") != 1
                 or plan_evidence.get("tenant_id") != tenant_id
                 or plan_evidence.get("workflow_id") != task["workflow_id"]
                 or plan_evidence.get("agent_id") != PLAN_AGENT
-                or plan_evidence.get("approval_required") is True
-                or bool(plan_evidence.get("approval_scopes"))
-                or plan_evidence.get("approval_ref") is not None
                 or artifacts.get("plan.md") != plan_ref
                 or artifacts.get("acceptance-criteria.md") != acceptance_ref
                 or digests.get("plan.md") != hashlib.sha256(plan_bytes).hexdigest()
