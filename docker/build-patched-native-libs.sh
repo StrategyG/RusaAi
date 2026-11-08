@@ -54,12 +54,30 @@ rm -rf /usr/local/share/doc/expat /usr/local/share/man/man1/xmlwf.1
 
 ldconfig
 LD_LIBRARY_PATH=/usr/local/lib python - <<'PY'
-import pyexpat
+import ctypes
 import sqlite3
+import subprocess
+import pyexpat
+import _sqlite3
 
-if pyexpat.EXPAT_VERSION != "expat_2.10.0":
-    raise SystemExit(f"Expected patched Expat 2.10.0, got {pyexpat.EXPAT_VERSION}")
+expat = ctypes.CDLL("libexpat.so.1")
+expat.XML_ExpatVersion.restype = ctypes.c_char_p
+expat_version = expat.XML_ExpatVersion().decode("ascii")
+
+def linked_library(module, expected):
+    result = subprocess.run(
+        ["ldd", module.__file__], check=True, capture_output=True, text=True
+    )
+    if expected not in result.stdout:
+        raise SystemExit(
+            f"{module.__name__} is not using the patched library {expected}:\n{result.stdout}"
+        )
+
+if expat_version != "expat_2.10.0":
+    raise SystemExit(f"Expected patched Expat 2.10.0, got {expat_version}")
 if sqlite3.sqlite_version_info < (3, 54, 1):
     raise SystemExit(f"Expected patched SQLite >=3.54.1, got {sqlite3.sqlite_version}")
-print(f"Patched native parsers verified: {pyexpat.EXPAT_VERSION}; SQLite {sqlite3.sqlite_version}")
+linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so.0")
+print(f"Patched native parsers verified: Expat {expat_version}; SQLite {sqlite3.sqlite_version}")
 PY
