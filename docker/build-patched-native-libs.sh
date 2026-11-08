@@ -9,7 +9,8 @@ trap 'rm -rf "$build_root"' EXIT HUP INT TERM
 cd "$build_root"
 
 expat_archive="expat-2.10.0.tar.xz"
-curl --fail --silent --show-error --location \
+curl --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 \
+  --fail --silent --show-error --location \
   "https://github.com/libexpat/libexpat/releases/download/R_2_10_0/$expat_archive" \
   --output "$expat_archive"
 echo "c624ba2998fc65df1163a49641ff3f9ab73138b11641d92c86bee0fb01b1bc7f  $expat_archive" \
@@ -23,7 +24,8 @@ make install
 
 cd "$build_root"
 sqlite_archive="sqlite-autoconf-3540100.tar.gz"
-curl --fail --silent --show-error --location \
+curl --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 \
+  --fail --silent --show-error --location \
   "https://www.sqlite.org/2026/$sqlite_archive" \
   --output "$sqlite_archive"
 python - "$sqlite_archive" <<'PY'
