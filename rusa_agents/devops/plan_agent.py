@@ -28,7 +28,6 @@ PLAN_CAPABILITIES = frozenset(
         "evidence.read",
         "policy.read",
         "audit.read",
-        "task.create",
     }
 )
 _STAGE_AGENT = {
@@ -532,6 +531,7 @@ class PlanAgent:
                         content=content,
                         content_type=content_type,
                         source_commit=task["input"].get("commit_sha"),
+                        source_artifact_digest=task["input"].get("artifact_digest"),
                         parent_refs=task["input"].get("evidence_refs", []),
                     )
                 )
