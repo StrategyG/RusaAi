@@ -1,0 +1,118 @@
+{
+  "schema_version": "1.0.0",
+  "evaluation_profile": "rusa-agent-retrieval-gold-v1",
+  "status": "PENDING_HUMAN_LABELS",
+  "label_basis": "relevant_source_uris",
+  "k": 5,
+  "note": "Template only. Do not report metrics until a reviewer adds real queries and relevant source URIs after checking the source text and agent scope.",
+  "profiles": [
+    {
+      "agent_id": "supreme-orchestrator",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "system-architect",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "planner",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "task-decomposer",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "software-engineer",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "devops",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "qa-testing",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "security-policy",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "memory-knowledge",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "evaluation-reporting",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_plan_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_code_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_build_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_test_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_release_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_deploy_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_operate_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_monitor_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_devops_orchestrator",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    },
+    {
+      "agent_id": "rusa_security_guard_agent",
+      "status": "PENDING_HUMAN_LABELS",
+      "cases": []
+    }
+  ],
+  "case_schema": {
+    "query": "A realistic question this agent must answer",
+    "relevant_source_uris": [
+      "rusa://agent-knowledge/<agent_id>/<source_id>"
+    ],
+    "review_status": "APPROVED",
+    "reviewer_note": "Why this source section supports the query"
+  }
+}
