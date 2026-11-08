@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -14,6 +15,27 @@ TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
+
+
+def _document_fingerprint(
+    source_uri: str,
+    title: str,
+    content_hash: str,
+    metadata: dict[str, Any],
+) -> str:
+    payload = json.dumps(
+        {
+            "source_uri": source_uri,
+            "title": title,
+            "content_hash": content_hash,
+            "metadata": metadata,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _vector_literal(vector: list[float], dimensions: int) -> str:
@@ -136,7 +158,34 @@ class PostgresKnowledgeStore:
                     ),
                     to_regclass('public.rusa_knowledge_documents_scope_idx') IS NOT NULL,
                     to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL,
-                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL
+                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL,
+                    COALESCE((
+                        SELECT relrowsecurity AND relforcerowsecurity
+                        FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_document_versions')
+                    ), false),
+                    COALESCE((
+                        SELECT relrowsecurity AND relforcerowsecurity
+                        FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_version_chunks')
+                    ), false),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_document_versions'
+                          AND policyname='rusa_knowledge_document_versions_tenant_isolation'
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_version_chunks'
+                          AND policyname='rusa_knowledge_version_chunks_tenant_isolation'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_document_versions', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_version_chunks', 'SELECT'
+                    ),
+                    to_regclass('public.rusa_knowledge_versions_document_idx') IS NOT NULL
                 """
             ).fetchone()
         return bool(row and all(row))
@@ -187,24 +236,91 @@ class PostgresKnowledgeStore:
                 )
             )
 
+        current_metadata = json.loads(metadata_json)
+        current_fingerprint = _document_fingerprint(
+            source_uri, title, content_hash, current_metadata
+        )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
-            document = connection.execute(
+            lock_key = f"{tenant_id}\\x1f{collection}\\x1f{source_uri}"
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (lock_key,),
+            )
+            existing = connection.execute(
                 """
-                INSERT INTO rusa_knowledge_documents
-                    (tenant_id, collection, source_uri, title, content_hash, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-                ON CONFLICT (tenant_id, collection, source_uri)
-                DO UPDATE SET
-                    title = EXCLUDED.title,
-                    content_hash = EXCLUDED.content_hash,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = now()
-                RETURNING document_id
+                SELECT document_id, title, source_uri, content_hash, metadata
+                FROM rusa_knowledge_documents
+                WHERE tenant_id=%s AND collection=%s AND source_uri=%s
+                FOR UPDATE
                 """,
-                (tenant_id, collection, source_uri, title, content_hash, metadata_json),
+                (tenant_id, collection, source_uri),
             ).fetchone()
-            document_id = str(document[0])
+            if existing is None:
+                document = connection.execute(
+                    """
+                    INSERT INTO rusa_knowledge_documents
+                        (tenant_id, collection, source_uri, title, content_hash, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                    RETURNING document_id
+                    """,
+                    (tenant_id, collection, source_uri, title, content_hash, metadata_json),
+                ).fetchone()
+                document_id = str(document[0])
+            else:
+                document_id = str(existing[0])
+                previous_metadata = existing[4]
+                if isinstance(previous_metadata, str):
+                    previous_metadata = json.loads(previous_metadata)
+                previous_fingerprint = _document_fingerprint(
+                    existing[2],
+                    existing[1],
+                    str(existing[3]).strip(),
+                    previous_metadata,
+                )
+                if previous_fingerprint != current_fingerprint:
+                    previous_metadata_json = json.dumps(
+                        previous_metadata,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    version = connection.execute(
+                        """
+                        INSERT INTO rusa_knowledge_document_versions
+                            (tenant_id, document_id, collection, source_uri, title,
+                             content_hash, version_fingerprint, metadata)
+                        VALUES (%s, %s::uuid, %s, %s, %s, %s, %s, %s::jsonb)
+                        ON CONFLICT (tenant_id, document_id, version_fingerprint)
+                        DO NOTHING
+                        RETURNING version_id
+                        """,
+                        (
+                            tenant_id, document_id, collection, existing[2], existing[1],
+                            str(existing[3]).strip(), previous_fingerprint, previous_metadata_json,
+                        ),
+                    ).fetchone()
+                    if version is not None:
+                        connection.execute(
+                            """
+                            INSERT INTO rusa_knowledge_version_chunks
+                                (tenant_id, version_id, chunk_index, content, embedding, metadata)
+                            SELECT tenant_id, %s::uuid, chunk_index, content, embedding, metadata
+                            FROM rusa_knowledge_chunks
+                            WHERE tenant_id=%s AND document_id=%s::uuid
+                            ORDER BY chunk_index
+                            """,
+                            (str(version[0]), tenant_id, document_id),
+                        )
+                connection.execute(
+                    """
+                    UPDATE rusa_knowledge_documents
+                    SET title=%s, content_hash=%s, metadata=%s::jsonb, updated_at=now()
+                    WHERE tenant_id=%s AND document_id=%s::uuid
+                    """,
+                    (title, content_hash, metadata_json, tenant_id, document_id),
+                )
             connection.execute(
                 "DELETE FROM rusa_knowledge_chunks WHERE tenant_id=%s AND document_id=%s::uuid",
                 (tenant_id, document_id),
