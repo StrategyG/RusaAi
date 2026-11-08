@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from rusa_agents.contracts import WorkerRole
 from rusa_agents.devops.agent_registry import (
     AGENT_POLICIES,
     BUILD_AGENT,
@@ -28,7 +29,6 @@ from rusa_agents.devops.specialists import (
 )
 from rusa_agents.git_workspace import GitHubPublisher
 from rusa_agents.tool_gateway import ToolDenied
-from rusa_agents.contracts import WorkerRole
 
 
 TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
