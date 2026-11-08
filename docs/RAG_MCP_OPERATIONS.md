@@ -8,7 +8,8 @@ not enabled by the core API merely because its package is installed.
 - Python 3.11 or newer.
 - PostgreSQL 16 with the pgvector extension available.
 - A dedicated database role with only the privileges granted by
-  `migrations/007_rag_knowledge_pgvector.sql`.
+  `migrations/007_rag_knowledge_pgvector.sql`, with agent-scope indexes from
+  `migrations/008_rag_agent_scope_indexes.sql`.
 - An OpenAI-compatible embeddings endpoint. The default model is
   `text-embedding-3-small` with 1536 dimensions; the configured embedding model
   must return vectors of the configured dimension.
@@ -17,12 +18,15 @@ not enabled by the core API merely because its package is installed.
 
 ## Database setup
 
-Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or
-administrator on the dedicated knowledge database. The migration creates
+Apply `migrations/007_rag_knowledge_pgvector.sql` and then
+`migrations/008_rag_agent_scope_indexes.sql` as a database owner or
+administrator on the dedicated knowledge database. Migration 007 creates
 tenant-scoped document and chunk tables, pgvector indexes, forced row-level
-security, and a non-login knowledge-worker role. Follow the migration's grant
+security, and a non-login knowledge-worker role. Migration 008 adds indexes
+used by shared/agent-specific metadata filters. Follow the migration grant
 instructions and configure `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker`
-for the runtime role. Do not run the service with a PostgreSQL superuser.
+for the runtime role. Readiness now requires both migrations. Do not run the
+service with a PostgreSQL superuser.
 
 Set `RUSA_KNOWLEDGE_DATABASE_URL` to the restricted database connection string.
 The embedding provider is configured with:
@@ -103,7 +107,12 @@ the pgvector migration and role grants have been applied. Configure:
   `RUSA_EMBEDDING_MODEL`
 
 The task tenant is taken from the authenticated queue lease and injected into
-the read-only agent tools. The model cannot provide or override `tenant_id`.
+the read-only agent tools. The trusted WorkerRole is converted by the host
+gateway into an AICode scope ID such as `aicode-analyst`; the model cannot
+provide or override `tenant_id`, `agent_id`, or the knowledge collection.
+Retrieval returns shared records plus records tagged for that worker scope.
+The standalone RUSA Knowledge MCP server has no agent-principal mapping in this
+increment and therefore retrieves shared records only.
 The worker connects using its restricted worker login, then explicitly assumes
 the non-login `rusa_knowledge_worker` role for each knowledge-store transaction.
 Do not grant the knowledge role to an API login or a general application role.
