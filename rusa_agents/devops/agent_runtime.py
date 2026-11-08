@@ -726,9 +726,6 @@ class DevOpsAgentRuntime:
             grant=grant,
             tools=gateway,
         )
-        operation = handler.execute(context)
-        if not inspect.isawaitable(operation):
-            raise TypeError("registered agent handlers must implement async execute(context)")
 
         timeout_seconds = float(grant.max_runtime_seconds)
         deadline_value = task_snapshot.get("deadline_at")
@@ -740,6 +737,10 @@ class DevOpsAgentRuntime:
             if remaining <= 0:
                 raise AgentBudgetExceededError("task deadline has expired")
             timeout_seconds = min(timeout_seconds, remaining)
+
+        operation = handler.execute(context)
+        if not inspect.isawaitable(operation):
+            raise TypeError("registered agent handlers must implement async execute(context)")
 
         try:
             result = await asyncio.wait_for(operation, timeout=timeout_seconds)
