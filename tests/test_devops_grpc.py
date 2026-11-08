@@ -88,6 +88,8 @@ class FakeStore:
                 "input": {
                     "repository": "StrategyG/RusaAi",
                     "plan_ref": "artifact://plans/plan-1",
+                    "plan_evidence_ref": "evidence://plans/plan-evidence-1",
+                    "acceptance_criteria_ref": "artifact://acceptance/criteria-1",
                     "acceptance_criteria": ["Required tests pass."],
                 },
                 "constraints": {
