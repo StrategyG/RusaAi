@@ -9,7 +9,7 @@ from typing import Any
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
 from .safety import reject_credential_material, validate_document_metadata
-from .store import PostgresKnowledgeStore
+from .store import AGENT_PATTERN, PostgresKnowledgeStore
 
 
 class KnowledgeService:
@@ -50,7 +50,7 @@ class KnowledgeService:
             if not ready:
                 store.close()
                 raise RuntimeError(
-                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql"
+                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql and migrations/008_rag_agent_scope_indexes.sql"
                 )
         return service
 
@@ -125,6 +125,10 @@ class KnowledgeService:
     ) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
         reject_credential_material(query)
         vector = self.embeddings.embed([query])[0]
         return self.store.search(
