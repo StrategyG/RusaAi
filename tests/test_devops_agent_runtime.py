@@ -1,0 +1,663 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+
+from rusa_agents.devops.agent_runtime import (
+    AgentApprovalRequiredError,
+    AgentAuthorizationError,
+    AgentBudgetExceededError,
+    AgentCapabilityDeniedError,
+    AgentHandlerNotRegisteredError,
+    DevOpsAgentRegistry,
+    DevOpsAgentRuntime,
+    ExecutionPolicyGrant,
+    ScopedToolGateway,
+    ToolInvocationDeniedError,
+)
+from rusa_agents.devops.contracts import ContractValidationError
+
+
+def _task(
+    stage: str = "plan",
+    agent_id: str = "rusa_plan_agent",
+    *,
+    tools: list[str] | None = None,
+    write_scope: list[str] | None = None,
+    network_access: bool = False,
+    destinations: list[str] | None = None,
+    environment: str = "staging",
+    approval_required: bool = False,
+    approval_scope: list[str] | None = None,
+    approval_ref: str | None = None,
+) -> dict:
+    inputs = {
+        "plan": {
+            "user_request": "Prepare a bounded delivery plan.",
+            "repository": "StrategyG/RusaAi",
+            "plan_ref": "artifact://plans/current",
+        },
+        "code": {
+            "repository": "StrategyG/RusaAi",
+            "plan_ref": "artifact://plans/current",
+            "acceptance_criteria": ["The change is covered by tests."],
+        },
+        "build": {
+            "repository": "StrategyG/RusaAi",
+            "commit_sha": "a" * 40,
+            "build_config_ref": "artifact://build/config",
+        },
+        "test": {
+            "commit_sha": "a" * 40,
+            "artifact_digest": "sha256:" + "b" * 64,
+            "test_plan_ref": "artifact://test/plan",
+            "acceptance_criteria_ref": "artifact://test/criteria",
+        },
+        "release": {
+            "commit_sha": "a" * 40,
+            "artifact_digest": "sha256:" + "b" * 64,
+            "test_evidence_ref": "artifact://test/evidence",
+            "sbom_ref": "artifact://sbom/current",
+        },
+        "deploy": {
+            "release_manifest_ref": "artifact://release/manifest",
+            "environment": environment,
+            "commit_sha": "a" * 40,
+            "artifact_digest": "sha256:" + "b" * 64,
+        },
+        "operate": {
+            "service": "rusa-api",
+            "runbook_ref": "artifact://runbooks/restart",
+        },
+        "monitor": {
+            "service": "rusa-api",
+            "metrics_window": "last-15m",
+        },
+    }
+    if agent_id == "rusa_security_guard_agent":
+        inputs[stage]["evidence_refs"] = ["evidence://security/review-input"]
+
+    return {
+        "schema_version": 1,
+        "task_id": "task-agent-registry-1",
+        "workflow_id": "run-agent-registry-1",
+        "tenant_id": "tenant-a",
+        "agent_id": agent_id,
+        "stage": stage,
+        "objective": "Exercise DevOps specialist authorization.",
+        "input": inputs[stage],
+        "constraints": {
+            "allowed_tools": tools if tools is not None else ["repository.read"],
+            "network_access": network_access,
+            "allowed_network_destinations": destinations or [],
+            "write_scope": write_scope or [],
+            "approval_required": approval_required,
+            "approval_scope": approval_scope or [],
+            "budget": {
+                "max_cost_usd": 2.0,
+                "max_tool_calls": 20,
+                "max_runtime_seconds": 300,
+            },
+            **({"approval_ref": approval_ref} if approval_ref else {}),
+        },
+        "attempt": 1,
+        "audit": {
+            "created_at": "2026-11-08T00:00:00Z",
+            "requested_by": "pytest",
+            "policy_version": "policy-1",
+        },
+    }
+
+
+def _grant(task: dict, **overrides) -> ExecutionPolicyGrant:
+    constraints = task["constraints"]
+    budget = constraints["budget"]
+    values = {
+        "tenant_id": task["tenant_id"],
+        "principal": task["agent_id"],
+        "policy_version": task["audit"]["policy_version"],
+        "allowed_tools": frozenset(constraints["allowed_tools"]),
+        "write_scope": tuple(constraints["write_scope"]),
+        "network_access": constraints["network_access"],
+        "allowed_network_destinations": frozenset(
+            constraints.get("allowed_network_destinations", [])
+        ),
+        "approved_scopes": frozenset(constraints.get("approval_scope", [])),
+        "approved_refs": frozenset(
+            [constraints["approval_ref"]] if "approval_ref" in constraints else []
+        ),
+        "allowed_branches": frozenset({"feature/rusa-devops/test"}) if "repository.branch.write" in constraints["allowed_tools"] else frozenset(),
+        "allowed_repositories": frozenset({task["input"]["repository"]}) if "repository" in task["input"] else frozenset(),
+        "allowed_artifact_refs": frozenset(
+            value
+            for key, value in task["input"].items()
+            if key.endswith("_ref") and isinstance(value, str)
+        ) | frozenset(task["input"].get("evidence_refs", [])),
+        "allowed_runbooks": frozenset({task["input"]["runbook_ref"]}) if "runbook.execute" in constraints["allowed_tools"] else frozenset(),
+        "allowed_environments": frozenset({task["input"]["environment"]}) if task["stage"] == "deploy" else frozenset(),
+        "max_cost_usd": budget["max_cost_usd"],
+        "max_tool_calls": budget["max_tool_calls"],
+        "max_runtime_seconds": budget["max_runtime_seconds"],
+    }
+    values.update(overrides)
+    return ExecutionPolicyGrant(**values)
+
+
+def test_registry_contains_eight_specialists_and_cross_cutting_security_guard():
+    registry = DevOpsAgentRegistry()
+    assert {profile.stage for profile in registry.profiles if profile.stage} == {
+        "plan", "code", "build", "test", "release", "deploy", "operate", "monitor"
+    }
+    expected = {
+        "rusa_plan_agent": {"repository.read", "issue.read", "artifact.read", "task.create", "plan.write"},
+        "rusa_code_agent": {"repository.read", "issue.read", "artifact.read", "repository.branch.write", "test.write", "documentation.write"},
+        "rusa_build_agent": {"repository.read", "artifact.read", "build.execute", "artifact.write", "sbom.write"},
+        "rusa_test_agent": {"repository.read", "artifact.read", "test.execute", "evidence.write", "metrics.read"},
+        "rusa_release_agent": {"artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read"},
+        "rusa_deploy_agent": {"artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read"},
+        "rusa_operate_agent": {"metrics.read", "logs.read", "runbook.read", "runbook.execute", "incident.write"},
+        "rusa_monitor_agent": {"metrics.read", "logs.read", "traces.read", "alerts.read"},
+        "rusa_security_guard_agent": {"repository.read", "issue.read", "artifact.read", "evidence.read", "policy.read", "audit.read", "metrics.read", "logs.read", "traces.read"},
+    }
+    assert {
+        profile.agent_id: set(profile.allowed_tools) for profile in registry.profiles
+    } == expected
+    guard = registry.profile_for("rusa_security_guard_agent")
+    assert guard.stage is None
+    assert guard.read_only is True
+
+
+def test_registry_overrides_can_only_reduce_registered_authority():
+    registry = DevOpsAgentRegistry()
+    profiles = list(registry.profiles)
+    index = next(i for i, profile in enumerate(profiles) if profile.agent_id == "rusa_plan_agent")
+    profiles[index] = replace(
+        profiles[index],
+        allowed_tools=profiles[index].allowed_tools | {"deployment.execute"},
+    )
+    with pytest.raises(ValueError, match="cannot expand"):
+        DevOpsAgentRegistry(tuple(profiles))
+
+
+def test_authorization_binds_tenant_principal_stage_and_policy_version():
+    task = _task()
+    registry = DevOpsAgentRegistry()
+    with pytest.raises(AgentAuthorizationError, match="tenant"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-b",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task),
+        )
+    with pytest.raises(AgentAuthorizationError, match="assigned"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_code_agent",
+            policy_grant=_grant(task, principal="rusa_code_agent"),
+        )
+    with pytest.raises(AgentAuthorizationError, match="policy version"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task, policy_version="stale-policy"),
+        )
+
+
+def test_narrowed_code_profile_rejects_a_capability_removed_by_policy():
+    registry = DevOpsAgentRegistry()
+    profiles = list(registry.profiles)
+    index = next(i for i, profile in enumerate(profiles) if profile.agent_id == "rusa_code_agent")
+    profiles[index] = replace(
+        profiles[index],
+        allowed_tools=profiles[index].allowed_tools - {"test.write"},
+    )
+    narrowed_registry = DevOpsAgentRegistry(tuple(profiles))
+    task = _task("code", "rusa_code_agent", tools=["test.write"])
+    with pytest.raises(AgentCapabilityDeniedError, match="agent registry"):
+        narrowed_registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_code_agent",
+            policy_grant=_grant(task),
+        )
+
+
+def test_policy_engine_grant_must_cover_every_requested_capability_and_scope():
+    task = _task(
+        tools=["repository.read", "plan.write"],
+        write_scope=["plans/"],
+    )
+    registry = DevOpsAgentRegistry()
+    with pytest.raises(AgentCapabilityDeniedError, match="Policy Engine grant"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task, allowed_tools=frozenset({"repository.read", "issue.read"})),
+        )
+    with pytest.raises(AgentCapabilityDeniedError, match="write scope"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task, write_scope=("docs/",)),
+        )
+
+
+def test_monitor_and_security_guard_profiles_are_read_only():
+    registry = DevOpsAgentRegistry()
+    for agent_id in ("rusa_monitor_agent", "rusa_security_guard_agent"):
+        profile = registry.profile_for(agent_id)
+        assert profile.read_only is True
+        assert profile.allowed_tools.isdisjoint(
+            {"artifact.write", "deployment.execute", "incident.write", "runbook.execute"}
+        )
+
+
+def test_plan_agent_cannot_receive_network_access_without_registry_eligibility():
+    task = _task(
+        tools=["repository.read"],
+        network_access=True,
+        destinations=["metrics.internal"],
+    )
+    with pytest.raises(AgentCapabilityDeniedError, match="not eligible"):
+        DevOpsAgentRegistry().authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task, network_access=True),
+        )
+
+
+def test_network_access_requires_agent_eligibility_and_exact_policy_allowlist():
+    task = _task(
+        "code",
+        "rusa_code_agent",
+        tools=["repository.read"],
+        network_access=True,
+        destinations=["https://pypi.org/"],
+    )
+    registry = DevOpsAgentRegistry()
+    grant = _grant(
+        task,
+        network_access=True,
+        allowed_network_destinations=frozenset({"pypi.org"}),
+    )
+    execution = registry.authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_code_agent",
+        policy_grant=grant,
+    )
+    assert execution.allowed_network_destinations == frozenset({"pypi.org"})
+
+    denied = _grant(
+        task,
+        network_access=True,
+        allowed_network_destinations=frozenset({"github.com"}),
+    )
+    with pytest.raises(AgentCapabilityDeniedError, match="network destinations"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_code_agent",
+            policy_grant=denied,
+        )
+
+
+def test_production_deploy_requires_a_policy_verified_approval_reference():
+    task = _task(
+        "deploy",
+        "rusa_deploy_agent",
+        tools=["artifact.read", "release.read", "deployment.execute"],
+        environment="production",
+        approval_required=True,
+        approval_scope=["deploy"],
+        approval_ref="approval://change/123",
+    )
+    registry = DevOpsAgentRegistry()
+    grant = _grant(task, approved_refs=frozenset())
+    with pytest.raises(AgentApprovalRequiredError, match="approval reference"):
+        registry.authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_deploy_agent",
+            policy_grant=grant,
+        )
+    approved = registry.authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_deploy_agent",
+        policy_grant=_grant(task),
+    )
+    assert approved.approval_ref == "approval://change/123"
+    assert approved.approval_scopes == frozenset({"deploy"})
+
+
+def test_task_budget_cannot_exceed_policy_engine_grant():
+    task = _task()
+    with pytest.raises(AgentBudgetExceededError):
+        DevOpsAgentRegistry().authorize(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task, max_tool_calls=task["constraints"]["budget"]["max_tool_calls"] - 1),
+        )
+
+
+@pytest.mark.asyncio
+async def test_code_branch_write_is_limited_to_policy_approved_feature_branch():
+    task = _task(
+        "code",
+        "rusa_code_agent",
+        tools=["repository.branch.write"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_code_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert await gateway.invoke(
+        "repository.branch.write",
+        {"repository": "StrategyG/RusaAi", "branch": "feature/rusa-devops/test"},
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="feature-branch allowlist"):
+        await gateway.invoke("repository.branch.write", {"repository": "StrategyG/RusaAi", "branch": "main"})
+
+
+@pytest.mark.asyncio
+async def test_operate_runbook_execution_is_limited_to_the_task_runbook():
+    task = _task(
+        "operate",
+        "rusa_operate_agent",
+        tools=["runbook.read", "runbook.execute"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_operate_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert await gateway.invoke(
+        "runbook.execute",
+        {"runbook_ref": task["input"]["runbook_ref"], "action": "restart-approved-service"},
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="runbook is outside"):
+        await gateway.invoke(
+            "runbook.execute",
+            {"runbook_ref": "artifact://runbooks/unapproved", "action": "restart"},
+        )
+
+
+
+
+class _FakeToolInvoker:
+    def __init__(self):
+        self.calls = []
+
+    async def invoke(self, tool_id, arguments):
+        self.calls.append((tool_id, arguments))
+        return {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_scoped_gateway_enforces_tool_path_network_and_call_budget():
+    task = _task(
+        tools=["plan.write", "repository.read"],
+        write_scope=["plans/"],
+    )
+    task["constraints"]["budget"]["max_tool_calls"] = 1
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_plan_agent",
+        policy_grant=_grant(task, max_tool_calls=1),
+    )
+    delegate = _FakeToolInvoker()
+    gateway = ScopedToolGateway(delegate, grant)
+
+    assert await gateway.invoke("plan.write", {"path": "plans/approved.md"}) == {"ok": True}
+    assert len(delegate.calls) == 1
+    with pytest.raises(ToolInvocationDeniedError, match="outside the task execution grant"):
+        await gateway.invoke("deployment.execute", {"environment": "staging"})
+    with pytest.raises(AgentBudgetExceededError):
+        await gateway.invoke("repository.read", {"repository": "StrategyG/RusaAi"})
+
+
+@pytest.mark.asyncio
+async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_destination():
+    task = _task(
+        "code",
+        "rusa_code_agent",
+        tools=["repository.read", "test.write"],
+        write_scope=["test-reports/"],
+        network_access=True,
+        destinations=["pypi.org"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_code_agent",
+        policy_grant=_grant(
+            task,
+            network_access=True,
+            allowed_network_destinations=frozenset({"pypi.org"}),
+        ),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    with pytest.raises(ValueError, match="unsafe path"):
+        await gateway.invoke("test.write", {"path": "test-reports/../../secrets"})
+    with pytest.raises(ToolInvocationDeniedError, match="network destination"):
+        await gateway.invoke(
+            "repository.read",
+            {"repository": "StrategyG/RusaAi", "url": "https://evil.example/"},
+        )
+    assert await gateway.invoke(
+        "repository.read",
+        {"repository": "StrategyG/RusaAi", "url": "https://pypi.org/"},
+    ) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_repository_and_artifact_reads_are_bound_to_task_resources():
+    task = _task(tools=["repository.read", "artifact.read"])
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_plan_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert await gateway.invoke(
+        "repository.read", {"repository": "StrategyG/RusaAi"}
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="repository"):
+        await gateway.invoke("repository.read", {"repository": "other/private-repo"})
+    assert await gateway.invoke(
+        "artifact.read", {"resource_ref": "artifact://plans/current"}
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="artifact reference"):
+        await gateway.invoke(
+            "artifact.read", {"resource_ref": "artifact://plans/unapproved"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_test_agent_executes_only_against_the_task_commit_and_artifact_digest():
+    task = _task(
+        "test",
+        "rusa_test_agent",
+        tools=["test.execute"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_test_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    with pytest.raises(ToolInvocationDeniedError, match="exact task commit"):
+        await gateway.invoke(
+            "test.execute",
+            {"commit_sha": "c" * 40, "artifact_digest": task["input"]["artifact_digest"]},
+        )
+    assert await gateway.invoke(
+        "test.execute",
+        {
+            "commit_sha": task["input"]["commit_sha"],
+            "artifact_digest": task["input"]["artifact_digest"],
+        },
+    ) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_production_deploy_gateway_requires_the_exact_approved_environment_and_reference():
+    task = _task(
+        "deploy",
+        "rusa_deploy_agent",
+        tools=["artifact.read", "release.read", "deployment.execute"],
+        environment="production",
+        approval_required=True,
+        approval_scope=["deploy"],
+        approval_ref="approval://change/123",
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_deploy_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    with pytest.raises(AgentApprovalRequiredError):
+        await gateway.invoke(
+            "deployment.execute",
+            {"environment": "production", "approval_ref": "approval://change/other", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+        )
+    with pytest.raises(ToolInvocationDeniedError, match="environment"):
+        await gateway.invoke(
+            "deployment.execute",
+            {"environment": "staging", "approval_ref": "approval://change/123", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+        )
+    assert await gateway.invoke(
+        "deployment.execute",
+        {"environment": "production", "approval_ref": "approval://change/123", "release_manifest_ref": "artifact://release/manifest", "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    ) == {"ok": True}
+
+
+class _FailingPlanHandler:
+    async def execute(self, context):
+        task = context.task
+        return {
+            "schema_version": 1,
+            "task_id": task["task_id"],
+            "workflow_id": task["workflow_id"],
+            "tenant_id": task["tenant_id"],
+            "agent_id": task["agent_id"],
+            "stage": task["stage"],
+            "attempt": task["attempt"],
+            "status": "failed",
+            "output": {
+                "summary": "The planning input is incomplete.",
+                "artifact_refs": [],
+                "evidence_refs": [],
+                "findings": [
+                    {"severity": "medium", "code": "plan_incomplete", "message": "Missing acceptance detail."}
+                ],
+            },
+            "audit": {
+                "started_at": "2026-11-08T00:00:00Z",
+                "completed_at": "2026-11-08T00:00:01Z",
+                "policy_version": context.grant.policy_version,
+            },
+        }
+
+
+@pytest.mark.asyncio
+async def test_runtime_validates_handler_result_against_the_originating_task():
+    task = _task()
+    registry = DevOpsAgentRegistry()
+    registry.register("rusa_plan_agent", _FailingPlanHandler())
+    runtime = DevOpsAgentRuntime(registry)
+    result = await runtime.execute(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_plan_agent",
+        policy_grant=_grant(task),
+        tool_delegate=_FakeToolInvoker(),
+    )
+    assert result["status"] == "failed"
+    assert result["task_id"] == task["task_id"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_validates_result_against_immutable_task_snapshot():
+    class MutatingHandler:
+        async def execute(self, context):
+            context.task["task_id"] = "forged-task-id"
+            return {
+                "schema_version": 1,
+                "task_id": "forged-task-id",
+                "workflow_id": context.task["workflow_id"],
+                "tenant_id": context.task["tenant_id"],
+                "agent_id": context.task["agent_id"],
+                "stage": context.task["stage"],
+                "attempt": context.task["attempt"],
+                "status": "failed",
+                "output": {
+                    "summary": "A handler attempted to rewrite task identity.",
+                    "artifact_refs": [],
+                    "evidence_refs": [],
+                    "findings": [
+                        {"severity": "high", "code": "identity_tamper", "message": "Task identity was changed."}
+                    ],
+                },
+                "audit": {
+                    "started_at": "2026-11-08T00:00:00Z",
+                    "completed_at": "2026-11-08T00:00:01Z",
+                    "policy_version": context.grant.policy_version,
+                },
+            }
+
+    task = _task()
+    registry = DevOpsAgentRegistry()
+    registry.register("rusa_plan_agent", MutatingHandler())
+    with pytest.raises(ContractValidationError, match="task_id"):
+        await DevOpsAgentRuntime(registry).execute(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task),
+            tool_delegate=_FakeToolInvoker(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_expired_task_deadline_before_handler_execution():
+    class MustNotRunHandler:
+        async def execute(self, _context):
+            raise AssertionError("expired task handler must not execute")
+
+    task = _task()
+    task["deadline_at"] = "2000-01-01T00:00:00Z"
+    registry = DevOpsAgentRegistry()
+    registry.register("rusa_plan_agent", MustNotRunHandler())
+    with pytest.raises(AgentBudgetExceededError, match="deadline"):
+        await DevOpsAgentRuntime(registry).execute(
+            task,
+            authenticated_tenant_id="tenant-a",
+            authenticated_principal="rusa_plan_agent",
+            policy_grant=_grant(task),
+            tool_delegate=_FakeToolInvoker(),
+        )
+
+
+def test_runtime_fails_closed_when_a_specialist_handler_is_not_registered():
+    task = _task()
+    with pytest.raises(AgentHandlerNotRegisteredError):
+        DevOpsAgentRuntime(DevOpsAgentRegistry()).registry.handler_for(task["agent_id"])

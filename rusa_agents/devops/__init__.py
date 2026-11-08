@@ -1,5 +1,20 @@
 """RUSA AI DevOps lifecycle contracts and safe dry-run orchestration."""
 
+from .agent_runtime import (
+    AgentApprovalRequiredError,
+    AgentAuthorizationError,
+    AgentBudgetExceededError,
+    AgentCapabilityDeniedError,
+    AgentExecutionContext,
+    AgentExecutionGrant,
+    AgentHandlerNotRegisteredError,
+    AgentProfile,
+    DevOpsAgentRegistry,
+    DevOpsAgentRuntime,
+    ExecutionPolicyGrant,
+    ScopedToolGateway,
+    ToolInvocationDeniedError,
+)
 from .contracts import (
     ContractValidationError,
     validate_agent_result,
@@ -17,6 +32,19 @@ from .store import (
 )
 
 __all__ = [
+    "AgentApprovalRequiredError",
+    "AgentAuthorizationError",
+    "AgentBudgetExceededError",
+    "AgentCapabilityDeniedError",
+    "AgentExecutionGrant",
+    "AgentExecutionContext",
+    "AgentHandlerNotRegisteredError",
+    "AgentProfile",
+    "DevOpsAgentRegistry",
+    "DevOpsAgentRuntime",
+    "ExecutionPolicyGrant",
+    "ScopedToolGateway",
+    "ToolInvocationDeniedError",
     "ContractValidationError",
     "OutboxLeaseLostError",
     "PostgresInbox",
