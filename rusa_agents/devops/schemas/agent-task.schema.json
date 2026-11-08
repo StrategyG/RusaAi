@@ -80,6 +80,10 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
         },
+        "base_branch": {
+          "type": "string",
+          "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$"
+        },
         "commit_sha": {
           "type": "string",
           "pattern": "^[a-f0-9]{40}$"
