@@ -175,3 +175,12 @@ def test_manifest_requires_agent_ids_for_agent_specific_sources(tmp_path):
 
     with pytest.raises(ValueError, match="agent_specific knowledge requires valid agent_ids"):
         load_manifest(manifest_path)
+
+
+def test_manifest_requires_explicit_scope_for_tagged_agent_sources(tmp_path):
+    manifest_path, _, manifest = _write_fixture(tmp_path)
+    manifest["documents"][0]["agent_ids"] = ["aicode-analyst"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="knowledge_scope must be explicit"):
+        load_manifest(manifest_path)
