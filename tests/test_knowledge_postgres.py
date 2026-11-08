@@ -246,3 +246,139 @@ def test_agent_id_validation_rejects_untrusted_invalid_identifier(knowledge_stor
             query_embedding=_unit_vector(0),
             agent_id="analyst/../../security",
         )
+
+
+def test_project_scoped_agent_retrieval_and_collection_counts(knowledge_store):
+    store, _ = knowledge_store
+    tenant_id = "tenant-agent-project"
+    shared_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://agent-project/shared",
+        title="Shared platform guidance",
+        content_hash="1" * 64,
+        metadata={"knowledge_scope": "shared", "agent_ids": []},
+        chunks=["project boundary shared platform knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+    analyst_global_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://agent-project/analyst-global",
+        title="Analyst general guidance",
+        content_hash="2" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+        },
+        chunks=["project boundary analyst general knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+    analyst_alpha_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://agent-project/analyst-alpha",
+        title="Analyst project alpha guidance",
+        content_hash="3" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-alpha",
+        },
+        chunks=["project boundary analyst alpha only knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+    analyst_beta_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://agent-project/analyst-beta",
+        title="Analyst project beta guidance",
+        content_hash="4" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-beta",
+        },
+        chunks=["project boundary analyst beta only knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+    security_alpha_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://agent-project/security-alpha",
+        title="Security project alpha guidance",
+        content_hash="5" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-security"],
+            "project_id": "project-alpha",
+        },
+        chunks=["project boundary security alpha only knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+
+    alpha_results = store.search(
+        tenant_id=tenant_id,
+        collection="agent",
+        query="project boundary",
+        query_embedding=_unit_vector(0),
+        limit=10,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    )
+    alpha_ids = {item["document_id"] for item in alpha_results}
+    assert {shared_id, analyst_global_id, analyst_alpha_id} <= alpha_ids
+    assert analyst_beta_id not in alpha_ids
+    assert security_alpha_id not in alpha_ids
+
+    beta_results = store.search(
+        tenant_id=tenant_id,
+        collection="agent",
+        query="project boundary",
+        query_embedding=_unit_vector(0),
+        limit=10,
+        agent_id="aicode-analyst",
+        project_id="project-beta",
+    )
+    beta_ids = {item["document_id"] for item in beta_results}
+    assert {shared_id, analyst_global_id, analyst_beta_id} <= beta_ids
+    assert analyst_alpha_id not in beta_ids
+    assert security_alpha_id not in beta_ids
+
+    assert store.get_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=analyst_alpha_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    ) is not None
+    assert store.get_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=analyst_alpha_id,
+        agent_id="aicode-analyst",
+        project_id="project-beta",
+    ) is None
+
+    alpha_collections = store.list_collections(
+        tenant_id=tenant_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    )
+    assert alpha_collections == [{"collection": "agent", "document_count": 3}]
+
+    tenant_shared_collections = store.list_collections(tenant_id=tenant_id)
+    assert tenant_shared_collections == [{"collection": "agent", "document_count": 1}]
+
+
+def test_project_scope_validation_rejects_untrusted_identifier(knowledge_store):
+    store, _ = knowledge_store
+    with pytest.raises(ValueError, match="project_id is invalid"):
+        store.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="needle",
+            query_embedding=_unit_vector(0),
+            agent_id="aicode-analyst",
+            project_id="../other-project",
+        )
