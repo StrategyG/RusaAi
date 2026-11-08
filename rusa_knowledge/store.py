@@ -12,6 +12,7 @@ from .safety import validate_document_metadata
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 
 
 def _vector_literal(vector: list[float], dimensions: int) -> str:
@@ -66,6 +67,13 @@ class PostgresKnowledgeStore:
             raise ValueError("tenant_id is invalid")
         if not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection):
             raise ValueError("collection is invalid")
+
+    @staticmethod
+    def _validate_agent_id(agent_id: str | None) -> None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
 
     def _set_db_role(self, connection: Any) -> None:
         if self.db_role:
@@ -220,8 +228,10 @@ class PostgresKnowledgeStore:
         query: str,
         query_embedding: list[float],
         limit: int = 5,
+        agent_id: str | None = None,
     ) -> list[dict[str, Any]]:
         self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         if not 1 <= limit <= 20:
@@ -230,11 +240,24 @@ class PostgresKnowledgeStore:
         candidate_limit = min(max(limit * 4, 20), 100)
 
         sql = """
-            WITH vector_candidates AS (
+            WITH scoped_chunks AS MATERIALIZED (
+                SELECT c.chunk_id, c.embedding, c.search_vector
+                FROM rusa_knowledge_chunks c
+                JOIN rusa_knowledge_documents d
+                  ON d.tenant_id=c.tenant_id AND d.document_id=c.document_id
+                WHERE c.tenant_id=%s AND c.collection=%s
+                  AND (
+                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                      )
+                  )
+            ),
+            vector_candidates AS (
                 SELECT chunk_id,
                        ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS vector_rank
-                FROM rusa_knowledge_chunks
-                WHERE tenant_id=%s AND collection=%s
+                FROM scoped_chunks
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s
             ),
@@ -243,9 +266,8 @@ class PostgresKnowledgeStore:
                        ROW_NUMBER() OVER (
                            ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
                        ) AS lexical_rank
-                FROM rusa_knowledge_chunks
-                WHERE tenant_id=%s AND collection=%s
-                  AND search_vector @@ plainto_tsquery('simple', %s)
+                FROM scoped_chunks
+                WHERE search_vector @@ plainto_tsquery('simple', %s)
                 ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
                 LIMIT %s
             ),
@@ -268,8 +290,9 @@ class PostgresKnowledgeStore:
             LIMIT %s
         """
         params = (
-            vector, tenant_id, collection, vector, candidate_limit,
-            query, tenant_id, collection, query, query, candidate_limit,
+            tenant_id, collection, agent_id, agent_id,
+            vector, vector, candidate_limit,
+            query, query, query, candidate_limit,
             vector, tenant_id, limit,
         )
         with self._pool.connection() as connection:
@@ -297,8 +320,10 @@ class PostgresKnowledgeStore:
         collection: str,
         document_id: str,
         max_chars: int = 20_000,
+        agent_id: str | None = None,
     ) -> dict[str, Any] | None:
         self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
         try:
             UUID(document_id)
         except (ValueError, TypeError, AttributeError) as exc:
@@ -312,8 +337,15 @@ class PostgresKnowledgeStore:
                 SELECT document_id, title, source_uri, metadata, content_hash, created_at, updated_at
                 FROM rusa_knowledge_documents
                 WHERE tenant_id=%s AND collection=%s AND document_id=%s::uuid
+                  AND (
+                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                      )
+                  )
                 """,
-                (tenant_id, collection, document_id),
+                (tenant_id, collection, document_id, agent_id, agent_id),
             ).fetchone()
             if document is None:
                 return None
