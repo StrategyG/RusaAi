@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -869,7 +869,7 @@ class PostgresWorkflowControlStore:
                 return response
 
             new_version = task["state_version"] + 1
-            conn.execute(
+            updated = conn.execute(
                 """
                 UPDATE public.devops_tasks
                 SET status='running', state_version=%s, updated_at=clock_timestamp()
@@ -1064,7 +1064,7 @@ class PostgresWorkflowControlStore:
             }[status]
             new_version = task["state_version"] + 1
             result_json = _canonical_json(result)
-            conn.execute(
+            updated = conn.execute(
                 """
                 UPDATE public.devops_tasks
                 SET status=%s, state_version=%s, result=%s::jsonb,
