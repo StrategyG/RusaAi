@@ -119,7 +119,11 @@ class ContentAddressedArtifactStore:
         return self.put(tenant_id, encoded, namespace=namespace)
 
     def _read_verified(self, path: Path, expected_digest: str) -> bytes:
-        if path.is_symlink() or not path.is_file():
+        if path.is_symlink():
+            raise ArtifactIntegrityError("artifact object is a symbolic link")
+        if not path.exists():
+            raise ArtifactNotFoundError("artifact object was not found")
+        if not path.is_file():
             raise ArtifactIntegrityError("artifact object is not a regular file")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
