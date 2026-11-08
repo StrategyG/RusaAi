@@ -1,0 +1,356 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "rusa-ai",
+  "mining_profile": "rusa-agent-section-mining-v1",
+  "profiles": [
+    {
+      "agent_id": "supreme-orchestrator",
+      "agent_name": "Supreme Orchestrator",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# SUPREME ORCHESTRATOR AGENT"
+      ],
+      "knowledge_domains": [
+        "agent_capabilities",
+        "workflow",
+        "dependency",
+        "task_state",
+        "policy",
+        "evidence"
+      ]
+    },
+    {
+      "agent_id": "system-architect",
+      "agent_name": "System Architect",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# SYSTEM ARCHITECT AGENT"
+      ],
+      "knowledge_domains": [
+        "system_architecture",
+        "component_boundary",
+        "api",
+        "database",
+        "event",
+        "adr",
+        "scalability",
+        "reliability"
+      ]
+    },
+    {
+      "agent_id": "planner",
+      "agent_name": "Planner",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# PLANNER AGENT"
+      ],
+      "knowledge_domains": [
+        "requirements",
+        "scope",
+        "backlog",
+        "priority",
+        "milestone",
+        "effort",
+        "risk",
+        "acceptance_criteria"
+      ]
+    },
+    {
+      "agent_id": "task-decomposer",
+      "agent_name": "Task Decomposer",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# TASK DECOMPOSER AGENT"
+      ],
+      "knowledge_domains": [
+        "task_contract",
+        "dag",
+        "dependency",
+        "parallelism",
+        "handoff",
+        "task_input_output"
+      ]
+    },
+    {
+      "agent_id": "software-engineer",
+      "agent_name": "Software Engineer",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# SOFTWARE ENGINEER AGENT"
+      ],
+      "knowledge_domains": [
+        "repository_conventions",
+        "source_code",
+        "api_contract",
+        "schema",
+        "tests",
+        "git_workflow",
+        "compatibility"
+      ]
+    },
+    {
+      "agent_id": "devops",
+      "agent_name": "DevOps",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# DEVOPS AGENT"
+      ],
+      "knowledge_domains": [
+        "compute",
+        "storage",
+        "networking",
+        "containers",
+        "ci_cd",
+        "deployment",
+        "backup",
+        "monitoring",
+        "recovery"
+      ]
+    },
+    {
+      "agent_id": "qa-testing",
+      "agent_name": "QA & Testing",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# QA & TESTING AGENT"
+      ],
+      "knowledge_domains": [
+        "unit_testing",
+        "integration_testing",
+        "api_testing",
+        "e2e",
+        "regression",
+        "performance",
+        "agent_behavior",
+        "model_evaluation"
+      ]
+    },
+    {
+      "agent_id": "security-policy",
+      "agent_name": "Security & Policy",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# SECURITY & POLICY AGENT"
+      ],
+      "knowledge_domains": [
+        "identity",
+        "authentication",
+        "authorization",
+        "rls",
+        "oauth",
+        "secrets",
+        "threat_model",
+        "prompt_injection",
+        "audit"
+      ]
+    },
+    {
+      "agent_id": "memory-knowledge",
+      "agent_name": "Memory & Knowledge",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# MEMORY & KNOWLEDGE AGENT"
+      ],
+      "knowledge_domains": [
+        "source_registry",
+        "parsing",
+        "chunking",
+        "extraction",
+        "embedding",
+        "retrieval",
+        "provenance",
+        "versioning",
+        "retention"
+      ]
+    },
+    {
+      "agent_id": "evaluation-reporting",
+      "agent_name": "Evaluation & Reporting",
+      "source_id": "RUSA-AGENT-001",
+      "headings": [
+        "# EVALUATION & REPORTING AGENT"
+      ],
+      "knowledge_domains": [
+        "retrieval_metrics",
+        "agent_metrics",
+        "workflow_outcome",
+        "quality",
+        "cost",
+        "latency",
+        "reliability"
+      ]
+    },
+    {
+      "agent_id": "rusa_plan_agent",
+      "agent_name": "RUSA Plan Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.1 RUSA Plan Agent"
+      ],
+      "knowledge_domains": [
+        "requirements",
+        "backlog",
+        "acceptance_criteria",
+        "dependency",
+        "risk",
+        "operations_feedback"
+      ]
+    },
+    {
+      "agent_id": "rusa_code_agent",
+      "agent_name": "RUSA Code Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.2 RUSA Code Agent"
+      ],
+      "knowledge_domains": [
+        "source_code",
+        "repository",
+        "coding_standards",
+        "api_contract",
+        "git",
+        "pull_request"
+      ]
+    },
+    {
+      "agent_id": "rusa_build_agent",
+      "agent_name": "RUSA Build Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.3 RUSA Build Agent"
+      ],
+      "knowledge_domains": [
+        "build",
+        "dependencies",
+        "reproducibility",
+        "artifacts",
+        "container",
+        "digest",
+        "supply_chain"
+      ]
+    },
+    {
+      "agent_id": "rusa_test_agent",
+      "agent_name": "RUSA Test Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.4 RUSA Test Agent"
+      ],
+      "knowledge_domains": [
+        "test_strategy",
+        "fixtures",
+        "integration",
+        "security_test",
+        "quality_gate",
+        "evidence"
+      ]
+    },
+    {
+      "agent_id": "rusa_release_agent",
+      "agent_name": "RUSA Release Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.5 RUSA Release Agent"
+      ],
+      "knowledge_domains": [
+        "release_policy",
+        "versioning",
+        "changelog",
+        "release_candidate",
+        "manifest",
+        "approvals"
+      ]
+    },
+    {
+      "agent_id": "rusa_deploy_agent",
+      "agent_name": "RUSA Deploy Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.6 RUSA Deploy Agent"
+      ],
+      "knowledge_domains": [
+        "deployment",
+        "environment",
+        "infrastructure",
+        "change_approval",
+        "health_check",
+        "rollback"
+      ]
+    },
+    {
+      "agent_id": "rusa_operate_agent",
+      "agent_name": "RUSA Operate Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.7 RUSA Operate Agent"
+      ],
+      "knowledge_domains": [
+        "runbook",
+        "incident",
+        "service_health",
+        "recovery",
+        "backup_restore",
+        "capacity"
+      ]
+    },
+    {
+      "agent_id": "rusa_monitor_agent",
+      "agent_name": "RUSA Monitor Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 4.8 RUSA Monitor Agent"
+      ],
+      "knowledge_domains": [
+        "logs",
+        "metrics",
+        "traces",
+        "slo",
+        "alert",
+        "anomaly",
+        "capacity",
+        "feedback"
+      ]
+    },
+    {
+      "agent_id": "rusa_devops_orchestrator",
+      "agent_name": "RUSA DevOps Orchestrator",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 2. Pemetaan siklus menjadi AI agent",
+        "## 3. Arsitektur tingkat tinggi",
+        "## 5. Kontrak komunikasi antar-agent",
+        "## 6. Mekanisme workflow dan handoff",
+        "## 12. Keputusan arsitektur yang dikunci"
+      ],
+      "knowledge_domains": [
+        "lifecycle_state",
+        "stage_dependency",
+        "handoff",
+        "gate",
+        "event",
+        "retry",
+        "cancellation"
+      ]
+    },
+    {
+      "agent_id": "rusa_security_guard_agent",
+      "agent_name": "RUSA Security Guard Agent",
+      "source_id": "RUSA-DEVOPS-001",
+      "headings": [
+        "## 2. Pemetaan siklus menjadi AI agent",
+        "## 8. Security, governance, dan human control",
+        "## 12. Keputusan arsitektur yang dikunci"
+      ],
+      "knowledge_domains": [
+        "secret_scan",
+        "dependency_security",
+        "container_security",
+        "tenant_isolation",
+        "privacy",
+        "authorization",
+        "audit",
+        "supply_chain"
+      ]
+    }
+  ]
+}
