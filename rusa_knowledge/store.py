@@ -13,6 +13,7 @@ from .safety import validate_document_metadata
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 
 
 def _vector_literal(vector: list[float], dimensions: int) -> str:
@@ -74,6 +75,13 @@ class PostgresKnowledgeStore:
             not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
         ):
             raise ValueError("agent_id is invalid")
+
+    @staticmethod
+    def _validate_project_id(project_id: str | None) -> None:
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
 
     def _set_db_role(self, connection: Any) -> None:
         if self.db_role:
@@ -231,9 +239,11 @@ class PostgresKnowledgeStore:
         query_embedding: list[float],
         limit: int = 5,
         agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         self._validate_scope(tenant_id, collection)
         self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         if not 1 <= limit <= 20:
@@ -253,6 +263,13 @@ class PostgresKnowledgeStore:
                       OR (
                           %s::text IS NOT NULL
                           AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              d.metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND d.metadata->>'project_id' = %s
+                              )
+                          )
                       )
                   )
             ),
@@ -292,7 +309,7 @@ class PostgresKnowledgeStore:
             LIMIT %s
         """
         params = (
-            tenant_id, collection, agent_id, agent_id,
+            tenant_id, collection, agent_id, agent_id, project_id, project_id,
             vector, vector, candidate_limit,
             query, query, query, candidate_limit,
             vector, tenant_id, limit,
@@ -323,9 +340,11 @@ class PostgresKnowledgeStore:
         document_id: str,
         max_chars: int = 20_000,
         agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
         self._validate_scope(tenant_id, collection)
         self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         try:
             UUID(document_id)
         except (ValueError, TypeError, AttributeError) as exc:
@@ -344,10 +363,17 @@ class PostgresKnowledgeStore:
                       OR (
                           %s::text IS NOT NULL
                           AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND metadata->>'project_id' = %s
+                              )
+                          )
                       )
                   )
                 """,
-                (tenant_id, collection, document_id, agent_id, agent_id),
+                (tenant_id, collection, document_id, agent_id, agent_id, project_id, project_id),
             ).fetchone()
             if document is None:
                 return None
@@ -372,9 +398,17 @@ class PostgresKnowledgeStore:
             "truncated": sum(len(row[0]) for row in chunks) > max_chars,
         }
 
-    def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
+    def list_collections(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
             raise ValueError("tenant_id is invalid")
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
             rows = connection.execute(
@@ -382,11 +416,25 @@ class PostgresKnowledgeStore:
                 SELECT collection, COUNT(*) AS document_count
                 FROM rusa_knowledge_documents
                 WHERE tenant_id=%s
+                  AND (
+                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
                 GROUP BY collection
                 ORDER BY collection
                 LIMIT 100
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id, project_id, project_id),
             ).fetchall()
         return [{"collection": row[0], "document_count": int(row[1])} for row in rows]
 
