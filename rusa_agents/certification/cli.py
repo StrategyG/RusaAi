@@ -6,9 +6,9 @@ import argparse
 import hashlib
 import json
 import sys
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from collections.abc import Sequence
 from typing import Any
 
 from rusa_agents.certification.contracts import (
