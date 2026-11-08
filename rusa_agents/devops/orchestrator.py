@@ -342,6 +342,8 @@ class DevOpsDryRunOrchestrator:
             return {
                 "repository": repository,
                 "plan_ref": plan_ref or f"artifact://dry-run/plans/{workflow_id}",
+                "plan_evidence_ref": f"evidence://dry-run/plans/{workflow_id}",
+                "acceptance_criteria_ref": f"artifact://dry-run/acceptance-criteria/{workflow_id}",
                 "acceptance_criteria": acceptance_criteria,
             }
         if stage == "build":
