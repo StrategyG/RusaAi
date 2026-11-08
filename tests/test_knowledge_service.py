@@ -63,10 +63,12 @@ def test_search_embeds_query_and_returns_store_results():
         collection="agent",
         query="How does RUSA work?",
         limit=3,
+        agent_id="aicode-analyst",
     )
     assert results[0]["content"] == "evidence"
     assert store.search_args["tenant_id"] == "tenant-a"
     assert store.search_args["query_embedding"] == [0.1, 0.2, 0.3]
+    assert store.search_args["agent_id"] == "aicode-analyst"
 
 
 
@@ -172,3 +174,16 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+def test_get_document_passes_agent_scope_to_store():
+    store = FakeStore()
+    service = KnowledgeService(store, FakeEmbeddings())
+    result = service.get_document(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        agent_id="aicode-security",
+    )
+    assert result["document_id"] == "00000000-0000-0000-0000-000000000001"
+    assert store.get_document is not None
