@@ -599,6 +599,135 @@ class PostgresWorkflowControlStore:
                 "task_status": "running",
             }
 
+    def sweep_expired_leases(
+        self,
+        *,
+        tenant_id: str,
+        limit: int = 100,
+    ) -> dict[str, int]:
+        """Fence expired worker leases and publish recovery facts atomically.
+
+        An ordinary expired lease becomes an ambiguous task failure; the
+        orchestrator must reconcile its possible side effects before retrying.
+        A task whose run is already cancelling remains cancel_requested and
+        moves the cancellation record to reconciliation_required.
+        """
+        if isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        swept = {"failed": 0, "reconciliation_required": 0}
+        with self._connect(self.worker_dsn) as conn:
+            self._prepare(conn, tenant_id)
+            expired = conn.execute(
+                """
+                SELECT t.task_id, t.run_id, t.attempt, t.stage, t.lease_epoch,
+                       t.state_version, t.status, w.status, w.cancel_epoch
+                FROM public.devops_tasks AS t
+                JOIN public.devops_workflows AS w
+                  ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
+                WHERE t.tenant_id=%s
+                  AND t.status IN ('accepted','running','validating','cancel_requested')
+                  AND t.lease_until IS NOT NULL
+                  AND t.lease_until <= clock_timestamp()
+                ORDER BY t.lease_until, t.task_id
+                LIMIT %s
+                FOR UPDATE OF t, w SKIP LOCKED
+                """,
+                (tenant_id, limit),
+            ).fetchall()
+
+            for (
+                task_id,
+                run_id,
+                attempt,
+                stage,
+                lease_epoch,
+                old_version,
+                task_status,
+                run_status,
+                cancel_epoch,
+            ) in expired:
+                new_version = old_version + 1
+                is_cancelling = (
+                    task_status == "cancel_requested"
+                    or run_status == "cancel_requested"
+                )
+                conn.execute(
+                    """
+                    UPDATE public.devops_tasks
+                    SET status=%s,
+                        state_version=%s,
+                        side_effect='UNKNOWN',
+                        lease_owner=NULL,
+                        lease_claim_id=NULL,
+                        lease_until=NULL,
+                        updated_at=clock_timestamp()
+                    WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                      AND lease_until <= clock_timestamp()
+                    """,
+                    (
+                        "cancel_requested" if is_cancelling else "failed",
+                        new_version,
+                        tenant_id,
+                        run_id,
+                        task_id,
+                    ),
+                )
+                correlation_id, traceparent = self._event_context(
+                    conn, tenant_id, run_id, task_id
+                )
+                if is_cancelling:
+                    conn.execute(
+                        """
+                        UPDATE public.devops_run_cancellations
+                        SET status='reconciliation_required'
+                        WHERE tenant_id=%s AND run_id=%s AND status='requested'
+                        """,
+                        (tenant_id, run_id),
+                    )
+                    event = self._event(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=attempt,
+                        event_type="audit.recorded",
+                        payload={
+                            "action": "task.cancel.lease_expired",
+                            "outcome": "reconciliation_required",
+                            "resource_ref": f"task://{task_id}/{attempt}",
+                            "state_version": new_version,
+                            "cancel_epoch": cancel_epoch,
+                        },
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                    )
+                    swept["reconciliation_required"] += 1
+                else:
+                    event = self._event(
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=attempt,
+                        event_type="task.failed",
+                        payload={
+                            "lease_epoch": lease_epoch,
+                            "state_version": new_version,
+                            "code": "worker_lease_expired",
+                            "category": "AMBIGUOUS",
+                            "side_effect": "UNKNOWN",
+                        },
+                        correlation_id=correlation_id,
+                        traceparent=traceparent,
+                    )
+                    swept["failed"] += 1
+                self._append_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    event=event,
+                    destination="events",
+                    aggregate_version=new_version,
+                )
+        return swept
+
     def _rpc_receipt(
         self,
         conn: Any,
