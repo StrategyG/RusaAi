@@ -66,8 +66,11 @@ atomic claim transaction and verifies the lease epoch remains zero.
   dependency DAG, acceptance criteria, risks, and approval scopes.
 - The Plan Agent persists plan.md, requirements.md, backlog.yaml,
   acceptance-criteria.md, and risk-assessment.md as tenant-scoped immutable
-  content-addressed artifacts. A separate evidence object records their
-  digests and task provenance.
+  content-addressed artifacts. A separate evidence object maps artifact names
+  to refs and records their digests, tenant, workflow, task, and policy version.
+- Code tasks must carry the Plan Agent evidence ref plus plan and acceptance
+  criteria refs. Code verifies the evidence belongs to the same tenant and
+  workflow and that both document digests match before opening a worktree.
 - Code Agent requires an accepted durable claim, the matching authenticated
   principal, repository.read, repository.branch.write, and a non-empty
   task-specific write scope.
