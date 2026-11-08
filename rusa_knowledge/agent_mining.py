@@ -184,6 +184,9 @@ def prepare_agent_knowledge(
     """Verify original source hashes and build one scoped document per mapped agent."""
     manifest, source_documents = prepare_seed_documents(manifest_path, source_dir)
     mapping, map_sha256 = load_agent_map(agent_map_path)
+    if mapping["project_id"] != manifest["project_id"]:
+        raise ValueError("agent map project_id must match the pinned source manifest")
+    root = Path(source_dir).resolve(strict=True)
     source_by_id = {item.source_id: item for item in source_documents}
     source_manifest = {item["source_id"]: item for item in manifest["documents"]}
     prepared: list[PreparedAgentKnowledge] = []
@@ -194,8 +197,20 @@ def prepare_agent_knowledge(
         source_meta = source_manifest.get(source_id)
         if source is None or source_meta is None:
             raise ValueError(f"agent map references unknown source_id: {source_id}")
+        source_path = root / source_meta["filename"]
+        if source_path.is_symlink() or not source_path.is_file():
+            raise ValueError(f"source '{source_id}' must remain a regular file, not a symlink")
+        if source_path.resolve(strict=True).parent != root:
+            raise ValueError(f"source '{source_id}' escapes the configured source directory")
+        raw_source = source_path.read_bytes()
+        if hashlib.sha256(raw_source).hexdigest() != source.source_sha256:
+            raise ValueError(f"source '{source_id}' changed after source-manifest verification")
+        try:
+            raw_content = raw_source.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"source '{source_id}' is not valid UTF-8 Markdown") from exc
         section_content, locators = extract_heading_sections(
-            source.content, profile["headings"]
+            raw_content, profile["headings"]
         )
         normalized = normalize_text(section_content)
         reject_credential_material(normalized)
