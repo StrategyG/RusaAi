@@ -132,6 +132,8 @@ class FilesystemArtifactStore:
 
         tenant_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         if blob_path.exists():
+            if blob_path.stat().st_size != len(encoded):
+                raise ArtifactIntegrityError("existing content-addressed blob has an invalid size")
             existing = blob_path.read_bytes()
             if hashlib.sha256(existing).hexdigest() != digest:
                 raise ArtifactIntegrityError("existing content-addressed blob failed integrity check")
@@ -223,6 +225,15 @@ class FilesystemArtifactStore:
         if blob_name != f"blobs/{expected_digest}":
             raise ArtifactIntegrityError("artifact manifest contains an unsafe blob reference")
         blob_path = tenant_root / blob_name
+        size_bytes = manifest.get("size_bytes")
+        if (
+            isinstance(size_bytes, bool)
+            or not isinstance(size_bytes, int)
+            or not 1 <= size_bytes <= self.max_artifact_bytes
+            or not blob_path.is_file()
+            or blob_path.stat().st_size != size_bytes
+        ):
+            raise ArtifactIntegrityError("artifact manifest or blob size is invalid")
         try:
             content = blob_path.read_bytes()
         except OSError as exc:
