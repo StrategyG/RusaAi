@@ -41,6 +41,13 @@ const lifecycleAgents = [
   ["Operate", "rusa_operate_agent"], ["Monitor", "rusa_monitor_agent"]
 ];
 
+const productPillars = [
+  { name: "AI Autonomous Software Engineering & DevOps", state: "AICode integration", detail: "Task intake, orchestrator, coding workers, task status, retry, and cancellation." },
+  { name: "RUSA Intelligence", state: "Core API integration", detail: "Inference and AICode runtime are exposed here; memory and knowledge services remain governed by their own APIs." },
+  { name: "RUSA Business", state: "Architecture pillar", detail: "Business operations automation, research, and company analysis." },
+  { name: "RUSA Ecosystem", state: "Architecture pillar", detail: "Marketplace, developer API, external integrations, and agent ecosystem." }
+];
+
 const architectureRoles = [
   "Supreme Orchestrator", "System Architect", "Planner", "Task Decomposer",
   "Software Engineer", "DevOps", "QA & Testing", "Security & Policy",
@@ -388,6 +395,12 @@ export default function Home() {
                   <div className="stat-card"><div className="stat-top"><span>Awaiting approval</span><div className="stat-icon"><ShieldAlert size={16} /></div></div><div className="stat-value">{counts.approvals}</div><div className="stat-foot">Human review required</div></div>
                   <div className="stat-card"><div className="stat-top"><span>Failed / blocked</span><div className="stat-icon"><AlertTriangle size={16} /></div></div><div className="stat-value">{counts.failed}</div><div className="stat-foot">Requires investigation</div></div>
                 </div>
+                <section className="panel mb-4">
+                  <div className="panel-header"><div><div className="panel-title">RUSA AI product pillars</div><div className="panel-subtitle">Four pillars from the RUSA AI architecture</div></div><BrainCircuit size={18} className="text-sky-300" /></div>
+                  <div className="agent-grid">
+                    {productPillars.map((pillar) => <article className="agent-card" key={pillar.name}><div className="flex items-center gap-2"><div className="list-icon"><BrainCircuit size={16} /></div><h3>{pillar.name}</h3></div><div className="agent-state">{pillar.state}</div><p>{pillar.detail}</p></article>)}
+                  </div>
+                </section>
                 <div className="grid-two">
                   <section className="panel">
                     <div className="panel-header"><div><div className="panel-title">Recent task activity</div><div className="panel-subtitle">Latest tasks from the tenant-scoped queue</div></div><button className="btn btn-small" onClick={() => setPage("Tasks")}>View all <ArrowRight size={13} /></button></div>
@@ -474,6 +487,7 @@ export default function Home() {
                   <div className="agent-grid">
                     {lifecycleAgents.map(([name, id], index) => <article className="agent-card" key={id}><div className="flex items-center gap-2"><div className="list-icon"><span className="mono">{String(index + 1).padStart(2, "0")}</span></div><h3>{name}</h3></div><div className="agent-state">{id}</div><p>Lifecycle capability defined in the RUSA Agentic DevOps design. Runtime/API integration is a separate implementation milestone.</p></article>)}
                   </div>
+                  <div className="inline-alert mt-4">Security Guard is a cross-cutting control across lifecycle stages. The current API exposes security worker capability, but a distinct lifecycle Security Guard runtime identity is not yet registered here.</div>
                 </section>
               </div>
             )}

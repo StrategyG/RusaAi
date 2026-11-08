@@ -4,6 +4,10 @@
 
 The Control Center is a separate Next.js application in web/. It consumes the existing FastAPI application through same-origin Next.js route handlers. It does not connect a browser to PostgreSQL, the worker process, a broker, the model provider, or internal tool execution.
 
+## RUSA AI product pillars
+
+The architecture document defines four pillars: AI Autonomous Software Engineering & DevOps, RUSA Intelligence, RUSA Business, and RUSA Ecosystem. The current Control Center integrates AICode task execution and RUSA Intelligence inference. Business automation and Ecosystem marketplace/integration surfaces are presented as architecture pillars, not as implemented backend modules.
+
 ## Implemented integration
 
 | UI capability | Backend contract |
@@ -40,7 +44,7 @@ The current repository implements an AICode orchestrator with analyst, architect
 
 The All Agents catalogue names Supreme Orchestrator, System Architect, Planner, Task Decomposer, Software Engineer, DevOps, QA & Testing, Security & Policy, Memory & Knowledge, and Evaluation & Reporting. These remain a separate architecture catalogue until canonical runtime registrations are available.
 
-The eight Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agents in the Agentic DevOps lifecycle document are displayed as architecture targets. They are not represented as live runtime agents until the corresponding worker registrations, APIs, and execution evidence exist. The source documents also use Supreme Orchestrator, Executive Orchestrator, and DevOps Orchestrator terminology; the UI deliberately does not alias these identities without an explicit architecture decision.
+The eight Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agents in the Agentic DevOps lifecycle document are displayed as architecture targets. Security Guard is represented as a cross-cutting design control; the current API's security worker role is not silently renamed to that lifecycle identity. They are not represented as live runtime agents until the corresponding worker registrations, APIs, and execution evidence exist. The source documents also use Supreme Orchestrator, Executive Orchestrator, and DevOps Orchestrator terminology; the UI deliberately does not alias these identities without an explicit architecture decision.
 
 The API supports the awaiting_approval state and an explicit retry after human review, but it does not currently expose an approve/reject endpoint. The UI therefore never marks a task approved. An authorized human must complete the review through the configured governance process before an operator uses retry.
 
