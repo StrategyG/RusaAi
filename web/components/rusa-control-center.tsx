@@ -201,8 +201,8 @@ const PILLARS = [
 
 const ORCHESTRATOR_STEPS = ["RECEIVE", "UNDERSTAND", "PLAN", "DECOMPOSE", "DELEGATE", "EXECUTE", "VALIDATE", "REVIEW", "COMPLETE", "LEARN"];
 const ROLE_PERMISSIONS: Record<string, string[]> = {
-  platform_admin: ["task:create", "task:read", "task:retry", "task:cancel", "operator metrics"],
-  tenant_admin: ["task:create", "task:read", "task:retry", "task:cancel"],
+  platform_admin: ["task:create", "task:read", "task:retry", "task:cancel", "inference", "operator metrics"],
+  tenant_admin: ["task:create", "task:read", "task:retry", "task:cancel", "inference"],
   developer: ["task:create", "task:read", "inference"],
   read_only: ["task:read"]
 };
