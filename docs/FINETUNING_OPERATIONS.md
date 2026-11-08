@@ -145,3 +145,16 @@ The manual workflow requires a trusted self-hosted GitHub Actions runner registe
 To run: open Actions → **RUSA-AI Agent SFT GPU Training** → Run workflow, check `confirm_gpu_run=true`, and start the job. The run validates data, trains the adapter, evaluates the held-out set, and uploads a short-lived unpromoted candidate artifact. It does not automatically merge weights into the base model or deploy them.
 
 A T4 in a separate Colab/Kaggle session is not automatically connected to GitHub Actions. In that case, run the same training command inside that GPU notebook/runtime after checking out this repository and installing `requirements-train.txt`.
+
+
+### Run on a T4 host directly
+
+On a trusted Linux machine or GPU notebook with an NVIDIA T4 attached:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements-train.txt
+bash scripts/train_rusa_agent_t4.sh
+```
+
+The script verifies the actual CUDA device is an NVIDIA T4 with at least 14 GiB visible VRAM, validates both dataset splits, runs the T4 QLoRA profile, checks that adapter weights were saved, and runs the held-out evaluation gates. A successful training step can still produce a candidate adapter whose evaluation gate fails; such an adapter must remain unpromoted.
