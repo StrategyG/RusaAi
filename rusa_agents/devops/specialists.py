@@ -649,6 +649,7 @@ class CodeAgentExecutor:
             max_steps=self.max_steps,
             max_actions_per_step=8,
             max_output_chars=12000,
+            system_identity="Agentic DevOps Code Agent",
         )
 
     async def execute(
