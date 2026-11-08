@@ -8,7 +8,8 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from rusa_agents.certification.contracts import (
     CertificationContractError,
