@@ -135,3 +135,10 @@ def test_cli_rejects_invalid_json_input(tmp_path, capsys) -> None:
     assert result == cli.EXIT_INPUT_ERROR
     assert output["status"] == "INPUT_ERROR"
     assert "cannot read JSON document" in output["error"]
+
+
+def test_cli_maps_argument_errors_to_input_error(capsys) -> None:
+    result = cli.main(["evaluate", "--record", "missing.json"])
+    captured = capsys.readouterr()
+    assert result == cli.EXIT_INPUT_ERROR
+    assert "usage:" in captured.err.lower()

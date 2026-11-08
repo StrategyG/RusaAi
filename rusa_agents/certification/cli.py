@@ -87,7 +87,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a certification command and return a stable process exit code."""
-    args = _parser().parse_args(argv)
+    try:
+        args = _parser().parse_args(argv)
+    except SystemExit as exc:
+        return EXIT_PASS if exc.code == 0 else EXIT_INPUT_ERROR
+
     try:
         now = _parse_now(args.now)
         if args.command == "validate-release-manifest":
