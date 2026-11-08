@@ -15,10 +15,10 @@ from typing import Any
 from .chunking import chunk_text, normalize_text
 from .safety import reject_credential_material, validate_document_metadata
 from .seed import (
+    prepare_seed_documents,
     SLUG_PATTERN,
     SOURCE_ID_PATTERN,
     TENANT_PATTERN,
-    prepare_seed_documents,
 )
 from .store import COLLECTION_PATTERN
 
@@ -157,7 +157,7 @@ def extract_heading_sections(
         selected.append((start, end, level, target))
 
     selected.sort(key=lambda item: item[0])
-    for previous, current in zip(selected, selected[1:]):
+    for previous, current in zip(selected, selected[1:], strict=False):
         if current[0] < previous[1]:
             raise ValueError("agent map contains overlapping source heading sections")
 
