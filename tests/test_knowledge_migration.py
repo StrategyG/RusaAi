@@ -9,3 +9,12 @@ def test_knowledge_migration_enforces_vector_and_tenant_rls():
     assert "WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true))" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
     assert "rusa_knowledge_worker" in migration
+
+
+def test_agent_scope_migration_adds_metadata_indexes():
+    migration = Path("migrations/008_rag_agent_scope_indexes.sql").read_text(encoding="utf-8")
+    assert "rusa_knowledge_documents_scope_idx" in migration
+    assert "rusa_knowledge_documents_agent_ids_gin" in migration
+    assert "metadata->'agent_ids'" in migration
+    assert "BEGIN;" in migration
+    assert "COMMIT;" in migration
