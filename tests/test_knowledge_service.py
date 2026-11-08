@@ -15,6 +15,7 @@ class FakeStore:
         return [{"document_id": "doc-1", "content": "evidence"}]
 
     def get_document(self, **kwargs):
+        self.get_document_args = kwargs
         return {"document_id": kwargs["document_id"]}
 
     def list_collections(self, **kwargs):
@@ -186,4 +187,4 @@ def test_get_document_passes_agent_scope_to_store():
         agent_id="aicode-security",
     )
     assert result["document_id"] == "00000000-0000-0000-0000-000000000001"
-    assert store.get_document is not None
+    assert store.get_document_args["agent_id"] == "aicode-security"
