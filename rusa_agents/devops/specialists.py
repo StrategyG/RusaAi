@@ -16,7 +16,7 @@ import jsonschema
 import yaml
 
 from .agent_registry import BUILD_AGENT, CODE_AGENT, PLAN_AGENT, authorize_agent_task
-from .artifacts import ContentAddressedArtifactStore
+from .artifacts import ArtifactStoreError, ContentAddressedArtifactStore
 from .contracts import validate_agent_result_for_task
 
 
@@ -685,7 +685,7 @@ class CodeAgentExecutor:
                 raise SpecialistExecutionError(
                     "plan artifact exceeds the Code Agent context limit"
                 )
-        except (ValueError, UnicodeDecodeError, OSError):
+        except (ArtifactStoreError, ValueError, UnicodeDecodeError, OSError):
             return _failure(
                 task,
                 started_at=started,
