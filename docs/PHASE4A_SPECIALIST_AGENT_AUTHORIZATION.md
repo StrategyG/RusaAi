@@ -51,6 +51,9 @@ following to match:
 The task payload is untrusted input. Its allowed_tools, write_scope,
 network destinations, approval reference, and budget never grant themselves
 authority. The trusted grant is supplied separately by the Policy Engine.
+The grant also pins Code writes to explicit feature/feat branches, Operate
+execution to an approved runbook reference, and Deploy to an approved
+environment. Protected branches are not valid Code branch grants.
 
 ## Tool boundary
 
@@ -66,8 +69,10 @@ separate identities so test evidence cannot be self-certified by the Code
 handler. Release preparation is distinct from deployment.
 
 Production Deploy requires a deploy approval scope and an approval reference
-that is present in the trusted grant. Destructive Operate actions require a
-destructive_action approval reference.
+that is present in the trusted grant. Every Deploy tool invocation must match
+the task's target environment and the policy allowlist. Operate runbook
+execution must match the task's exact runbook reference. Destructive Operate
+actions require a destructive_action approval reference.
 
 ## Current boundary and next work
 
