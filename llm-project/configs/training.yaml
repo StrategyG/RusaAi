@@ -1,5 +1,5 @@
 project: llm-project
-status: implemented_pipeline_not_trained
+status: curated_seed_dataset_ready_training_not_run
 
 model:
   id: Qwen/Qwen3-4B-Instruct-2507
@@ -55,7 +55,8 @@ evaluation:
   max_blocked_false_positive_rate: 0.10
 
 notes:
-  - The training pipeline is implemented; no RUSA-AI fine-tuned weights are included or implied.
+  - A 120-example synthetic seed training split and 36-example held-out evaluation split are committed; the QLoRA run has not been executed and no fine-tuned weights are included.
+  - The seed corpus is synthetic and documented in llm-project/data/curated/PROVENANCE.md; review and expand it with authorized examples before production promotion.
   - Curated training and evaluation datasets must be reviewed, licensed, redacted, and split without leakage.
   - The 100-example minimum is a guardrail, not a claim that 100 examples are sufficient for production quality.
   - The model's native context is not the training target; use the configured 4096-token training window until hardware benchmarks justify a change.
