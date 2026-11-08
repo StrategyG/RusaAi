@@ -25,7 +25,6 @@ from .rabbitmq import (
 )
 from .store import OutboxLeaseLostError, PostgresInbox, PostgresOutboxRelay
 
-
 LIFECYCLE_TOPIC = "rusa.lifecycle.v1"
 POLICY_TOPIC = "rusa.policy.v1"
 AUDIT_TOPIC = "rusa.audit.v1"
