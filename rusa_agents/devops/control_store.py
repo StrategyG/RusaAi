@@ -217,6 +217,22 @@ class PostgresWorkflowControlStore:
             ).fetchone()
         if row is None:
             raise WorkflowNotFoundError("task not found")
+        task_contract = row[10]
+        canonical_identity = {
+            "task_id": row[0],
+            "workflow_id": row[1],
+            "tenant_id": row[2],
+            "agent_id": row[3],
+            "stage": row[4],
+            "attempt": row[5],
+        }
+        if not isinstance(task_contract, dict) or any(
+            task_contract.get(field) != value
+            for field, value in canonical_identity.items()
+        ):
+            raise TaskPolicyDeniedError(
+                "task contract identity does not match canonical PostgreSQL task state"
+            )
         return {
             "task_id": row[0],
             "run_id": row[1],
