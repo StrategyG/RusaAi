@@ -81,3 +81,25 @@ def test_rejects_invalid_agent_scope_metadata():
         validate_document_metadata(
             "file:///agent.md", "Notes", {"agent_ids": ["aicode-analyst"]}
         )
+
+
+def test_project_scope_metadata_requires_valid_identifier():
+    validate_document_metadata(
+        "file:///agent.md",
+        "Project notes",
+        {
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "strategyg--rusaai",
+        },
+    )
+    with pytest.raises(ValueError, match="project_id"):
+        validate_document_metadata(
+            "file:///agent.md",
+            "Project notes",
+            {
+                "knowledge_scope": "agent_specific",
+                "agent_ids": ["aicode-analyst"],
+                "project_id": "../tenant-b",
+            },
+        )
