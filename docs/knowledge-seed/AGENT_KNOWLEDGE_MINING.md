@@ -147,6 +147,12 @@ Use the 14 knowledge types identified in the RAG_Cerdas mining implementation as
 
 For RUSA architecture and agent sources, additionally tag records with domain labels such as architecture, agent_contract, communication, workflow, security, operations, testing, evaluation, mcp_integration and knowledge_governance.
 
+The RAG_Cerdas classifier has a separate hierarchical subject taxonomy with 16 top-level categories (including Technology, Artificial Intelligence, Business, Finance, Law, Education and Health) and subcategories. This is a reusable classifier design pattern, not the RUSA domain taxonomy; RUSA must use the domain labels above and add project-specific subdomains only through review.
+
+RAG_Cerdas also provides five logical review roles: Content Integrity, Knowledge Quality, Fact Verification, Contradiction Analysis and Institutional Knowledge Auditor. Its quality model weights extraction integrity, provenance, evidence strength, consistency, source credibility and freshness. Missing dimensions remain null and produce NEEDS_REVIEW rather than being guessed. The score is explicitly uncalibrated and cannot certify external truth or human approval.
+
+Its extractive triage uses explicit review rubrics for quote traceability, context, claim type, comparison/contradiction classification and quarantine recommendation. A direct-contradiction label is not treated as certified fact; the source excerpts and human review remain required.
+
 Extraction controls:
 - Bind every mined claim to an exact source excerpt and source locator.
 - Keep model-extracted claims unverified until review.
