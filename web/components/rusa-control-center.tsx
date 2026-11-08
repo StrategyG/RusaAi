@@ -210,23 +210,28 @@ const PROTECTED_ACTIONS = ["merge", "deploy", "release", "secret_change", "permi
 const DENIED_ACTIONS = ["disable_audit", "exfiltrate_secret", "force_push_main"];
 
 const DEFAULT_ENVELOPE = JSON.stringify({
-  schema_version: 1,
-  type: "task.request",
-  message_id: "msg-721",
-  tenant_id: "tenant-a",
-  run_id: "run-42",
-  task_id: "task-07",
-  attempt: 1,
-  correlation_id: "corr-42",
-  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-  producer: "orchestrator",
-  occurred_at: "2026-11-06T11:00:00Z",
-  payload: {
-    capability: "research",
-    input_ref: "artifact-31-v1",
-    deadline_at: "2026-11-06T11:02:00Z",
-    idempotency_key: "run-42/task-07/1",
-    priority: "P2"
+  protocol_version: "1.0",
+  task_id: "550e8400-e29b-41d4-a716-446655440000",
+  message_id: "550e8400-e29b-41d4-a716-446655440001",
+  type: "task.create",
+  from: { agent_id: "workspace-user", role: "human" },
+  to: { agent_id: "rusa-orchestrator", role: "rusa_orchestrator" },
+  created_at: "2026-11-06T11:00:00Z",
+  task: {
+    objective: "Implement the requested RUSA AI change",
+    context: "Validate the A2A envelope against the repository schema.",
+    acceptance_criteria: [
+      "The change follows the approved architecture",
+      "Relevant tests pass"
+    ],
+    repository: "StrategyG/RusaAi",
+    base_branch: "main",
+    work_branch: "feature/ui-ux-precision"
+  },
+  policy: {
+    allowed_actions: ["repo_read", "branch_create", "workspace_write", "test_run"],
+    prohibited_actions: ["force_push_main", "exfiltrate_secret"],
+    human_approval_required: ["merge", "deploy", "release", "permission_change"]
   }
 }, null, 2);
 
@@ -1001,7 +1006,7 @@ export default function RusaControlCenter() {
                 <Panel title="A2A task envelope validator" subtitle="POST /v1/validate-task · JSON Schema Draft 2020-12">
                   <form onSubmit={validateEnvelope} className="rc-validator">
                     <label>Envelope JSON<textarea spellCheck={false} value={envelopeText} onChange={(event) => { setEnvelopeText(event.target.value); setValidation(null); }} /></label>
-                    <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">Endpoint validates the A2A envelope schema, not AICode task request fields.</span></div>
+                    <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">Schema source: schemas/a2a/task-envelope.schema.json. This validator checks the repository's current A2A envelope contract, not the separate proposed envelope in ADR-COMM-001 and not the AICode create-task request body.</span></div>
                   </form>
                   {validationError && <div className="rc-alert rc-alert-danger">{validationError}</div>}
                   {validation && <div className={"rc-validation-result " + (validation.valid ? "valid" : "invalid")}><div><Badge tone={validation.valid ? "success" : "danger"}>{validation.valid ? "VALID" : "INVALID"}</Badge><strong>{validation.valid ? "Envelope accepted by schema validator" : "Schema validation errors"}</strong></div>{validation.errors.length > 0 && <ul>{validation.errors.map((item, index) => <li key={index}>{item}</li>)}</ul>}</div>}

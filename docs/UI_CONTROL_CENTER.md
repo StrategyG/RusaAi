@@ -50,7 +50,7 @@ The Agentic DevOps lifecycle document also describes RUSA Repository as an evide
 | Task cancellation | `DELETE /v1/aicode/tasks/{task_id}` | Admin roles only in UI; backend remains authoritative |
 | Chat inference | `POST /v1/chat/completions` | Supports streaming when provider does; HTTP 501 falls back to non-streaming |
 | Model discovery | `GET /v1/models` | Added same-origin BFF route |
-| A2A envelope validation | `POST /v1/validate-task` | Validates the A2A envelope schema, not the AICode create-task body |
+| A2A envelope validation | `POST /v1/validate-task` | Validates `schemas/a2a/task-envelope.schema.json`, not the AICode create-task body or the separate proposed ADR envelope |
 | Health | `GET /health`, `GET /health/ready` | Liveness and readiness are separate |
 | Operator metrics | `GET /metrics` | Same-origin BFF route; platform_admin only; metrics key stays server-side |
 

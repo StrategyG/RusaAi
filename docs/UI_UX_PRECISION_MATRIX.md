@@ -30,7 +30,7 @@
 | Governance | Inspect principal, role permission, policy boundaries | Auth session, backend role mapping, AutonomyPolicy | Policy values are source defaults, not runtime policy introspection |
 | Observability | Inspect health and operator metrics | /health, /health/ready, /metrics | Metrics require platform_admin and server-side RUSA_METRICS_API_KEY; task progress polls |
 | Product Pillars | Inspect four product pillars | RUSA_AI_Architecture.md | Business and Ecosystem remain architecture-defined |
-| Developer Tools | Discover model and validate A2A envelope | /v1/models, /v1/validate-task | Envelope validator is not AICode create-task validation |
+| Developer Tools | Discover model and validate A2A envelope | /v1/models, /v1/validate-task | Uses schemas/a2a/task-envelope.schema.json; not AICode create-task validation or the proposed ADR envelope |
 
 ## Agent identity matrix
 
@@ -92,7 +92,7 @@ Each role detail panel presents its objective, responsibilities, inputs, outputs
 - RUSA Business automation and RUSA Ecosystem marketplace/integration modules
 - Runtime registration for all eight lifecycle agents
 
-ADR-COMM-001 is marked Diusulkan. gRPC, RabbitMQ, Kafka/event log, outbox, /runs, and WebSocket are presented as proposed contracts, not current deployment facts.
+ADR-COMM-001 is marked Diusulkan. Its example JSON envelope is a proposed contract and is not the same as the current validator schema at schemas/a2a/task-envelope.schema.json. gRPC, RabbitMQ, Kafka/event log, outbox, /runs, and WebSocket are presented as proposed contracts, not current deployment facts.
 
 ## Interaction and security rules
 
