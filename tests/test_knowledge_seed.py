@@ -165,3 +165,13 @@ def test_apply_requires_an_explicit_tenant_and_dedicated_database(tmp_path, monk
     )
     assert missing_database == 1
     assert "RUSA_KNOWLEDGE_DATABASE_URL is required" in capsys.readouterr().err
+
+
+def test_manifest_requires_agent_ids_for_agent_specific_sources(tmp_path):
+    manifest_path, _, manifest = _write_fixture(tmp_path)
+    manifest["documents"][0]["knowledge_scope"] = "agent_specific"
+    manifest["documents"][0]["agent_ids"] = []
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="agent_specific knowledge requires valid agent_ids"):
+        load_manifest(manifest_path)
