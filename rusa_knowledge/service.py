@@ -50,7 +50,7 @@ class KnowledgeService:
             if not ready:
                 store.close()
                 raise RuntimeError(
-                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql and migrations/008_rag_agent_scope_indexes.sql"
+                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql, migrations/008_rag_agent_scope_indexes.sql, and migrations/009_rag_project_scope_index.sql"
                 )
         return service
 
