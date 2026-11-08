@@ -10,7 +10,6 @@ from rusa_agents.devops.agent_runtime import (
     AgentBudgetExceededError,
     AgentCapabilityDeniedError,
     AgentHandlerNotRegisteredError,
-    AgentProfile,
     DevOpsAgentRegistry,
     DevOpsAgentRuntime,
     ExecutionPolicyGrant,
@@ -238,19 +237,17 @@ def test_monitor_and_security_guard_are_read_only_even_if_task_requests_write():
             )
 
 
-def test_monitor_cannot_receive_network_or_write_scope():
+def test_plan_agent_cannot_receive_network_access_without_registry_eligibility():
     task = _task(
-        "monitor",
-        "rusa_monitor_agent",
-        tools=["metrics.read"],
+        tools=["repository.read"],
         network_access=True,
         destinations=["metrics.internal"],
     )
-    with pytest.raises(AgentCapabilityDeniedError):
+    with pytest.raises(AgentCapabilityDeniedError, match="not eligible"):
         DevOpsAgentRegistry().authorize(
             task,
             authenticated_tenant_id="tenant-a",
-            authenticated_principal="rusa_monitor_agent",
+            authenticated_principal="rusa_plan_agent",
             policy_grant=_grant(task, network_access=True),
         )
 
