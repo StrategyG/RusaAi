@@ -1,4 +1,4 @@
-# Phase 4A — specialist execution authority foundation
+# Phase 4B — Plan and Code specialist execution
 
 ## Scope
 
@@ -55,22 +55,45 @@ The gRPC tests prove a capability-escalated task is rejected before lease
 creation. The PostgreSQL integration test repeats that assertion inside the
 atomic claim transaction and verifies the lease epoch remains zero.
 
-## Explicitly not completed by Phase 4A
+## Phase 4B implementation
 
-- Stage-specific Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor
-  execution handlers.
-- Artifact storage and signed build/SBOM/test evidence.
-- Independent QA verification that evidence matches the exact source commit
-  and artifact digest.
+- Plan Agent returns schema-validated JSON for goal, scope, requirements,
+  dependency DAG, acceptance criteria, risks, and approval scopes.
+- The Plan Agent persists plan.md, requirements.md, backlog.yaml,
+  acceptance-criteria.md, and risk-assessment.md as tenant-scoped immutable
+  content-addressed artifacts. A separate evidence object records their
+  digests and task provenance.
+- Code Agent requires an accepted durable claim, the matching authenticated
+  principal, repository.read, repository.branch.write, and a non-empty
+  task-specific write scope.
+- Code Agent uses a task/attempt/claim-scoped Git worktree. Its tool gateway
+  intersects the agent registry, task capabilities, and the actual file path
+  for every read/write action. The existing workspace gateway remains a
+  second protection layer.
+- Code Agent publishes only its generated feature branch and a draft pull
+  request. It cannot merge, deploy, modify CI, migrations, schemas,
+  dependencies, deployment/infra files, or credential material.
+- The source commit, changed-file manifest, draft PR, and immutable evidence
+  are bound to the Code result. Ambiguous push/PR failures report the side
+  effect as UNKNOWN or APPLIED rather than silently inviting a duplicate retry.
+- Executors accept a lease checkpoint callback so the worker host can enforce
+  heartbeat renewal and cancellation during model/tool execution. The worker
+  host remains responsible for running the heartbeat loop.
+
+## Explicitly not completed by Phase 4B
+
+- Build Agent reproducible build execution and SBOM generation.
+- Independent Test Agent execution and commit/digest-bound QA evidence.
+- Cryptographically signed build, SBOM, test, and release evidence.
 - Release-candidate publication and staging deployment.
-- Production worker-pool provisioning.
+- Deploy, Operate, Monitor, and Security Guard stage handlers.
+- Production worker-pool provisioning and orchestration of live child tasks.
 
 ## Next increments
 
-- **4B — Plan and Code execution:** structured Plan output and isolated
-  task-scoped Git workspaces for Code, with branch-only publication.
 - **4C — Build and independent QA:** reproducible build output, SBOM, test
-  reports, and immutable commit/digest-bound evidence.
+  reports, and immutable commit/digest-bound evidence. QA must be an
+  independent Test Agent identity and cannot PASS without exact evidence.
 - **4D — Release and staging:** verify Build and QA evidence, produce a signed
   release candidate, and deploy only to an approved staging target.
 - **4E — remaining specialists:** integrate Deploy, Operate, Monitor, and
