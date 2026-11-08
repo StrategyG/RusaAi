@@ -531,6 +531,51 @@ def test_cancel_run_requires_reconciliation_for_prior_applied_side_effects():
         _cleanup(tenant_id)
 
 
+def test_worker_runtime_can_update_only_tenant_cancellation_state():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        _claim(store, tenant_id, run_id, task)
+        cancellation = store.cancel_run(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            idempotency_key="worker-reconcile-scope",
+            reason_code="operator_requested",
+            requested_by="rusa_supreme_orchestrator",
+            traceparent=TRACEPARENT,
+        )
+        assert cancellation["status"] == "cancel_requested"
+
+        with store._connect(DSN) as conn:
+            conn.execute("SET LOCAL ROLE rusa_worker_runtime")
+            conn.execute(
+                "SELECT set_config('rusa.tenant_id', %s, true)",
+                (tenant_id,),
+            )
+            updated = conn.execute(
+                """
+                UPDATE public.devops_run_cancellations
+                SET status='reconciliation_required'
+                WHERE tenant_id=%s AND run_id=%s
+                RETURNING status
+                """,
+                (tenant_id, run_id),
+            ).fetchone()
+            cross_tenant = conn.execute(
+                """
+                UPDATE public.devops_run_cancellations
+                SET status='reconciliation_required'
+                WHERE tenant_id=%s AND run_id=%s
+                RETURNING status
+                """,
+                (f"other-{tenant_id}", run_id),
+            ).fetchone()
+        assert updated == ("reconciliation_required",)
+        assert cross_tenant is None
+    finally:
+        _cleanup(tenant_id)
+
+
 def test_cancel_expired_lease_requires_operator_reconciliation():
     tenant_id, run_id, _, task = _create_run()
     store = _control_store()
