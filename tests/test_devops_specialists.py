@@ -1,5 +1,6 @@
 from __future__ import annotations  # noqa: I001
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +46,8 @@ def _task(stage: str) -> dict:
             "repository": "StrategyG/RusaAi",
             "base_branch": "main",
             "plan_ref": "artifact://sha256/" + "a" * 64,
+            "plan_evidence_ref": "evidence://sha256/" + "b" * 64,
+            "acceptance_criteria_ref": "artifact://sha256/" + "c" * 64,
             "acceptance_criteria": ["The example feature has a regression test."],
         }
         scope = ["src/", "tests/", "docs/"]
@@ -141,6 +144,36 @@ def _valid_plan() -> dict:
     }
 
 
+def _attach_plan_provenance(task: dict, store: ContentAddressedArtifactStore) -> None:
+    plan_bytes = b"# Approved plan\nImplement a small feature."
+    acceptance_bytes = (
+        "# Acceptance criteria\n\n"
+        "- **AC-1** — The example feature has a regression test.\n"
+        "  - Verification: run the independent regression test.\n"
+    )
+    plan_ref = store.put(task["tenant_id"], plan_bytes, namespace="artifact")
+    acceptance_ref = store.put(task["tenant_id"], acceptance_bytes, namespace="artifact")
+    evidence = {
+        "schema_version": 1,
+        "tenant_id": task["tenant_id"],
+        "workflow_id": task["workflow_id"],
+        "agent_id": PLAN_AGENT,
+        "artifacts": {
+            "plan.md": plan_ref,
+            "acceptance-criteria.md": acceptance_ref,
+        },
+        "artifact_sha256": {
+            "plan.md": hashlib.sha256(plan_bytes).hexdigest(),
+            "acceptance-criteria.md": hashlib.sha256(acceptance_bytes).hexdigest(),
+        },
+    }
+    task["input"]["plan_ref"] = plan_ref
+    task["input"]["acceptance_criteria_ref"] = acceptance_ref
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+
+
 class FakeProvider:
     def __init__(self, payload: dict):
         self.payload = payload
@@ -180,6 +213,10 @@ async def test_plan_agent_creates_five_immutable_documents_and_evidence(tmp_path
     )
     assert evidence["task_id"] == task["task_id"]
     assert len(evidence["artifact_sha256"]) == 5
+    assert set(evidence["artifacts"]) == {
+        "plan.md", "requirements.md", "backlog.yaml",
+        "acceptance-criteria.md", "risk-assessment.md",
+    }
 
 
 @pytest.mark.asyncio
@@ -330,9 +367,7 @@ class FakeCodeWorker:
 async def test_code_agent_publishes_only_task_feature_branch_and_draft_pr(tmp_path, monkeypatch):
     task = _task("code")
     store = ContentAddressedArtifactStore(tmp_path / "objects")
-    task["input"]["plan_ref"] = store.put(
-        task["tenant_id"], b"# Approved plan\nImplement a small feature.", namespace="artifact"
-    )
+    _attach_plan_provenance(task, store)
     workspace = tmp_path / "worktree"
     manager = FakeWorkspaceManager(workspace)
     publisher = FakePublisher()
@@ -370,9 +405,7 @@ async def test_code_agent_publishes_only_task_feature_branch_and_draft_pr(tmp_pa
 async def test_code_agent_records_applied_side_effect_if_draft_pr_creation_fails(tmp_path, monkeypatch):
     task = _task("code")
     store = ContentAddressedArtifactStore(tmp_path / "objects")
-    task["input"]["plan_ref"] = store.put(
-        task["tenant_id"], b"# Approved plan", namespace="artifact"
-    )
+    _attach_plan_provenance(task, store)
     workspace = tmp_path / "worktree"
     manager = FakeWorkspaceManager(workspace)
     publisher = FakePublisher(fail_pr=True)
