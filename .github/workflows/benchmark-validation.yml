@@ -52,13 +52,110 @@ jobs:
       - name: Validate reasoning dataset
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
           from scripts.benchmark_reasoning import load_dataset
 
-          cases = load_dataset(Path("llm-project/data/reasoning_smoke.jsonl"))
-          ids = [str(case["id"]) for case in cases]
+          dataset_path = Path("llm-project/data/reasoning_smoke.jsonl")
+          cases = load_dataset(dataset_path)
+          ids = [str(case["id"]).strip() for case in cases]
           assert len(ids) == len(set(ids)), "reasoning dataset IDs must be unique"
+          for case in cases:
+              assert str(case["category"]).strip(), f"case {case['id']} has an empty category"
+              accepted = case["accepted_answers"]
+              assert isinstance(accepted, list) and accepted, f"case {case['id']} needs accepted_answers"
+              assert all(isinstance(answer, str) and answer.strip() for answer in accepted), (
+                  f"case {case['id']} has invalid accepted_answers"
+              )
           print(f"Validated {len(cases)} reasoning benchmark cases")
           PY
       - name: Test benchmark scoring
-        run: python -m pytest -q tests/test_benchmarking.py
+        run: |
+          mkdir -p artifacts
+          python -m pytest -q tests/test_benchmarking.py --junitxml=artifacts/benchmark-unit-tests.xml
+      - name: Generate commit-bound test evidence
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import platform
+          import sys
+          import xml.etree.ElementTree as ET
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          dataset_path = Path("llm-project/data/reasoning_smoke.jsonl")
+          junit_path = Path("artifacts/benchmark-unit-tests.xml")
+          root = ET.parse(junit_path).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          totals = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          evidence = {
+              "schema_version": 1,
+              "evidence_id": "RUSA-BENCHMARK-CI",
+              "status": "PASS",
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "source": {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "commit_sha": os.environ["GITHUB_SHA"],
+                  "workflow": os.environ["GITHUB_WORKFLOW"],
+                  "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+                  "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "workflow_url": (
+                      os.environ["GITHUB_SERVER_URL"] + "/" +
+                      os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" +
+                      os.environ["GITHUB_RUN_ID"]
+                  ),
+              },
+              "runtime": {
+                  "python": sys.version.split()[0],
+                  "platform": platform.platform(),
+              },
+              "dataset": {
+                  "path": str(dataset_path),
+                  "sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+                  "case_count": sum(
+                      1 for line in dataset_path.read_text(encoding="utf-8").splitlines()
+                      if line.strip() and not line.lstrip().startswith("#")
+                  ),
+              },
+              "checks": {
+                  "compile": "PASS",
+                  "ruff": "PASS",
+                  "dataset_validation": "PASS",
+                  "unit_tests": {
+                      "status": "PASS" if totals["failures"] == 0 and totals["errors"] == 0 else "FAIL",
+                      **totals,
+                  },
+              },
+              "scope_limitations": [
+                  "This evidence covers benchmark evaluator CI only.",
+                  "It does not contain a live model reasoning score or inference load result.",
+                  "It is not a production release approval or independent QA sign-off.",
+              ],
+          }
+          if evidence["checks"]["unit_tests"]["status"] != "PASS":
+              evidence["status"] = "FAIL"
+          Path("test-evidence.json").write_text(
+              json.dumps(evidence, indent=2, ensure_ascii=False) + "\\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(evidence, indent=2, ensure_ascii=False))
+          PY
+      - name: Upload commit-bound test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rusa-benchmark-test-evidence-${{ github.run_id }}
+          path: |
+            test-evidence.json
+            artifacts/benchmark-unit-tests.xml
+          if-no-files-found: error
+          retention-days: 90
