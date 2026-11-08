@@ -92,6 +92,8 @@ class FilesystemArtifactStore:
         name: str,
         content: str,
         content_type: str,
+        source_commit: str | None = None,
+        parent_refs: list[str] | None = None,
     ) -> ArtifactRecord:
         tenant_key = self._tenant_key(tenant_id)
         if not isinstance(workflow_id, str) or not workflow_id:
@@ -102,6 +104,14 @@ class FilesystemArtifactStore:
             raise ValueError("artifact name must be a safe filename")
         if content_type not in _ALLOWED_CONTENT_TYPES:
             raise ValueError("unsupported DevOps artifact content type")
+        if source_commit is not None and not re.fullmatch(r"[a-f0-9]{40}", source_commit):
+            raise ValueError("source_commit must be a full lowercase Git SHA")
+        if parent_refs is not None and (
+            not isinstance(parent_refs, list)
+            or len(parent_refs) > 100
+            or any(not isinstance(ref, str) or not ref for ref in parent_refs)
+        ):
+            raise ValueError("parent_refs must be a list of at most 100 non-empty references")
         if not isinstance(content, str):
             raise TypeError("artifact content must be UTF-8 text")
         encoded = content.encode("utf-8")
@@ -135,6 +145,10 @@ class FilesystemArtifactStore:
             "size_bytes": len(encoded),
             "created_at": created_at,
             "access_policy": "tenant-private",
+            "lineage": {
+                "source_commit": source_commit,
+                "parent_refs": parent_refs or [],
+            },
             "blob": f"blobs/{digest}",
         }
         self._atomic_write(
@@ -188,6 +202,8 @@ class FilesystemArtifactStore:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ArtifactIntegrityError("artifact manifest is unavailable or invalid") from exc
+        if not isinstance(manifest, dict):
+            raise ArtifactIntegrityError("artifact manifest must be a JSON object")
         if (
             manifest.get("schema_version") != 1
             or manifest.get("artifact_id") != artifact_id
