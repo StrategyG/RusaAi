@@ -129,6 +129,17 @@ _CODE_FORBIDDEN_PARTS = frozenset(
         ".ssh",
         ".aws",
         ".azure",
+        "migrations",
+        "schemas",
+        "deploy",
+        "deployment",
+        "infra",
+        "infrastructure",
+        "terraform",
+        "k8s",
+        "kubernetes",
+        "helm",
+        "systemd",
     }
 )
 _CODE_FORBIDDEN_SUFFIXES = frozenset(
