@@ -70,5 +70,9 @@ def test_devops_lease_migration_has_complete_fencing_and_replay_constraints():
     assert "side_effect IN ('NONE', 'APPLIED', 'UNKNOWN')" in migration
     assert "CREATE TABLE IF NOT EXISTS public.devops_run_cancellations" in migration
     assert "CREATE TABLE IF NOT EXISTS public.devops_task_rpc_receipts" in migration
+    assert "GRANT SELECT ON public.devops_run_cancellations TO rusa_worker_runtime" in migration
+    assert "GRANT UPDATE (status, completed_at) ON public.devops_run_cancellations" in migration
+    assert "FOR SELECT TO rusa_worker_runtime" in migration
+    assert "FOR UPDATE TO rusa_worker_runtime" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
