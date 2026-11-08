@@ -407,6 +407,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [repository_inventory, relevant_code_reading, defect_localization]
+    retrieval_intents:
+      - "Which files implement the requested behavior and where are the relevant entry points?"
+      - "Which tests and code paths are associated with the reported defect?"
     allowed_tool_names: [list_files, read_file, git_diff, search_knowledge, get_document, list_collections]
     retrieval_policy: "shared plus records tagged aicode-analyst"
     runtime_binding: "WorkerRole.ANALYST"
@@ -415,6 +418,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [architecture_review, component_design, implementation_plan]
+    retrieval_intents:
+      - "What current component boundaries and dependencies constrain this change?"
+      - "Which design decisions are proposed, approved or contradicted by code evidence?"
     allowed_tool_names: [list_files, read_file, git_diff, search_knowledge, get_document, list_collections]
     retrieval_policy: "shared plus records tagged aicode-architect"
     runtime_binding: "WorkerRole.ARCHITECT"
@@ -423,6 +429,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [approved_code_changes, tests, application_documentation]
+    retrieval_intents:
+      - "Which API, schema and coding conventions govern the approved change?"
+      - "What test evidence and protected-file restrictions apply?"
     allowed_tool_names: [list_files, read_file, write_file, git_diff, search_knowledge, get_document, list_collections]
     retrieval_policy: "shared plus records tagged aicode-developer"
     runtime_binding: "WorkerRole.DEVELOPER"
@@ -431,6 +440,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [failure_diagnosis, defect_localization, validation_results]
+    retrieval_intents:
+      - "Which prior failure signatures, code paths and tests match this error?"
+      - "What evidence distinguishes a reproducible defect from an environment failure?"
     allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
     allowed_check_profiles: [pytest, compile, ruff]
     retrieval_policy: "shared plus records tagged aicode-debugger"
@@ -440,6 +452,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [pytest, test_cases, regression, validation_evidence]
+    retrieval_intents:
+      - "Which acceptance criteria and regression tests apply to this change?"
+      - "Which test results are tied to the exact source or artifact revision?"
     allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
     allowed_check_profiles: [pytest]
     retrieval_policy: "shared plus records tagged aicode-tester"
@@ -449,6 +464,9 @@ runtime_worker_profiles:
     identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
     profile_status: documented_runtime_worker
     knowledge_domains: [code_security, dependency_review, static_analysis, security_evidence]
+    retrieval_intents:
+      - "Which threat controls, dependency policies and protected paths apply?"
+      - "What static-analysis evidence exists, and what security checks have not run?"
     allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
     allowed_check_profiles: [bandit, ruff, compile]
     retrieval_policy: "shared plus records tagged aicode-security"
