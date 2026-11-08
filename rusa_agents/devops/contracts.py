@@ -16,6 +16,7 @@ _SCHEMA_FILES = {
     "agent_task": "agent-task.schema.json",
     "agent_result": "agent-result.schema.json",
     "workflow_event": "workflow-event.schema.json",
+    "plan_output": "plan-output.schema.json",
 }
 
 
@@ -80,6 +81,10 @@ def validate_agent_result(payload: dict[str, Any]) -> None:
 
 def validate_workflow_event(payload: dict[str, Any]) -> None:
     validate_contract("workflow_event", payload)
+
+
+def validate_plan_output(payload: dict[str, Any]) -> None:
+    validate_contract("plan_output", payload)
 
 
 def validate_agent_result_for_task(
