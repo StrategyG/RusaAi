@@ -10,7 +10,11 @@ Client = mcp.Client
 server = importlib.import_module("rusa_mcp.server")
 
 class FakeKnowledgeService:
+    def __init__(self):
+        self.calls = []
+
     def search(self, **kwargs):
+        self.calls.append(("search", kwargs))
         return [{
             "document_id": "00000000-0000-0000-0000-000000000001",
             "source_uri": "docs/guide.md",
@@ -19,6 +23,7 @@ class FakeKnowledgeService:
         }]
 
     def get_document(self, **kwargs):
+        self.calls.append(("get_document", kwargs))
         return {"document_id": kwargs["document_id"], "content": "full document"}
 
     def list_collections(self, **kwargs):
@@ -26,7 +31,8 @@ class FakeKnowledgeService:
 
 
 def test_mcp_tools_require_request_tenant_and_return_grounded_results(monkeypatch):
-    monkeypatch.setattr(server, "get_knowledge_service", lambda: FakeKnowledgeService())
+    service = FakeKnowledgeService()
+    monkeypatch.setattr(server, "get_knowledge_service", lambda: service)
 
     async def run():
         context_token = server.CURRENT_TENANT.set("tenant-a")
@@ -41,6 +47,9 @@ def test_mcp_tools_require_request_tenant_and_return_grounded_results(monkeypatc
                 )
                 assert result.is_error is False
                 assert "retrieved evidence" in str(result.content)
+                search_call = next(call for call in service.calls if call[0] == "search")
+                assert search_call[1]["tenant_id"] == "tenant-a"
+                assert search_call[1].get("agent_id") is None
         finally:
             server.CURRENT_TENANT.reset(context_token)
 
