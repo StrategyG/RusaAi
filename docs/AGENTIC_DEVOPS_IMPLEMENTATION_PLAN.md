@@ -24,6 +24,9 @@ match a proposed directory layout.
   adapters, Ed25519 detached-JWS signing, and the internal mTLS/SPIFFE
   WorkflowControl gRPC service with task claims, lease heartbeats, state
   fencing, idempotent RPC receipts, and cancellation epochs.
+- Phase 4A (this change) adds the fail-closed registry and policy-grant
+  boundary for the eight lifecycle specialists and the cross-cutting
+  Security Guard. It does not register production handlers or start workers.
 - These are durable transport/control-plane primitives. A production
   RabbitMQ/Kafka cluster, deployed relay process, and fully automated
   eight-stage worker fleet are not provisioned by PR #67.
@@ -128,12 +131,29 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 
 ## Phase 4 — specialist execution and QA
 
-- Implement the eight agents behind per-agent identities and capability
-  allowlists.
-- Keep Code execution in isolated sandbox workspaces.
-- Bind every build/test/release artifact to exact source commit and digest.
-- Require independent QA evidence before release publication.
-- Keep deployment production approvals outside agent authority.
+### Phase 4A — authorization foundation (this change)
+
+- Register all eight lifecycle specialist identities and the cross-cutting
+  Security Guard with immutable stage and capability profiles.
+- Bind task tenant, authenticated SPIFFE principal, and Policy Engine grant.
+- Intersect task capabilities, write scopes, network destinations, approvals,
+  and budgets with the independent policy grant.
+- Expose a scoped tool gateway; handlers do not receive the raw tool executor.
+- Fail closed when a specialist handler is not registered.
+
+**Exit criteria:** authorization tests prove identity, tenant, stage, capability,
+scope, approval, and budget enforcement. This phase does not claim that
+production agent handlers or a worker fleet are provisioned.
+
+### Remaining Phase 4 — specialist adapters and QA
+
+- Implement the eight stage handlers behind per-agent identities and the
+  Phase 4A scoped execution boundary.
+- Keep Code execution in isolated sandbox workspaces and feature branches.
+- Bind every build/test/release artifact to the exact source commit and digest.
+- Require independent QA evidence for the same digest before Release.
+- Keep protected-branch merge and production deployment approvals under
+  human-controlled policy.
 
 **Exit criteria:** a staging workflow produces a signed release candidate
 whose tests and provenance match the exact source revision.
