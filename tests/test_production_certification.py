@@ -245,7 +245,7 @@ def test_release_manifest_accepts_approved_unexpired_high_exception() -> None:
     validate_release_manifest(payload, now=NOW)
 
 
-@pytest.mark.parametrize("severity", ["medium", "low"])
+@pytest.mark.parametrize("severity", ["critical", "high", "medium", "low"])
 def test_release_manifest_rejects_negative_vulnerability_counts(severity: str) -> None:
     payload = release_manifest()
     payload["artifacts"][0]["vulnerability_scan"]["counts"][severity] = -1
