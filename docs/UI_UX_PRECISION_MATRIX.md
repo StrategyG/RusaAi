@@ -113,3 +113,12 @@ The desktop layout uses grouped navigation, a persistent workspace sidebar, dens
 ## Validation
 
 The PR CI workflow runs TypeScript typecheck and Next.js production build, then builds the web Docker image. Compose validation remains part of the repository's existing CI checks.
+
+
+## Cross-stage lifecycle controls
+
+The lifecycle document separately defines:
+
+- `rusa_devops_orchestrator`: delegation, dependency management, stage handoff, and stopping a workflow when a gate fails.
+- `rusa_security_guard_agent`: cross-stage security, privacy, policy, and audit control. It is not a replacement for the eight primary lifecycle agents.
+- Human approver: a human decision-maker for protected-branch merge, critical infrastructure changes, production deployment, and other policy-protected actions. It is not an agent.

@@ -898,6 +898,13 @@ export default function RusaControlCenter() {
                     {activeStage && <div className="rc-stage-detail"><div className="rc-eyebrow">{activeStage.id}</div><h2>{activeStage.name} Agent</h2><p>{activeStage.purpose}</p><div className="rc-detail-columns"><div><h3>Inputs</h3><ul>{activeStage.inputs.map((item) => <li key={item}>{item}</li>)}</ul></div><div><h3>Outputs</h3><ul>{activeStage.outputs.map((item) => <li key={item}>{item}</li>)}</ul></div></div><h3>Exit criteria</h3><ul>{activeStage.exit.map((item) => <li key={item}>{item}</li>)}</ul><div className="rc-alert rc-alert-warning"><LockKeyhole size={15} /> Authority boundary: {activeStage.boundary}</div></div>}
                   </div>
                 </Panel>
+                <Panel title="Cross-stage orchestration and security controls" subtitle="Separate controls defined outside the eight primary lifecycle agents">
+                  <div className="rc-comm-grid">
+                    <div className="rc-comm-card"><strong>rusa_devops_orchestrator</strong><Badge tone="neutral">Cross-stage design</Badge><span>Delegation and handoff</span><small>Distributes work, manages dependencies, forwards stage outputs, and stops the flow when a gate fails.</small></div>
+                    <div className="rc-comm-card"><strong>rusa_security_guard_agent</strong><Badge tone="neutral">Cross-stage design</Badge><span>Security, privacy, policy, audit</span><small>Checks secret scanning, supply-chain provenance, tenant isolation, authorization, data privacy, and prompt/tool risks.</small></div>
+                  </div>
+                  <div className="rc-alert rc-alert-warning"><ShieldAlert size={16} /> Human approver is a human decision-maker, not a ninth agent. Protected-branch merge, critical infrastructure changes, and production deployment require the approval defined by policy.</div>
+                </Panel>
                 <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> Delapan stage ini adalah spesifikasi lifecycle. Backend AICode saat ini menjalankan worker roles Analyst, Architect, Developer, Debugger, Tester, dan Security; belum ada lifecycle registry/API untuk mengklaim delapan stage tersebut aktif.</div>
               </div>
             )}
