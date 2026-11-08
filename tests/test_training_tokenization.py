@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-import torch
+torch = pytest.importorskip("torch")
 
 SCRIPT = Path(__file__).resolve().parents[1] / "llm-project" / "train" / "train_sft.py"
 SPEC = importlib.util.spec_from_file_location("rusa_train_sft", SCRIPT)

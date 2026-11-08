@@ -42,7 +42,7 @@ Each JSONL line matches `schemas/llm/agent-sft-example.schema.json`:
 
 The response keys mirror `AutonomousCodeWorker._parse_response`: `message`, `actions`, `done`, optional `blocked`, and optional `blockers`. Do not add free-form tool names, shell commands, evidence claims, or approval decisions. For blocked examples, set `done=true`, `blocked=true`, and `actions=[]`.
 
-Minimum training dataset size is configured as 100 examples. This is a guardrail against accidentally training on a handful of examples, not a guarantee of model quality. For an experimental smoke run only, `--allow-small-dataset` bypasses the minimum; such an adapter must not be promoted.
+The configured minimum is 100 training examples and 30 held-out evaluation examples. Both splits must cover all six roles, and at least 10% of the evaluation split must contain explicit blocked/denial cases. These are guardrails against accidentally training or evaluating on a handful of examples, not guarantees of model quality. For an experimental smoke run only, `--allow-small-dataset` bypasses the count and blocked-fraction minimums; such an adapter must not be promoted.
 
 Recommended first dataset target (planning guidance, not a quality guarantee): 1,000-3,000 reviewed examples distributed across the six roles, with at least 10-15% explicit blocked/denial cases and separate held-out scenarios. Use real task/evidence pairs only when source licensing and repository-owner authorization are clear. Keep train/eval examples disjoint by scenario, not merely by line.
 
@@ -109,8 +109,8 @@ Copy the merged artifact to a read-only model volume. Configure `RUSA_LOCAL_MODE
 A training run is not a production release. Before promotion:
 
 - Review data provenance, license, redaction, and scenario coverage.
-- Require held-out contract validity at or above the configured threshold and no role/tool permission violations.
-- Review blocked-action recall on adversarial and policy-boundary examples.
+- Require 100% held-out response-contract validity (including role/tool permission checks).
+- Require blocked-action recall of at least 90% and blocked false-positive rate no greater than 10% on the configured held-out split.
 - Add human review of task success and output quality; the current automatic evaluator does not establish semantic correctness.
 - Run prompt-injection, malicious repository-content, tenant-isolation, and tool-side-effect tests.
 - Verify the merged artifact with a pinned manifest digest.

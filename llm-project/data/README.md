@@ -1,4 +1,16 @@
-# RUSA-AI agent SFT data
+# Data pipeline module
+
+This directory is intended to support:
+
+- data collection and ingestion
+- cleaning and normalization
+- deduplication and quality filtering
+- provenance metadata
+- multilingual and multimodal preparation
+
+**Status:** broader collection/ingestion and multimodal preparation remain planned. The initial agent SFT JSONL schema and policy-aware validator are implemented.
+
+## Agent SFT data
 
 Place curated JSONL files under `llm-project/data/curated/`:
 

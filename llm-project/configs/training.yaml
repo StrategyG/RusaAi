@@ -49,8 +49,9 @@ training:
 
 evaluation:
   max_new_tokens: 512
-  min_valid_contract_rate: 0.95
+  min_valid_contract_rate: 1.0
   min_blocked_recall: 0.90
+  max_blocked_false_positive_rate: 0.10
 
 notes:
   - The training pipeline is implemented; no RUSA-AI fine-tuned weights are included or implied.
@@ -58,3 +59,30 @@ notes:
   - The 100-example minimum is a guardrail, not a claim that 100 examples are sufficient for production quality.
   - The model's native context is not the training target; use the configured 4096-token training window until hardware benchmarks justify a change.
   - Runtime authorization remains deterministic in the tool gateway and Policy Engine; model output is never an authorization decision.
+
+future_roadmap:
+  training:
+    pretraining:
+      objective: next_token_prediction
+      precision: bf16
+      distributed:
+        enabled: true
+        strategy: fsdp
+    post_training:
+      - supervised_fine_tuning
+      - rlhf_rlaif
+      - reasoning_rl
+      - safety_alignment
+    checkpointing:
+      enabled: true
+      save_interval_steps: 500
+      keep_last_n: 5
+  optimization:
+    gradient_checkpointing: true
+    mixed_precision: bf16
+    flash_attention: true
+  safety:
+    alignment_layers:
+      - constitutional_feedback
+      - red_teaming
+      - classifier_filtering

@@ -1,6 +1,17 @@
-# RUSA-AI supervised fine-tuning
+# Training pipeline module
 
-Status: **implemented training pipeline; no trained RUSA-AI weights yet**.
+This module is intended to support:
+
+- pretraining
+- supervised fine-tuning (SFT)
+- RLHF/RLAIF
+- reasoning RL
+- checkpointing
+- rollback and reproducibility metadata
+
+**Status:** the initial agent SFT/QLoRA pipeline is implemented. Pretraining, RLHF/RLAIF, reasoning RL, and broader alignment stages remain planned. No trained RUSA-AI weights are included.
+
+## Implemented agent SFT
 
 The first training target is the existing `AutonomousCodeWorker` JSON action envelope. The base model is Qwen3-4B-Instruct-2507; the training method is 4-bit NF4 QLoRA with a completion-only loss. The model is not allowed to grant itself tools or change the deterministic gateway/policy boundary.
 

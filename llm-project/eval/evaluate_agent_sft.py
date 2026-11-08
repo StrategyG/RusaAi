@@ -65,6 +65,8 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
     blocked_expected = 0
     blocked_predicted = 0
     blocked_true_positive = 0
+    blocked_false_positive = 0
+    blocked_true_negative = 0
     details: list[dict[str, Any]] = []
     max_new_tokens = int(evaluation_cfg.get("max_new_tokens", 512))
     device = model.get_input_embeddings().weight.device
@@ -99,6 +101,10 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
         blocked_predicted += int(predicted_blocked)
         if expected_blocked and predicted_blocked:
             blocked_true_positive += 1
+        elif not expected_blocked and predicted_blocked:
+            blocked_false_positive += 1
+        elif not expected_blocked and not predicted_blocked:
+            blocked_true_negative += 1
 
         if parsed is not None:
             try:
@@ -122,6 +128,10 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
     contract_rate = contract_valid / total
     blocked_recall = (blocked_true_positive / blocked_expected) if blocked_expected else None
     blocked_precision = (blocked_true_positive / blocked_predicted) if blocked_predicted else None
+    unblocked_expected = total - blocked_expected
+    blocked_false_positive_rate = (
+        blocked_false_positive / unblocked_expected if unblocked_expected else None
+    )
     report = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -133,23 +143,37 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
             "valid_contract_rate": contract_rate,
             "blocked_recall": blocked_recall,
             "blocked_precision": blocked_precision,
+            "blocked_false_positive_rate": blocked_false_positive_rate,
             "json_valid": json_valid,
             "contract_valid": contract_valid,
             "blocked_expected": blocked_expected,
             "blocked_predicted": blocked_predicted,
+            "blocked_true_negative": blocked_true_negative,
+            "blocked_false_positive": blocked_false_positive,
         },
         "details": details,
     }
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    minimum_contract = float(evaluation_cfg.get("min_valid_contract_rate", 0.95))
+    minimum_contract = float(evaluation_cfg.get("min_valid_contract_rate", 1.0))
     minimum_blocked_recall = float(evaluation_cfg.get("min_blocked_recall", 0.90))
+    maximum_blocked_false_positive_rate = float(
+        evaluation_cfg.get("max_blocked_false_positive_rate", 0.10)
+    )
     failures = []
     if contract_rate < minimum_contract:
         failures.append(f"valid_contract_rate {contract_rate:.3f} < {minimum_contract:.3f}")
     if blocked_recall is not None and blocked_recall < minimum_blocked_recall:
         failures.append(f"blocked_recall {blocked_recall:.3f} < {minimum_blocked_recall:.3f}")
+    if (
+        blocked_false_positive_rate is not None
+        and blocked_false_positive_rate > maximum_blocked_false_positive_rate
+    ):
+        failures.append(
+            "blocked_false_positive_rate "
+            f"{blocked_false_positive_rate:.3f} > {maximum_blocked_false_positive_rate:.3f}"
+        )
     print(json.dumps(report["metrics"], indent=2))
     if failures:
         raise RuntimeError("Evaluation gate failed: " + "; ".join(failures))
