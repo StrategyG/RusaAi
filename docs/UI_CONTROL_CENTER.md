@@ -17,7 +17,7 @@ The Control Center is a separate Next.js application in web/. It consumes the ex
 | Chat | POST /v1/chat/completions |
 | Health | GET /health and GET /health/ready |
 
-The API key is held in an encrypted JWE session cookie with HttpOnly and SameSite attributes. Browser code receives only subject, tenant ID, and roles. Every task endpoint continues to apply backend tenant scoping and task RBAC. Mutating BFF requests require a same-origin Origin header.
+The API key is held in an encrypted JWE session cookie with HttpOnly and SameSite attributes. Browser code receives only subject, tenant ID, and roles. Every task endpoint continues to apply backend tenant scoping and task RBAC. Mutating BFF requests require a same-origin Origin header checked against the request Host; the reverse proxy must preserve Host and set X-Forwarded-Proto. The local Compose service disables Secure cookies for loopback HTTP, while production enables them.
 
 ## Task list API
 

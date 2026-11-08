@@ -48,6 +48,7 @@ services:
       NODE_ENV: production
       RUSA_API_BASE_URL: http://api:8000
       RUSA_WEB_SESSION_SECRET: ${RUSA_WEB_SESSION_SECRET:?Set RUSA_WEB_SESSION_SECRET using a secret manager}
+      RUSA_WEB_COOKIE_SECURE: "true"
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

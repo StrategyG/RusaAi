@@ -38,7 +38,13 @@ export function sameOriginRequest(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   try {
-    return new URL(origin).origin === new URL(request.url).origin;
+    const originUrl = new URL(origin);
+    const requestUrl = new URL(request.url);
+    const requestHost = request.headers.get("host") || requestUrl.host;
+    const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+    const requestProtocol = forwardedProto ? forwardedProto + ":" : requestUrl.protocol;
+    return originUrl.host.toLowerCase() === requestHost.toLowerCase()
+      && originUrl.protocol === requestProtocol;
   } catch {
     return false;
   }

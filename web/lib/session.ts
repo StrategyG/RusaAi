@@ -66,7 +66,9 @@ export async function readServerSession(): Promise<ServerSession | null> {
 export function sessionCookieOptions() {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure:
+      process.env.RUSA_WEB_COOKIE_SECURE === "true" ||
+      (process.env.RUSA_WEB_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production"),
     sameSite: "lax" as const,
     path: "/",
     maxAge: SESSION_TTL_SECONDS
