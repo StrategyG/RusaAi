@@ -1,12 +1,15 @@
 """RUSA AI DevOps lifecycle contracts and safe dry-run orchestration."""
 
+from .artifacts import ArtifactIntegrityError, ArtifactRecord, FilesystemArtifactStore
 from .contracts import (
     ContractValidationError,
     validate_agent_result,
     validate_agent_result_for_task,
     validate_agent_task,
+    validate_plan_output,
     validate_workflow_event,
 )
+from .plan_agent import PlanAgent, PlanContextProvider, PlanValidationError
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
 from .store import (
     OutboxLeaseLostError,
@@ -17,6 +20,12 @@ from .store import (
 )
 
 __all__ = [
+    "ArtifactIntegrityError",
+    "ArtifactRecord",
+    "FilesystemArtifactStore",
+    "PlanAgent",
+    "PlanContextProvider",
+    "PlanValidationError",
     "ContractValidationError",
     "OutboxLeaseLostError",
     "PostgresInbox",
@@ -29,5 +38,6 @@ __all__ = [
     "validate_agent_result",
     "validate_agent_result_for_task",
     "validate_agent_task",
+    "validate_plan_output",
     "validate_workflow_event",
 ]
