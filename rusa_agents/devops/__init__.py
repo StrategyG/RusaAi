@@ -1,5 +1,12 @@
 """RUSA AI DevOps lifecycle contracts and safe dry-run orchestration."""
 
+from .agent_registry import (
+    AGENT_POLICIES,
+    AgentAuthorizationError,
+    AgentPolicy,
+    authorize_agent_task,
+    registered_agent_ids,
+)
 from .contracts import (
     ContractValidationError,
     validate_agent_result,
@@ -17,6 +24,11 @@ from .store import (
 )
 
 __all__ = [
+    "AGENT_POLICIES",
+    "AgentAuthorizationError",
+    "AgentPolicy",
+    "authorize_agent_task",
+    "registered_agent_ids",
     "ContractValidationError",
     "OutboxLeaseLostError",
     "PostgresInbox",
