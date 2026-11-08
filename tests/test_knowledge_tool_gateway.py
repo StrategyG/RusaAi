@@ -28,6 +28,7 @@ def test_knowledge_tools_are_scoped_to_authenticated_task_tenant(tmp_path):
         knowledge_service=service,
         knowledge_tenant_id="tenant-from-queue",
         knowledge_collection="agent",
+        knowledge_project_id="strategyg--rusaai",
     )
 
     result = gateway.execute(
@@ -39,6 +40,7 @@ def test_knowledge_tools_are_scoped_to_authenticated_task_tenant(tmp_path):
     assert service.calls[0][1]["tenant_id"] == "tenant-from-queue"
     assert service.calls[0][1]["collection"] == "agent"
     assert service.calls[0][1]["agent_id"] == "aicode-analyst"
+    assert service.calls[0][1]["project_id"] == "strategyg--rusaai"
 
 
 def test_knowledge_tool_cannot_override_tenant_or_pass_unknown_arguments(tmp_path):
@@ -73,6 +75,7 @@ def test_worker_cannot_choose_collection_and_document_reads_keep_agent_scope(tmp
         knowledge_service=service,
         knowledge_tenant_id="tenant-a",
         knowledge_collection="agent",
+        knowledge_project_id="strategyg--rusaai",
     )
     with pytest.raises(ToolDenied, match="Unexpected arguments"):
         gateway.execute(
@@ -94,3 +97,36 @@ def test_worker_cannot_choose_collection_and_document_reads_keep_agent_scope(tmp
     call = next(call for call in service.calls if call[0] == "get_document")
     assert call[1]["collection"] == "agent"
     assert call[1]["agent_id"] == "aicode-security"
+    assert call[1]["project_id"] == "strategyg--rusaai"
+
+
+def test_list_collections_is_agent_and_project_scoped(tmp_path):
+    service = FakeKnowledgeService()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        knowledge_service=service,
+        knowledge_tenant_id="tenant-a",
+        knowledge_collection="agent",
+        knowledge_project_id="strategyg--rusaai",
+    )
+    result = gateway.execute(
+        {"name": "list_collections", "arguments": {}},
+        WorkerRole.SECURITY,
+    )
+    assert result.ok
+    call = next(call for call in service.calls if call[0] == "list_collections")
+    assert call[1] == {
+        "tenant_id": "tenant-a",
+        "agent_id": "aicode-security",
+        "project_id": "strategyg--rusaai",
+    }
+
+
+def test_gateway_rejects_invalid_project_scope(tmp_path):
+    with pytest.raises(ValueError, match="knowledge project identity"):
+        WorkspaceToolGateway(
+            tmp_path,
+            knowledge_service=FakeKnowledgeService(),
+            knowledge_tenant_id="tenant-a",
+            knowledge_project_id="../tenant-b",
+        )
