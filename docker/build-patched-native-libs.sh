@@ -118,7 +118,7 @@ if expat_version != "expat_2.10.0" or pyexpat.EXPAT_VERSION != expat_version:
 if sqlite3.sqlite_version_info < (3, 54, 1):
     raise SystemExit(f"Expected SQLite >=3.54.1, got {sqlite3.sqlite_version}")
 linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
-linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so.0")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so")
 db = sqlite3.connect(":memory:")
 db.execute("CREATE VIRTUAL TABLE fts_probe USING fts5(content)")
 db.close()
