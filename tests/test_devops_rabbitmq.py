@@ -428,7 +428,7 @@ async def test_outbox_dispatcher_retries_ambiguous_publish_with_same_message_id(
     dispatcher = RabbitMQOutboxDispatcher(
         relay=relay,
         publisher=publisher,
-        jitter=lambda low, high: low,
+        jitter=lambda low, high: high,
     )
     report = await dispatcher.dispatch_once()
 
