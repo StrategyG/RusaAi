@@ -1,6 +1,6 @@
 """Curated, source-pinned Markdown section mining for agent-specific RAG packs."""
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import argparse
 import hashlib
