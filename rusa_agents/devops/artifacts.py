@@ -93,6 +93,7 @@ class FilesystemArtifactStore:
         content: str,
         content_type: str,
         source_commit: str | None = None,
+        source_artifact_digest: str | None = None,
         parent_refs: list[str] | None = None,
     ) -> ArtifactRecord:
         tenant_key = self._tenant_key(tenant_id)
@@ -106,6 +107,10 @@ class FilesystemArtifactStore:
             raise ValueError("unsupported DevOps artifact content type")
         if source_commit is not None and not re.fullmatch(r"[a-f0-9]{40}", source_commit):
             raise ValueError("source_commit must be a full lowercase Git SHA")
+        if source_artifact_digest is not None and not re.fullmatch(
+            r"sha256:[a-f0-9]{64}", source_artifact_digest
+        ):
+            raise ValueError("source_artifact_digest must be a SHA-256 artifact digest")
         if parent_refs is not None and (
             not isinstance(parent_refs, list)
             or len(parent_refs) > 100
@@ -147,6 +152,7 @@ class FilesystemArtifactStore:
             "access_policy": "tenant-private",
             "lineage": {
                 "source_commit": source_commit,
+                "source_artifact_digest": source_artifact_digest,
                 "parent_refs": parent_refs or [],
             },
             "blob": f"blobs/{digest}",
