@@ -159,3 +159,24 @@ def test_agent_mining_dry_run_does_not_require_database_or_embedding(tmp_path, c
     assert output["agent_profile_count"] == 1
     assert output["database_write"] is False
     assert output["embedding_calls"] == 0
+
+
+def test_curated_agent_map_covers_twenty_distinct_profiles_and_source_groups():
+    mapping, map_sha256 = load_agent_map(
+        Path("docs/knowledge-seed/agent_knowledge_map.json")
+    )
+    profiles = mapping["profiles"]
+    assert len(profiles) == 20
+    assert len({profile["agent_id"] for profile in profiles}) == 20
+    assert len(map_sha256) == 64
+    assert sum(profile["source_id"] == "RUSA-AGENT-001" for profile in profiles) == 10
+    assert sum(profile["source_id"] == "RUSA-DEVOPS-001" for profile in profiles) == 10
+    assert {
+        profile["agent_id"] for profile in profiles
+    } >= {
+        "supreme-orchestrator",
+        "system-architect",
+        "memory-knowledge",
+        "rusa_plan_agent",
+        "rusa_security_guard_agent",
+    }
