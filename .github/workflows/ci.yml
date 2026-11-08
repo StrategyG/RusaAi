@@ -54,6 +54,11 @@ jobs:
         run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis
         run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
+      - name: Validate curated agent SFT dataset
+        run: |
+          python llm-project/train/validate_dataset.py \
+            --train-file llm-project/data/curated/train.jsonl \
+            --eval-file llm-project/data/curated/eval.jsonl
       - name: Tests
         run: python -m pytest -q
 
