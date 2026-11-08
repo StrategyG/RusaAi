@@ -132,7 +132,7 @@ jobs:
                   "ruff": "PASS",
                   "dataset_validation": "PASS",
                   "unit_tests": {
-                      "status": "PASS" if totals["failures"] == 0 and totals["errors"] == 0 else "FAIL",
+                      "status": "PASS" if totals["failures"] == 0 and totals["errors"] == 0 and totals["skipped"] == 0 else "FAIL",
                       **totals,
                   },
               },
@@ -145,7 +145,7 @@ jobs:
           if evidence["checks"]["unit_tests"]["status"] != "PASS":
               evidence["status"] = "FAIL"
           Path("test-evidence.json").write_text(
-              json.dumps(evidence, indent=2, ensure_ascii=False) + "\\n",
+              json.dumps(evidence, indent=2, ensure_ascii=False) + "\n",
               encoding="utf-8",
           )
           print(json.dumps(evidence, indent=2, ensure_ascii=False))
