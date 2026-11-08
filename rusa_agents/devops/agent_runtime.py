@@ -7,9 +7,12 @@ permissions. Task JSON is never itself an authorization grant.
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import inspect
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -603,17 +606,38 @@ class DevOpsAgentRuntime:
         policy_grant: ExecutionPolicyGrant,
         tool_delegate: ToolInvoker,
     ) -> dict[str, Any]:
+        task_snapshot = copy.deepcopy(task)
         grant = self.registry.authorize(
-            task,
+            task_snapshot,
             authenticated_tenant_id=authenticated_tenant_id,
             authenticated_principal=authenticated_principal,
             policy_grant=policy_grant,
         )
         handler = self.registry.handler_for(authenticated_principal)
         gateway = ScopedToolGateway(tool_delegate, grant)
-        context = AgentExecutionContext(task=task, grant=grant, tools=gateway)
-        result = handler.execute(context)
-        if inspect.isawaitable(result):
-            result = await result
-        validate_agent_result_for_task(task, result)
+        context = AgentExecutionContext(
+            task=copy.deepcopy(task_snapshot),
+            grant=grant,
+            tools=gateway,
+        )
+        operation = handler.execute(context)
+        if not inspect.isawaitable(operation):
+            raise TypeError("registered agent handlers must implement async execute(context)")
+
+        timeout_seconds = float(grant.max_runtime_seconds)
+        deadline_value = task_snapshot.get("deadline_at")
+        if deadline_value:
+            deadline = datetime.fromisoformat(deadline_value.replace("Z", "+00:00"))
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            remaining = (deadline.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                raise AgentBudgetExceededError("task deadline has expired")
+            timeout_seconds = min(timeout_seconds, remaining)
+
+        try:
+            result = await asyncio.wait_for(operation, timeout=timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            raise AgentBudgetExceededError("agent execution exceeded its task runtime budget") from exc
+        validate_agent_result_for_task(task_snapshot, result)
         return result
