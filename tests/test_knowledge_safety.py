@@ -77,3 +77,7 @@ def test_rejects_invalid_agent_scope_metadata():
             "Notes",
             {"knowledge_scope": "agent_specific", "agent_ids": ["analyst/security"]},
         )
+    with pytest.raises(ValueError, match="must be explicit"):
+        validate_document_metadata(
+            "file:///agent.md", "Notes", {"agent_ids": ["aicode-analyst"]}
+        )
