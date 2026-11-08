@@ -97,7 +97,7 @@ def _extract_sections(source: str, targets: list[str]) -> str:
             raise ValueError(f"source heading has an empty section: {target!r}")
         selected.append((start, end, target))
     selected.sort(key=lambda item: item[0])
-    for previous, current in zip(selected, selected[1:]):
+    for previous, current in zip(selected, selected[1:], strict=False):
         if current[0] < previous[1]:
             raise ValueError("agent map contains overlapping source heading sections")
     sections = ["\n".join(lines[start:end]).strip() for start, end, _ in selected]
