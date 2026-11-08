@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import TOOL_EXECUTIONS
 
@@ -369,11 +370,7 @@ class WorkspaceToolGateway:
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
-        allowed_profiles = {
-            WorkerRole.TESTER: {"pytest"},
-            WorkerRole.DEBUGGER: {"pytest", "compile", "ruff"},
-            WorkerRole.SECURITY: {"bandit", "ruff", "compile"},
-        }
+        allowed_profiles = ROLE_CHECK_PROFILES
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
         return self.sandbox.run(self.workspace, profile)
