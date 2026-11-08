@@ -217,6 +217,19 @@ These are implemented worker roles in the RUSA-AI AICode subsystem, not aliases 
 
 The scope ID is derived from the trusted WorkerRole in the host gateway, not from model-generated arguments. These six scopes remain separate from the ten canonical and eight lifecycle profiles until System Architect approves a formal identity mapping.
 
+### Curated per-agent source-section packs
+
+The feature branch now includes `docs/knowledge-seed/agent_knowledge_map.json` and `rusa_knowledge/agent_mining.py`. The map defines exact Markdown heading subtrees for the ten canonical agents and ten Agentic DevOps/cross-cutting roles. The miner:
+
+- verifies the four original source files against the pinned source manifest before extracting anything;
+- requires each configured heading to exist exactly once and ignores headings inside fenced code blocks;
+- extracts heading subtrees without rewriting their text;
+- records original source line locators, source SHA-256, section SHA-256 and map SHA-256;
+- creates one stable derived document URI per agent with `knowledge_scope=agent_specific` and exactly one `agent_id`;
+- runs a non-writing preflight by default; database writes and embedding calls require explicit `--apply`.
+
+The four original source documents remain shared platform context. The 20 derived packs provide focused per-agent retrieval rather than claiming that the original source documents are confidential or inaccessible to other agents. Six AICode runtime workers still require a separately reviewed source map based on their implementation/code knowledge; they are not silently mapped to the 20 documented roles.
+
 ## 6. Centralized RAG retrieval model
 
 ### Target model
@@ -261,7 +274,7 @@ Therefore the branch establishes an initial per-runtime-worker and per-project r
 4. **Tenant + agent + project isolation — implemented in this feature branch for AICode workers.** Tenant RLS is retained; the host derives project scope from the already-authorized repository, and project-bound agent-specific records are visible only to that agent in that project. PostgreSQL integration tests cover cross-agent and cross-project denial. This is an application-level project metadata filter, not a separate project-level RLS policy.
 5. **Collection selection — worker model argument removed in this branch.** The worker uses the configured collection. Standalone MCP retains its existing collection argument but has no agent identity and can only retrieve shared records.
 6. **Immutable source version history — outstanding.** Re-ingestion still replaces chunks for the stable source URI; source snapshots and version history need a separate migration.
-7. **Per-agent evaluation sets — outstanding.** Retrieval intents are defined; manually reviewed gold labels and actual indexed document IDs must be created after ingestion.
+7. **Per-agent evaluation sets — partially prepared.** The evaluator accepts stable `relevant_source_uris` labels before database UUIDs exist. The 20-profile source map supplies stable agent document URIs, but relevance judgments still require human review after a successful preflight.
 8. **Vector store — retain pgvector.** No measured evidence justifies a second vector database.
 9. **MCP source sync — outstanding.** The current catalog is mined from repository code/docs, not live remote MCP resources. Add live connectors only after endpoint, principal, scopes, allowlist and approval are configured.
 
@@ -275,6 +288,7 @@ Candidate metrics:
 - Conflict detection precision/recall.
 - Agent-scope leakage rate (target: zero).
 - Tenant/project isolation leakage rate (target: zero).
+- Per-agent source URI coverage and section-locator validity.
 - Prompt-injection resistance for retrieved external content.
 - Retrieval latency and index freshness.
 
