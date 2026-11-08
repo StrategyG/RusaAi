@@ -2,7 +2,12 @@
 
 ## Scope
 
-This increment implements the broker adapter for durable commands. It does not connect the existing AICode queue or the synthetic DevOps dry-run to RabbitMQ, and it does not start a production relay or worker pool. A worker must not consume task requests until the durable claim/lease transaction and its `task.accepted` outbox event are implemented.
+This document covers the RabbitMQ command adapter. It does not connect or replace
+the existing AICode `aicode_jobs` queue, and it does not start a production
+relay or worker pool. The adjacent Phase 3C/3D adapters (Kafka and gRPC
+WorkflowControl) are included in PR #67 and are documented in the implementation
+plan. A worker must not execute or acknowledge a `task.request` until its
+`ClaimTask` RPC returns an accepted claim ID and lease epoch.
 
 ## Routing contract
 
@@ -42,4 +47,16 @@ The dispatcher signing key must map to the producer identity that created the co
 
 ## Current boundary and next work
 
-This increment provides the transport primitives and unit coverage for routing, signatures, publisher confirms, manual acknowledgements, bounded requeue, topology, and outbox settlement. It does not yet provision a RabbitMQ cluster, deploy a relay container, integrate worker claim/lease operations, expose the control queue to workers, or implement Kafka/gRPC. Those are separate reviewable increments. Production rollout requires a quorum-capable RabbitMQ cluster, mTLS workload certificates, managed Ed25519 key rotation, queue permissions per capability, and operational DLQ/redelivery monitoring.
+This increment provides routing, signatures, publisher confirms, manual
+acknowledgements, bounded requeue, topology, and outbox settlement. PR #67 also
+adds the adjacent Kafka event-log adapter and the mTLS/SPIFFE gRPC control
+plane: durable `ClaimTask`, lease heartbeats, fenced progress/result receipts,
+and P0 cancellation with a monotonic cancel epoch. A task with an applied or
+unknown side effect keeps cancellation in `reconciliation_required`; it is not
+silently finalized as cancelled.
+
+The current boundary remains explicit: no production RabbitMQ/Kafka cluster,
+production relay deployment, or fully automated eight-stage worker fleet is
+provisioned by this PR. Production rollout requires quorum-capable RabbitMQ,
+managed Kafka topics/ACLs, workload certificate and Ed25519 key rotation,
+queue/topic permissions per identity, and operational DLQ/replay monitoring.
