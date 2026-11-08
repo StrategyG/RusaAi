@@ -20,15 +20,14 @@ Store the reviewed cases as JSONL (one case object per line). After the relevant
 
 ```bash
 rusa-knowledge evaluate \\
-  --dataset ./analyst-gold.jsonl \\
+  --dataset ./rusa-plan-gold.jsonl \\
   --tenant-id '<authorized-rusa-tenant>' \\
   --collection agent \\
-  --agent-id aicode-analyst \\
-  --project-id strategyg--rusaai \\
+  --agent-id rusa_plan_agent \\
   --k 5
 ```
 
-Use the actual agent ID from the curated profile and omit `--project-id` for agent-wide knowledge. Omit `--agent-id` only when intentionally evaluating shared-only knowledge. The CLI reports the exact tenant, collection, agent, and project filters alongside Recall@K, MRR@K, and NDCG@K. The operator-supplied filters are not an authenticated worker principal; run the evaluation only with an authorized tenant and a restricted knowledge database role.
+Use the actual agent ID from the curated 20-profile map (for example, `rusa_plan_agent` or `system-architect`). The six `aicode-*` runtime workers are a separate profile set and do not yet have a mined gold set. Omit `--project-id` for agent-wide knowledge. Omit `--agent-id` only when intentionally evaluating shared-only knowledge. The CLI reports the exact tenant, collection, agent, and project filters alongside Recall@K, MRR@K, and NDCG@K. The operator-supplied filters are not an authenticated worker principal; run the evaluation only with an authorized tenant and a restricted knowledge database role.
 
 ## Required evaluation dimensions
 
