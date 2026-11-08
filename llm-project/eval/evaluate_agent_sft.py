@@ -133,6 +133,8 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
         })
 
     total = len(records)
+    if blocked_expected == 0 or blocked_expected == total:
+        raise ValueError("evaluation split must include both blocked and unblocked examples")
     valid_json_rate = json_valid / total
     contract_rate = contract_valid / total
     blocked_recall = (blocked_true_positive / blocked_expected) if blocked_expected else None

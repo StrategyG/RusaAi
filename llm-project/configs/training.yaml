@@ -13,6 +13,7 @@ dataset:
   min_train_examples: 100
   min_eval_examples: 30
   min_blocked_eval_fraction: 0.10
+  min_unblocked_eval_fraction: 0.50
   required_roles: [analyst, architect, developer, debugger, tester, security]
   max_seq_length: 4096
 

@@ -19,6 +19,7 @@ from rusa_training.dataset import (  # noqa: E402
     load_jsonl,
     sha256_file,
     validate_dataset_splits,
+    validate_eval_distribution,
 )
 
 LOGGER = logging.getLogger("rusa-training")
@@ -152,13 +153,15 @@ def run_training(config_path: Path, *, train_path: Path | None = None, eval_path
                 f"missing train={sorted(required_roles - train_roles)}, "
                 f"missing eval={sorted(required_roles - eval_roles)}"
             )
-    blocked_fraction = sum(bool(item["response"].get("blocked", False)) for item in eval_records) / len(eval_records)
-    minimum_blocked_fraction = float(dataset_cfg.get("min_blocked_eval_fraction", 0.10))
-    if not allow_small_dataset and blocked_fraction < minimum_blocked_fraction:
-        raise ValueError(
-            f"Blocked eval examples are {blocked_fraction:.1%}; "
-            f"minimum is {minimum_blocked_fraction:.1%}"
-        )
+    if not allow_small_dataset:
+        try:
+            validate_eval_distribution(
+                eval_records,
+                min_blocked_fraction=float(dataset_cfg.get("min_blocked_eval_fraction", 0.10)),
+                min_unblocked_fraction=float(dataset_cfg.get("min_unblocked_eval_fraction", 0.50)),
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
     if training_cfg.get("method", "qlora") != "qlora":
         raise ValueError("This implementation currently supports method: qlora only")
 

@@ -7,6 +7,7 @@ from rusa_training.dataset import (
     load_jsonl,
     validate_agent_response,
     validate_dataset_splits,
+    validate_eval_distribution,
     validate_record,
 )
 
@@ -111,3 +112,17 @@ def test_train_eval_split_rejects_same_content_with_different_ids():
     evaluation = make_record("eval-1")
     with pytest.raises(DatasetValidationError, match="duplicate examples"):
         validate_dataset_splits([train], [evaluation])
+
+
+def test_eval_distribution_requires_both_blocked_and_unblocked_cases():
+    blocked = make_record("blocked-1", response={
+        "message": "I cannot access credentials.",
+        "actions": [],
+        "done": True,
+        "blocked": True,
+        "blockers": ["Credential access is prohibited."],
+    })
+    unblocked = [make_record(f"normal-{index}") for index in range(9)]
+    validate_eval_distribution([blocked, *unblocked], min_blocked_fraction=0.10, min_unblocked_fraction=0.50)
+    with pytest.raises(DatasetValidationError, match="unblocked eval fraction"):
+        validate_eval_distribution([blocked], min_blocked_fraction=0.10, min_unblocked_fraction=0.50)

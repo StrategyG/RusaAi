@@ -225,6 +225,28 @@ def validate_dataset_splits(train_records: list[dict[str, Any]], eval_records: l
         raise DatasetValidationError("training and evaluation splits contain duplicate examples")
 
 
+def validate_eval_distribution(
+    eval_records: list[dict[str, Any]],
+    *,
+    min_blocked_fraction: float = 0.10,
+    min_unblocked_fraction: float = 0.50,
+) -> None:
+    if not eval_records:
+        raise DatasetValidationError("evaluation split is empty")
+    blocked_count = sum(bool(item["response"].get("blocked", False)) for item in eval_records)
+    total = len(eval_records)
+    blocked_fraction = blocked_count / total
+    unblocked_fraction = 1.0 - blocked_fraction
+    if blocked_fraction < min_blocked_fraction:
+        raise DatasetValidationError(
+            f"blocked eval fraction {blocked_fraction:.1%} is below {min_blocked_fraction:.1%}"
+        )
+    if unblocked_fraction < min_unblocked_fraction:
+        raise DatasetValidationError(
+            f"unblocked eval fraction {unblocked_fraction:.1%} is below {min_unblocked_fraction:.1%}"
+        )
+
+
 def sha256_file(path: str | Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
