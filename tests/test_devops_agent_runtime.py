@@ -463,6 +463,58 @@ async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_dest
 
 
 @pytest.mark.asyncio
+async def test_repository_and_artifact_reads_are_bound_to_task_resources():
+    task = _task(tools=["repository.read", "artifact.read"])
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_plan_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    assert await gateway.invoke(
+        "repository.read", {"repository": "StrategyG/RusaAi"}
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="repository"):
+        await gateway.invoke("repository.read", {"repository": "other/private-repo"})
+    assert await gateway.invoke(
+        "artifact.read", {"resource_ref": "artifact://plans/current"}
+    ) == {"ok": True}
+    with pytest.raises(ToolInvocationDeniedError, match="artifact reference"):
+        await gateway.invoke(
+            "artifact.read", {"resource_ref": "artifact://plans/unapproved"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_test_agent_executes_only_against_the_task_commit_and_artifact_digest():
+    task = _task(
+        "test",
+        "rusa_test_agent",
+        tools=["test.execute"],
+    )
+    grant = DevOpsAgentRegistry().authorize(
+        task,
+        authenticated_tenant_id="tenant-a",
+        authenticated_principal="rusa_test_agent",
+        policy_grant=_grant(task),
+    )
+    gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
+    with pytest.raises(ToolInvocationDeniedError, match="exact task commit"):
+        await gateway.invoke(
+            "test.execute",
+            {"commit_sha": "c" * 40, "artifact_digest": task["input"]["artifact_digest"]},
+        )
+    assert await gateway.invoke(
+        "test.execute",
+        {
+            "commit_sha": task["input"]["commit_sha"],
+            "artifact_digest": task["input"]["artifact_digest"],
+        },
+    ) == {"ok": True}
+
+
+@pytest.mark.asyncio
 async def test_production_deploy_gateway_requires_the_exact_approved_environment_and_reference():
     task = _task(
         "deploy",
