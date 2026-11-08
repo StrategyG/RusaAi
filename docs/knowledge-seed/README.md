@@ -105,8 +105,10 @@ The MCP service is separately deployed and read-only. The core API does not enab
 ## Operational boundaries
 
 - This seed does not deploy PostgreSQL, the MCP service, or worker retrieval.
-- This seed does not change the existing database migration or RAG retrieval algorithm.
-- Current retrieval uses pgvector plus PostgreSQL full-text search with reciprocal-rank fusion; no external reranker is added here.
+- This seed does not deploy PostgreSQL, the MCP service, or worker retrieval.
+- Current retrieval uses pgvector plus PostgreSQL full-text search with weighted reciprocal-rank fusion; no external reranker is added here.
+- The feature branch applies the same metadata visibility filter to vector and lexical candidates before fusion: shared records plus records tagged for the authenticated worker scope.
+- The RUSA Knowledge MCP endpoint has tenant identity but no authenticated agent identity mapping in this increment, so it can retrieve shared records only.
 - Retrieved content is evidence, not instructions.
 - Proposed design records remain visibly proposed and unverified.
 - Tenant isolation and forced row-level security remain mandatory.
