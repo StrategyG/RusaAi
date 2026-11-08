@@ -34,16 +34,16 @@
       "implementation_status": "NOT_VERIFIED",
       "agent_ids": [],
       "agent_names": [
-        "SUPREME ORCHESTRATOR",
-        "SYSTEM ARCHITECT",
-        "PLANNER",
-        "TASK DECOMPOSER",
-        "SOFTWARE ENGINEER",
-        "DEVOPS",
-        "QA & TESTING",
-        "SECURITY & POLICY",
-        "MEMORY & KNOWLEDGE",
-        "EVALUATION & REPORTING"
+        "SUPREME ORCHESTRATOR AGENT",
+        "SYSTEM ARCHITECT AGENT",
+        "PLANNER AGENT",
+        "TASK DECOMPOSER AGENT",
+        "SOFTWARE ENGINEER AGENT",
+        "DEVOPS AGENT",
+        "QA & TESTING AGENT",
+        "SECURITY & POLICY AGENT",
+        "MEMORY & KNOWLEDGE AGENT",
+        "EVALUATION & REPORTING AGENT"
       ],
       "sha256": "43da306c109b1f768586fc2ff518a13f246a4d6543bce449dab8fef7e309e8e5"
     },
