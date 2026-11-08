@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
   }
   const response = await backendFetch("/v1/chat/completions", session, {
     method: "POST",
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: request.signal
   });
   if (response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
     return new Response(response.body, {

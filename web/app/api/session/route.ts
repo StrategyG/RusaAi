@@ -12,11 +12,37 @@ export const runtime = "nodejs";
 export async function GET() {
   const session = await readServerSession();
   if (!session) return NextResponse.json({ error: "No active session." }, { status: 401 });
-  return NextResponse.json({
-    subject: session.subject,
-    tenant_id: session.tenantId,
-    roles: session.roles
-  });
+  try {
+    const response = await fetch(backendBaseUrl() + "/v1/auth/session", {
+      headers: { "X-API-Key": session.apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000)
+    });
+    if (response.status === 401 || response.status === 403) {
+      return NextResponse.json({ error: "Session is no longer authorized. Sign in again." }, { status: 401 });
+    }
+    if (!response.ok) {
+      return NextResponse.json({ error: "RUSA API identity could not be revalidated." }, { status: 503 });
+    }
+    const identity = await response.json();
+    if (
+      typeof identity.subject !== "string" ||
+      typeof identity.tenant_id !== "string" ||
+      !Array.isArray(identity.roles) ||
+      !identity.roles.every((role: unknown) => typeof role === "string") ||
+      identity.subject !== session.subject ||
+      identity.tenant_id !== session.tenantId
+    ) {
+      return NextResponse.json({ error: "Session identity changed or is invalid. Sign in again." }, { status: 401 });
+    }
+    return NextResponse.json({
+      subject: identity.subject,
+      tenant_id: identity.tenant_id,
+      roles: identity.roles
+    });
+  } catch {
+    return NextResponse.json({ error: "RUSA API identity service is unavailable." }, { status: 503 });
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -30,8 +56,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-  if (!apiKey || apiKey.length > 4096) {
-    return NextResponse.json({ error: "Enter a valid tenant API key." }, { status: 400 });
+  if (!apiKey || apiKey.length > 2048) {
+    return NextResponse.json({ error: "Enter a valid tenant API key (maximum 2,048 characters)." }, { status: 400 });
   }
 
   try {
@@ -56,6 +82,9 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await issueSessionToken(apiKey, identity);
+    if (token.length > 3800) {
+      return NextResponse.json({ error: "The encrypted session would exceed the safe browser-cookie size." }, { status: 400 });
+    }
     const result = NextResponse.json({
       subject: identity.subject,
       tenant_id: identity.tenant_id,

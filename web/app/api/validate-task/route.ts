@@ -16,8 +16,15 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
-  if (!body || typeof body !== "object" || !("envelope" in body)) {
+  if (!body || typeof body !== "object" || Array.isArray(body) || !("envelope" in body)) {
     return NextResponse.json({ error: "An envelope object is required." }, { status: 400 });
+  }
+  const envelope = (body as { envelope?: unknown }).envelope;
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return NextResponse.json({ error: "Envelope must be a JSON object." }, { status: 400 });
+  }
+  if (new TextEncoder().encode(JSON.stringify(envelope)).byteLength > 262144) {
+    return NextResponse.json({ error: "Envelope exceeds the 256 KiB web validator limit." }, { status: 413 });
   }
   const response = await backendFetch("/v1/validate-task", session, {
     method: "POST",
