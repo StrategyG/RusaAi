@@ -57,6 +57,12 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
         raise ValueError("agent_ids must be a unique array of valid agent identifiers")
     if knowledge_scope == "agent_specific" and not agent_ids:
         raise ValueError("agent_specific knowledge requires at least one agent_id")
+    project_id = metadata.get("project_id")
+    if project_id is not None and (
+        not isinstance(project_id, str)
+        or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", project_id)
+    ):
+        raise ValueError("project_id must be a valid bounded project identifier")
     try:
         parsed = urlsplit(source_uri)
     except ValueError as exc:
