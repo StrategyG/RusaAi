@@ -80,6 +80,10 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
         },
+        "base_branch": {
+          "type": "string",
+          "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$"
+        },
         "commit_sha": {
           "type": "string",
           "pattern": "^[a-f0-9]{40}$"
@@ -89,6 +93,10 @@
           "pattern": "^sha256:[a-f0-9]{64}$"
         },
         "plan_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "plan_evidence_ref": {
           "type": "string",
           "format": "uri"
         },
@@ -455,7 +463,9 @@
             "required": [
               "repository",
               "plan_ref",
-              "acceptance_criteria"
+              "acceptance_criteria",
+              "plan_evidence_ref",
+              "acceptance_criteria_ref"
             ]
           }
         }

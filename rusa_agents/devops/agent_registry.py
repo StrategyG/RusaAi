@@ -349,16 +349,18 @@ def authorize_agent_task(
     (for example, the mTLS/SPIFFE certificate), never from the task body or
     transport headers.
     """
-    validate_agent_task(task)
     if not isinstance(authenticated_principal, str) or not authenticated_principal:
         raise AgentAuthorizationError("authenticated agent principal is required")
+    if authenticated_principal not in AGENT_POLICIES:
+        raise AgentAuthorizationError("authenticated agent identity is not registered")
+    if not isinstance(task, dict) or task.get("agent_id") != authenticated_principal:
+        raise AgentAuthorizationError("authenticated principal does not match task agent_id")
 
+    validate_agent_task(task)
     agent_id = task["agent_id"]
     policy = AGENT_POLICIES.get(agent_id)
     if policy is None:
         raise AgentAuthorizationError("agent identity is not registered")
-    if authenticated_principal != agent_id:
-        raise AgentAuthorizationError("authenticated principal does not match task agent_id")
     if policy.stage is not None and task["stage"] != policy.stage:
         raise AgentAuthorizationError("agent identity is not authorized for this lifecycle stage")
 

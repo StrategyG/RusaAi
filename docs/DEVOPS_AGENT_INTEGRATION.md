@@ -110,5 +110,9 @@ budget, deadline, and cancellation checks remain separate mandatory gates.
 | 3C — Kafka event log | Tenant/run partitioning, signed event publishing, idempotent consumer projections | Publish-confirm, replay and duplicate-consumer tests |
 | 3D — gRPC control plane | mTLS/SPIFFE identity, scoped DB roles, RPC deadlines, claim/lease/state fencing, cancellation | Identity, authorization, claim, heartbeat, result receipt and cancel tests |
 | 3E — Reliability validation | Crash/restart, redelivery, replay, cancellation, lease expiry and side-effect reconciliation | CI evidence; production broker/worker provisioning remains a separate rollout gate |
-| 4 — Specialist execution | Eight agents, per-agent identity, capability enforcement, independent QA | Staging candidate with exact commit/digest evidence |
+| 4A — Specialist authority | Eight stage identities, capability ceilings, task write scopes, read-only Monitor/Security Guard | Runtime identity and claim checks |
+| 4B — Plan and Code | Structured plan artifacts, task-scoped worktree, branch-only publication | Immutable plan/code evidence and draft PR |
+| 4C — Build and QA | Reproducible build, SBOM, independent Test Agent | Exact commit/digest-bound QA evidence |
+| 4D — Release and staging | Verify provenance, sign release candidate, staging-only deploy | Signed candidate with matching test evidence |
+| 4E — remaining specialists | Deploy, Operate, Monitor and Security Guard handlers | Allowlisted service/telemetry integration |
 | 5 — Operations and feedback | Operate/Monitor, SLO, alerts, budget, kill-switch, feedback | Security, SRE and product-owner sign-off |

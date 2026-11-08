@@ -128,7 +128,7 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 
 ## Phase 4 — specialist execution and QA
 
-**Phase 4A is implemented in the stacked specialist-execution PR:**
+**Phase 4A (PR #68) establishes the specialist authority boundary:**
 
 - Adds a fail-closed registry for all eight lifecycle specialist identities
   plus the cross-cutting Security Guard.
@@ -139,19 +139,27 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
   the PostgreSQL row-lock transaction before a lease is created.
 - Requires an explicit approval reference for production Deploy tasks.
 
+**Phase 4B (this increment) implements Plan and Code execution:**
+
+- Plan Agent validates a structured plan and persists five tenant-scoped,
+  content-addressed planning artifacts plus provenance evidence.
+- Code Agent requires an accepted claim and live lease/cancellation
+  checkpoints, then works in a task/attempt/claim-scoped Git worktree.
+- The Code tool gateway enforces actual file paths against task write scopes
+  and publishes only a feature branch plus draft pull request.
+- Source commit, changed-file hashes, branch and PR are recorded as immutable
+  evidence. Ambiguous publication outcomes are not silently retried.
+
 **Remaining Phase 4 work:**
 
-- Implement the eight stage-specific execution handlers behind those
-  identities and allowlists.
-- Keep Code execution in isolated sandbox workspaces and branch-only Git
-  publication.
-- Bind every build/test/release artifact to the exact source commit and
-  immutable artifact digest.
-- Require independent QA evidence before release publication.
-- Produce a signed release candidate and verify it in staging.
-- Keep deployment production approvals outside agent authority.
+- Build Agent reproducible build execution and SBOM generation.
+- Independent Test Agent execution and exact commit/digest-bound QA evidence.
+- Signed build, SBOM, test and release evidence.
+- Release-candidate verification and staging-only deployment.
+- Deploy, Operate, Monitor and Security Guard service integrations.
+- Production worker-pool provisioning and live child-task orchestration.
 
-The detailed Phase 4A boundary and follow-on increments are documented in
+The detailed boundaries and follow-on increments are documented in
 [PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).
 
 **Exit criteria:** a staging workflow produces a signed release candidate

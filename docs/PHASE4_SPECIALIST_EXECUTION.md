@@ -1,11 +1,16 @@
-# Phase 4A — specialist execution authority foundation
+# Phase 4B — Plan and Code specialist execution
 
-## Scope
+## Phase 4A — specialist authority foundation
 
-This increment establishes the execution-time authority boundary for the
-eight lifecycle specialists and the cross-cutting Security Guard. It is a
-foundation for Phase 4, not a claim that the eight agent implementations or
-worker fleet are complete.
+PR #68 establishes the execution-time authority boundary for the eight
+lifecycle specialists and the cross-cutting Security Guard. Its registry is
+a capability ceiling, not an authorization grant.
+
+## Phase 4B — Plan and Code execution
+
+This increment implements structured planning and isolated Code execution.
+It is not a claim that the complete eight-agent worker fleet or staging
+delivery path is production-ready.
 
 ## Agent registry
 
@@ -55,22 +60,53 @@ The gRPC tests prove a capability-escalated task is rejected before lease
 creation. The PostgreSQL integration test repeats that assertion inside the
 atomic claim transaction and verifies the lease epoch remains zero.
 
-## Explicitly not completed by Phase 4A
+## Phase 4B implementation
 
-- Stage-specific Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor
-  execution handlers.
-- Artifact storage and signed build/SBOM/test evidence.
-- Independent QA verification that evidence matches the exact source commit
-  and artifact digest.
+- Plan Agent returns schema-validated JSON for goal, scope, requirements,
+  dependency DAG, acceptance criteria, risks, and approval scopes.
+- The Plan Agent persists plan.md, requirements.md, backlog.yaml,
+  acceptance-criteria.md, and risk-assessment.md as tenant-scoped immutable
+  content-addressed artifacts. A separate evidence object maps artifact names
+  to refs and records their digests, tenant, workflow, task, and policy version.
+- If policy requires approval or the plan identifies an approval scope,
+  the Plan Agent persists a pending approval request, returns needs_approval,
+  and emits no Code handoff. A pending request is never treated as approval.
+- Code independently rejects both tasks marked approval_required and Plan
+  evidence containing pending approval scopes or a pending approval reference.
+- Code tasks must carry the Plan Agent evidence ref plus plan and acceptance
+  criteria refs. Code verifies the evidence belongs to the same tenant and
+  workflow and that both document digests match before opening a worktree.
+- Code Agent requires an accepted durable claim, the matching authenticated
+  principal, repository.read, repository.branch.write, and a non-empty
+  task-specific write scope.
+- Code Agent uses a task/attempt/claim-scoped Git worktree. Its tool gateway
+  intersects the agent registry, task capabilities, and the actual file path
+  for every read/write action. The existing workspace gateway remains a
+  second protection layer.
+- Code Agent publishes only its generated feature branch and a draft pull
+  request. It cannot merge, deploy, modify CI, migrations, schemas,
+  dependencies, deployment/infra files, or credential material.
+- The source commit, changed-file manifest, draft PR, and immutable evidence
+  are bound to the Code result. Ambiguous push/PR failures report the side
+  effect as UNKNOWN or APPLIED rather than silently inviting a duplicate retry.
+- Executors accept a lease checkpoint callback so the worker host can enforce
+  heartbeat renewal and cancellation during model/tool execution. The worker
+  host remains responsible for running the heartbeat loop.
+
+## Explicitly not completed by Phase 4B
+
+- Build Agent reproducible build execution and SBOM generation.
+- Independent Test Agent execution and commit/digest-bound QA evidence.
+- Cryptographically signed build, SBOM, test, and release evidence.
 - Release-candidate publication and staging deployment.
-- Production worker-pool provisioning.
+- Deploy, Operate, Monitor, and Security Guard stage handlers.
+- Production worker-pool provisioning and orchestration of live child tasks.
 
 ## Next increments
 
-- **4B — Plan and Code execution:** structured Plan output and isolated
-  task-scoped Git workspaces for Code, with branch-only publication.
 - **4C — Build and independent QA:** reproducible build output, SBOM, test
-  reports, and immutable commit/digest-bound evidence.
+  reports, and immutable commit/digest-bound evidence. QA must be an
+  independent Test Agent identity and cannot PASS without exact evidence.
 - **4D — Release and staging:** verify Build and QA evidence, produce a signed
   release candidate, and deploy only to an approved staging target.
 - **4E — remaining specialists:** integrate Deploy, Operate, Monitor, and

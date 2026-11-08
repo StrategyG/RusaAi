@@ -1,4 +1,4 @@
-"""RUSA AI DevOps lifecycle contracts and safe dry-run orchestration."""
+"""RUSA AI DevOps lifecycle contracts, authority and specialist execution."""
 
 from .agent_registry import (
     AGENT_POLICIES,
@@ -6,6 +6,11 @@ from .agent_registry import (
     AgentPolicy,
     authorize_agent_task,
     registered_agent_ids,
+)
+from .artifacts import (
+    ArtifactIntegrityError,
+    ArtifactNotFoundError,
+    ContentAddressedArtifactStore,
 )
 from .contracts import (
     ContractValidationError,
@@ -15,6 +20,15 @@ from .contracts import (
     validate_workflow_event,
 )
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
+from .specialists import (
+    CodeAgentExecutor,
+    ExecutionLease,
+    ExecutionLeaseError,
+    PlanAgentExecutor,
+    ScopedCodeWorkspaceGateway,
+    SpecialistExecutionError,
+    SpecialistOutcome,
+)
 from .store import (
     OutboxLeaseLostError,
     PostgresInbox,
@@ -27,17 +41,27 @@ __all__ = [
     "AGENT_POLICIES",
     "AgentAuthorizationError",
     "AgentPolicy",
-    "authorize_agent_task",
-    "registered_agent_ids",
+    "ArtifactIntegrityError",
+    "ArtifactNotFoundError",
+    "CodeAgentExecutor",
+    "ContentAddressedArtifactStore",
     "ContractValidationError",
+    "DevOpsDryRunOrchestrator",
+    "DevOpsDryRunReport",
+    "ExecutionLease",
+    "ExecutionLeaseError",
     "OutboxLeaseLostError",
+    "PlanAgentExecutor",
     "PostgresInbox",
     "PostgresOutboxRelay",
     "PostgresWorkflowStore",
-    "WorkflowIdempotencyConflictError",
-    "DevOpsDryRunOrchestrator",
-    "DevOpsDryRunReport",
+    "ScopedCodeWorkspaceGateway",
+    "SpecialistExecutionError",
+    "SpecialistOutcome",
     "SyntheticDevOpsAgent",
+    "WorkflowIdempotencyConflictError",
+    "authorize_agent_task",
+    "registered_agent_ids",
     "validate_agent_result",
     "validate_agent_result_for_task",
     "validate_agent_task",
