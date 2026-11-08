@@ -44,11 +44,12 @@ def main() -> None:
 
     grpc_stub = OUTPUT_DIR / "workflow_pb2_grpc.py"
     source = grpc_stub.read_text(encoding="utf-8")
-    source = source.replace(
-        "import workflow_pb2 as workflow__pb2",
-        "from . import workflow_pb2 as workflow__pb2",
-    )
-    if "import workflow_pb2 as workflow__pb2" in source:
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        if line == "import workflow_pb2 as workflow__pb2":
+            lines[index] = "from . import workflow_pb2 as workflow__pb2"
+    source = "\n".join(lines) + "\n"
+    if any(line == "import workflow_pb2 as workflow__pb2" for line in lines):
         raise SystemExit("failed to make generated gRPC stub package-relative")
     grpc_stub.write_text(source, encoding="utf-8")
     print(f"Generated WorkflowControl stubs in {OUTPUT_DIR.relative_to(ROOT)}")
