@@ -24,6 +24,14 @@ class FakeStore:
         self.list_collections_args = kwargs
         return [{"collection": "agent", "document_count": 1}]
 
+    def list_document_versions(self, **kwargs):
+        self.list_document_versions_args = kwargs
+        return [{"version_id": "version-1"}]
+
+    def get_document_version(self, **kwargs):
+        self.get_document_version_args = kwargs
+        return {"version_id": kwargs["version_id"], "content": "historical"}
+
     def close(self):
         pass
 
@@ -246,3 +254,32 @@ def test_search_rejects_invalid_project_scope_before_embedding():
         )
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+def test_version_history_methods_pass_agent_and_project_scope():
+    store = FakeStore()
+    service = KnowledgeService(store, FakeEmbeddings())
+    listed = service.list_document_versions(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
+        limit=5,
+    )
+    assert listed == [{"version_id": "version-1"}]
+    assert store.list_document_versions_args["agent_id"] == "aicode-analyst"
+    assert store.list_document_versions_args["project_id"] == "strategyg--rusaai"
+    assert store.list_document_versions_args["limit"] == 5
+
+    historical = service.get_document_version(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        version_id="00000000-0000-0000-0000-000000000002",
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
+    )
+    assert historical["content"] == "historical"
+    assert store.get_document_version_args["agent_id"] == "aicode-analyst"
+    assert store.get_document_version_args["project_id"] == "strategyg--rusaai"
