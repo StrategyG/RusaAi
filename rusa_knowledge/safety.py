@@ -39,18 +39,18 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
     if not isinstance(metadata, dict):
         raise ValueError("document metadata must be a JSON object")
     knowledge_scope = metadata.get("knowledge_scope", "shared")
-    if knowledge_scope not in {"shared", "agent_specific"}:
+    if not isinstance(knowledge_scope, str) or knowledge_scope not in {"shared", "agent_specific"}:
         raise ValueError("knowledge_scope must be shared or agent_specific")
     agent_ids = metadata.get("agent_ids", [])
     if (
         not isinstance(agent_ids, list)
         or len(agent_ids) > 100
-        or len(set(agent_ids)) != len(agent_ids)
         or any(
             not isinstance(agent_id, str)
             or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", agent_id)
             for agent_id in agent_ids
         )
+        or len(set(agent_ids)) != len(agent_ids)
     ):
         raise ValueError("agent_ids must be a unique array of valid agent identifiers")
     if knowledge_scope == "agent_specific" and not agent_ids:
