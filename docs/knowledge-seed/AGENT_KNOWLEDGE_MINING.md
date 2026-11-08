@@ -232,7 +232,7 @@ Keep one physical tenant-scoped knowledge store and one shared RUSA knowledge co
 - section_path, content_hash, ingestion_run_id
 - access_policy, tenant_id, project_id
 
-The authenticated server/runtime must inject agent_id. The model must not choose or override it. Retrieval returns records where the scope is shared or the authenticated agent is listed in agent_ids, after tenant/project authorization.
+The authenticated server/runtime must inject agent_id. The model must not choose or override it. Every record with agent_ids must explicitly declare knowledge_scope; missing scope is rejected rather than inferred as shared. Retrieval returns records where the scope is shared or the authenticated agent is listed in agent_ids, after tenant/project authorization.
 
 ### Current implementation gap in RUSA-AI
 
