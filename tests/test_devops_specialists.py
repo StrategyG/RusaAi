@@ -319,6 +319,38 @@ def test_scoped_code_gateway_enforces_actual_write_paths_and_capabilities():
         )
 
 
+@pytest.mark.asyncio
+async def test_code_agent_rejects_plan_evidence_from_another_workflow(tmp_path):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    evidence = store.get_json(task["tenant_id"], task["input"]["plan_evidence_ref"])
+    evidence["workflow_id"] = "another-workflow"
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+        gateway_factory=lambda path, assigned_task, checkpoint: SimpleNamespace(workspace=path),
+        worker_factory=lambda provider, gateway: FakeCodeWorker(gateway.workspace),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_evidence_mismatch"
+    assert manager.created_task is None
+
+
 class FakeWorkspaceManager:
     def __init__(self, workspace: Path):
         self.workspace = workspace
