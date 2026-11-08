@@ -10,6 +10,9 @@ from rusa_agents.certification.contracts import (
     validate_production_certification,
     validate_release_manifest,
 )
+from rusa_agents.certification.provenance_verification import (
+    verify_github_slsa_provenance,
+)
 
 __all__ = [
     "ArtifactVerificationError",
@@ -18,4 +21,5 @@ __all__ = [
     "validate_production_certification",
     "validate_release_manifest",
     "verify_cosign_image_signature",
+    "verify_github_slsa_provenance",
 ]
