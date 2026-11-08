@@ -165,6 +165,7 @@ async def test_plan_agent_persists_five_tenant_private_artifacts_and_validates_r
         assert manifest["workflow_id"] == task["workflow_id"]
         assert manifest["task_id"] == task["task_id"]
         assert manifest["access_policy"] == "tenant-private"
+        assert manifest["lineage"]["source_commit"] is None
 
     assert "# Delivery plan" in contents["plan.md"]
     assert "REQ-FUNC-1" in contents["requirements.md"]
@@ -211,6 +212,28 @@ async def test_model_can_only_add_a_conservative_approval_hold(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_risk_level_approval_flag_cannot_be_downgraded_by_model(tmp_path):
+    task = _task()
+    plan = _plan(
+        risks=[{
+            "id": "RISK-PROD-1",
+            "description": "The change may affect production data.",
+            "likelihood": "medium",
+            "impact": "critical",
+            "mitigation": "Require an approved production change window.",
+            "approval_required": True,
+        }]
+    )
+    result = await PlanAgent(
+        provider=FakeProvider(json.dumps(plan)),
+        artifact_store=FilesystemArtifactStore(tmp_path),
+    ).run(task)
+
+    assert result["status"] == "needs_approval"
+    assert "handoff" not in result
+
+
+@pytest.mark.asyncio
 async def test_repository_planning_requires_pinned_revision_and_authorized_context(tmp_path):
     task = _task()
     task["input"].update(
@@ -249,6 +272,11 @@ async def test_repository_context_is_pinned_and_delimited_as_untrusted_data(tmp_
     assert "untrusted data" in system_prompt
     assert "untrusted_repository_content" in user_prompt
     assert result["audit"]["source_commit"] == "a" * 40
+    _, manifest = FilesystemArtifactStore(tmp_path).read(
+        tenant_id=task["tenant_id"],
+        uri=result["output"]["artifact_refs"][0],
+    )
+    assert manifest["lineage"]["source_commit"] == "a" * 40
 
 
 @pytest.mark.asyncio
