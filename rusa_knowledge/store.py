@@ -242,7 +242,7 @@ class PostgresKnowledgeStore:
         candidate_limit = min(max(limit * 4, 20), 100)
 
         sql = """
-            WITH scoped_chunks AS MATERIALIZED (
+            WITH scoped_chunks AS NOT MATERIALIZED (
                 SELECT c.chunk_id, c.embedding, c.search_vector
                 FROM rusa_knowledge_chunks c
                 JOIN rusa_knowledge_documents d
