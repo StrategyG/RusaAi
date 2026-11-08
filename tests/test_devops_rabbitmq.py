@@ -343,10 +343,6 @@ class _FakeChannel:
         assert ensure is False
         return self.queues.setdefault(name, _FakeQueue(name))
 
-    async def get_queue(self, name, *, ensure):
-        assert ensure is False
-        return self.queues.setdefault(name, _FakeQueue(name))
-
 
 @pytest.mark.asyncio
 async def test_topology_declares_quorum_queues_per_capability_and_priority_with_dlq():
