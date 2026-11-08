@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Activity, AlertTriangle, Archive, ArrowDownRight, ArrowRight, Bot, BrainCircuit,
@@ -200,12 +200,19 @@ const PILLARS = [
 ];
 
 const ORCHESTRATOR_STEPS = ["RECEIVE", "UNDERSTAND", "PLAN", "DECOMPOSE", "DELEGATE", "EXECUTE", "VALIDATE", "REVIEW", "COMPLETE", "LEARN"];
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  platform_admin: ["task:create", "task:read", "task:retry", "task:cancel", "inference", "operator metrics"],
-  tenant_admin: ["task:create", "task:read", "task:retry", "task:cancel", "inference"],
-  developer: ["task:create", "task:read", "inference"],
+const TASK_ROLE_PERMISSIONS: Record<string, string[]> = {
+  platform_admin: ["task:create", "task:read", "task:retry", "task:cancel"],
+  tenant_admin: ["task:create", "task:read", "task:retry", "task:cancel"],
+  developer: ["task:create", "task:read"],
   read_only: ["task:read"]
 };
+const INFERENCE_ALLOWED_ROLES = ["platform_admin", "tenant_admin", "developer"];
+const METRICS_ALLOWED_ROLE = "platform_admin";
+const ALL_AGENT_TASK_STATUSES = ["PENDING", "READY", "RUNNING", "BLOCKED", "NEEDS_APPROVAL", "REVIEW", "COMPLETED", "FAILED", "CANCELLED"];
+const DEVOPS_TASK_STATUSES = ["queued", "running", "passed", "failed", "blocked", "needs_approval", "cancelled", "skipped"];
+const AICODE_API_STATUSES = ["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"];
+const CURRENT_A2A_MESSAGE_TYPES = ["task.create", "task.accepted", "task.status", "task.result", "task.blocked", "task.review", "task.cancel"];
+const ADR_A2A_MESSAGE_TYPES = ["task.request", "task.accepted", "task.progress", "tool.invocation", "task.completed", "task.failed", "policy.violation", "task.cancel.requested", "task.cancelled", "audit.recorded"];
 const PROTECTED_ACTIONS = ["merge", "deploy", "release", "secret_change", "permission_change", "destructive_action", "production_write"];
 const DENIED_ACTIONS = ["disable_audit", "exfiltrate_secret", "force_push_main"];
 
@@ -264,15 +271,40 @@ function statusLabel(status: string): string {
 function resultObject(task: Task): Record<string, unknown> {
   return task.result && typeof task.result === "object" ? task.result : {};
 }
-function extractArtifacts(task: Task): string[] {
+type TaskReference = { kind: string; value: string; href?: string };
+function extractTaskReferences(task: Task): TaskReference[] {
   const result = resultObject(task);
-  const values = result.artifacts;
-  if (Array.isArray(values)) return values.filter((item): item is string => typeof item === "string");
-  return [];
-}
-function extractEvidence(task: Task): Record<string, unknown> {
-  const result = resultObject(task);
-  return result.evidence && typeof result.evidence === "object" ? result.evidence as Record<string, unknown> : {};
+  const references: TaskReference[] = [];
+  const repository = task.payload?.repository?.full_name || "";
+  const pullRequestUrl = result.pull_request_url;
+  if (typeof pullRequestUrl === "string") {
+    try {
+      const url = new URL(pullRequestUrl);
+      if (url.protocol === "https:" && url.hostname === "github.com" && /^\/[^/]+\/[^/]+\/pull\/\d+(?:\/|$)/.test(url.pathname)) {
+        references.push({ kind: "Pull request", value: url.toString(), href: url.toString() });
+      }
+    } catch { /* Ignore untrusted or malformed result references. */ }
+  }
+  const commitSha = result.commit_sha;
+  if (typeof commitSha === "string" && /^[a-fA-F0-9]{7,64}$/.test(commitSha)) {
+    const href = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
+      ? "https://github.com/" + repository + "/commit/" + commitSha
+      : undefined;
+    references.push({ kind: "Commit", value: commitSha, href });
+  }
+  const branch = result.branch;
+  if (typeof branch === "string" && branch.length > 0 && branch.length <= 255) {
+    references.push({ kind: "Feature branch", value: branch });
+  }
+  const artifacts = result.artifacts;
+  if (Array.isArray(artifacts)) {
+    for (const artifact of artifacts) {
+      if (typeof artifact === "string" && artifact.length > 0 && artifact.length <= 2048) {
+        references.push({ kind: "Artifact reference", value: artifact });
+      }
+    }
+  }
+  return references;
 }
 function jsonText(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
@@ -327,7 +359,11 @@ export default function RusaControlCenter() {
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [taskSearch, setTaskSearch] = useState("");
   const [approvalTasks, setApprovalTasks] = useState<Task[]>([]);
+  const [approvalTotal, setApprovalTotal] = useState(0);
+  const [approvalFetchedAt, setApprovalFetchedAt] = useState("");
+  const [approvalError, setApprovalError] = useState("");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const taskIdempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [objective, setObjective] = useState("");
@@ -384,9 +420,25 @@ export default function RusaControlCenter() {
     try {
       const response = await fetch("/api/tasks?status=awaiting_approval&limit=100&offset=0", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
-      if (response.ok) setApprovalTasks(Array.isArray(data.items) ? data.items : []);
+      if (!response.ok) throw new Error(errorText(data));
+      const items = Array.isArray(data.items) ? data.items as Task[] : [];
+      setApprovalTasks(items);
+      setApprovalTotal(typeof data.total === "number" ? data.total : items.length);
+      setApprovalFetchedAt(new Date().toISOString());
+      setApprovalError("");
+    } catch (cause) {
+      setApprovalError(cause instanceof Error ? cause.message : "Approval queue refresh failed.");
+      // Keep the last successful snapshot, but label it as stale in the UI.
+    }
+  }, []);
+
+  const refreshTenantTotal = useCallback(async () => {
+    try {
+      const response = await fetch("/api/tasks?limit=1&offset=0", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && typeof data.total === "number") setAllTaskTotal(data.total);
     } catch {
-      // The main task list remains available even if the approval projection cannot be refreshed.
+      // Keep the last successful tenant total.
     }
   }, []);
 
@@ -405,7 +457,7 @@ export default function RusaControlCenter() {
       if (!response.ok) throw new Error(errorText(data));
       const ids = Array.isArray(data.data) ? data.data.map((item: { id?: unknown }) => item.id).filter((id: unknown): id is string => typeof id === "string") : [];
       setModels(ids);
-      setChatModel((current) => current || ids[0] || "");
+      setChatModel((current) => ids.includes(current) ? current : (ids[0] || ""));
       setModelError("");
     } catch (cause) {
       setModels([]);
@@ -452,8 +504,13 @@ export default function RusaControlCenter() {
       void refreshApprovals();
     }, 10000);
     const healthTimer = window.setInterval(() => { void refreshHealth(); }, 30000);
-    return () => { window.clearInterval(taskTimer); window.clearInterval(healthTimer); };
-  }, [session, taskOffset, taskFilter, refreshTasks, refreshApprovals, refreshHealth]);
+    const totalTimer = window.setInterval(() => { void refreshTenantTotal(); }, 30000);
+    return () => {
+      window.clearInterval(taskTimer);
+      window.clearInterval(healthTimer);
+      window.clearInterval(totalTimer);
+    };
+  }, [session, taskOffset, taskFilter, refreshTasks, refreshApprovals, refreshHealth, refreshTenantTotal]);
 
   useEffect(() => {
     if (session && page === "observability" && isPlatformAdmin) void refreshMetrics();
@@ -503,9 +560,13 @@ export default function RusaControlCenter() {
 
   async function logout() {
     await fetch("/api/session", { method: "DELETE" });
+    taskIdempotencyRef.current = null;
     setSession(null);
     setTasks([]);
     setApprovalTasks([]);
+    setApprovalTotal(0);
+    setApprovalFetchedAt("");
+    setApprovalError("");
     setTaskTotal(0);
     setAllTaskTotal(0);
     setSelectedTask(null);
@@ -549,22 +610,29 @@ export default function RusaControlCenter() {
       setError("Context maksimal 20.000 karakter.");
       return;
     }
+    const taskPayload = {
+      objective: objective.trim(),
+      context,
+      repository: { full_name: repository.trim(), base_branch: baseBranch.trim() },
+      acceptance_criteria: acceptanceCriteria
+    };
+    const fingerprint = JSON.stringify(taskPayload);
+    if (!taskIdempotencyRef.current || taskIdempotencyRef.current.fingerprint !== fingerprint) {
+      taskIdempotencyRef.current = { fingerprint, key: window.crypto.randomUUID() };
+    }
+    const idempotencyKey = taskIdempotencyRef.current.key;
     setBusy(true);
     setError("");
     setNotice("");
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objective: objective.trim(),
-          context,
-          repository: { full_name: repository.trim(), base_branch: baseBranch.trim() },
-          acceptance_criteria: acceptanceCriteria
-        })
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(taskPayload)
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      taskIdempotencyRef.current = null;
       setNewTaskOpen(false);
       setTaskFilter("all");
       setTaskOffset(0);
@@ -617,7 +685,7 @@ export default function RusaControlCenter() {
     event.preventDefault();
     const prompt = chatInput.trim();
     if (!prompt || chatBusy || !canUseChat) return;
-    const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }].slice(-128);
+    const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }].slice(-32);
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
@@ -627,7 +695,7 @@ export default function RusaControlCenter() {
         const next = [...current];
         const index = next.length - 1;
         if (index >= 0 && next[index].role === "assistant") next[index] = { role: "assistant", content };
-        return next;
+        return next.slice(-32);
       });
     };
     try {
@@ -658,7 +726,7 @@ export default function RusaControlCenter() {
       const contentType = response.headers.get("content-type") || "";
       if (chatStream && contentType.includes("text/event-stream")) {
         if (!response.body) throw new Error("Streaming response body is unavailable.");
-        setChatMessages((current) => [...current, { role: "assistant", content: "" }]);
+        setChatMessages((current) => [...current, { role: "assistant", content: "" }].slice(-32));
         placeholderAdded = true;
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -695,12 +763,12 @@ export default function RusaControlCenter() {
       } else {
         const data = await response.json().catch(() => ({}));
         const answer = (data as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content || "Model returned an empty response.";
-        setChatMessages((current) => [...current, { role: "assistant", content: answer }]);
+        setChatMessages((current) => [...current, { role: "assistant", content: answer }].slice(-32));
       }
     } catch (cause) {
       const message = "Request gagal: " + (cause instanceof Error ? cause.message : "Unknown error");
       if (placeholderAdded) updateAssistant(message);
-      else setChatMessages((current) => [...current, { role: "assistant", content: message }]);
+      else setChatMessages((current) => [...current, { role: "assistant", content: message }].slice(-32));
     } finally { setChatBusy(false); }
   }
 
@@ -708,6 +776,10 @@ export default function RusaControlCenter() {
     event.preventDefault();
     setValidation(null);
     setValidationError("");
+    if (new TextEncoder().encode(envelopeText).byteLength > 262144) {
+      setValidationError("Envelope melebihi batas 256 KiB untuk validator web.");
+      return;
+    }
     let envelope: unknown;
     try { envelope = JSON.parse(envelopeText); }
     catch { setValidationError("JSON tidak valid. Periksa tanda kutip, koma, dan struktur object."); return; }
@@ -736,8 +808,7 @@ export default function RusaControlCenter() {
   const loadedCount = tasks.length;
   const pageCount = Math.max(1, Math.ceil(taskTotal / 25));
   const currentPage = Math.floor(taskOffset / 25) + 1;
-  const artifacts = tasks.flatMap((task) => extractArtifacts(task).map((artifact) => ({ task, artifact })));
-  const evidenceItems = tasks.flatMap((task) => Object.entries(extractEvidence(task)).map(([key, value]) => ({ task, key, value })));
+  const taskReferences = tasks.flatMap((task) => extractTaskReferences(task).map((reference) => ({ task, reference })));
 
   if (booting) return <main className="rc-loading"><div className="rc-brand-mark"><BrainCircuit size={25} /></div><strong>RUSA AI</strong><span>Memuat secure workspace…</span></main>;
 
@@ -775,7 +846,7 @@ export default function RusaControlCenter() {
                   return (
                     <button key={item.id} className={"rc-nav-item" + (page === item.id ? " active" : "")} onClick={() => { setPage(item.id); setMobileOpen(false); }}>
                       <Icon size={17} /><span>{item.label}</span>
-                      {item.id === "approvals" && approvalTasks.length > 0 && <b>{approvalTasks.length}</b>}
+                      {item.id === "approvals" && approvalTotal > 0 && <b>{approvalTotal > 99 ? "99+" : approvalTotal}</b>}
                     </button>
                   );
                 })}
@@ -791,7 +862,7 @@ export default function RusaControlCenter() {
         <section className="rc-main">
           <header className="rc-topbar">
             <div className="rc-topbar-left"><button className="rc-icon-btn rc-mobile-menu" onClick={() => setMobileOpen((value) => !value)} aria-label="Toggle navigation"><Menu size={19} /></button><div className="rc-breadcrumb">RUSA AI <span>/</span> <strong>{pageInfo.title}</strong></div></div>
-            <div className="rc-topbar-right"><span className="rc-role-pill">{session.roles.join(" · ")}</span><button className="rc-btn rc-btn-ghost" onClick={() => { void refreshTasks(taskOffset, taskFilter); void refreshApprovals(); void refreshHealth(); if (page === "observability") void refreshMetrics(); }}><RefreshCw size={14} /> Refresh</button></div>
+            <div className="rc-topbar-right"><span className="rc-role-pill">{session.roles.join(" · ")}</span><button className="rc-btn rc-btn-ghost" onClick={() => { void refreshTasks(taskOffset, taskFilter); void refreshTenantTotal(); void refreshApprovals(); void refreshHealth(); if (page === "observability") void refreshMetrics(); }}><RefreshCw size={14} /> Refresh</button></div>
           </header>
 
           <div className="rc-content">
@@ -807,7 +878,7 @@ export default function RusaControlCenter() {
                 <div className="rc-stat-grid">
                   <StatCard label="Total task records" value={allTaskTotal} detail="All records in authenticated tenant" icon={ListChecks} />
                   <StatCard label="Active in loaded page" value={counts.active} detail={"From " + loadedCount + " loaded records"} icon={Play} tone="blue" />
-                  <StatCard label="Awaiting approval" value={approvalTasks.length} detail="Loaded approval queue · max 100" icon={ShieldAlert} tone="amber" />
+                  <StatCard label="Awaiting approval" value={approvalTotal} detail={approvalError ? "Last successful snapshot · stale" : "Tenant total · " + approvalTasks.length + " loaded (max 100)"} icon={ShieldAlert} tone="amber" />
                   <StatCard label="Failed / blocked sample" value={counts.failed} detail="From current task page" icon={AlertTriangle} tone="red" />
                 </div>
                 <div className="rc-grid-two">
@@ -927,8 +998,8 @@ export default function RusaControlCenter() {
                 <div className="rc-chat-toolbar"><label>Model<select value={chatModel} onChange={(event) => setChatModel(event.target.value)} disabled={!models.length}><option value="">{models.length ? "Select model" : "Model discovery unavailable"}</option>{models.map((model) => <option value={model} key={model}>{model}</option>)}</select></label><label className="rc-toggle"><input type="checkbox" checked={chatStream} onChange={(event) => setChatStream(event.target.checked)} /> Request streaming</label><Badge tone={models.length ? "success" : "warning"}>{models.length ? models.length + " model(s)" : "Model unknown"}</Badge></div>
                 {modelError && <div className="rc-note">Model discovery: {modelError}. Chat can use the backend-configured default model.</div>}
                 <div className="rc-chat-history">{chatMessages.map((message, index) => <div className={"rc-chat-line " + message.role} key={index}><div className="rc-chat-avatar">{message.role === "assistant" ? <BrainCircuit size={16} /> : "U"}</div><div className="rc-chat-bubble"><small>{message.role === "assistant" ? "RUSA AI" : "YOU"}</small><p>{message.content || (chatBusy ? "RUSA AI sedang menulis…" : "")}</p></div></div>)}{chatBusy && <div className="rc-chat-working"><span className="rc-live-dot" /> Inference berjalan…</div>}</div>
-                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} maxLength={100000} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
-                <div className="rc-note">Model selector berasal dari GET /v1/models. Jika provider tidak mendukung stream (HTTP 501), UI otomatis mencoba non-streaming. Chat tidak menjalankan AICode task.</div>
+                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} maxLength={16000} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
+                <div className="rc-note">Model selector berasal dari GET /v1/models. Jika provider tidak mendukung stream (HTTP 501), UI otomatis mencoba non-streaming. UI mengirim maksimal 32 pesan terakhir dan 16.000 karakter per pesan agar tetap di bawah default body limit API 1 MiB. Chat tidak menjalankan AICode task.</div>
               </Panel>
             )}
 
@@ -1005,7 +1076,7 @@ export default function RusaControlCenter() {
                 </Panel>
                 <Panel title="A2A task envelope validator" subtitle="POST /v1/validate-task · JSON Schema Draft 2020-12">
                   <form onSubmit={validateEnvelope} className="rc-validator">
-                    <label>Envelope JSON<textarea spellCheck={false} value={envelopeText} onChange={(event) => { setEnvelopeText(event.target.value); setValidation(null); }} /></label>
+                    <label>Envelope JSON<textarea spellCheck={false} maxLength={262144} value={envelopeText} onChange={(event) => { setEnvelopeText(event.target.value); setValidation(null); }} /></label>
                     <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">Schema source: schemas/a2a/task-envelope.schema.json. This validator checks the repository's current A2A envelope contract, not the separate proposed envelope in ADR-COMM-001 and not the AICode create-task request body.</span></div>
                   </form>
                   {validationError && <div className="rc-alert rc-alert-danger">{validationError}</div>}
