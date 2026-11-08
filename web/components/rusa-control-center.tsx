@@ -317,6 +317,7 @@ export default function RusaControlCenter() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskTotal, setTaskTotal] = useState(0);
+  const [allTaskTotal, setAllTaskTotal] = useState(0);
   const [taskOffset, setTaskOffset] = useState(0);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -367,6 +368,7 @@ export default function RusaControlCenter() {
       const result = data as TaskPage;
       setTasks(Array.isArray(result.items) ? result.items : []);
       setTaskTotal(typeof result.total === "number" ? result.total : 0);
+      if (filter === "all") setAllTaskTotal(typeof result.total === "number" ? result.total : 0);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not refresh task queue.");
@@ -500,6 +502,7 @@ export default function RusaControlCenter() {
     setTasks([]);
     setApprovalTasks([]);
     setTaskTotal(0);
+    setAllTaskTotal(0);
     setSelectedTask(null);
     setChatMessages([{ role: "assistant", content: "Sesi berakhir. Hubungkan kembali untuk memulai." }]);
     setPage("overview");
@@ -524,11 +527,12 @@ export default function RusaControlCenter() {
       setError("Objective wajib diisi dan maksimal 8.000 karakter.");
       return;
     }
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.trim())) {
-      setError("Repository harus menggunakan format owner/name.");
+    const repositoryParts = repository.trim().split("/");
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.trim()) || repositoryParts.some((part) => part === "." || part === "..")) {
+      setError("Repository harus menggunakan format owner/name dengan segmen yang valid.");
       return;
     }
-    if (!baseBranch.trim() || baseBranch.length > 181 || baseBranch.includes("..") || baseBranch.includes("//") || baseBranch.endsWith("/")) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,180}$/.test(baseBranch.trim()) || baseBranch.includes("..") || baseBranch.includes("//") || baseBranch.endsWith("/")) {
       setError("Base branch tidak valid.");
       return;
     }
@@ -557,6 +561,9 @@ export default function RusaControlCenter() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
       setNewTaskOpen(false);
+      setTaskFilter("all");
+      setTaskOffset(0);
+      setTaskSearch("");
       setObjective("");
       setContext("");
       setCriteria("Implement the requested change\nAdd or update relevant tests\nPreserve tenant isolation and policy controls");
@@ -605,7 +612,7 @@ export default function RusaControlCenter() {
     event.preventDefault();
     const prompt = chatInput.trim();
     if (!prompt || chatBusy || !canUseChat) return;
-    const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }];
+    const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }].slice(-128);
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
@@ -793,7 +800,7 @@ export default function RusaControlCenter() {
             {page === "overview" && (
               <div className="rc-stack">
                 <div className="rc-stat-grid">
-                  <StatCard label="Total task records" value={taskTotal} detail="All records in authenticated tenant" icon={ListChecks} />
+                  <StatCard label="Total task records" value={allTaskTotal} detail="All records in authenticated tenant" icon={ListChecks} />
                   <StatCard label="Active in loaded page" value={counts.active} detail={"From " + loadedCount + " loaded records"} icon={Play} tone="blue" />
                   <StatCard label="Awaiting approval" value={approvalTasks.length} detail="Loaded approval queue · max 100" icon={ShieldAlert} tone="amber" />
                   <StatCard label="Failed / blocked sample" value={counts.failed} detail="From current task page" icon={AlertTriangle} tone="red" />
@@ -813,7 +820,7 @@ export default function RusaControlCenter() {
                     <button className="rc-text-btn" onClick={() => setPage("orchestrator")}>Inspect execution pipeline <ArrowRight size={14} /></button>
                   </Panel>
                 </div>
-                <Panel title="Recent AICode tasks" subtitle="Newest tenant-scoped records · polling interval 10 seconds" action={<button className="rc-text-btn" onClick={() => setPage("tasks")}>Open task queue <ArrowRight size={14} /></button>}>
+                <Panel title="Loaded AICode task sample" subtitle="Current loaded page and selected queue filter · polling interval 10 seconds" action={<button className="rc-text-btn" onClick={() => setPage("tasks")}>Open task queue <ArrowRight size={14} /></button>}>
                   <TaskTable tasks={tasks.slice(0, 6)} onOpen={openTask} />
                 </Panel>
                 <Panel title="RUSA AI product pillars" subtitle="Integration status is based on source/API evidence">
@@ -915,7 +922,7 @@ export default function RusaControlCenter() {
                 <div className="rc-chat-toolbar"><label>Model<select value={chatModel} onChange={(event) => setChatModel(event.target.value)} disabled={!models.length}><option value="">{models.length ? "Select model" : "Model discovery unavailable"}</option>{models.map((model) => <option value={model} key={model}>{model}</option>)}</select></label><label className="rc-toggle"><input type="checkbox" checked={chatStream} onChange={(event) => setChatStream(event.target.checked)} /> Request streaming</label><Badge tone={models.length ? "success" : "warning"}>{models.length ? models.length + " model(s)" : "Model unknown"}</Badge></div>
                 {modelError && <div className="rc-note">Model discovery: {modelError}. Chat can use the backend-configured default model.</div>}
                 <div className="rc-chat-history">{chatMessages.map((message, index) => <div className={"rc-chat-line " + message.role} key={index}><div className="rc-chat-avatar">{message.role === "assistant" ? <BrainCircuit size={16} /> : "U"}</div><div className="rc-chat-bubble"><small>{message.role === "assistant" ? "RUSA AI" : "YOU"}</small><p>{message.content || (chatBusy ? "RUSA AI sedang menulis…" : "")}</p></div></div>)}{chatBusy && <div className="rc-chat-working"><span className="rc-live-dot" /> Inference berjalan…</div>}</div>
-                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
+                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} maxLength={100000} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
                 <div className="rc-note">Model selector berasal dari GET /v1/models. Jika provider tidak mendukung stream (HTTP 501), UI otomatis mencoba non-streaming. Chat tidak menjalankan AICode task.</div>
               </Panel>
             )}
