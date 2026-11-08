@@ -62,7 +62,7 @@ RUN apt-get update \
 COPY --from=builder /usr/local /usr/local
 COPY --chown=appuser:appuser . /app
 
-RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && docker --version \
     && if dpkg-query -W -f='${binary:Package}\n' | grep -Eq '^(docker.io|docker-ce|containerd|containerd.io|runc)$'; then \
