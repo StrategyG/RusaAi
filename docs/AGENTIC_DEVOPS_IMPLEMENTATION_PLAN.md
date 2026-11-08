@@ -128,15 +128,39 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 
 ## Phase 4 — specialist execution and QA
 
-- Implement the eight agents behind per-agent identities and capability
-  allowlists.
+**Phase 4A — Plan Agent foundation (this change):**
+
+- Add a structured Plan Output schema with strict task, requirement,
+  acceptance-criteria, dependency, risk, and approval fields.
+- Implement `rusa_plan_agent` as a bounded specialist that accepts only
+  plan-stage tasks and an explicit capability allowlist.
+- Require an authorized context provider for repository/evidence input;
+  repository context must be pinned to a full commit SHA.
+- Treat request, repository, issue, and evidence text as untrusted data.
+- Persist `plan.md`, `requirements.md`, `backlog.yaml`,
+  `acceptance-criteria.md`, and `risk-assessment.md` as immutable,
+  tenant-private, content-addressed artifacts.
+- Convert mandatory or conservatively recommended approval into a pending
+  approval artifact and stop the handoff. A pending artifact is not approval.
+
+**Phase 4A boundary:** this is the first specialist implementation. It does
+not yet consume RabbitMQ commands, claim tasks through gRPC, or execute the
+Code/Build/Test specialists. Those are subsequent Phase 4 increments.
+
+**Phase 4B and later:**
+
+- Add the durable worker bridge: verify the command, claim the task through
+  WorkflowControl, heartbeat the claim, observe cancellation, and report the
+  result before acknowledging the RabbitMQ message.
+- Implement Code, Build, and Test behind their own SPIFFE identities and
+  capability allowlists.
 - Keep Code execution in isolated sandbox workspaces.
 - Bind every build/test/release artifact to exact source commit and digest.
 - Require independent QA evidence before release publication.
 - Keep deployment production approvals outside agent authority.
 
-**Exit criteria:** a staging workflow produces a signed release candidate
-whose tests and provenance match the exact source revision.
+**Phase 4 exit criteria:** a staging workflow produces a signed release
+candidate whose tests and provenance match the exact source revision.
 
 ## Phase 5 — production operations and feedback
 
