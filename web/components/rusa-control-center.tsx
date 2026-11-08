@@ -193,7 +193,7 @@ const KPI_GROUPS = [
 ];
 
 const PILLARS = [
-  { name: "AI Autonomous Software Engineering & DevOps", status: "Partial integration", detail: "AICode task intake, orchestrator, worker pipeline, task state, retry, cancellation, dan evidence payload.", evidence: "FastAPI /v1/aicode/tasks dan rusa_agents runtime." },
+  { name: "AI Autonomous Software Engineering & DevOps", status: "Partial integration", detail: "AICode task intake, orchestrator, worker pipeline, task state, retry, cancellation, dan task-result references (PR URL, commit SHA, branch).", evidence: "FastAPI /v1/aicode/tasks dan rusa_agents runtime." },
   { name: "RUSA Intelligence", status: "Partial integration", detail: "Inference API, model discovery, AICode runtime, tenant-scoped task memory, serta optional RAG/pgvector dan read-only MCP tersedia pada lapisan berbeda. Knowledge browser dan agent scorecard belum diekspos pada web API.", evidence: "FastAPI /v1/chat/completions dan /v1/models; rusa_agents memory; optional rusa_knowledge/rusa_mcp." },
   { name: "RUSA Business", status: "Architecture defined", detail: "Business operations automation, research, dan company analysis belum memiliki UI/API pada scope repository yang diperiksa.", evidence: "RUSA_AI_Architecture.md." },
   { name: "RUSA Ecosystem", status: "Architecture defined", detail: "Marketplace, developer API, external integrations, dan agent ecosystem belum memiliki UI/API pada scope repository yang diperiksa.", evidence: "RUSA_AI_Architecture.md." }
@@ -364,6 +364,12 @@ export default function RusaControlCenter() {
   const [approvalError, setApprovalError] = useState("");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const taskIdempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const taskRequestSeqRef = useRef(0);
+  const approvalRequestSeqRef = useRef(0);
+  const totalRequestSeqRef = useRef(0);
+  const healthRequestSeqRef = useRef(0);
+  const modelRequestSeqRef = useRef(0);
+  const metricsRequestSeqRef = useRef(0);
 
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [objective, setObjective] = useState("");
@@ -400,83 +406,99 @@ export default function RusaControlCenter() {
   const isPlatformAdmin = session?.roles.includes("platform_admin") ?? false;
 
   const refreshTasks = useCallback(async (offset = 0, filter: TaskFilter = "all") => {
+    const requestSeq = ++taskRequestSeqRef.current;
     const params = new URLSearchParams({ limit: "25", offset: String(offset) });
     if (filter !== "all" && filter !== "active") params.set("status", filter);
     try {
       const response = await fetch("/api/tasks?" + params.toString(), { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== taskRequestSeqRef.current) return;
       const result = data as TaskPage;
       setTasks(Array.isArray(result.items) ? result.items : []);
       setTaskTotal(typeof result.total === "number" ? result.total : 0);
       if (filter === "all") setAllTaskTotal(typeof result.total === "number" ? result.total : 0);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not refresh task queue.");
+      if (requestSeq === taskRequestSeqRef.current) setError(cause instanceof Error ? cause.message : "Could not refresh task queue.");
     }
   }, []);
 
   const refreshApprovals = useCallback(async () => {
+    const requestSeq = ++approvalRequestSeqRef.current;
     try {
       const response = await fetch("/api/tasks?status=awaiting_approval&limit=100&offset=0", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== approvalRequestSeqRef.current) return;
       const items = Array.isArray(data.items) ? data.items as Task[] : [];
       setApprovalTasks(items);
       setApprovalTotal(typeof data.total === "number" ? data.total : items.length);
       setApprovalFetchedAt(new Date().toISOString());
       setApprovalError("");
     } catch (cause) {
-      setApprovalError(cause instanceof Error ? cause.message : "Approval queue refresh failed.");
+      if (requestSeq === approvalRequestSeqRef.current) setApprovalError(cause instanceof Error ? cause.message : "Approval queue refresh failed.");
       // Keep the last successful snapshot, but label it as stale in the UI.
     }
   }, []);
 
   const refreshTenantTotal = useCallback(async () => {
+    const requestSeq = ++totalRequestSeqRef.current;
     try {
       const response = await fetch("/api/tasks?limit=1&offset=0", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
-      if (response.ok && typeof data.total === "number") setAllTaskTotal(data.total);
+      if (requestSeq === totalRequestSeqRef.current && response.ok && typeof data.total === "number") setAllTaskTotal(data.total);
     } catch {
       // Keep the last successful tenant total.
     }
   }, []);
 
   const refreshHealth = useCallback(async () => {
+    const requestSeq = ++healthRequestSeqRef.current;
     try {
       const response = await fetch("/api/health", { cache: "no-store" });
-      if (response.ok) setHealth(await response.json());
-      else setHealth(null);
-    } catch { setHealth(null); }
+      const data = response.ok ? await response.json() : null;
+      if (requestSeq === healthRequestSeqRef.current) setHealth(data);
+    } catch {
+      if (requestSeq === healthRequestSeqRef.current) setHealth(null);
+    }
   }, []);
 
   const refreshModels = useCallback(async () => {
+    const requestSeq = ++modelRequestSeqRef.current;
     try {
       const response = await fetch("/api/models", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== modelRequestSeqRef.current) return;
       const ids = Array.isArray(data.data) ? data.data.map((item: { id?: unknown }) => item.id).filter((id: unknown): id is string => typeof id === "string") : [];
       setModels(ids);
       setChatModel((current) => ids.includes(current) ? current : (ids[0] || ""));
       setModelError("");
     } catch (cause) {
-      setModels([]);
-      setModelError(cause instanceof Error ? cause.message : "Model discovery unavailable.");
+      if (requestSeq === modelRequestSeqRef.current) {
+        setModels([]);
+        setModelError(cause instanceof Error ? cause.message : "Model discovery unavailable.");
+      }
     }
   }, []);
 
   const refreshMetrics = useCallback(async () => {
     if (!isPlatformAdmin) return;
+    const requestSeq = ++metricsRequestSeqRef.current;
     setMetricsError("");
     try {
       const response = await fetch("/api/metrics", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== metricsRequestSeqRef.current) return;
       setMetricsText(typeof data.text === "string" ? data.text : "");
       setMetricsFetchedAt(typeof data.fetched_at === "string" ? data.fetched_at : "");
     } catch (cause) {
-      setMetricsError(cause instanceof Error ? cause.message : "Metrics endpoint unavailable.");
-      setMetricsText("");
+      if (requestSeq === metricsRequestSeqRef.current) {
+        setMetricsError(cause instanceof Error ? cause.message : "Metrics endpoint unavailable.");
+        setMetricsText("");
+      }
     }
   }, [isPlatformAdmin]);
 
@@ -487,6 +509,9 @@ export default function RusaControlCenter() {
         const identity = await response.json();
         setSession(identity);
         await Promise.all([refreshTasks(0, "all"), refreshApprovals(), refreshHealth(), refreshModels()]);
+      } else if (response.status !== 401) {
+        const data = await response.json().catch(() => ({}));
+        setLoginError(errorText(data));
       }
     } catch {
       setLoginError("RUSA API belum dapat dijangkau.");
@@ -560,6 +585,12 @@ export default function RusaControlCenter() {
 
   async function logout() {
     await fetch("/api/session", { method: "DELETE" });
+    taskRequestSeqRef.current += 1;
+    approvalRequestSeqRef.current += 1;
+    totalRequestSeqRef.current += 1;
+    healthRequestSeqRef.current += 1;
+    modelRequestSeqRef.current += 1;
+    metricsRequestSeqRef.current += 1;
     taskIdempotencyRef.current = null;
     setSession(null);
     setTasks([]);
@@ -686,6 +717,10 @@ export default function RusaControlCenter() {
     const prompt = chatInput.trim();
     if (!prompt || chatBusy || !canUseChat) return;
     const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }].slice(-32);
+    const requestMessages = nextMessages.map((message) => ({ ...message, content: message.content.slice(-6000) }));
+    while (requestMessages.length > 1 && new TextEncoder().encode(JSON.stringify(requestMessages)).byteLength > 900 * 1024) {
+      requestMessages.shift();
+    }
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
@@ -701,7 +736,7 @@ export default function RusaControlCenter() {
     try {
       const body = {
         ...(chatModel ? { model: chatModel } : {}),
-        messages: nextMessages.map((item) => ({ role: item.role, content: item.content })),
+        messages: requestMessages.map((item) => ({ role: item.role, content: item.content })),
         temperature: 0.7,
         top_p: 0.9,
         max_tokens: 2048,
@@ -990,14 +1025,14 @@ export default function RusaControlCenter() {
                 </Panel>
                 <Panel title="Cross-stage orchestration and security controls" subtitle="Separate controls defined outside the eight primary lifecycle agents">
                   <div className="rc-comm-grid">
-                    <div className="rc-comm-card"><strong>rusa_devops_orchestrator</strong><Badge tone="neutral">Cross-stage design</Badge><span>Workflow coordination</span><small>Splits work, manages dependencies, forwards validated stage outputs/evidence, chooses repair handoffs, and stops the normal path when a gate fails.</small></div>
+                    <div className="rc-comm-card"><strong>rusa_devops_orchestrator</strong><Badge tone="neutral">Cross-stage design</Badge><span>Workflow coordination</span><small>Splits work, manages dependencies, forwards stage outputs between agents and stops the workflow when a gate fails.</small></div>
                     <div className="rc-comm-card"><strong>rusa_security_guard_agent</strong><Badge tone="neutral">Cross-stage design</Badge><span>Cross-stage security guard</span><small>Checks secret scanning, dependency/container vulnerabilities, tenant isolation, authorization/audit, privacy, supply-chain provenance, model/tool permissions, prompt injection/untrusted input, and retention/deletion policy.</small></div>
                   </div>
                   <div className="rc-alert rc-alert-warning"><ShieldAlert size={16} /> Human approver is a decision-maker, not a ninth agent. The source document requires human approval for protected-branch merge, branch-protection/permission changes, production deployment where policy requires it, risky or irreversible migrations, data/resource deletion, secret/identity/security-policy changes, spend/capacity above budget, and publishing private assets to Social.</div>
                 </Panel>
                 <Panel title="Lifecycle gates and feedback loop" subtitle="Handoff rules from the proposed Agentic DevOps architecture">
                   <div className="rc-step-grid">{["PLAN", "CODE", "BUILD", "TEST", "RELEASE", "DEPLOY", "OPERATE", "MONITOR"].map((stage, index) => <div className="rc-step" key={stage}><span>{String(index + 1).padStart(2, "0")}</span><strong>{stage}</strong></div>)}</div>
-                  <div className="rc-alert rc-alert-warning"><Workflow size={16} /> Plan approval gates Code; required tests must pass before Release; release approval gates Deploy; Monitor and Operate findings feed the next Plan. A failed gate stops the normal path and routes to repair or human review.</div>
+                  <div className="rc-alert rc-alert-warning"><Workflow size={16} /> Code starts from the Plan Agent's defined scope, requirements, acceptance criteria, dependencies, and risk outputs; scope changes require product-owner approval. Required tests must pass before Release; the required release approval gates Deploy; Monitor and Operate findings feed the next Plan. A failed gate stops the normal path and routes to repair or human review.</div>
                   <div className="rc-contract-grid"><div><strong>Evidence handoff</strong><span>Every handoff carries artifact and evidence references, not only a text summary.</span></div><div><strong>Re-test after repair</strong><span>Code repair creates a new commit/artifact; tests must rerun against that exact version. Old evidence cannot certify new changes.</span></div><div><strong>Auditability</strong><span>Decisions, retries, approvals, and cancellations are recorded.</span></div><div><strong>Feedback loop</strong><span>Monitor and Operate send recurring issues and improvements back to Plan.</span></div></div>
                 </Panel>
                 <div className="rc-alert rc-alert-warning"><AlertTriangle size={16} /> Delapan stage ini berstatus Proposed Architecture. Backend AICode saat ini menjalankan worker roles Analyst, Architect, Developer, Debugger, Tester, dan Security; belum ada lifecycle registry/API untuk mengklaim delapan stage tersebut aktif.</div>
@@ -1010,8 +1045,8 @@ export default function RusaControlCenter() {
                 <div className="rc-chat-toolbar"><label>Model<select value={chatModel} onChange={(event) => setChatModel(event.target.value)} disabled={!models.length}><option value="">{models.length ? "Select model" : "Model discovery unavailable"}</option>{models.map((model) => <option value={model} key={model}>{model}</option>)}</select></label><label className="rc-toggle"><input type="checkbox" checked={chatStream} onChange={(event) => setChatStream(event.target.checked)} /> Request streaming</label><Badge tone={models.length ? "success" : "warning"}>{models.length ? models.length + " model(s)" : "Model unknown"}</Badge></div>
                 {modelError && <div className="rc-note">Model discovery: {modelError}. Chat can use the backend-configured default model.</div>}
                 <div className="rc-chat-history">{chatMessages.map((message, index) => <div className={"rc-chat-line " + message.role} key={index}><div className="rc-chat-avatar">{message.role === "assistant" ? <BrainCircuit size={16} /> : "U"}</div><div className="rc-chat-bubble"><small>{message.role === "assistant" ? "RUSA AI" : "YOU"}</small><p>{message.content || (chatBusy ? "RUSA AI sedang menulis…" : "")}</p></div></div>)}{chatBusy && <div className="rc-chat-working"><span className="rc-live-dot" /> Inference berjalan…</div>}</div>
-                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} maxLength={16000} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
-                <div className="rc-note">Model selector berasal dari GET /v1/models. Jika provider tidak mendukung stream (HTTP 501), UI otomatis mencoba non-streaming. UI mengirim maksimal 32 pesan terakhir dan 16.000 karakter per pesan agar tetap di bawah default body limit API 1 MiB. Chat tidak menjalankan AICode task.</div>
+                <form className="rc-chat-compose" onSubmit={sendChat}><textarea value={chatInput} maxLength={6000} onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={canUseChat ? "Tulis pesan untuk RUSA AI…" : "Inference tidak tersedia untuk role ini"} disabled={!canUseChat || chatBusy} /><button className="rc-btn rc-btn-primary" type="submit" disabled={!canUseChat || chatBusy || !chatInput.trim()}><Send size={16} /> Send</button></form>
+                <div className="rc-note">Model selector berasal dari GET /v1/models. Jika provider tidak mendukung stream (HTTP 501), UI otomatis mencoba non-streaming. UI mengirim maksimal 32 pesan terakhir dan 6.000 karakter per pesan dan batas serialisasi request 900 KiB agar tetap di bawah default body limit API 1 MiB. Chat tidak menjalankan AICode task.</div>
               </Panel>
             )}
 
@@ -1042,7 +1077,7 @@ export default function RusaControlCenter() {
               <div className="rc-stack">
                 <div className="rc-kpi-grid">{KPI_GROUPS.map((group) => <Panel key={group.name} title={group.name} subtitle="Metric definitions from agent specification"><ul className="rc-kpi-list">{group.items.map((item) => <li key={item}><span>{item}</span><Badge tone="neutral">Defined</Badge></li>)}</ul></Panel>)}</div>
                 <Panel title="Implemented evaluation and telemetry primitives" subtitle="These are narrower than the ten-agent Evaluation & Reporting role contract">
-                  <div className="rc-contract-grid"><div><strong>Offline RAG retrieval evaluation</strong><span>rusa-knowledge evaluate computes Recall@K, MRR@K, and NDCG@K from a manually curated JSONL relevance dataset. This is an offline CLI, not a live dashboard.</span></div><div><strong>API / AICode Prometheus metrics</strong><span>API request count/duration, AICode task outcome/duration, worker-step count, and tool-execution count are instrumented.</span></div><div><strong>Worker metrics listener</strong><span>The worker process exposes its own Prometheus listener on internal port 9100; it is separate from the API /metrics process and is not queried by this web page.</span></div><div><strong>Not yet implemented as a reporting product</strong><span>Agent scorecard jobs, historical evaluation reports, model quality dashboards, cost attribution, and approved-improvement tracking are not exposed by the current web API.</span></div></div>
+                  <div className="rc-contract-grid"><div><strong>Offline RAG retrieval evaluation</strong><span>rusa-knowledge evaluate computes Recall@K, MRR@K, and NDCG@K from a manually curated JSONL relevance dataset. This is an offline CLI, not a live dashboard.</span></div><div><strong>API / AICode Prometheus metrics</strong><span>API request count/duration and AICode task outcome/duration are instrumented in the API process.</span></div><div><strong>Worker metrics listener</strong><span>The worker process exposes its own Prometheus listener on port 9100; worker-step and tool-execution counters live in that separate process and are not aggregated into the API /metrics response.</span></div><div><strong>Not yet implemented as a reporting product</strong><span>Agent scorecard jobs, historical evaluation reports, model quality dashboards, cost attribution, and approved-improvement tracking are not exposed by the current web API.</span></div></div>
                 </Panel>
                 <div className="rc-alert rc-alert-warning"><Gauge size={16} /> The KPI groups above are definitions from the Evaluation & Reporting Agent specification. The page does not calculate or fabricate those scores.</div>
               </div>
@@ -1080,7 +1115,7 @@ export default function RusaControlCenter() {
                   </Panel>
                 </div>
                 <Panel title="Worker metrics listener" subtitle="Separate process and private scrape surface">
-                  <div className="rc-contract-grid"><div><strong>Listener</strong><span>RUSA_METRICS_PORT defaults to 9100; Compose exposes port 9100 only on the internal Docker network.</span></div><div><strong>Scope</strong><span>Worker-step and tool-execution metrics are emitted by the worker process, not aggregated into the API process /metrics response.</span></div><div><strong>Web access</strong><span>No browser-facing worker-metrics proxy or aggregation endpoint is implemented in this Control Center.</span></div><div><strong>Security boundary</strong><span>Do not publish the worker metrics port publicly; scrape it only from an approved internal monitoring service.</span></div></div>
+                  <div className="rc-contract-grid"><div><strong>Listener</strong><span>RUSA_METRICS_PORT defaults to 9100; Compose exposes port 9100 to attached container networks but does not publish it to the host.</span></div><div><strong>Scope</strong><span>Worker-step and tool-execution metrics are emitted by the worker process, not aggregated into the API process /metrics response.</span></div><div><strong>Web access</strong><span>No browser-facing worker-metrics proxy or aggregation endpoint is implemented in this Control Center.</span></div><div><strong>Security boundary</strong><span>Do not publish the worker metrics port publicly; scrape it only from an approved internal monitoring service.</span></div></div>
                 </Panel>
                 <Panel title="Telemetry delivery status" subtitle="Distinguish current behavior from ADR target">
                   <div className="rc-delivery-grid"><div><Badge tone="success">Current</Badge><strong>HTTP polling</strong><span>Task list: 10 seconds · Health: 30 seconds · Tenant total: 30 seconds</span></div><div><Badge tone="info">Current</Badge><strong>API metrics</strong><span>GET /metrics is the API process registry; worker metrics are a separate internal listener.</span></div><div><Badge tone="warning">Proposed</Badge><strong>WebSocket + cursor</strong><span>ADR-COMM-001 describes replay/reconnect; no external WebSocket endpoint is present in current app.</span></div><div><Badge tone="warning">Proposed</Badge><strong>Event log + outbox</strong><span>Kafka/outbox projection is an ADR target, not a verified deployment fact.</span></div></div>
@@ -1138,7 +1173,7 @@ export default function RusaControlCenter() {
             {selectedTask.payload?.context && <div className="rc-detail-section"><h3>Context</h3><p>{selectedTask.payload.context}</p></div>}
             {selectedTask.payload?.acceptance_criteria && <div className="rc-detail-section"><h3>Acceptance criteria</h3><ul>{selectedTask.payload.acceptance_criteria.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
             {selectedTask.last_error && <div className="rc-alert rc-alert-danger"><AlertTriangle size={15} /> {selectedTask.last_error}</div>}
-            <div className="rc-detail-section"><h3>Execution result payload</h3><pre className="rc-code">{jsonText(selectedTask.result || { status: "No result payload yet" })}</pre><div className="rc-alert rc-alert-warning"><FileCheck2 size={15} /> Successful AICode task results currently expose pull_request_url, commit_sha, and branch. Per-worker evidence is persisted by the runtime memory/audit path but is not returned by the current task-detail API.</div></div>
+            <div className="rc-detail-section"><h3>Execution result payload</h3><pre className="rc-code">{jsonText(selectedTask.result || { status: "No result payload yet" })}</pre><div className="rc-alert rc-alert-warning"><FileCheck2 size={15} /> Successful AICode task results currently expose pull_request_url, commit_sha, and branch. Worker execution records are saved to tenant-scoped AICode memory; the current task-detail API does not expose those memory records or per-worker evidence.</div></div>
             <div className="rc-modal-actions"><div className="rc-note">Actions are shown only when supported by current role and task state.</div>{canControl && selectedTask.status === "failed" && <button className="rc-btn rc-btn-ghost" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry failed task</button>}{canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && <button className="rc-btn rc-btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}</div>
           </section>
         </div>
