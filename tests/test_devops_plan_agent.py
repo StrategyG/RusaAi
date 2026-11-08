@@ -258,6 +258,7 @@ async def test_repository_context_is_pinned_and_delimited_as_untrusted_data(tmp_
     task["input"].update(
         repository="StrategyG/RusaAi",
         commit_sha="a" * 40,
+        artifact_digest="sha256:" + "c" * 64,
     )
     task["constraints"]["allowed_tools"].append("repository.read")
     provider = FakeProvider(json.dumps(_plan()))
@@ -272,11 +273,13 @@ async def test_repository_context_is_pinned_and_delimited_as_untrusted_data(tmp_
     assert "untrusted data" in system_prompt
     assert "untrusted_repository_content" in user_prompt
     assert result["audit"]["source_commit"] == "a" * 40
+    assert result["audit"]["artifact_digest"] == "sha256:" + "c" * 64
     _, manifest = FilesystemArtifactStore(tmp_path).read(
         tenant_id=task["tenant_id"],
         uri=result["output"]["artifact_refs"][0],
     )
     assert manifest["lineage"]["source_commit"] == "a" * 40
+    assert manifest["lineage"]["source_artifact_digest"] == "sha256:" + "c" * 64
 
 
 @pytest.mark.asyncio
