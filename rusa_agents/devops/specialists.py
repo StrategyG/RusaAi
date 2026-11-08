@@ -215,7 +215,6 @@ def _timeout_seconds(task: dict[str, Any], lease: ExecutionLease) -> float:
     lease_until = _parse_time(lease.lease_until)
     remaining = min(
         (deadline - now).total_seconds(),
-        (lease_until - now).total_seconds(),
         float(task["constraints"]["budget"]["max_runtime_seconds"]),
     )
     if remaining <= 0:
@@ -686,11 +685,12 @@ class CodeAgentExecutor:
             f"{lease.claim_id}:{lease.lease_epoch}".encode("utf-8")
         ).hexdigest()[:24]
         branch = f"feature/rusa-devops-{branch_suffix}"
+        base_branch = task["input"].get("base_branch", "main")
         coding_task = CodingTask(
             objective=task["objective"],
             repository=RepositoryTarget(
                 full_name=repository,
-                base_branch="main",
+                base_branch=base_branch,
                 work_branch=branch,
             ),
             acceptance_criteria=list(task["input"]["acceptance_criteria"]),
@@ -804,7 +804,7 @@ class CodeAgentExecutor:
                                 pr_url = await self.publisher.create_or_get_draft_pr(
                                     repository,
                                     branch,
-                                    "main",
+                                    base_branch,
                                     f"DevOps: {task['objective'][:120]}",
                                     (
                                         "Automated Code Agent change. This pull request is draft-only. "
