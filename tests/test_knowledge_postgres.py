@@ -45,6 +45,13 @@ def knowledge_store():
                 "public.rusa_knowledge_documents, public.rusa_knowledge_chunks TO {}"
             ).format(sql.Identifier(role_name))
         )
+        admin.execute(
+            sql.SQL(
+                "GRANT SELECT, INSERT ON "
+                "public.rusa_knowledge_document_versions, "
+                "public.rusa_knowledge_version_chunks TO {}"
+            ).format(sql.Identifier(role_name))
+        )
 
     connection_options = conninfo_to_dict(DSN)
     connection_options["user"] = role_name
@@ -530,3 +537,22 @@ def test_historical_version_visibility_intersects_current_and_snapshot_scope(kno
         agent_id="aicode-analyst",
         project_id="project-beta",
     ) is None
+
+
+def test_version_history_is_append_only_for_worker_role(knowledge_store):
+    store, restricted_dsn = knowledge_store
+    import psycopg
+
+    with psycopg.connect(restricted_dsn) as connection:
+        privileges = connection.execute(
+            """
+            SELECT
+                has_table_privilege(current_user, 'public.rusa_knowledge_document_versions', 'SELECT'),
+                has_table_privilege(current_user, 'public.rusa_knowledge_document_versions', 'INSERT'),
+                has_table_privilege(current_user, 'public.rusa_knowledge_document_versions', 'UPDATE'),
+                has_table_privilege(current_user, 'public.rusa_knowledge_document_versions', 'DELETE'),
+                has_table_privilege(current_user, 'public.rusa_knowledge_version_chunks', 'UPDATE'),
+                has_table_privilege(current_user, 'public.rusa_knowledge_version_chunks', 'DELETE')
+            """
+        ).fetchone()
+    assert privileges == (True, True, False, False, False, False)
