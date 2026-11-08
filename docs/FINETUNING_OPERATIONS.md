@@ -134,3 +134,14 @@ Before running it:
 The workflow installs the isolated training dependencies, checks GPU capacity, validates the train/evaluation splits, runs QLoRA, and runs the held-out contract/safety evaluator. The evaluator fails the workflow if the configured promotion metrics are not met. An adapter and evaluation report are uploaded as a short-lived **unpromoted candidate artifact** for review; they are not committed to Git, merged into a base model, deployed, or certified for production.
 
 The workflow requires a runner with the exact labels above. If no eligible runner is online, the job remains queued; no CPU fallback is attempted.
+
+
+## NVIDIA T4 16 GB experiment profile
+
+Use `llm-project/configs/training-t4.yaml` for an NVIDIA Tesla T4. This profile uses 4-bit NF4, FP16 compute, a 2,048-token sequence window, batch size 1, gradient checkpointing, LoRA rank 8, and zero dataloader workers. It is an experimental starting point; GPU memory pressure depends on the installed CUDA/PyTorch/bitsandbytes stack and actual tokenized examples. If CUDA OOM occurs, run a separately reviewed experiment with a 1,024-token window and LoRA rank 4.
+
+The manual workflow requires a trusted self-hosted GitHub Actions runner registered with labels `self-hosted`, `linux`, `x64`, `cuda`, `gpu`, and `t4`. The workflow verifies that the visible device name is NVIDIA T4 and that at least 14 GiB VRAM is available. Register the runner on the machine that owns the T4; do not expose a runner with access to untrusted repositories or pull requests.
+
+To run: open Actions → **RUSA-AI Agent SFT GPU Training** → Run workflow, check `confirm_gpu_run=true`, and start the job. The run validates data, trains the adapter, evaluates the held-out set, and uploads a short-lived unpromoted candidate artifact. It does not automatically merge weights into the base model or deploy them.
+
+A T4 in a separate Colab/Kaggle session is not automatically connected to GitHub Actions. In that case, run the same training command inside that GPU notebook/runtime after checking out this repository and installing `requirements-train.txt`.
