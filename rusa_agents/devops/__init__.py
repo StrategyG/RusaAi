@@ -7,6 +7,16 @@ from .agent_registry import (
     authorize_agent_task,
     registered_agent_ids,
 )
+from .artifacts import ContentAddressedArtifactStore
+from .specialists import (
+    CodeAgentExecutor,
+    ExecutionLease,
+    ExecutionLeaseError,
+    PlanAgentExecutor,
+    SpecialistOutcome,
+    SpecialistExecutionError,
+)
+
 from .contracts import (
     ContractValidationError,
     validate_agent_result,
@@ -30,6 +40,13 @@ __all__ = [
     "authorize_agent_task",
     "registered_agent_ids",
     "ContractValidationError",
+    "CodeAgentExecutor",
+    "ContentAddressedArtifactStore",
+    "ExecutionLease",
+    "ExecutionLeaseError",
+    "PlanAgentExecutor",
+    "SpecialistExecutionError",
+    "SpecialistOutcome",
     "OutboxLeaseLostError",
     "PostgresInbox",
     "PostgresOutboxRelay",
