@@ -212,7 +212,6 @@ def _checkpoint(checkpoint: Callable[[], bool] | None) -> None:
 def _timeout_seconds(task: dict[str, Any], lease: ExecutionLease) -> float:
     now = _now()
     deadline = _parse_time(task["deadline_at"])
-    lease_until = _parse_time(lease.lease_until)
     remaining = min(
         (deadline - now).total_seconds(),
         float(task["constraints"]["budget"]["max_runtime_seconds"]),
