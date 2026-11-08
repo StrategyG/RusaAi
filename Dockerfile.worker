@@ -3,7 +3,7 @@ FROM python:3.12.16-slim-trixie AS builder
 WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils pkg-config libbz2-dev libdb-dev libexpat1-dev libffi-dev libgdbm-dev liblzma-dev libncursesw5-dev libreadline-dev libsqlite3-dev libssl-dev libnsl-dev libtirpc-dev uuid-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/build-patched-native-libs.sh /tmp/build-patched-native-libs.sh
