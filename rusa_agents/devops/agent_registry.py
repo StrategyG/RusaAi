@@ -5,7 +5,7 @@ the Policy Engine must still intersect these capabilities with tenant/resource
 policy, approvals, budgets, deadlines, and the current cancellation state.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 from dataclasses import dataclass
 from types import MappingProxyType
