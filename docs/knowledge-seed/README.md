@@ -1,6 +1,6 @@
 # RUSA AI Knowledge Seed — Architecture & Agents
 
-This seed manifest prepares the first centralized RUSA AI knowledge corpus from four source documents supplied by the project owner. The repository is public, so the original source documents are intentionally **not committed**. Place the exact originals in the ignored `sources/` directory before running ingestion.
+This seed manifest prepares the first centralized RUSA AI knowledge corpus from four source documents supplied by the project owner. The repository is public, so the original source documents are intentionally **not committed**. Place the exact originals in the ignored `sources/` directory before running ingestion. See [IMPORT_VERIFICATION_2026-11-08.md](IMPORT_VERIFICATION_2026-11-08.md) for the supplied archive integrity and SFT candidate screening record.
 
 ## Scope
 
