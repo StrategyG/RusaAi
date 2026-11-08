@@ -312,7 +312,7 @@ Publish only after source checksum/parser validation, exact evidence locator ret
 - Add agent profile validation.
 - Add source/domain/agent metadata to ingestion.
 - Preserve shared versus agent-specific visibility.
-- Add immutable source version identity.
+- Implement tenant-scoped append-only document-version snapshots and scoped history reads in migration 010; deployment and retention operations remain pending.
 
 ### Phase C — Trusted retrieval scope
 - Resolve agent identity server-side.
@@ -331,7 +331,7 @@ Publish only after source checksum/parser validation, exact evidence locator ret
 - Build per-agent gold sets.
 - Evaluate retrieval, citation, abstention and scope isolation.
 - Add approved MCP discovery and source sync.
-- Re-index on source revision changes without erasing history.
+- Re-index on source revision changes while retaining prior snapshots (implemented in the feature branch; production retention/restore operations remain pending).
 - Keep operational events and episodic memory separate from architecture facts.
 
 ## 9. Non-goals for this increment
