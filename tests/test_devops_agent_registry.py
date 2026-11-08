@@ -178,12 +178,27 @@ def test_code_agent_cannot_escalate_to_deployment_or_production_tools():
         "Dockerfile",
         "requirements-dev.txt",
         ".devcontainer/devcontainer.json",
+        "src/credentials.json",
+        "src/service-account.json",
+        "src/secrets.json",
+        "src/token.json",
+        "src/id_rsa",
+        "src/id_ed25519",
+        "src/authorized_keys",
+        "src/known_hosts",
     ],
 )
 def test_code_agent_cannot_receive_protected_repository_write_scope(scope):
     task = _task("code")
     task["constraints"]["write_scope"] = [scope]
     with pytest.raises(AgentAuthorizationError, match="protected repository path"):
+        authorize_agent_task(task, authenticated_principal=CODE_AGENT)
+
+
+def test_code_agent_write_capabilities_require_a_non_empty_task_scope():
+    task = _task("code")
+    task["constraints"]["write_scope"] = []
+    with pytest.raises(AgentAuthorizationError, match="non-empty task-scoped write_scope"):
         authorize_agent_task(task, authenticated_principal=CODE_AGENT)
 
 
