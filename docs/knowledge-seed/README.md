@@ -31,7 +31,7 @@ This directory is ignored by Git to avoid publishing internal source material.
 
 The existing RUSA RAG implementation uses PostgreSQL 16 with pgvector and 1536-dimensional embeddings. It retains the existing vector store and adds `migrations/008_rag_agent_scope_indexes.sql` for the shared/agent-specific metadata filters; this seed does not introduce Qdrant or a second vector store.
 
-Apply migrations `007_rag_knowledge_pgvector.sql`, `008_rag_agent_scope_indexes.sql`, and `009_rag_project_scope_index.sql`, in that order, using a database owner/administrator connection to the dedicated knowledge database. Then configure a restricted non-superuser login that can assume the `rusa_knowledge_worker` role.
+Apply migrations `007_rag_knowledge_pgvector.sql` through `010_rag_knowledge_version_history.sql` in order, using a database owner/administrator connection to the dedicated knowledge database. Migration 010 adds tenant-scoped immutable snapshots of prior document versions and their chunks. Then configure a restricted non-superuser login that can assume the `rusa_knowledge_worker` role.
 
 Set these environment variables outside the repository, using a secret manager where appropriate:
 
@@ -86,7 +86,7 @@ python -m rusa_knowledge.seed --tenant-id '<authorized-rusa-tenant>' --apply
 
 The default collection is `agent`, matching the existing worker and MCP retrieval defaults. The four initial architecture/agent source documents are marked `knowledge_scope=shared`, so all authorized agent workers may retrieve them. Future agent-specific documents must set `knowledge_scope=agent_specific` and provide one or more validated `agent_ids`. If `agent_ids` is present, `knowledge_scope` must be explicit; the system will not infer shared visibility. The worker gateway supplies its AICode scope ID (for example, `aicode-analyst`) from the trusted WorkerRole and derives a project scope from the already-authorized repository target (for example, `strategyg--rusaai`). Agent-specific knowledge without a project ID is agent-wide within the tenant; records with a project ID are visible only to that agent in the matching project. Models cannot choose the scope, project, or collection.
 
-The source URI is stable per source ID, so re-ingesting the same source updates the same document row rather than creating a duplicate row. Re-ingestion still recomputes embeddings and replaces that document's chunks.
+The source URI is stable per source ID, so re-ingesting the same source updates the same document row rather than creating a duplicate row. When the content, title, or metadata fingerprint changes, the previous document metadata and chunk text/embeddings are snapshotted in the version-history tables before the active chunks are replaced. Identical re-ingestion does not create a duplicate version. Historical versions remain subject to the current document's agent/project visibility policy.
 
 The script prints document IDs, chunk counts, and content hashes. Keep this output as the ingestion record; do not log secrets or full source bodies.
 
