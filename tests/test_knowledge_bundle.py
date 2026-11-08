@@ -98,7 +98,7 @@ def _write_fixture(tmp_path):
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("source_manifest.json", json.dumps(bundle_manifest))
         archive.writestr("README.txt", "test fixture")
-        for source_id, (filename, text) in sources.items():
+        for _source_id, (filename, text) in sources.items():
             archive.writestr(f"sources/{filename}", text)
         for name, text in packs.items():
             archive.writestr(name, text)
