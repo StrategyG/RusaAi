@@ -99,9 +99,12 @@ class SpiffeIdentityResolver:
         if not domain or "/" in domain or ":" in domain:
             raise ValueError("trust_domain must be a bare DNS trust domain")
         self.trust_domain = domain
-        self.principal_methods = dict(
-            principal_methods or DEFAULT_PRINCIPAL_METHODS
+        method_map = (
+            DEFAULT_PRINCIPAL_METHODS
+            if principal_methods is None
+            else principal_methods
         )
+        self.principal_methods = dict(method_map)
 
     @staticmethod
     def _auth_values(auth_context: dict, key: str) -> list[bytes]:
@@ -147,10 +150,19 @@ class SpiffeIdentityResolver:
         ):
             raise IdentityAuthenticationError("SPIFFE trust domain is not trusted")
 
-        parts = [unquote(part) for part in parsed.path.split("/") if part]
-        if len(parts) != 4 or parts[0] != "tenant" or parts[2] != "service":
-            raise IdentityAuthenticationError("SPIFFE URI path is not a RUSA workload identity")
-        tenant_id, principal = parts[1], parts[3]
+        raw_parts = parsed.path.split("/")
+        if (
+            len(raw_parts) != 5
+            or raw_parts[0] != ""
+            or raw_parts[1] != "tenant"
+            or not raw_parts[2]
+            or raw_parts[3] != "service"
+            or not raw_parts[4]
+        ):
+            raise IdentityAuthenticationError("SPIFFE URI path is not a canonical RUSA workload identity")
+        tenant_id, principal = unquote(raw_parts[2]), unquote(raw_parts[4])
+        if tenant_id != raw_parts[2] or principal != raw_parts[4]:
+            raise IdentityAuthenticationError("SPIFFE URI path segments must not be percent-encoded")
         if not _TENANT_RE.fullmatch(tenant_id):
             raise IdentityAuthenticationError("SPIFFE tenant identifier is invalid")
         if not _PRINCIPAL_RE.fullmatch(principal):
