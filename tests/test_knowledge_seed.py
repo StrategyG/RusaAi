@@ -75,6 +75,7 @@ def test_prepare_seed_documents_checks_hash_and_builds_provenance(tmp_path):
     assert item.metadata["source_sha256"] == item.source_sha256
     assert item.metadata["verification_status"] == "UNVERIFIED"
     assert item.metadata["implementation_status"] == "NOT_VERIFIED"
+    assert item.metadata["knowledge_scope"] == "shared"
     assert item.metadata["chunking_strategy"] == "character_overlap_v1"
 
 
