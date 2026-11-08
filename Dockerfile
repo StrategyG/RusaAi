@@ -48,12 +48,28 @@ RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
 
-import pyexpat, sqlite3
-if pyexpat.EXPAT_VERSION != "expat_2.10.0":
-    raise SystemExit(f"Unpatched Expat runtime: {pyexpat.EXPAT_VERSION}")
+import ctypes
+import pyexpat
+import sqlite3
+import subprocess
+import _sqlite3
+
+expat = ctypes.CDLL("libexpat.so.1")
+expat.XML_ExpatVersion.restype = ctypes.c_char_p
+expat_version = expat.XML_ExpatVersion().decode("ascii")
+
+def linked_library(module, expected):
+    result = subprocess.run(["ldd", module.__file__], check=True, capture_output=True, text=True)
+    if expected not in result.stdout:
+        raise SystemExit(f"{module.__name__} is not using patched library {expected}: {result.stdout}")
+
+if expat_version != "expat_2.10.0":
+    raise SystemExit(f"Unpatched Expat runtime: {expat_version}")
 if sqlite3.sqlite_version_info < (3, 54, 1):
     raise SystemExit(f"Unpatched SQLite runtime: {sqlite3.sqlite_version}")
-print(f"Patched native libraries active: {pyexpat.EXPAT_VERSION}; SQLite {sqlite3.sqlite_version}")
+linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so.0")
+print(f"Patched native libraries active: Expat {expat_version}; SQLite {sqlite3.sqlite_version}")
 
 for package in ("pip", "setuptools", "wheel", "jaraco.context"):
     try:
