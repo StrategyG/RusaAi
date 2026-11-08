@@ -24,7 +24,6 @@ from .control_store import (
 )
 from .store import WorkflowIdempotencyConflictError
 
-
 LOGGER = logging.getLogger("rusa.devops.grpc")
 _TENANT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PRINCIPAL_RE = re.compile(r"^[a-z][a-z0-9_]{1,127}$")
