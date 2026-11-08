@@ -150,7 +150,7 @@ def _attach_plan_provenance(task: dict, store: ContentAddressedArtifactStore) ->
         "# Acceptance criteria\n\n"
         "- **AC-1** — The example feature has a regression test.\n"
         "  - Verification: run the independent regression test.\n"
-    )
+    ).encode("utf-8")
     plan_ref = store.put(task["tenant_id"], plan_bytes, namespace="artifact")
     acceptance_ref = store.put(task["tenant_id"], acceptance_bytes, namespace="artifact")
     evidence = {
