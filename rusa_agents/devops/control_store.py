@@ -139,16 +139,25 @@ class PostgresWorkflowControlStore:
 
     @staticmethod
     def _workflow_row(conn: Any, tenant_id: str, run_id: str, *, lock: bool = False):
-        suffix = " FOR UPDATE" if lock else ""
-        row = conn.execute(
-            """
+        sql = """
             SELECT run_id, tenant_id, status, state_version, result_ref,
                    created_at, updated_at, cancel_epoch
             FROM public.devops_workflows
             WHERE tenant_id=%s AND run_id=%s
-            """ + suffix,
-            (tenant_id, run_id),
-        ).fetchone()
+        """
+        if lock:
+            row = conn.execute(
+                """
+                SELECT run_id, tenant_id, status, state_version, result_ref,
+                       created_at, updated_at, cancel_epoch
+                FROM public.devops_workflows
+                WHERE tenant_id=%s AND run_id=%s
+                FOR UPDATE
+                """,
+                (tenant_id, run_id),
+            ).fetchone()
+        else:
+            row = conn.execute(sql, (tenant_id, run_id)).fetchone()
         if row is None:
             raise WorkflowNotFoundError("workflow not found")
         return {
@@ -171,20 +180,36 @@ class PostgresWorkflowControlStore:
         *,
         lock: bool = False,
     ):
-        suffix = " FOR UPDATE" if lock else ""
-        row = conn.execute(
-            """
-            SELECT t.task_id, t.run_id, t.tenant_id, t.agent_id, t.stage,
-                   t.attempt, t.status, t.state_version, t.lease_epoch,
-                   t.deadline_at, t.task, t.result, t.lease_owner, t.lease_claim_id,
-                   t.lease_until, t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
-            FROM public.devops_tasks AS t
-            JOIN public.devops_workflows AS w
-              ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
-            WHERE t.tenant_id=%s AND t.run_id=%s AND t.task_id=%s
-            """ + suffix,
-            (tenant_id, run_id, task_id),
-        ).fetchone()
+        params = (tenant_id, run_id, task_id)
+        if lock:
+            row = conn.execute(
+                """
+                SELECT t.task_id, t.run_id, t.tenant_id, t.agent_id, t.stage,
+                       t.attempt, t.status, t.state_version, t.lease_epoch,
+                       t.deadline_at, t.task, t.result, t.lease_owner, t.lease_claim_id,
+                       t.lease_until, t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
+                FROM public.devops_tasks AS t
+                JOIN public.devops_workflows AS w
+                  ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
+                WHERE t.tenant_id=%s AND t.run_id=%s AND t.task_id=%s
+                FOR UPDATE
+                """,
+                params,
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT t.task_id, t.run_id, t.tenant_id, t.agent_id, t.stage,
+                       t.attempt, t.status, t.state_version, t.lease_epoch,
+                       t.deadline_at, t.task, t.result, t.lease_owner, t.lease_claim_id,
+                       t.lease_until, t.heartbeat_at, t.side_effect, w.status, w.cancel_epoch
+                FROM public.devops_tasks AS t
+                JOIN public.devops_workflows AS w
+                  ON w.tenant_id=t.tenant_id AND w.run_id=t.run_id
+                WHERE t.tenant_id=%s AND t.run_id=%s AND t.task_id=%s
+                """,
+                params,
+            ).fetchone()
         if row is None:
             raise WorkflowNotFoundError("task not found")
         return {
