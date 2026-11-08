@@ -242,7 +242,11 @@ class PostgresKnowledgeStore:
         )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
-            lock_key = f"{tenant_id}\\x1f{collection}\\x1f{source_uri}"
+            lock_key = json.dumps(
+                [tenant_id, collection, source_uri],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
             connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 (lock_key,),
