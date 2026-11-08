@@ -51,6 +51,14 @@ jobs:
         run: python scripts/generate_devops_proto.py
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
+      - name: Diagnose Ruff import ordering
+        run: |
+          ruff check --select I --diff \
+            rusa_agents/devops/control_store.py \
+            rusa_agents/devops/grpc_server.py \
+            rusa_agents/devops/kafka.py \
+            rusa_agents/devops/rabbitmq.py \
+            tests/test_devops_kafka.py || true
       - name: Lint
         run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis
