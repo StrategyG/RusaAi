@@ -102,5 +102,7 @@ Successful Code results require a source commit. Successful Build, Test, Release
 | 3C — Kafka event log | Tenant/run partitioning, signed event publishing, idempotent consumer projections | Publish-confirm, replay and duplicate-consumer tests |
 | 3D — gRPC control plane | mTLS/SPIFFE identity, scoped DB roles, RPC deadlines, claim/lease/state fencing, cancellation | Identity, authorization, claim, heartbeat, result receipt and cancel tests |
 | 3E — Reliability validation | Crash/restart, redelivery, replay, cancellation, lease expiry and side-effect reconciliation | CI evidence; production broker/worker provisioning remains a separate rollout gate |
-| 4 — Specialist execution | Eight agents, per-agent identity, capability enforcement, independent QA | Staging candidate with exact commit/digest evidence |
+| 4A — Plan Agent | Structured plan schema, bounded capabilities, revision-pinned context, tenant-private immutable planning artifacts, approval hold | Five planning artifacts, valid dependency DAG, exact source lineage, no unapproved handoff |
+| 4B — Worker bridge and delivery agents | RabbitMQ command to accepted gRPC claim, heartbeat/cancel handling, Code/Build/Test identities and isolated execution | Code branch/worktree, reproducible build digest, independent test evidence bound to exact commit |
+| 4C — Release and Deploy | Signed release candidate, provenance, staging deployment, health checks and rollback rehearsal | Staging release candidate with human approval boundaries |
 | 5 — Operations and feedback | Operate/Monitor, SLO, alerts, budget, kill-switch, feedback | Security, SRE and product-owner sign-off |
