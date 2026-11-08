@@ -41,6 +41,12 @@ const lifecycleAgents = [
   ["Operate", "rusa_operate_agent"], ["Monitor", "rusa_monitor_agent"]
 ];
 
+const architectureRoles = [
+  "Supreme Orchestrator", "System Architect", "Planner", "Task Decomposer",
+  "Software Engineer", "DevOps", "QA & Testing", "Security & Policy",
+  "Memory & Knowledge", "Evaluation & Reporting"
+];
+
 function statusClass(status: string) {
   const normalized = (status || "unknown").toLowerCase();
   const known = ["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled", "blocked"];
@@ -455,6 +461,13 @@ export default function Home() {
                   <div className="agent-grid">
                     {runtimeAgents.map((agent) => <article className="agent-card" key={agent.name}><div className="flex items-center gap-2"><div className="list-icon"><Bot size={16} /></div><h3>{agent.name}</h3></div><div className="agent-state">{agent.role}</div><p>{agent.detail}</p></article>)}
                   </div>
+                </section>
+                <section className="panel">
+                  <div className="panel-header"><div><div className="panel-title">RUSA AI architecture catalogue</div><div className="panel-subtitle">Roles named in the All Agents architecture document; shown separately from runtime registrations</div></div><span className="status status-queued">Design catalogue</span></div>
+                  <div className="agent-grid">
+                    {architectureRoles.map((name) => <article className="agent-card" key={name}><div className="flex items-center gap-2"><div className="list-icon"><BrainCircuit size={16} /></div><h3>{name}</h3></div><div className="agent-state">Architecture role</div><p>Defined in the RUSA AI agent catalogue. Runtime binding and canonical agent identity are not inferred by the UI.</p></article>)}
+                  </div>
+                  <div className="inline-alert mt-4">The source documents use Supreme Orchestrator, Executive Orchestrator, and DevOps Orchestrator terminology. Their canonical identity/ownership mapping remains an architecture decision; this interface keeps the labels distinct.</div>
                 </section>
                 <section className="panel">
                   <div className="panel-header"><div><div className="panel-title">Agentic DevOps lifecycle target</div><div className="panel-subtitle">Eight specialized stages from the architecture document; not all are exposed as runtime agents in this repository yet</div></div><span className="status status-queued">Architecture target</span></div>
