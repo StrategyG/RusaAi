@@ -38,6 +38,7 @@ def test_knowledge_tools_are_scoped_to_authenticated_task_tenant(tmp_path):
     assert "kb://guide" in result.output
     assert service.calls[0][1]["tenant_id"] == "tenant-from-queue"
     assert service.calls[0][1]["collection"] == "agent"
+    assert service.calls[0][1]["agent_id"] == "aicode-analyst"
 
 
 def test_knowledge_tool_cannot_override_tenant_or_pass_unknown_arguments(tmp_path):
@@ -63,3 +64,33 @@ def test_knowledge_tools_fail_closed_when_rag_is_disabled(tmp_path):
             {"name": "list_collections", "arguments": {}},
             WorkerRole.ANALYST,
         )
+
+
+def test_worker_cannot_choose_collection_and_document_reads_keep_agent_scope(tmp_path):
+    service = FakeKnowledgeService()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        knowledge_service=service,
+        knowledge_tenant_id="tenant-a",
+        knowledge_collection="agent",
+    )
+    with pytest.raises(ToolDenied, match="Unexpected arguments"):
+        gateway.execute(
+            {
+                "name": "search_knowledge",
+                "arguments": {"query": "deployment", "collection": "other"},
+            },
+            WorkerRole.ANALYST,
+        )
+
+    result = gateway.execute(
+        {
+            "name": "get_document",
+            "arguments": {"document_id": "00000000-0000-0000-0000-000000000001"},
+        },
+        WorkerRole.SECURITY,
+    )
+    assert result.ok
+    call = next(call for call in service.calls if call[0] == "get_document")
+    assert call[1]["collection"] == "agent"
+    assert call[1]["agent_id"] == "aicode-security"
