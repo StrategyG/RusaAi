@@ -1,11 +1,16 @@
 # Phase 4B — Plan and Code specialist execution
 
-## Scope
+## Phase 4A — specialist authority foundation
 
-This increment establishes the execution-time authority boundary for the
-eight lifecycle specialists and the cross-cutting Security Guard. It is a
-foundation for Phase 4, not a claim that the eight agent implementations or
-worker fleet are complete.
+PR #68 establishes the execution-time authority boundary for the eight
+lifecycle specialists and the cross-cutting Security Guard. Its registry is
+a capability ceiling, not an authorization grant.
+
+## Phase 4B — Plan and Code execution
+
+This increment implements structured planning and isolated Code execution.
+It is not a claim that the complete eight-agent worker fleet or staging
+delivery path is production-ready.
 
 ## Agent registry
 
