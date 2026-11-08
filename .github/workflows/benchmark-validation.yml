@@ -75,7 +75,7 @@ jobs:
           python -m pytest -q tests/test_benchmarking.py --junitxml=artifacts/benchmark-unit-tests.xml
       - name: Generate commit-bound test evidence
         env:
-          GITHUB_SHA: ${{ github.sha }}
+          SOURCE_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -105,7 +105,7 @@ jobs:
               "created_at": datetime.now(timezone.utc).isoformat(),
               "source": {
                   "repository": os.environ["GITHUB_REPOSITORY"],
-                  "commit_sha": os.environ["GITHUB_SHA"],
+                  "commit_sha": os.environ["SOURCE_COMMIT_SHA"],
                   "workflow": os.environ["GITHUB_WORKFLOW"],
                   "workflow_run_id": os.environ["GITHUB_RUN_ID"],
                   "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
