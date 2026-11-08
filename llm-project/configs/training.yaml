@@ -39,8 +39,8 @@ training:
   warmup_ratio: 0.03
   lr_scheduler_type: cosine
   logging_steps: 5
-  eval_steps: 50
-  save_steps: 50
+  eval_strategy: epoch
+  save_strategy: epoch
   save_total_limit: 3
   max_grad_norm: 0.3
   gradient_checkpointing: true

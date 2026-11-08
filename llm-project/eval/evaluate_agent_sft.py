@@ -33,6 +33,15 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
     model_cfg = config["model"]
     qlora_cfg = config["qlora"]
     evaluation_cfg = config.get("evaluation", {})
+    provenance_path = adapter_dir / "rusa-finetune-provenance.json"
+    if not provenance_path.is_file():
+        raise ValueError("adapter directory must contain rusa-finetune-provenance.json")
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    model_metadata = provenance["model"]
+    model_id = model_metadata["id"]
+    revision = model_metadata.get("resolved_revision") or model_metadata["configured_revision"]
+    if model_id != model_cfg["id"]:
+        raise ValueError("adapter provenance base model does not match the configured model")
     records = load_jsonl(eval_file)
     if not torch.cuda.is_available():
         raise RuntimeError("Adapter evaluation requires a CUDA GPU")
@@ -48,8 +57,8 @@ def run_evaluation(adapter_dir: Path, eval_file: Path, config_path: Path, output
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     base = AutoModelForCausalLM.from_pretrained(
-        model_cfg["id"],
-        revision=model_cfg["revision"],
+        model_id,
+        revision=revision,
         quantization_config=quantization,
         torch_dtype=compute_dtype,
         device_map="auto",

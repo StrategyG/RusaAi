@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -20,22 +21,35 @@ def main() -> int:
     if output_dir.exists() and any(output_dir.iterdir()):
         parser.error("--output-dir must be empty or not yet exist")
 
+    provenance_path = adapter_dir / "rusa-finetune-provenance.json"
+    if not provenance_path.is_file():
+        parser.error("adapter directory must contain rusa-finetune-provenance.json")
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        model_metadata = provenance["model"]
+        model_id = model_metadata["id"]
+        revision = model_metadata.get("resolved_revision") or model_metadata["configured_revision"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        parser.error(f"adapter provenance is invalid: {exc}")
+
     try:
         import torch
-        from peft import AutoPeftModelForCausalLM
-        from transformers import AutoTokenizer
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:
         raise SystemExit("Install requirements-train.txt before merging adapters") from exc
 
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
-    model = AutoPeftModelForCausalLM.from_pretrained(
-        str(adapter_dir),
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        revision=revision,
         torch_dtype=dtype,
         device_map="auto",
         low_cpu_mem_usage=True,
         trust_remote_code=False,
         use_safetensors=True,
     )
+    model = PeftModel.from_pretrained(base_model, str(adapter_dir), is_trainable=False)
     merged = model.merge_and_unload(safe_merge=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     merged.save_pretrained(
@@ -45,9 +59,7 @@ def main() -> int:
     )
     tokenizer = AutoTokenizer.from_pretrained(str(adapter_dir), trust_remote_code=False)
     tokenizer.save_pretrained(output_dir)
-    provenance = adapter_dir / "rusa-finetune-provenance.json"
-    if provenance.is_file():
-        shutil.copy2(provenance, output_dir / provenance.name)
+    shutil.copy2(provenance_path, output_dir / provenance_path.name)
     print(f"Merged model saved to: {output_dir}")
     print("Next: create and pin rusa-model-manifest.json before serving this artifact.")
     return 0
