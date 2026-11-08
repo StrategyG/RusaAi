@@ -67,7 +67,7 @@ COPY --from=builder /usr/local /usr/local
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
 
-RUN ldd /usr/local/bin/python3.11 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.11 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
