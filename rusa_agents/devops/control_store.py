@@ -16,7 +16,6 @@ from .contracts import (
 )
 from .store import WorkflowIdempotencyConflictError
 
-
 CONTROL_SERVICE_ID = "rusa_devops_control_service"
 _TRACEPARENT_RE = re.compile(
     r"^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
