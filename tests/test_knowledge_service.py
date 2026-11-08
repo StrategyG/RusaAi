@@ -1,3 +1,5 @@
+import pytest
+
 from rusa_knowledge.service import KnowledgeService
 
 
@@ -15,10 +17,20 @@ class FakeStore:
         return [{"document_id": "doc-1", "content": "evidence"}]
 
     def get_document(self, **kwargs):
+        self.get_document_args = kwargs
         return {"document_id": kwargs["document_id"]}
 
     def list_collections(self, **kwargs):
+        self.list_collections_args = kwargs
         return [{"collection": "agent", "document_count": 1}]
+
+    def list_document_versions(self, **kwargs):
+        self.list_document_versions_args = kwargs
+        return [{"version_id": "version-1"}]
+
+    def get_document_version(self, **kwargs):
+        self.get_document_version_args = kwargs
+        return {"version_id": kwargs["version_id"], "content": "historical"}
 
     def close(self):
         pass
@@ -28,6 +40,8 @@ class FakeEmbeddings:
     def __init__(self):
         self.inputs = []
         self.batches = []
+        self.model = "test-embedding-model"
+        self.dimensions = 3
 
     def embed(self, texts):
         self.inputs.extend(texts)
@@ -52,6 +66,10 @@ def test_ingest_text_hashes_and_indexes_chunks():
     assert store.ingested["tenant_id"] == "tenant-a"
     assert store.ingested["chunks"] == ["One paragraph of useful knowledge."]
     assert len(store.ingested["embeddings"][0]) == 3
+    assert store.ingested["metadata"]["embedding_model"] == "test-embedding-model"
+    assert store.ingested["metadata"]["embedding_dimensions"] == 3
+    assert store.ingested["metadata"]["chunk_size_chars"] == 1200
+    assert store.ingested["metadata"]["chunk_overlap_chars"] == 180
 
 
 def test_search_embeds_query_and_returns_store_results():
@@ -63,10 +81,14 @@ def test_search_embeds_query_and_returns_store_results():
         collection="agent",
         query="How does RUSA work?",
         limit=3,
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
     )
     assert results[0]["content"] == "evidence"
     assert store.search_args["tenant_id"] == "tenant-a"
     assert store.search_args["query_embedding"] == [0.1, 0.2, 0.3]
+    assert store.search_args["agent_id"] == "aicode-analyst"
+    assert store.search_args["project_id"] == "strategyg--rusaai"
 
 
 
@@ -172,3 +194,98 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+def test_get_document_passes_agent_scope_to_store():
+    store = FakeStore()
+    service = KnowledgeService(store, FakeEmbeddings())
+    result = service.get_document(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        agent_id="aicode-security",
+        project_id="strategyg--rusaai",
+    )
+    assert result["document_id"] == "00000000-0000-0000-0000-000000000001"
+    assert store.get_document_args["agent_id"] == "aicode-security"
+    assert store.get_document_args["project_id"] == "strategyg--rusaai"
+
+
+def test_search_rejects_invalid_agent_scope_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="architecture",
+            agent_id="analyst/../security",
+        )
+    except ValueError as exc:
+        assert "agent_id is invalid" in str(exc)
+    else:
+        raise AssertionError("invalid agent scope was accepted")
+    assert embeddings.inputs == []
+    assert store.search_args is None
+
+
+def test_list_collections_passes_agent_and_project_visibility():
+    store = FakeStore()
+    service = KnowledgeService(store, FakeEmbeddings())
+    result = service.list_collections(
+        tenant_id="tenant-a",
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
+    )
+    assert result == [{"collection": "agent", "document_count": 1}]
+    assert store.list_collections_args == {
+        "tenant_id": "tenant-a",
+        "agent_id": "aicode-analyst",
+        "project_id": "strategyg--rusaai",
+    }
+
+
+def test_search_rejects_invalid_project_scope_before_embedding():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings)
+    with pytest.raises(ValueError, match="project_id is invalid"):
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="architecture",
+            agent_id="aicode-analyst",
+            project_id="../other-project",
+        )
+    assert embeddings.inputs == []
+    assert store.search_args is None
+
+
+def test_version_history_methods_pass_agent_and_project_scope():
+    store = FakeStore()
+    service = KnowledgeService(store, FakeEmbeddings())
+    listed = service.list_document_versions(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
+        limit=5,
+    )
+    assert listed == [{"version_id": "version-1"}]
+    assert store.list_document_versions_args["agent_id"] == "aicode-analyst"
+    assert store.list_document_versions_args["project_id"] == "strategyg--rusaai"
+    assert store.list_document_versions_args["limit"] == 5
+
+    historical = service.get_document_version(
+        tenant_id="tenant-a",
+        collection="agent",
+        document_id="00000000-0000-0000-0000-000000000001",
+        version_id="00000000-0000-0000-0000-000000000002",
+        agent_id="aicode-analyst",
+        project_id="strategyg--rusaai",
+    )
+    assert historical["content"] == "historical"
+    assert store.get_document_version_args["agent_id"] == "aicode-analyst"
+    assert store.get_document_version_args["project_id"] == "strategyg--rusaai"

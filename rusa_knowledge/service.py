@@ -9,7 +9,7 @@ from typing import Any
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
 from .safety import reject_credential_material, validate_document_metadata
-from .store import PostgresKnowledgeStore
+from .store import AGENT_PATTERN, PROJECT_PATTERN, PostgresKnowledgeStore
 
 
 class KnowledgeService:
@@ -50,7 +50,7 @@ class KnowledgeService:
             if not ready:
                 store.close()
                 raise RuntimeError(
-                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql"
+                    "knowledge database is not ready; apply migrations/007_rag_knowledge_pgvector.sql through migrations/010_rag_knowledge_version_history.sql in order"
                 )
         return service
 
@@ -84,7 +84,16 @@ class KnowledgeService:
         if len(normalized) > 2_000_000:
             raise ValueError("document content exceeds the 2 million character limit")
         reject_credential_material(normalized)
-        validate_document_metadata(source_uri, title, metadata or {})
+        metadata_payload = dict(metadata or {})
+        embedding_model = getattr(self.embeddings, "model", None)
+        embedding_dimensions = getattr(self.embeddings, "dimensions", None)
+        if isinstance(embedding_model, str) and embedding_model:
+            metadata_payload["embedding_model"] = embedding_model
+        if type(embedding_dimensions) is int and embedding_dimensions > 0:
+            metadata_payload["embedding_dimensions"] = embedding_dimensions
+        metadata_payload["chunk_size_chars"] = chunk_size
+        metadata_payload["chunk_overlap_chars"] = overlap
+        validate_document_metadata(source_uri, title, metadata_payload)
         chunks = chunk_text(normalized, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             raise ValueError("document did not produce any searchable chunks")
@@ -102,7 +111,7 @@ class KnowledgeService:
             source_uri=source_uri,
             title=title,
             content_hash=digest,
-            metadata=metadata or {},
+            metadata=metadata_payload,
             chunks=chunks,
             embeddings=vectors,
         )
@@ -121,9 +130,19 @@ class KnowledgeService:
         collection: str,
         query: str,
         limit: int = 5,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
         reject_credential_material(query)
         vector = self.embeddings.embed([query])[0]
         return self.store.search(
@@ -132,6 +151,8 @@ class KnowledgeService:
             query=query,
             query_embedding=vector,
             limit=limit,
+            agent_id=agent_id,
+            project_id=project_id,
         )
 
     def get_document(
@@ -141,16 +162,100 @@ class KnowledgeService:
         collection: str,
         document_id: str,
         max_chars: int = 20_000,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
         return self.store.get_document(
             tenant_id=tenant_id,
             collection=collection,
             document_id=document_id,
             max_chars=max_chars,
+            agent_id=agent_id,
+            project_id=project_id,
         )
 
-    def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        return self.store.list_collections(tenant_id=tenant_id)
+    def list_document_versions(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.list_document_versions(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    def get_document_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.get_document_version(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            version_id=version_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            max_chars=max_chars,
+        )
+
+    def list_collections(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.list_collections(
+            tenant_id=tenant_id, agent_id=agent_id, project_id=project_id
+        )
 
     def close(self) -> None:
         self.store.close()

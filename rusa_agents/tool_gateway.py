@@ -7,6 +7,7 @@ from __future__ import annotations  # noqa: I001
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
@@ -251,6 +252,7 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        knowledge_project_id: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -262,9 +264,15 @@ class WorkspaceToolGateway:
             or not knowledge_tenant_id.strip()
         ):
             raise ValueError("knowledge tenant identity must come from the authenticated task")
+        if knowledge_project_id is not None and (
+            not isinstance(knowledge_project_id, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", knowledge_project_id)
+        ):
+            raise ValueError("knowledge project identity must be a validated server-derived identifier")
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        self.knowledge_project_id = knowledge_project_id
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -391,55 +399,75 @@ class WorkspaceToolGateway:
             raise ToolDenied("Tenant-scoped knowledge retrieval is not enabled for this worker")
         return self.knowledge_service, self.knowledge_tenant_id
 
-    def _search_knowledge(self, args: dict[str, Any]) -> ToolResult:
+    def _search_knowledge(self, args: dict[str, Any], role: WorkerRole) -> ToolResult:
         service, tenant_id = self._knowledge_context()
         query = args.get("query")
-        collection = args.get("collection", self.knowledge_collection)
         limit = args.get("limit", 5)
+        collection = self.knowledge_collection
+        agent_id = f"aicode-{role.value}"
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ToolDenied("Knowledge query must be a non-empty string of at most 2000 characters")
-        if not isinstance(collection, str) or not collection:
-            raise ToolDenied("Knowledge collection is invalid")
         if type(limit) is not int or not 1 <= limit <= 10:
             raise ToolDenied("Knowledge result limit must be between 1 and 10")
         results = service.search(
-            tenant_id=tenant_id, collection=collection, query=query, limit=limit
+            tenant_id=tenant_id,
+            collection=collection,
+            query=query,
+            limit=limit,
+            agent_id=agent_id,
+            project_id=self.knowledge_project_id,
         )
         output = json.dumps(
-            {"query": query, "collection": collection, "results": results},
+            {"query": query, "collection": collection, "agent_id": agent_id, "results": results},
             ensure_ascii=False,
             default=str,
         )[:12_000]
-        return ToolResult(True, output, {"source": "tenant_knowledge", "collection": collection})
+        return ToolResult(
+            True, output,
+            {"source": "tenant_knowledge", "collection": collection, "agent_id": agent_id},
+        )
 
-    def _get_knowledge_document(self, args: dict[str, Any]) -> ToolResult:
+    def _get_knowledge_document(self, args: dict[str, Any], role: WorkerRole) -> ToolResult:
         service, tenant_id = self._knowledge_context()
         document_id = args.get("document_id")
-        collection = args.get("collection", self.knowledge_collection)
+        collection = self.knowledge_collection
+        agent_id = f"aicode-{role.value}"
         if not isinstance(document_id, str) or not document_id or len(document_id) > 64:
             raise ToolDenied("Knowledge document ID is invalid")
-        if not isinstance(collection, str) or not collection:
-            raise ToolDenied("Knowledge collection is invalid")
         document = service.get_document(
             tenant_id=tenant_id,
             collection=collection,
             document_id=document_id,
             max_chars=12_000,
+            agent_id=agent_id,
+            project_id=self.knowledge_project_id,
         )
         output = json.dumps(
-            {"found": document is not None, "document": document},
+            {"found": document is not None, "document": document, "agent_id": agent_id},
             ensure_ascii=False,
             default=str,
         )[:12_500]
-        return ToolResult(True, output, {"source": "tenant_knowledge", "collection": collection})
+        return ToolResult(
+            True, output,
+            {"source": "tenant_knowledge", "collection": collection, "agent_id": agent_id},
+        )
 
-    def _list_knowledge_collections(self) -> ToolResult:
+    def _list_knowledge_collections(self, role: WorkerRole) -> ToolResult:
         service, tenant_id = self._knowledge_context()
-        collections = service.list_collections(tenant_id=tenant_id)
+        agent_id = f"aicode-{role.value}"
+        collections = service.list_collections(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            project_id=self.knowledge_project_id,
+        )
         return ToolResult(
             True,
-            json.dumps({"collections": collections}, ensure_ascii=False, default=str)[:4000],
-            {"source": "tenant_knowledge"},
+            json.dumps(
+                {"collections": collections, "agent_id": agent_id},
+                ensure_ascii=False,
+                default=str,
+            )[:4000],
+            {"source": "tenant_knowledge", "agent_id": agent_id},
         )
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
@@ -458,8 +486,8 @@ class WorkspaceToolGateway:
             "write_file": {"path", "content"},
             "run_check": {"profile"},
             "git_diff": set(),
-            "search_knowledge": {"query", "collection", "limit"},
-            "get_document": {"document_id", "collection"},
+            "search_knowledge": {"query", "limit"},
+            "get_document": {"document_id"},
             "list_collections": set(),
         }
         if name not in schemas:
@@ -478,11 +506,11 @@ class WorkspaceToolGateway:
             elif name == "run_check":
                 result = self.run_check(args.get("profile", ""), role)
             elif name == "search_knowledge":
-                result = self._search_knowledge(args)
+                result = self._search_knowledge(args, role)
             elif name == "get_document":
-                result = self._get_knowledge_document(args)
+                result = self._get_knowledge_document(args, role)
             elif name == "list_collections":
-                result = self._list_knowledge_collections()
+                result = self._list_knowledge_collections(role)
             elif name == "git_diff":
                 result = self.git_diff()
             else:

@@ -8,7 +8,10 @@ not enabled by the core API merely because its package is installed.
 - Python 3.11 or newer.
 - PostgreSQL 16 with the pgvector extension available.
 - A dedicated database role with only the privileges granted by
-  `migrations/007_rag_knowledge_pgvector.sql`.
+  `migrations/007_rag_knowledge_pgvector.sql`, with agent-scope indexes from
+  `migrations/008_rag_agent_scope_indexes.sql` and
+  `migrations/009_rag_project_scope_index.sql` and
+  `migrations/010_rag_knowledge_version_history.sql`.
 - An OpenAI-compatible embeddings endpoint. The default model is
   `text-embedding-3-small` with 1536 dimensions; the configured embedding model
   must return vectors of the configured dimension.
@@ -17,12 +20,15 @@ not enabled by the core API merely because its package is installed.
 
 ## Database setup
 
-Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or
-administrator on the dedicated knowledge database. The migration creates
-tenant-scoped document and chunk tables, pgvector indexes, forced row-level
-security, and a non-login knowledge-worker role. Follow the migration's grant
-instructions and configure `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker`
-for the runtime role. Do not run the service with a PostgreSQL superuser.
+Apply migrations `007_rag_knowledge_pgvector.sql` through
+`010_rag_knowledge_version_history.sql` in order as a database owner or
+administrator on the dedicated knowledge database. Migration 007 creates
+tenant-scoped document and chunk tables with forced row-level security.
+Migrations 008 and 009 add shared/agent and project-scope lookup indexes.
+Migration 010 adds tenant-scoped immutable snapshots of prior document
+versions and their chunks, with forced row-level security and the restricted
+knowledge-worker grants. Readiness requires all four migrations. Do not run
+the service with a PostgreSQL superuser.
 
 Set `RUSA_KNOWLEDGE_DATABASE_URL` to the restricted database connection string.
 The embedding provider is configured with:
@@ -53,11 +59,18 @@ rusa-knowledge check
 ```
 
 Evaluate retrieval with a manually curated JSONL dataset containing
-`query` and `relevant_document_ids` fields:
+`query` and exactly one of `relevant_document_ids` or
+`relevant_source_uris` per case. The default collection is `agent`.
+For per-agent evaluation, pass the agent filter; add the project filter when
+the relevant documents are project-bound:
 
 ```bash
-rusa-knowledge evaluate --dataset ./relevance.jsonl --tenant-id tenant-a --collection agent --k 5
+rusa-knowledge evaluate --dataset ./rusa-plan-gold.jsonl --tenant-id tenant-a --collection agent --agent-id rusa_plan_agent --k 5
 ```
+
+Omit `--agent-id` for shared-only evaluation. The report includes the tenant,
+collection, agent, and project filters used. The CLI filters are operator
+inputs; use only a tenant and scope that the operator is authorized to evaluate.
 
 ## MCP server
 
@@ -103,10 +116,38 @@ the pgvector migration and role grants have been applied. Configure:
   `RUSA_EMBEDDING_MODEL`
 
 The task tenant is taken from the authenticated queue lease and injected into
-the read-only agent tools. The model cannot provide or override `tenant_id`.
+the read-only agent tools. The trusted WorkerRole is converted by the host
+gateway into an AICode scope ID such as `aicode-analyst`; the model cannot
+provide or override `tenant_id`, `agent_id`, or the knowledge collection.
+Retrieval returns shared records plus records tagged for that worker scope; if an agent-specific record has a `project_id`, the host supplies a matching project scope derived from the authorized repository.
+The standalone RUSA Knowledge MCP server has no agent-principal mapping in this
+increment and therefore retrieves shared records only.
 The worker connects using its restricted worker login, then explicitly assumes
 the non-login `rusa_knowledge_worker` role for each knowledge-store transaction.
 Do not grant the knowledge role to an API login or a general application role.
+
+## Container image vulnerability triage
+
+The CI workflow reports every CRITICAL and HIGH finding for the API, agent
+sandbox, worker, and knowledge MCP images. Its blocking step uses Trivy
+`--ignore-unfixed`, so a green gate means no currently fixable CRITICAL/HIGH
+finding was detected; it does **not** mean the images are vulnerability-free.
+
+The 2026-11-08 scan for this feature branch used Debian 13.7 (trixie) and
+reported 0 CRITICAL findings and 51 HIGH in the API image, 56 HIGH in the
+sandbox image, 55 HIGH in the worker image, and 51 HIGH in the knowledge MCP
+image. The report includes upstream Debian package findings such as util-linux
+and acl issues that Debian currently lists as vulnerable or postponed for
+trixie. Review the full Trivy report for each release; do not suppress these
+findings or treat the green fixable-only gate as production security approval.
+
+Useful upstream status references:
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-76642
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-54369
+- Debian tracker: https://security-tracker.debian.org/tracker/CVE-2026-9538
+
+Rebuild and rescan when Debian publishes fixed trixie packages or when the
+runtime base image is deliberately changed and compatibility-tested.
 
 ## Operational boundaries
 

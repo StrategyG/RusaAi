@@ -83,7 +83,7 @@ def search_knowledge(
     collection: str = "agent",
     limit: int = 5,
 ) -> dict[str, Any]:
-    """Search tenant-authorized knowledge using vector and lexical hybrid retrieval."""
+    """Search tenant-authorized shared knowledge; no agent principal is supplied by this MCP server."""
     tenant_id = _require_tenant()
     results = get_knowledge_service().search(
         tenant_id=tenant_id,
@@ -96,7 +96,7 @@ def search_knowledge(
 
 @mcp.tool()
 def get_document(document_id: str, collection: str = "agent") -> dict[str, Any]:
-    """Read one document and its bounded text content within the authenticated tenant."""
+    """Read shared knowledge only; agent-specific records require a trusted worker identity."""
     tenant_id = _require_tenant()
     document = get_knowledge_service().get_document(
         tenant_id=tenant_id,
@@ -126,6 +126,7 @@ def knowledge_capabilities() -> str:
             "tools": ["search_knowledge", "get_document", "list_collections"],
             "write_tools": [],
             "tenant_scope": "derived from authenticated bearer token; never supplied by the caller",
+            "agent_scope": "shared_only_without_authenticated_agent_identity",
         },
         ensure_ascii=False,
     )

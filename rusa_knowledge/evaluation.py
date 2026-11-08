@@ -61,23 +61,30 @@ def evaluate_retrieval(
         if count > max_cases:
             raise ValueError("evaluation dataset exceeds the configured case limit")
         query = case.get("query")
-        relevant = case.get("relevant_document_ids")
+        relevant_documents = case.get("relevant_document_ids")
+        relevant_sources = case.get("relevant_source_uris")
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("each evaluation case needs a bounded non-empty query")
+        if (relevant_documents is None) == (relevant_sources is None):
+            raise ValueError(
+                "each evaluation case must provide exactly one of relevant_document_ids or relevant_source_uris"
+            )
+        relevant = relevant_documents if relevant_documents is not None else relevant_sources
         if (
             not isinstance(relevant, list)
             or not relevant
             or any(not isinstance(item, str) or not item for item in relevant)
         ):
-            raise ValueError("each evaluation case needs relevant_document_ids")
+            raise ValueError("evaluation relevance labels must be a non-empty array of strings")
         relevant_ids = set(relevant)
+        identity_field = "document_id" if relevant_documents is not None else "source_uri"
         results = retrieve(query, k)
         if not isinstance(results, list):
             raise ValueError("retriever must return a list of ranked documents")
         retrieved_ids = list(dict.fromkeys(
-            item["document_id"]
+            item[identity_field]
             for item in results
-            if isinstance(item, dict) and isinstance(item.get("document_id"), str)
+            if isinstance(item, dict) and isinstance(item.get(identity_field), str)
         ))[:k]
         recall_values.append(recall_at_k(retrieved_ids, relevant_ids, k))
         reciprocal_values.append(reciprocal_rank_at_k(retrieved_ids, relevant_ids, k))
@@ -88,6 +95,7 @@ def evaluate_retrieval(
     return {
         "queries": count,
         "k": k,
+        "label_basis": "document_id_or_source_uri",
         "recall_at_k": sum(recall_values) / count,
         "mrr_at_k": sum(reciprocal_values) / count,
         "ndcg_at_k": sum(ndcg_values) / count,
