@@ -558,12 +558,27 @@ class PostgresKnowledgeStore:
                           )
                       )
                   )
+                  AND (
+                      COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(v.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              v.metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND v.metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
                 ORDER BY v.created_at DESC
                 LIMIT %s
                 """,
                 (
-                    tenant_id, collection, document_id, agent_id, agent_id,
-                    project_id, project_id, limit,
+                    tenant_id, collection, document_id,
+                    agent_id, agent_id, project_id, project_id,
+                    agent_id, agent_id, project_id, project_id, limit,
                 ),
             ).fetchall()
         return [
@@ -624,9 +639,24 @@ class PostgresKnowledgeStore:
                           )
                       )
                   )
+                  AND (
+                      COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(v.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              v.metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND v.metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
                 """,
                 (
                     tenant_id, collection, document_id, version_id,
+                    agent_id, agent_id, project_id, project_id,
                     agent_id, agent_id, project_id, project_id,
                 ),
             ).fetchone()
