@@ -68,6 +68,11 @@ atomic claim transaction and verifies the lease epoch remains zero.
   acceptance-criteria.md, and risk-assessment.md as tenant-scoped immutable
   content-addressed artifacts. A separate evidence object maps artifact names
   to refs and records their digests, tenant, workflow, task, and policy version.
+- If policy requires approval or the plan identifies an approval scope,
+  the Plan Agent persists a pending approval request, returns needs_approval,
+  and emits no Code handoff. A pending request is never treated as approval.
+- Code independently rejects both tasks marked approval_required and Plan
+  evidence containing pending approval scopes or a pending approval reference.
 - Code tasks must carry the Plan Agent evidence ref plus plan and acceptance
   criteria refs. Code verifies the evidence belongs to the same tenant and
   workflow and that both document digests match before opening a worktree.
