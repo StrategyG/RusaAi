@@ -59,11 +59,18 @@ rusa-knowledge check
 ```
 
 Evaluate retrieval with a manually curated JSONL dataset containing
-`query` and `relevant_document_ids` fields:
+`query` and exactly one of `relevant_document_ids` or
+`relevant_source_uris` per case. The default collection is `agent`.
+For per-agent evaluation, pass the agent filter; add the project filter when
+the relevant documents are project-bound:
 
 ```bash
-rusa-knowledge evaluate --dataset ./relevance.jsonl --tenant-id tenant-a --collection agent --k 5
+rusa-knowledge evaluate --dataset ./analyst-gold.jsonl --tenant-id tenant-a --collection agent --agent-id aicode-analyst --project-id strategyg--rusaai --k 5
 ```
+
+Omit `--agent-id` for shared-only evaluation. The report includes the tenant,
+collection, agent, and project filters used. The CLI filters are operator
+inputs; use only a tenant and scope that the operator is authorized to evaluate.
 
 ## MCP server
 
