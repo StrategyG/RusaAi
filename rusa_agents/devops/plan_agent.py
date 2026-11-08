@@ -200,7 +200,7 @@ class PlanAgent:
         for item in tasks:
             if item["id"] in by_id:
                 raise PlanValidationError("plan task IDs must be unique")
-            if _STAGE_AGENT[item["stage"]] != item["agent_id"]:
+            if item["agent_id"] not in {_STAGE_AGENT[item["stage"]], "rusa_security_guard_agent"}:
                 raise PlanValidationError(
                     f"task {item['id']} maps stage {item['stage']} to the wrong specialist"
                 )
@@ -238,6 +238,9 @@ class PlanAgent:
             ids = [item["id"] for item in plan["requirements"][collection_name]]
             if len(ids) != len(set(ids)):
                 raise PlanValidationError("requirement IDs must be unique")
+        dependency_ids = [item["id"] for item in plan["dependencies"]]
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise PlanValidationError("dependency IDs must be unique")
         risk_ids = [item["id"] for item in plan["risks"]]
         if len(risk_ids) != len(set(risk_ids)):
             raise PlanValidationError("risk IDs must be unique")
