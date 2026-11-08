@@ -10,7 +10,8 @@ not enabled by the core API merely because its package is installed.
 - A dedicated database role with only the privileges granted by
   `migrations/007_rag_knowledge_pgvector.sql`, with agent-scope indexes from
   `migrations/008_rag_agent_scope_indexes.sql` and
-  `migrations/009_rag_project_scope_index.sql`.
+  `migrations/009_rag_project_scope_index.sql` and
+  `migrations/010_rag_knowledge_version_history.sql`.
 - An OpenAI-compatible embeddings endpoint. The default model is
   `text-embedding-3-small` with 1536 dimensions; the configured embedding model
   must return vectors of the configured dimension.
@@ -19,16 +20,15 @@ not enabled by the core API merely because its package is installed.
 
 ## Database setup
 
-Apply migrations `007_rag_knowledge_pgvector.sql`,
-`008_rag_agent_scope_indexes.sql`, and `009_rag_project_scope_index.sql`
-in that order as a database owner or administrator on the dedicated knowledge
-database. Migration 007 creates tenant-scoped document and chunk tables,
-pgvector indexes, forced row-level security, and a non-login knowledge-worker
-role. Migration 008 adds shared/agent metadata indexes; migration 009 adds the
-project-scope lookup index. Follow the migration grant instructions and
-configure `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker` for the runtime role.
-Readiness now requires all three migrations. Do not run the service with a
-PostgreSQL superuser.
+Apply migrations `007_rag_knowledge_pgvector.sql` through
+`010_rag_knowledge_version_history.sql` in order as a database owner or
+administrator on the dedicated knowledge database. Migration 007 creates
+tenant-scoped document and chunk tables with forced row-level security.
+Migrations 008 and 009 add shared/agent and project-scope lookup indexes.
+Migration 010 adds tenant-scoped immutable snapshots of prior document
+versions and their chunks, with forced row-level security and the restricted
+knowledge-worker grants. Readiness requires all four migrations. Do not run
+the service with a PostgreSQL superuser.
 
 Set `RUSA_KNOWLEDGE_DATABASE_URL` to the restricted database connection string.
 The embedding provider is configured with:
