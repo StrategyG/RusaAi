@@ -1,6 +1,6 @@
 """Tenant-scoped immutable content-addressed storage for DevOps artifacts."""
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import hashlib
 import json
@@ -95,7 +95,7 @@ class ContentAddressedArtifactStore:
             except FileExistsError:
                 existing = self._read_verified(target, digest)
                 if existing != content:
-                    raise ArtifactIntegrityError("existing immutable object has conflicting bytes")
+                    raise ArtifactIntegrityError("existing immutable object has conflicting bytes") from None
         finally:
             temporary.unlink(missing_ok=True)
         return f"{namespace}://sha256/{digest}"
