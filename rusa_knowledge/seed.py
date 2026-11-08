@@ -147,6 +147,15 @@ def load_manifest(manifest_path: str | Path) -> dict[str, Any]:
             ):
                 raise ValueError(f"{prefix}.{field} must be a unique array of bounded strings")
 
+        knowledge_scope = item.get("knowledge_scope", "shared")
+        if knowledge_scope not in {"shared", "agent_specific"}:
+            raise ValueError(f"{prefix}.knowledge_scope must be shared or agent_specific")
+        if knowledge_scope == "agent_specific":
+            if not item["agent_ids"] or any(
+                not SLUG_PATTERN.fullmatch(agent_id) for agent_id in item["agent_ids"]
+            ):
+                raise ValueError(f"{prefix}.agent_specific knowledge requires valid agent_ids")
+
     return manifest
 
 
@@ -201,6 +210,7 @@ def prepare_seed_documents(
             "knowledge_type": item["knowledge_type"],
             "agent_ids": item["agent_ids"],
             "agent_names": item["agent_names"],
+            "knowledge_scope": item.get("knowledge_scope", "shared"),
             "parser": parsed.metadata["parser"],
             "media_type": parsed.metadata["media_type"],
             "file_size_bytes": int(parsed.metadata["file_size_bytes"]),
