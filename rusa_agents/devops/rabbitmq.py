@@ -15,9 +15,9 @@ import json
 import random
 import re
 import ssl
-from datetime import datetime, timezone
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -636,7 +636,7 @@ class RabbitMQOutboxDispatcher:
                 )
                 delay = self.jitter(0, delay_cap) if delay_cap else 0
                 if isinstance(delay, bool) or not isinstance(delay, int) or not 0 <= delay <= delay_cap:
-                    raise ValueError("retry jitter must return an integer within the backoff cap")
+                    raise ValueError("retry jitter must return an integer within the backoff cap") from None
                 try:
                     status = await asyncio.to_thread(
                         self.relay.retry,
