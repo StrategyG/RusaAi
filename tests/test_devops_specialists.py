@@ -162,6 +162,7 @@ async def test_plan_agent_creates_five_immutable_documents_and_evidence(tmp_path
         task,
         authenticated_principal=PLAN_AGENT,
         lease=_lease(task),
+        checkpoint=lambda: True,
     )
 
     assert outcome.result["status"] == "passed"
@@ -195,6 +196,7 @@ async def test_plan_agent_rejects_dependency_cycles_without_passing(tmp_path):
         task,
         authenticated_principal=PLAN_AGENT,
         lease=_lease(task),
+        checkpoint=lambda: True,
     )
 
     assert outcome.result["status"] == "failed"
@@ -215,6 +217,7 @@ async def test_plan_agent_requires_matching_accepted_claim(tmp_path):
             task,
             authenticated_principal=PLAN_AGENT,
             lease=_lease(task, accepted=False),
+            checkpoint=lambda: True,
         )
 
     with pytest.raises(ExecutionLeaseError, match="identity"):
@@ -222,6 +225,7 @@ async def test_plan_agent_requires_matching_accepted_claim(tmp_path):
             task,
             authenticated_principal=PLAN_AGENT,
             lease=_lease(task, principal=CODE_AGENT),
+            checkpoint=lambda: True,
         )
 
 
@@ -350,6 +354,7 @@ async def test_code_agent_publishes_only_task_feature_branch_and_draft_pr(tmp_pa
         task,
         authenticated_principal=CODE_AGENT,
         lease=_lease(task),
+        checkpoint=lambda: True,
     )
 
     assert outcome.result["status"] == "passed"
@@ -389,6 +394,7 @@ async def test_code_agent_records_applied_side_effect_if_draft_pr_creation_fails
         task,
         authenticated_principal=CODE_AGENT,
         lease=_lease(task),
+        checkpoint=lambda: True,
     )
 
     assert outcome.result["status"] == "failed"
