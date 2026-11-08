@@ -71,6 +71,8 @@ class ExecutionPolicyGrant:
     approved_scopes: frozenset[str] = frozenset()
     approved_refs: frozenset[str] = frozenset()
     allowed_branches: frozenset[str] = frozenset()
+    allowed_repositories: frozenset[str] = frozenset()
+    allowed_artifact_refs: frozenset[str] = frozenset()
     allowed_runbooks: frozenset[str] = frozenset()
     allowed_environments: frozenset[str] = frozenset()
     max_cost_usd: float = 0.0
@@ -116,6 +118,10 @@ class ExecutionPolicyGrant:
             raise ValueError("policy approval reference is invalid")
         if not isinstance(self.allowed_branches, frozenset):
             raise TypeError("policy branches must use an immutable frozenset")
+        if not isinstance(self.allowed_repositories, frozenset):
+            raise TypeError("policy repositories must use an immutable frozenset")
+        if not isinstance(self.allowed_artifact_refs, frozenset):
+            raise TypeError("policy artifact references must use an immutable frozenset")
         if not isinstance(self.allowed_runbooks, frozenset):
             raise TypeError("policy runbooks must use an immutable frozenset")
         if not isinstance(self.allowed_environments, frozenset):
@@ -134,6 +140,10 @@ class ExecutionPolicyGrant:
             _normalize_destination(destination)
         for branch in self.allowed_branches:
             _validate_feature_branch(branch)
+        for repository in self.allowed_repositories:
+            _validate_repository_name(repository)
+        if any(not isinstance(ref, str) or not ref for ref in self.allowed_artifact_refs):
+            raise ValueError("policy artifact reference is invalid")
         if any(not isinstance(ref, str) or not ref for ref in self.allowed_runbooks):
             raise ValueError("policy runbook allowlist contains an invalid reference")
 
@@ -151,8 +161,13 @@ class AgentExecutionGrant:
     approval_scopes: frozenset[str]
     approval_ref: str | None
     allowed_branches: frozenset[str]
+    allowed_repositories: frozenset[str]
+    allowed_artifact_refs: frozenset[str]
     allowed_runbooks: frozenset[str]
     allowed_environments: frozenset[str]
+    repository: str | None
+    source_commit: str | None
+    artifact_digest: str | None
     target_environment: str | None
     runbook_ref: str | None
     max_cost_usd: float
@@ -251,6 +266,16 @@ def _scope_covers(granted: str, requested: str) -> bool:
     grant = _validate_write_scope(granted)
     path = _validate_write_scope(requested)
     return path == grant or path.startswith(grant + "/")
+
+
+def _validate_repository_name(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value)
+        or any(part in {"", ".", ".."} or part.startswith(".") for part in value.split("/"))
+    ):
+        raise ValueError("repository must be an owner/name identifier")
+    return value
 
 
 def _validate_feature_branch(value: str) -> str:
@@ -452,7 +477,24 @@ class DevOpsAgentRegistry:
             runbook_ref = task.get("input", {}).get("runbook_ref")
             if not runbook_ref or runbook_ref not in policy_grant.allowed_runbooks:
                 raise AgentCapabilityDeniedError("runbook execution is outside the Policy Engine allowlist")
-        target_environment = task.get("input", {}).get("environment")
+        task_input = task.get("input", {})
+        repository = task_input.get("repository")
+        if repository is not None:
+            _validate_repository_name(repository)
+            if repository not in policy_grant.allowed_repositories:
+                raise AgentCapabilityDeniedError("repository is outside the Policy Engine resource grant")
+        if requested_tools & {"repository.read", "repository.branch.write"} and not repository:
+            raise AgentCapabilityDeniedError("repository tools require a task-bound repository")
+        artifact_refs = set()
+        for key, value in task_input.items():
+            if key.endswith("_ref") and isinstance(value, str):
+                artifact_refs.add(value)
+            elif key == "evidence_refs" and isinstance(value, list):
+                artifact_refs.update(item for item in value if isinstance(item, str))
+        if not artifact_refs.issubset(policy_grant.allowed_artifact_refs):
+            raise AgentCapabilityDeniedError("task artifact references exceed the Policy Engine resource grant")
+
+        target_environment = task_input.get("environment")
         if task["stage"] == "deploy" and target_environment not in policy_grant.allowed_environments:
             raise AgentCapabilityDeniedError("deployment environment is outside the Policy Engine grant")
 
@@ -528,10 +570,15 @@ class DevOpsAgentRegistry:
             approval_scopes=approval_scopes,
             approval_ref=approval_ref,
             allowed_branches=policy_grant.allowed_branches,
+            allowed_repositories=policy_grant.allowed_repositories,
+            allowed_artifact_refs=frozenset(artifact_refs),
             allowed_runbooks=policy_grant.allowed_runbooks,
             allowed_environments=policy_grant.allowed_environments,
+            repository=repository,
+            source_commit=task_input.get("commit_sha"),
+            artifact_digest=task_input.get("artifact_digest"),
             target_environment=target_environment,
-            runbook_ref=task.get("input", {}).get("runbook_ref"),
+            runbook_ref=task_input.get("runbook_ref"),
             max_cost_usd=budget["max_cost_usd"],
             max_tool_calls=budget["max_tool_calls"],
             max_runtime_seconds=budget["max_runtime_seconds"],
@@ -580,18 +627,51 @@ class ScopedToolGateway:
             if destination not in self._grant.allowed_network_destinations:
                 raise ToolInvocationDeniedError("network destination is outside the task allowlist")
 
+        if tool_id in {"repository.read", "repository.branch.write"}:
+            if arguments.get("repository") != self._grant.repository:
+                raise ToolInvocationDeniedError("repository is outside the task resource grant")
         if tool_id == "repository.branch.write":
             branch = arguments.get("branch") or arguments.get("work_branch")
             if branch not in self._grant.allowed_branches:
                 raise ToolInvocationDeniedError("branch is outside the Policy Engine feature-branch allowlist")
             _validate_feature_branch(branch)
+        if tool_id in {"artifact.read", "evidence.read", "sbom.read", "release.read"}:
+            resource_ref = (
+                arguments.get("resource_ref")
+                or arguments.get("artifact_ref")
+                or arguments.get("ref")
+            )
+            if resource_ref not in self._grant.allowed_artifact_refs:
+                raise ToolInvocationDeniedError("artifact reference is outside the task resource grant")
+        if tool_id == "runbook.read" and arguments.get("runbook_ref") != self._grant.runbook_ref:
+            raise ToolInvocationDeniedError("runbook is outside the task grant")
+        if tool_id == "build.execute":
+            if arguments.get("commit_sha") != self._grant.source_commit:
+                raise ToolInvocationDeniedError("build source commit does not match the task")
+        if tool_id == "test.execute":
+            if (
+                arguments.get("commit_sha") != self._grant.source_commit
+                or arguments.get("artifact_digest") != self._grant.artifact_digest
+            ):
+                raise ToolInvocationDeniedError("test must target the exact task commit and artifact digest")
+        if tool_id == "release.prepare":
+            if (
+                arguments.get("commit_sha") != self._grant.source_commit
+                or arguments.get("artifact_digest") != self._grant.artifact_digest
+                or arguments.get("test_evidence_ref") not in self._grant.allowed_artifact_refs
+                or arguments.get("sbom_ref") not in self._grant.allowed_artifact_refs
+            ):
+                raise ToolInvocationDeniedError("release candidate evidence does not match the task")
         if tool_id == "deployment.execute":
             environment = arguments.get("environment")
             if (
                 environment != self._grant.target_environment
                 or environment not in self._grant.allowed_environments
+                or arguments.get("release_manifest_ref") not in self._grant.allowed_artifact_refs
+                or arguments.get("commit_sha") != self._grant.source_commit
+                or arguments.get("artifact_digest") != self._grant.artifact_digest
             ):
-                raise ToolInvocationDeniedError("deployment environment is outside the task grant")
+                raise ToolInvocationDeniedError("deployment artifact, commit, or environment is outside the task grant")
             if environment == "production":
                 approval_ref = arguments.get("approval_ref")
                 if (
