@@ -173,6 +173,10 @@ def verify_bundle(
     agent_map = json.loads(agent_map_file.read_text(encoding="utf-8"))
     repo_docs = {item["source_id"]: item for item in repo_manifest["documents"]}
     map_profiles = {item["agent_id"]: item for item in agent_map["profiles"]}
+    if len(repo_docs) != len(repo_manifest["documents"]):
+        raise ValueError("repository source manifest contains duplicate source IDs")
+    if len(map_profiles) != len(agent_map["profiles"]):
+        raise ValueError("repository agent map contains duplicate agent IDs")
 
     if not zipfile.is_zipfile(archive_path):
         raise ValueError("bundle is not a valid ZIP archive")
@@ -238,6 +242,14 @@ def verify_bundle(
                 "implementation_status": item.get("implementation_status"),
             })
 
+        expected_members = {"source_manifest.json", "README.txt"}
+        expected_members.update("sources/" + item["filename"] for item in source_items)
+        expected_members.update("agent_packs/" + item["agent_id"] + ".md" for item in profiles)
+        if names != expected_members:
+            unexpected = sorted(names - expected_members)
+            missing = sorted(expected_members - names)
+            raise ValueError(f"bundle member set mismatch; unexpected={unexpected}, missing={missing}")
+
         if set(repo_docs) != {item["source_id"] for item in source_items}:
             raise ValueError("bundle source set does not match the repository manifest")
         if set(map_profiles) != {item.get("agent_id") for item in profiles}:
@@ -250,7 +262,8 @@ def verify_bundle(
                 raise ValueError("agent profile has an unknown agent_id")
             mapped = map_profiles[agent_id]
             if (
-                profile.get("source_id") != mapped.get("source_id")
+                profile.get("agent_name") != mapped.get("agent_name")
+                or profile.get("source_id") != mapped.get("source_id")
                 or profile.get("headings") != mapped.get("headings")
             ):
                 raise ValueError(f"agent profile does not match curated map: {agent_id}")
@@ -260,6 +273,8 @@ def verify_bundle(
                 raise ValueError(f"agent source hash mismatch: {agent_id}")
             section = _extract_sections(source_texts[source_id], profile["headings"])
             section_hash = _sha256(section.encode("utf-8"))
+            normalized_section = _normalize(section)
+            ingestion_section_hash = _sha256(normalized_section.encode("utf-8"))
             if section_hash != profile.get("section_sha256"):
                 raise ValueError(f"agent section SHA-256 mismatch: {agent_id}")
             pack_member = f"agent_packs/{agent_id}.md"
@@ -281,8 +296,9 @@ def verify_bundle(
             agent_report.append({
                 "agent_id": agent_id,
                 "source_id": source_id,
-                "section_sha256": section_hash,
-                "chunk_count": _chunk_count(section),
+                "archive_section_sha256": section_hash,
+                "ingestion_section_sha256": ingestion_section_hash,
+                "chunk_count": _chunk_count(normalized_section),
                 "verification_status": profile.get("verification_status"),
                 "implementation_status": profile.get("implementation_status"),
             })
