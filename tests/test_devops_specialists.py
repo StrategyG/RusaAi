@@ -412,6 +412,70 @@ async def test_code_agent_rejects_plan_evidence_from_another_workflow(tmp_path):
     assert manager.created_task is None
 
 
+@pytest.mark.asyncio
+async def test_code_agent_rejects_plan_evidence_that_is_still_awaiting_approval(tmp_path):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    evidence = store.get_json(task["tenant_id"], task["input"]["plan_evidence_ref"])
+    evidence["approval_required"] = True
+    evidence["approval_scopes"] = ["release"]
+    evidence["approval_ref"] = store.put(
+        task["tenant_id"],
+        b'{"status":"pending"}',
+        namespace="artifact",
+    )
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_evidence_mismatch"
+    assert manager.created_task is None
+
+
+@pytest.mark.asyncio
+async def test_code_agent_refuses_task_marked_as_awaiting_human_approval(tmp_path):
+    task = _task("code")
+    task["constraints"]["approval_required"] = True
+    task["constraints"]["approval_scope"] = ["release"]
+    task["constraints"]["approval_ref"] = "approval://pending/release"
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.approval_required"
+    assert manager.created_task is None
+
+
 class FakeWorkspaceManager:
     def __init__(self, workspace: Path):
         self.workspace = workspace
