@@ -69,7 +69,7 @@ class PostgresTaskQueue:
         if not isinstance(actor, str) or len(actor) > 128:
             raise ValueError("Task policy audit actor is invalid")
         if actor.startswith("api:"):
-            if action not in {"task.create", "task.read", "task.retry", "task.cancel"}:
+            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.cancel"}:
                 raise ValueError("API task policy audit action is invalid")
         elif actor.startswith("worker:"):
             if action != "task.execute":
@@ -648,6 +648,77 @@ class PostgresTaskQueue:
                 "allow" if cur.rowcount == 1 else "deny",
             )
         return cur.rowcount == 1
+
+    def list(
+        self,
+        tenant_id: str,
+        *,
+        status_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        audit_actor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a tenant-scoped, newest-first page of durable task records."""
+        self._require_policy_audit_actor(audit_actor)
+        valid_statuses = {
+            "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled",
+        }
+        if status_filter is not None and status_filter not in valid_statuses:
+            raise ValueError("Unsupported task status filter")
+        if not 1 <= limit <= 100 or not 0 <= offset <= 100000:
+            raise ValueError("Task list pagination is outside the allowed range")
+
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            if status_filter is None:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s",
+                    (tenant_id,),
+                ).fetchone()[0]
+                rows = conn.execute(
+                    """
+                    SELECT task_id::text, tenant_id, payload, result, status, attempts,
+                           max_attempts, last_error, created_at, updated_at
+                    FROM aicode_jobs
+                    WHERE tenant_id=%s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (tenant_id, limit, offset),
+                ).fetchall()
+            else:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s AND status=%s",
+                    (tenant_id, status_filter),
+                ).fetchone()[0]
+                rows = conn.execute(
+                    """
+                    SELECT task_id::text, tenant_id, payload, result, status, attempts,
+                           max_attempts, last_error, created_at, updated_at
+                    FROM aicode_jobs
+                    WHERE tenant_id=%s AND status=%s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (tenant_id, status_filter, limit, offset),
+                ).fetchall()
+            self._record_policy_event(
+                conn, tenant_id, "*", audit_actor, "task.list", "allow",
+            )
+
+        items = []
+        for row in rows:
+            payload = row[2] if isinstance(row[2], dict) else json.loads(row[2])
+            result = row[3] if isinstance(row[3], dict) else (
+                json.loads(row[3]) if row[3] is not None else None
+            )
+            items.append({
+                "task_id": row[0], "tenant_id": row[1], "payload": payload,
+                "result": result, "status": row[4], "attempts": row[5],
+                "max_attempts": row[6], "last_error": row[7],
+                "created_at": row[8].isoformat(), "updated_at": row[9].isoformat(),
+            })
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     def get(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,

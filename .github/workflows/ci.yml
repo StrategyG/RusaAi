@@ -189,6 +189,8 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_IMAGE: example.invalid/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'

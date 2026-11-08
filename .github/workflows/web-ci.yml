@@ -1,0 +1,49 @@
+name: RUSA AI Web CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "docker-compose.yml"
+      - "docker-compose.production.yml"
+      - ".github/workflows/web-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "docker-compose.yml"
+      - "docker-compose.production.yml"
+      - ".github/workflows/web-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-ai-web-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+      - name: Type check
+        working-directory: web
+        run: npm run typecheck
+      - name: Build Next.js application
+        working-directory: web
+        env:
+          RUSA_API_BASE_URL: http://127.0.0.1:8000
+          RUSA_WEB_SESSION_SECRET: ci-only-session-secret-change-this-value-123456789
+        run: npm run build
+      - name: Build web container
+        run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
