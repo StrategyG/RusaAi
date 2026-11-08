@@ -220,6 +220,67 @@ async def test_plan_agent_creates_five_immutable_documents_and_evidence(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_plan_agent_holds_handoff_when_model_identifies_approval_scopes(tmp_path):
+    task = _task("plan")
+    plan = _valid_plan()
+    plan["approval_scopes"] = ["production_data_change", "external_publication"]
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(plan),
+        artifact_store=store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "needs_approval"
+    assert "handoff" not in outcome.result
+    approval_ref = outcome.result["output"]["approval_ref"]
+    assert approval_ref in outcome.result["output"]["artifact_refs"]
+    request = store.get_json(task["tenant_id"], approval_ref)
+    assert request["status"] == "pending"
+    assert request["approval_scopes"] == ["external_publication", "production_data_change"]
+    assert "not an approval" in request["notice"]
+    evidence = store.get_json(
+        task["tenant_id"],
+        outcome.result["output"]["evidence_refs"][0],
+    )
+    assert evidence["approval_required"] is True
+    assert evidence["approval_ref"] == approval_ref
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_honors_policy_mandated_approval_even_without_model_scope(tmp_path):
+    task = _task("plan")
+    task["constraints"]["approval_required"] = True
+    task["constraints"]["approval_scope"] = ["release"]
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(_valid_plan()),
+        artifact_store=store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "needs_approval"
+    assert "handoff" not in outcome.result
+    request = store.get_json(
+        task["tenant_id"],
+        outcome.result["output"]["approval_ref"],
+    )
+    assert request["approval_scopes"] == ["release"]
+
+
+@pytest.mark.asyncio
 async def test_plan_agent_rejects_dependency_cycles_without_passing(tmp_path):
     plan = _valid_plan()
     plan["tasks"][0]["depends_on"] = ["TASK-2"]
