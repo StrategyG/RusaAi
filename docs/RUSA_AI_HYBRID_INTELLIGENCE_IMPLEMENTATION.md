@@ -352,6 +352,12 @@ The current automatic evaluator validates format and blocked-action metrics; it 
 
 The 80% task-success target is a proposed initial staging gate, not an existing repository metric. Calibrate it after the first blinded benchmark run; never lower safety gates to improve task-success scores.
 
+## 7.7 External teacher models and ChatGPT/OpenAI
+
+An authorized OpenAI API model may be evaluated as a teacher, reviewer, or independent evaluator, but ChatGPT's hosted proprietary weights are not downloadable training weights for RUSA. Teacher outputs are quarantined candidate data and require source grounding, executable verification where applicable, schema/policy checks, and human approval before promotion. Do not send private source or tenant data externally without explicit authorization.
+
+OpenAI's official documentation states that its fine-tuning platform is winding down and is no longer accessible to new users; eligible existing customers have a limited job-creation window. Consequently, OpenAI fine-tuning is not a required RUSA dependency. Keep the pinned Qwen3-4B QLoRA path as the reproducible self-hosted training route. See [External Teacher Models and Distillation Policy](MODEL_TEACHER_AND_DISTILLATION_POLICY.md) for availability caveats and governance.
+
 ## 8. Continuous knowledge improvement
 
 Implement a controlled learning loop:
