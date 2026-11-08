@@ -84,6 +84,10 @@ jobs:
             "find /usr/local /usr/lib /usr/share /opt /root -iname '*setuptools*' -print 2>/dev/null || true"
       - name: Install sandbox launcher
         run: python -m pip install -e .
+      - name: Generate protobuf stubs for isolated sandbox suite
+        run: |
+          python -m pip install "grpcio-tools>=1.62,<2"
+          python scripts/generate_devops_proto.py
       - name: Run full test suite in isolated sandbox
         env:
           RUSA_SANDBOX_IMAGE: rusa-ai-agent-sandbox:${{ github.sha }}
