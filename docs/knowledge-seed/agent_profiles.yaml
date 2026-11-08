@@ -401,6 +401,59 @@ agent_profiles:
     guardrails: ["Do not remove or conceal security evidence."]
     runtime_binding: "NOT_VERIFIED"
 
+runtime_worker_profiles:
+  - runtime_role: analyst
+    agent_id: aicode-analyst
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [repository_inventory, relevant_code_reading, defect_localization]
+    allowed_tool_names: [list_files, read_file, git_diff, search_knowledge, get_document, list_collections]
+    retrieval_policy: "shared plus records tagged aicode-analyst"
+    runtime_binding: "WorkerRole.ANALYST"
+  - runtime_role: architect
+    agent_id: aicode-architect
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [architecture_review, component_design, implementation_plan]
+    allowed_tool_names: [list_files, read_file, git_diff, search_knowledge, get_document, list_collections]
+    retrieval_policy: "shared plus records tagged aicode-architect"
+    runtime_binding: "WorkerRole.ARCHITECT"
+  - runtime_role: developer
+    agent_id: aicode-developer
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [approved_code_changes, tests, application_documentation]
+    allowed_tool_names: [list_files, read_file, write_file, git_diff, search_knowledge, get_document, list_collections]
+    retrieval_policy: "shared plus records tagged aicode-developer"
+    runtime_binding: "WorkerRole.DEVELOPER"
+  - runtime_role: debugger
+    agent_id: aicode-debugger
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [failure_diagnosis, defect_localization, validation_results]
+    allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
+    allowed_check_profiles: [pytest, compile, ruff]
+    retrieval_policy: "shared plus records tagged aicode-debugger"
+    runtime_binding: "WorkerRole.DEBUGGER"
+  - runtime_role: tester
+    agent_id: aicode-tester
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [pytest, test_cases, regression, validation_evidence]
+    allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
+    allowed_check_profiles: [pytest]
+    retrieval_policy: "shared plus records tagged aicode-tester"
+    runtime_binding: "WorkerRole.TESTER"
+  - runtime_role: security
+    agent_id: aicode-security
+    identity_source: "RUSA-IMPL-001#docs/aicode-agent-enterprise.md"
+    profile_status: documented_runtime_worker
+    knowledge_domains: [code_security, dependency_review, static_analysis, security_evidence]
+    allowed_tool_names: [list_files, read_file, run_check, git_diff, search_knowledge, get_document, list_collections]
+    allowed_check_profiles: [bandit, ruff, compile]
+    retrieval_policy: "shared plus records tagged aicode-security"
+    runtime_binding: "WorkerRole.SECURITY"
+
 identity_overlap:
   - profiles: [planner, rusa_plan_agent]
     status: related_not_merged
