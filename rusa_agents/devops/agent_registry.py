@@ -39,21 +39,25 @@ STAGE_AGENT_IDS = MappingProxyType(
 
 # These are observation-only capabilities. They cannot mutate a repository,
 # workflow, deployment, runbook, or evidence record.
+MONITOR_READ_ONLY_TOOLS = frozenset(
+    {
+        "metrics.read",
+        "logs.read",
+        "traces.read",
+        "alerts.read",
+    }
+)
+
 READ_ONLY_TOOLS = frozenset(
     {
-        "alerts.read",
-        "artifact.read",
-        "audit.read",
-        "evidence.read",
-        "health.read",
-        "issue.read",
-        "logs.read",
-        "metrics.read",
-        "policy.read",
-        "release.read",
         "repository.read",
-        "runbook.read",
-        "sbom.read",
+        "issue.read",
+        "artifact.read",
+        "evidence.read",
+        "policy.read",
+        "audit.read",
+        "metrics.read",
+        "logs.read",
         "traces.read",
     }
 )
@@ -172,7 +176,6 @@ _POLICIES = {
                 "artifact.read",
                 "plan.write",
                 "task.create",
-                "documentation.write",
             }
         ),
         write_scope_prefixes=("plans/", "requirements/", "backlog/", "acceptance/", "risk-assessment/"),
@@ -185,9 +188,8 @@ _POLICIES = {
                 "repository.read",
                 "repository.branch.write",
                 "artifact.read",
-                "artifact.write",
-                "documentation.write",
                 "test.write",
+                "documentation.write",
             }
         ),
         write_scope_prefixes=None,
@@ -200,7 +202,6 @@ _POLICIES = {
                 "repository.read",
                 "build.execute",
                 "artifact.write",
-                "manifest.write",
                 "sbom.write",
             }
         ),
@@ -214,10 +215,8 @@ _POLICIES = {
                 "repository.read",
                 "artifact.read",
                 "test.execute",
-                "test.write",
                 "evidence.write",
-                "policy.read",
-                "sbom.read",
+                "metrics.read",
             }
         ),
         write_scope_prefixes=("test-reports/", "evidence/"),
@@ -229,11 +228,9 @@ _POLICIES = {
             {
                 "artifact.read",
                 "evidence.read",
-                "sbom.read",
-                "release.read",
                 "release.prepare",
                 "manifest.write",
-                "policy.read",
+                "sbom.read",
             }
         ),
         write_scope_prefixes=("release/", "manifests/"),
@@ -247,9 +244,7 @@ _POLICIES = {
                 "release.read",
                 "deployment.execute",
                 "health.read",
-                "evidence.write",
                 "runbook.read",
-                "policy.read",
             }
         ),
         write_scope_prefixes=("deployments/", "evidence/"),
@@ -259,14 +254,11 @@ _POLICIES = {
         stage="operate",
         allowed_tools=frozenset(
             {
-                "health.read",
-                "logs.read",
                 "metrics.read",
-                "traces.read",
-                "incident.write",
+                "logs.read",
                 "runbook.read",
                 "runbook.execute",
-                "audit.read",
+                "incident.write",
             }
         ),
         write_scope_prefixes=("incidents/", "reports/"),
@@ -274,7 +266,7 @@ _POLICIES = {
     MONITOR_AGENT: AgentPolicy(
         agent_id=MONITOR_AGENT,
         stage="monitor",
-        allowed_tools=READ_ONLY_TOOLS,
+        allowed_tools=MONITOR_READ_ONLY_TOOLS,
         write_scope_prefixes=(),
         read_only=True,
     ),
