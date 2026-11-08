@@ -11,6 +11,7 @@ from rusa_agents.contracts import (
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
+from rusa_agents.runtime import AICodeRuntime
 
 
 class StubWorker:
@@ -297,3 +298,17 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+def test_runtime_derives_stable_knowledge_project_scope_from_repository():
+    assert AICodeRuntime._knowledge_project_scope("StrategyG/RusaAi") == "strategyg--rusaai"
+    assert AICodeRuntime._knowledge_project_scope("team-1/service_api") == "team-1--service_api"
+
+
+def test_runtime_rejects_invalid_repository_project_scope():
+    import pytest
+
+    with pytest.raises(ValueError, match="repository target"):
+        AICodeRuntime._knowledge_project_scope("not-a-repository")
+    with pytest.raises(ValueError, match="unsupported project-scope"):
+        AICodeRuntime._knowledge_project_scope("Team/Repo Name")
