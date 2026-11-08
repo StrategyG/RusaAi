@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation.add_argument("--dataset", required=True)
     evaluation.add_argument("--tenant-id", required=True)
     evaluation.add_argument("--collection", default="default")
+    evaluation.add_argument("--agent-id", help="trusted agent scope for agent-specific evaluation")
+    evaluation.add_argument("--project-id", help="trusted project scope for project-bound knowledge")
     evaluation.add_argument("--k", type=int, default=5)
     return parser
 
@@ -65,6 +67,8 @@ def main() -> int:
                     collection=args.collection,
                     query=query,
                     limit=limit,
+                    agent_id=args.agent_id,
+                    project_id=args.project_id,
                 ),
                 k=args.k,
             )
