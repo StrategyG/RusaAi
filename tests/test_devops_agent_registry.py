@@ -11,7 +11,9 @@ from rusa_agents.devops.agent_registry import (
     CODE_AGENT,
     DEPLOY_AGENT,
     MONITOR_AGENT,
+    OPERATE_AGENT,
     PLAN_AGENT,
+    RELEASE_AGENT,
     READ_ONLY_TOOLS,
     SECURITY_GUARD_AGENT,
     TEST_AGENT,
@@ -50,12 +52,19 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
             "test_plan_ref": "artifact://tests/plan-1",
             "acceptance_criteria_ref": "artifact://acceptance/criteria-1",
         },
+        "release": {
+            "commit_sha": "a" * 40,
+            "artifact_digest": "sha256:" + "b" * 64,
+            "test_evidence_ref": "evidence://test/report-1",
+            "sbom_ref": "artifact://sbom/sbom-1",
+        },
         "deploy": {
             "release_manifest_ref": "artifact://release/manifest-1",
             "environment": "staging",
             "commit_sha": "a" * 40,
             "artifact_digest": "sha256:" + "b" * 64,
         },
+        "operate": {"service": "api", "runbook_ref": "runbook://api/restart"},
         "monitor": {"service": "api", "metrics_window": "last-15m"},
     }[stage]
     if agent_id == SECURITY_GUARD_AGENT:
@@ -67,7 +76,9 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "code": ["src/"],
         "build": ["build/"],
         "test": ["test-reports/"],
+        "release": ["release/"],
         "deploy": ["deployments/"],
+        "operate": ["incidents/"],
         "monitor": [],
     }[stage]
     return {
@@ -109,7 +120,9 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         ("code", CODE_AGENT),
         ("build", BUILD_AGENT),
         ("test", TEST_AGENT),
+        ("release", RELEASE_AGENT),
         ("deploy", DEPLOY_AGENT),
+        ("operate", OPERATE_AGENT),
         ("monitor", MONITOR_AGENT),
     ],
 )
@@ -222,9 +235,9 @@ def test_registry_is_complete_for_eight_stages_plus_cross_cutting_guard():
         CODE_AGENT,
         BUILD_AGENT,
         TEST_AGENT,
-        "rusa_release_agent",
+        RELEASE_AGENT,
         DEPLOY_AGENT,
-        "rusa_operate_agent",
+        OPERATE_AGENT,
         MONITOR_AGENT,
         SECURITY_GUARD_AGENT,
     }
