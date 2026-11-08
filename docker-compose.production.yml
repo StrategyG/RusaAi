@@ -82,9 +82,95 @@ services:
       retries: 3
     networks: [rusa-internal, rusa-egress]
 
+  grpc-orchestrator:
+    image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "rusa_agents.devops.grpc_server"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_GRPC_PROFILE: orchestrator
+      RUSA_GRPC_BIND_ADDRESS: 0.0.0.0:7443
+      RUSA_GRPC_TRUST_DOMAIN: ${RUSA_GRPC_TRUST_DOMAIN:-rusa.ai}
+      RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
+      RUSA_WORKER_DATABASE_URL: ""
+      RUSA_GRPC_SERVER_CERT_FILE: /run/secrets/rusa_grpc_server_cert
+      RUSA_GRPC_SERVER_KEY_FILE: /run/secrets/rusa_grpc_server_key
+      RUSA_GRPC_CLIENT_CA_FILE: /run/secrets/rusa_grpc_client_ca
+      RUSA_GRPC_RPC_TIMEOUT_SECONDS: "2"
+      RUSA_GRPC_STATEMENT_TIMEOUT_MS: "2000"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    expose: ["7443"]
+    secrets:
+      - rusa_grpc_server_cert
+      - rusa_grpc_server_key
+      - rusa_grpc_client_ca
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',7443),timeout=2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal]
+
+  grpc-workers:
+    image: ${RUSA_API_IMAGE:?Set RUSA_API_IMAGE to an immutable API image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "rusa_agents.devops.grpc_server"]
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUSA_GRPC_PROFILE: workers
+      RUSA_GRPC_BIND_ADDRESS: 0.0.0.0:7443
+      RUSA_GRPC_TRUST_DOMAIN: ${RUSA_GRPC_TRUST_DOMAIN:-rusa.ai}
+      RUSA_API_DATABASE_URL: ""
+      RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
+      RUSA_GRPC_SERVER_CERT_FILE: /run/secrets/rusa_grpc_server_cert
+      RUSA_GRPC_SERVER_KEY_FILE: /run/secrets/rusa_grpc_server_key
+      RUSA_GRPC_CLIENT_CA_FILE: /run/secrets/rusa_grpc_client_ca
+      RUSA_GRPC_RPC_TIMEOUT_SECONDS: "2"
+      RUSA_GRPC_STATEMENT_TIMEOUT_MS: "2000"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    expose: ["7443"]
+    secrets:
+      - rusa_grpc_server_cert
+      - rusa_grpc_server_key
+      - rusa_grpc_client_ca
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',7443),timeout=2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [rusa-internal]
+
 networks:
   rusa-internal:
     driver: bridge
     internal: true
   rusa-egress:
     driver: bridge
+
+secrets:
+  rusa_grpc_server_cert:
+    file: ${RUSA_GRPC_SERVER_CERT_FILE:?Set the gRPC server certificate PEM path}
+  rusa_grpc_server_key:
+    file: ${RUSA_GRPC_SERVER_KEY_FILE:?Set the gRPC server private key PEM path}
+  rusa_grpc_client_ca:
+    file: ${RUSA_GRPC_CLIENT_CA_FILE:?Set the gRPC client CA bundle PEM path}

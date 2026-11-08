@@ -1,6 +1,8 @@
 """Shared test import setup and PostgreSQL migration bootstrap."""
+import importlib.util
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +12,22 @@ ROOT = Path(__file__).resolve().parents[1]
 SERVE_PATH = ROOT / "llm-project" / "serve"
 if str(SERVE_PATH) not in sys.path:
     sys.path.insert(0, str(SERVE_PATH))
+
+
+GENERATED_DIR = ROOT / "rusa_agents" / "devops" / "generated"
+GENERATED_STUBS = (
+    GENERATED_DIR / "workflow_pb2.py",
+    GENERATED_DIR / "workflow_pb2_grpc.py",
+)
+
+if importlib.util.find_spec("grpc_tools") is not None and not all(
+    path.is_file() for path in GENERATED_STUBS
+):
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "generate_devops_proto.py")],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -27,7 +45,10 @@ def apply_postgres_migrations_for_integration_suite():
         if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
         and (
             int(path.name.split("_", 1)[0]) <= 6
-            or path.name == "008_devops_durable_communication.sql"
+            or path.name in {
+                "008_devops_durable_communication.sql",
+                "009_devops_task_leases_and_cancellation.sql",
+            }
         )
     )
     expected = [
@@ -38,6 +59,7 @@ def apply_postgres_migrations_for_integration_suite():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "008_devops_durable_communication.sql",
+        "009_devops_task_leases_and_cancellation.sql",
     ]
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")

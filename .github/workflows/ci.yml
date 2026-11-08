@@ -5,7 +5,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -47,7 +46,9 @@ jobs:
       - name: Install package and development tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,messaging]"
+      - name: Generate internal WorkflowControl protobuf stubs
+        run: python scripts/generate_devops_proto.py
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Lint
@@ -83,6 +84,10 @@ jobs:
             "find /usr/local /usr/lib /usr/share /opt /root -iname '*setuptools*' -print 2>/dev/null || true"
       - name: Install sandbox launcher
         run: python -m pip install -e .
+      - name: Generate protobuf stubs for isolated sandbox suite
+        run: |
+          python -m pip install "grpcio-tools>=1.62,<2"
+          python scripts/generate_devops_proto.py
       - name: Run full test suite in isolated sandbox
         env:
           RUSA_SANDBOX_IMAGE: rusa-ai-agent-sandbox:${{ github.sha }}
@@ -205,7 +210,13 @@ jobs:
           RUSA_MAX_PARALLEL_WORKERS: "4"
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
+          RUSA_GRPC_SERVER_CERT_FILE: .ci/grpc-server.crt
+          RUSA_GRPC_SERVER_KEY_FILE: .ci/grpc-server.key
+          RUSA_GRPC_CLIENT_CA_FILE: .ci/grpc-client-ca.crt
+          RUSA_GRPC_TRUST_DOMAIN: rusa.ai
         run: |
+          mkdir -p .ci
+          touch .ci/grpc-server.crt .ci/grpc-server.key .ci/grpc-client-ca.crt
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
 

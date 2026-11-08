@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 rusa-knowledge = "rusa_knowledge.cli:main"
+rusa-devops-grpc = "rusa_agents.devops.grpc_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -28,6 +29,14 @@ dev = [
   "pytest-asyncio>=0.21,<2",
   "ruff>=0.6,<1",
   "bandit>=1.7,<2",
+  "grpcio-tools>=1.62,<2",
+]
+messaging = [
+  "aio-pika>=9.4,<10",
+  "aiokafka>=0.11,<1",
+  "cryptography>=50.0.0,<51",
+  "grpcio>=1.62,<2",
+  "protobuf>=5.26,<7",
 ]
 model = [
   "torch>=2.2,<3",
@@ -49,6 +58,7 @@ asyncio_mode = "auto"
 addopts = "-ra"
 
 [tool.ruff]
+extend-exclude = ["rusa_agents/devops/generated/**"]
 target-version = "py310"
 line-length = 100
 

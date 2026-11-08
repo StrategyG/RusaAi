@@ -5,11 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
+COPY requirements.txt requirements-messaging.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
-    && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
+    && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt -r requirements-messaging.txt
 COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
+COPY contracts/proto/rusa/devops/v1/workflow.proto ./contracts/proto/rusa/devops/v1/workflow.proto
+COPY scripts/generate_devops_proto.py ./scripts/generate_devops_proto.py
+RUN python -m pip install --no-cache-dir --target=/tmp/proto-tools "grpcio-tools>=1.62,<2" \
+    && PYTHONPATH=/tmp/proto-tools python scripts/generate_devops_proto.py \
+    && rm -rf /tmp/proto-tools
 ARG RUSA_INSTALL_LOCAL_MODEL=0
 RUN python -m pip install --no-cache-dir --prefix=/install --no-deps . \
     && if [ "$RUSA_INSTALL_LOCAL_MODEL" = "1" ]; then \
@@ -55,6 +60,8 @@ for package in ("pip", "setuptools", "wheel", "jaraco.context"):
 for module in (
     "fastapi", "uvicorn", "pydantic", "jsonschema",
     "httpx", "psycopg", "prometheus_client", "rusa_agents",
+    "rusa_agents.devops.rabbitmq", "rusa_agents.devops.kafka",
+    "rusa_agents.devops.control_store", "rusa_agents.devops.grpc_server",
 ):
     import_module(module)
 print("API runtime imports verified; build tooling is absent.")

@@ -8,7 +8,13 @@
 
 The **Supreme Orchestrator** remains the system-wide coordinator and owns the user-facing workflow outcome. The **DevOps Orchestrator** is a domain coordinator invoked by the Supreme Orchestrator for software delivery lifecycle work. It coordinates the eight lifecycle stages but does not create a competing system-wide authority, independent tenant context, or second canonical workflow store.
 
-The canonical workflow state remains with the existing workflow/AICode persistence boundary until a durable workflow store is approved and implemented. Do not introduce a second queue or rewrite the existing runtime merely to match the target directory layout.
+For DevOps lifecycle runs, canonical state is the dedicated PostgreSQL
+`devops_workflows` and `devops_tasks` store with transactional outbox/inbox,
+introduced in Phase 3A (PR #66). This is a bounded DevOps workflow store, not
+a replacement for AICode's existing `aicode_jobs` queue. Existing AICode
+workers, API, and sandbox remain intact. The Supreme Orchestrator remains the
+system-wide authority; the DevOps Orchestrator coordinates only the lifecycle
+sub-workflow and cannot create a second tenant or policy authority.
 
 ## 2. Mapping of the ten system-wide agents
 
@@ -91,6 +97,10 @@ Successful Code results require a source commit. Successful Build, Test, Release
 |---|---|---|
 | 1 — Contract foundation | Schemas, capability IDs, stage mapping, cross-document validation | Positive/negative contract tests; no external side effects |
 | 2 — Safe dry run | DevOps Orchestrator and dummy specialists | Synthetic Plan-to-Monitor workflow with audit evidence |
-| 3 — Durable communication | Workflow store, transactional outbox, queue, event log, RPC, signing | Crash, redelivery, replay, cancel and partial-failure tests |
+| 3A — Durable state | PostgreSQL workflow/task store, tenant isolation, transactional outbox/inbox | Idempotent intake, relay lease and RLS tests |
+| 3B — RabbitMQ commands | Capability/priority routing, signed commands, confirms, manual ACK/NACK, DLQs, isolated P0 cancel | Routing, signature, retry, quarantine and outbox-settlement tests |
+| 3C — Kafka event log | Tenant/run partitioning, signed event publishing, idempotent consumer projections | Publish-confirm, replay and duplicate-consumer tests |
+| 3D — gRPC control plane | mTLS/SPIFFE identity, scoped DB roles, RPC deadlines, claim/lease/state fencing, cancellation | Identity, authorization, claim, heartbeat, result receipt and cancel tests |
+| 3E — Reliability validation | Crash/restart, redelivery, replay, cancellation, lease expiry and side-effect reconciliation | CI evidence; production broker/worker provisioning remains a separate rollout gate |
 | 4 — Specialist execution | Eight agents, per-agent identity, capability enforcement, independent QA | Staging candidate with exact commit/digest evidence |
 | 5 — Operations and feedback | Operate/Monitor, SLO, alerts, budget, kill-switch, feedback | Security, SRE and product-owner sign-off |

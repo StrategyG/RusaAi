@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -56,3 +56,23 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+def test_devops_lease_migration_has_complete_fencing_and_replay_constraints():
+    migration = Path(
+        "migrations/009_devops_task_leases_and_cancellation.sql"
+    ).read_text(encoding="utf-8")
+
+    assert migration.count("COMMIT;") == 1
+    assert "cancel_request_sha256 ~ '^[a-f0-9]{64}$'" in migration
+    assert migration.count("request_sha256 ~ '^[a-f0-9]{64}$'") == 3
+    assert "lease_claim_id" in migration
+    assert "lease_until TIMESTAMPTZ" in migration
+    assert "side_effect IN ('NONE', 'APPLIED', 'UNKNOWN')" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_run_cancellations" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_task_rpc_receipts" in migration
+    assert "GRANT SELECT ON public.devops_run_cancellations TO rusa_worker_runtime" in migration
+    assert "GRANT UPDATE (status, completed_at) ON public.devops_run_cancellations" in migration
+    assert "FOR SELECT TO rusa_worker_runtime" in migration
+    assert "FOR UPDATE TO rusa_worker_runtime" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
