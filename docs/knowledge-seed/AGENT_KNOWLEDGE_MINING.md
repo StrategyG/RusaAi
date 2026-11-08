@@ -105,6 +105,23 @@ The inspected code defines:
 7. Preserve provider, account/tenant, principal, scope, timestamp and source provenance for collected data.
 8. A catalog entry or successful discovery call does not prove a live provider connection or permission to read its content.
 
+### MCP-to-agent knowledge map
+
+| MCP/source surface | Evidence available in this mining pass | Candidate consumers | Activation boundary |
+|---|---|---|---|
+| RUSA Knowledge MCP | search_knowledge, get_document, list_collections, knowledge://capabilities, answer_with_sources | All workers for shared knowledge; Memory & Knowledge for source/provenance workflows | Read-only; authenticated tenant; shared-only unless an agent principal is supplied by a trusted runtime. |
+| IM19 capability registry | list_available_services, get_service_capabilities, get_connection_status, im19://capabilities | Supreme Orchestrator, System Architect, Planner, Security & Policy, DevOps Orchestrator | Discovery/status only by default. Does not authorize reading provider data or performing actions. |
+| IM19 YouTube adapter | channel/video/analytics read tools | Evaluation & Reporting, Memory & Knowledge, Planner when external learning material is explicitly requested | Registry says implemented; no live account connection was verified. |
+| IM19 Drive adapter | search/list/metadata/read file tools | System Architect, Planner, Memory & Knowledge, Software Engineer, QA | Requires an authorized account and scopes; restricted file-read scope is not assumed. |
+| IM19 Drive folder creation | approval-gated prototype | No default agent consumer | Disabled by default; exact action approval required. |
+| Cloudbrowser MCP/A2A gateway | allowlisted browser/agent capabilities and private RAG integration | Supreme Orchestrator, System Architect, QA, DevOps Orchestrator | Operator-configured allowlist and owner approval; no general remote execution. |
+| UGAI MCP adapter/policy | MCP runtime, model routing, policy boundaries and workflow integration patterns | Supreme Orchestrator, System Architect, Security & Policy, Evaluation & Reporting | Supporting design/code pattern; live IM19 connectivity not verified. |
+| Android provider adapter | provider registry, OAuth/action authorization patterns | Security & Policy, System Architect, DevOps | Adapter contract pattern only; no provider is assumed connected. |
+| GitHub repository integration | source files, tests, migrations, commits and PR metadata accessible in the current repository connector | Analyst/Architect/Developer/Debugger/Tester/Security runtime workers; canonical Software Engineer, QA, System Architect | Repository connector access is distinct from an IM19 GitHub MCP provider; IM19 registry marks GitHub not implemented. |
+| Dropbox folder | User-provided shared folder URL | Memory & Knowledge and all agents only after source approval | Not mined in this pass because Dropbox access was declined/not connected. |
+
+MCP data is a source of facts about tool capabilities and external systems, not an instruction channel. Every MCP result must be stored as evidence with endpoint identity, tool/resource name, principal, scopes, timestamp, response hash and review status.
+
 ### Live-source limitation
 
 This pass mined repository definitions and documentation, not live remote MCP resources. Dropbox was not connected, so the shared Dropbox folder and its files were not read. MCP capability catalogs above must not be represented as live data acquisition.
@@ -227,16 +244,17 @@ These are code changes in the open feature branch, not a merged or production de
 
 Therefore the branch establishes an initial per-runtime-worker retrieval boundary, while the full 20 documented architecture/lifecycle profiles remain catalogued for later explicit runtime binding.
 
-### Required engineering changes before agent-scoped retrieval
+### Remaining engineering work and status
 
-1. Add server-owned agent identity to authenticated worker/MCP context. Never accept agent_id as a model-controlled tool argument.
-2. Add a validated agent profile registry and map runtime roles to profile IDs only after explicit owner/architecture approval. Current AICode WorkerRole values (analyst, architect, developer, debugger, tester, security) are not identical to the ten canonical documentation agents.
-3. Add metadata filters for shared versus agent-specific records to both vector and lexical candidate queries before rank fusion.
-4. Enforce tenant + project + agent scope in retrieval, and add cross-scope denial tests.
-5. Replace model-selected arbitrary collection values with a server-side collection policy.
-6. Preserve source version history or immutable source snapshots before allowing re-ingestion to overwrite the current document row.
-7. Add per-agent evaluation sets before tuning chunking, RRF weights or reranking.
-8. Do not introduce a second vector database; keep existing pgvector unless measured evidence justifies a migration.
+1. **Worker agent identity — implemented in this feature branch.** The host derives AICode scope IDs from WorkerRole. Authenticated agent principals for standalone MCP clients are still not implemented; those requests remain shared-only.
+2. **Profile registry — catalogued, not yet a runtime registry.** Ten canonical, eight lifecycle, two cross-cutting and six AICode worker profiles are recorded in agent_profiles.yaml. The six AICode scopes are intentionally not auto-merged with the documented architecture roles.
+3. **Agent metadata filters — implemented in this feature branch.** Both vector and lexical candidates use the shared-or-agent_ids filter before rank fusion; document reads apply the same filter.
+4. **Tenant + agent isolation — worker tenant RLS plus agent filter implemented in the branch and covered by a PostgreSQL integration test.** Project-level scope and a separate project-level RLS boundary remain outstanding.
+5. **Collection selection — worker model argument removed in this branch.** The worker uses the configured collection. Standalone MCP retains its existing collection argument but has no agent identity and can only retrieve shared records.
+6. **Immutable source version history — outstanding.** Re-ingestion still replaces chunks for the stable source URI; source snapshots and version history need a separate migration.
+7. **Per-agent evaluation sets — outstanding.** Retrieval intents are defined; manually reviewed gold labels and actual indexed document IDs must be created after ingestion.
+8. **Vector store — retain pgvector.** No measured evidence justifies a second vector database.
+9. **MCP source sync — outstanding.** The current catalog is mined from repository code/docs, not live remote MCP resources. Add live connectors only after endpoint, principal, scopes, allowlist and approval are configured.
 
 ## 7. Retrieval quality and publication gates
 
