@@ -11,7 +11,7 @@ import asyncio
 import inspect
 import json
 import random
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -502,7 +502,7 @@ class KafkaOutboxDispatcher:
                 )
                 delay = self.jitter(0, delay_cap) if delay_cap else 0
                 if isinstance(delay, bool) or not isinstance(delay, int) or not 0 <= delay <= delay_cap:
-                    raise ValueError("retry jitter must return an integer within the backoff cap")
+                    raise ValueError("retry jitter must return an integer within the backoff cap") from None
                 try:
                     status = await asyncio.to_thread(
                         self.relay.retry,
