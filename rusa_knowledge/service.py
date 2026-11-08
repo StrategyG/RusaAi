@@ -121,6 +121,7 @@ class KnowledgeService:
         collection: str,
         query: str,
         limit: int = 5,
+        agent_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
@@ -132,6 +133,7 @@ class KnowledgeService:
             query=query,
             query_embedding=vector,
             limit=limit,
+            agent_id=agent_id,
         )
 
     def get_document(
@@ -141,12 +143,14 @@ class KnowledgeService:
         collection: str,
         document_id: str,
         max_chars: int = 20_000,
+        agent_id: str | None = None,
     ) -> dict[str, Any] | None:
         return self.store.get_document(
             tenant_id=tenant_id,
             collection=collection,
             document_id=document_id,
             max_chars=max_chars,
+            agent_id=agent_id,
         )
 
     def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
