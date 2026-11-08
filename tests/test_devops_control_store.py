@@ -11,6 +11,7 @@ import pytest
 from rusa_agents.devops.control_store import (
     PostgresWorkflowControlStore,
     RpcReplayConflictError,
+    TaskPolicyDeniedError,
 )
 from rusa_agents.devops.rabbitmq import command_route
 from rusa_agents.devops.store import PostgresWorkflowStore
@@ -170,6 +171,71 @@ def _result(task: dict, *, status="passed") -> dict:
             "event": "plan.completed",
         }
     return result
+
+
+def test_atomic_claim_rejects_task_capability_escalation_before_lease_creation():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        with store._connect(DSN) as conn:
+            conn.execute(
+                """
+                UPDATE public.devops_tasks
+                SET task=jsonb_set(
+                    task,
+                    '{constraints,allowed_tools}',
+                    '["deployment.execute"]'::jsonb
+                )
+                WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                """,
+                (tenant_id, run_id, task["task_id"]),
+            )
+
+        with pytest.raises(TaskPolicyDeniedError, match="capability policy denied"):
+            _claim(store, tenant_id, run_id, task)
+
+        current = store.get_task(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            task_id=task["task_id"],
+            principal=task["agent_id"],
+        )
+        assert current["status"] == "queued"
+        assert current["lease_epoch"] == 0
+        assert current["lease_owner"] is None
+    finally:
+        _cleanup(tenant_id)
+
+
+def test_claim_rejects_task_contract_identity_drift_from_canonical_row():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        with store._connect(DSN) as conn:
+            conn.execute(
+                """
+                UPDATE public.devops_tasks
+                SET task=jsonb_set(task, '{agent_id}', '"rusa_deploy_agent"'::jsonb)
+                WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                """,
+                (tenant_id, run_id, task["task_id"]),
+            )
+
+        with pytest.raises(TaskPolicyDeniedError, match="identity does not match"):
+            _claim(store, tenant_id, run_id, task)
+
+        with store._connect(DSN) as conn:
+            status, lease_epoch = conn.execute(
+                """
+                SELECT status, lease_epoch FROM public.devops_tasks
+                WHERE tenant_id=%s AND run_id=%s AND task_id=%s
+                """,
+                (tenant_id, run_id, task["task_id"]),
+            ).fetchone()
+        assert status == "queued"
+        assert lease_epoch == 0
+    finally:
+        _cleanup(tenant_id)
 
 
 def test_claim_is_idempotent_only_for_the_same_worker_instance():

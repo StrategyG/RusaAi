@@ -128,12 +128,31 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 
 ## Phase 4 — specialist execution and QA
 
-- Implement the eight agents behind per-agent identities and capability
-  allowlists.
-- Keep Code execution in isolated sandbox workspaces.
-- Bind every build/test/release artifact to exact source commit and digest.
+**Phase 4A is implemented in the stacked specialist-execution PR:**
+
+- Adds a fail-closed registry for all eight lifecycle specialist identities
+  plus the cross-cutting Security Guard.
+- Defines per-agent tool allowlists and stage-specific write scopes.
+- Keeps Monitor and Security Guard read-only and denies arbitrary network
+  access from every specialist by default.
+- Enforces capability policy in gRPC GetTask/ClaimTask and repeats it inside
+  the PostgreSQL row-lock transaction before a lease is created.
+- Requires an explicit approval reference for production Deploy tasks.
+
+**Remaining Phase 4 work:**
+
+- Implement the eight stage-specific execution handlers behind those
+  identities and allowlists.
+- Keep Code execution in isolated sandbox workspaces and branch-only Git
+  publication.
+- Bind every build/test/release artifact to the exact source commit and
+  immutable artifact digest.
 - Require independent QA evidence before release publication.
+- Produce a signed release candidate and verify it in staging.
 - Keep deployment production approvals outside agent authority.
+
+The detailed Phase 4A boundary and follow-on increments are documented in
+[PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).
 
 **Exit criteria:** a staging workflow produces a signed release candidate
 whose tests and provenance match the exact source revision.

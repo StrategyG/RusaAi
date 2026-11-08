@@ -77,7 +77,46 @@ class FakeStore:
             "state_version": 4,
             "lease_epoch": 2,
             "deadline_at": datetime.now(timezone.utc),
-            "task": {"schema_version": 1, "task_id": "task-1"},
+            "task": {
+                "schema_version": 1,
+                "task_id": "task-1",
+                "workflow_id": "run-1",
+                "tenant_id": "tenant-a",
+                "agent_id": "rusa_code_agent",
+                "stage": "code",
+                "objective": "Implement the approved code change.",
+                "input": {
+                    "repository": "StrategyG/RusaAi",
+                    "plan_ref": "artifact://plans/plan-1",
+                    "acceptance_criteria": ["Required tests pass."],
+                },
+                "constraints": {
+                    "allowed_tools": [
+                        "repository.read",
+                        "repository.branch.write",
+                        "artifact.read",
+                        "documentation.write",
+                        "test.write",
+                    ],
+                    "network_access": False,
+                    "allowed_network_destinations": [],
+                    "write_scope": ["src/"],
+                    "approval_required": False,
+                    "approval_scope": [],
+                    "budget": {
+                        "max_cost_usd": 2.0,
+                        "max_tool_calls": 20,
+                        "max_runtime_seconds": 300,
+                    },
+                },
+                "attempt": 1,
+                "audit": {
+                    "created_at": "2026-11-08T00:00:00Z",
+                    "requested_by": "pytest",
+                    "policy_version": "policy-test-v1",
+                    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                },
+            },
             "result": None,
             "lease_owner": "rusa_code_agent",
             "lease_until": datetime.now(timezone.utc),
@@ -228,6 +267,40 @@ async def test_get_task_limits_stage_agent_to_its_assigned_task():
 
 
 @pytest.mark.asyncio
+async def test_claim_rejects_capability_escalation_before_creating_a_lease():
+    store = FakeStore()
+    store.task["task"]["constraints"]["allowed_tools"].append("deployment.execute")
+    service = _servicer(store)
+    with pytest.raises(FakeAbort) as error:
+        await service.ClaimTask(
+            pb.ClaimTaskRequest(
+                tenant_id="tenant-a",
+                run_id="run-1",
+                task_id="task-1",
+                attempt=1,
+                traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                claim_id="worker-process-1",
+            ),
+            FakeContext(_spiffe("rusa_code_agent")),
+        )
+    assert error.value.code == grpc.StatusCode.PERMISSION_DENIED
+    assert not any(call[0] == "claim_task" for call in store.calls)
+
+
+@pytest.mark.asyncio
+async def test_get_task_rejects_protected_write_scope_for_code_agent():
+    store = FakeStore()
+    store.task["task"]["constraints"]["write_scope"] = ["migrations/010_policy.sql"]
+    service = _servicer(store)
+    with pytest.raises(FakeAbort) as error:
+        await service.GetTask(
+            pb.GetTaskRequest(tenant_id="tenant-a", task_id="task-1"),
+            FakeContext(_spiffe("rusa_code_agent")),
+        )
+    assert error.value.code == grpc.StatusCode.PERMISSION_DENIED
+
+
+@pytest.mark.asyncio
 async def test_claim_heartbeat_and_progress_are_bound_to_certificate_principal():
     store = FakeStore()
     service = _servicer(store)
@@ -274,7 +347,12 @@ async def test_claim_heartbeat_and_progress_are_bound_to_certificate_principal()
     assert claim.accepted is True
     assert heartbeat.accepted is True
     assert progress.accepted is True
-    assert [call[1]["worker_id"] for call in store.calls] == [
+    worker_calls = [
+        call[1]["worker_id"]
+        for call in store.calls
+        if "worker_id" in call[1]
+    ]
+    assert worker_calls == [
         "rusa_code_agent",
         "rusa_code_agent",
         "rusa_code_agent",

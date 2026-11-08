@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from .agent_registry import AgentAuthorizationError, authorize_agent_task
 from .contracts import (
     ContractValidationError,
     validate_agent_result_for_task,
@@ -43,6 +44,10 @@ class WorkflowNotFoundError(LookupError):
 
 class TaskAccessDeniedError(PermissionError):
     """The authenticated workload is not assigned to the requested task."""
+
+
+class TaskPolicyDeniedError(PermissionError):
+    """The task's requested capabilities exceed the authenticated agent policy."""
 
 
 class TaskStateConflictError(RuntimeError):
@@ -212,6 +217,22 @@ class PostgresWorkflowControlStore:
             ).fetchone()
         if row is None:
             raise WorkflowNotFoundError("task not found")
+        task_contract = row[10]
+        canonical_identity = {
+            "task_id": row[0],
+            "workflow_id": row[1],
+            "tenant_id": row[2],
+            "agent_id": row[3],
+            "stage": row[4],
+            "attempt": row[5],
+        }
+        if not isinstance(task_contract, dict) or any(
+            task_contract.get(field) != value
+            for field, value in canonical_identity.items()
+        ):
+            raise TaskPolicyDeniedError(
+                "task contract identity does not match canonical PostgreSQL task state"
+            )
         return {
             "task_id": row[0],
             "run_id": row[1],
@@ -389,6 +410,15 @@ class PostgresWorkflowControlStore:
             task = self._task_row(conn, tenant_id, run_id, task_id, lock=True)
             if task["agent_id"] != worker_id:
                 raise TaskAccessDeniedError("workload is not assigned to this task")
+            try:
+                authorize_agent_task(
+                    task["task"],
+                    authenticated_principal=worker_id,
+                )
+            except (AgentAuthorizationError, ContractValidationError) as exc:
+                raise TaskPolicyDeniedError(
+                    "task capability policy denied this workload"
+                ) from exc
             if task["attempt"] != attempt:
                 return self._claim_response(task, workflow, accepted=False)
             if workflow["status"] != "running" and workflow["status"] != "queued":
