@@ -104,6 +104,16 @@ class PlanAgent:
         }
         if approval_ref:
             output["approval_ref"] = approval_ref
+        audit = {
+            "started_at": started_at,
+            "completed_at": self._now(),
+            "policy_version": task["audit"]["policy_version"],
+            "model_id": str(getattr(self.provider, "model", "configured-model"))[:256],
+        }
+        if task["input"].get("commit_sha"):
+            audit["source_commit"] = task["input"]["commit_sha"]
+        if task["input"].get("artifact_digest"):
+            audit["artifact_digest"] = task["input"]["artifact_digest"]
         result: dict[str, Any] = {
             "schema_version": 1,
             "task_id": task["task_id"],
@@ -114,12 +124,7 @@ class PlanAgent:
             "attempt": task["attempt"],
             "status": status,
             "output": output,
-            "audit": {
-                "started_at": started_at,
-                "completed_at": self._now(),
-                "policy_version": task["audit"]["policy_version"],
-                "model_id": str(getattr(self.provider, "model", "configured-model"))[:256],
-            },
+            "audit": audit,
         }
         if handoff:
             result["handoff"] = handoff
