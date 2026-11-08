@@ -159,7 +159,7 @@ def test_task_body_cannot_impersonate_another_authenticated_agent():
 def test_code_agent_cannot_escalate_to_deployment_or_production_tools():
     task = _task("code")
     task["constraints"]["allowed_tools"].append("deployment.execute")
-    with pytest.raises(AgentAuthorizationError, match="outside the agent allowlist"):
+    with pytest.raises(ContractValidationError, match="agent_task"):
         authorize_agent_task(task, authenticated_principal=CODE_AGENT)
 
 
