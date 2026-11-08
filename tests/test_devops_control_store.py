@@ -526,3 +526,108 @@ def test_cancel_expired_lease_requires_operator_reconciliation():
         assert cancellation_status == "reconciliation_required"
     finally:
         _cleanup(tenant_id)
+
+def test_expired_worker_lease_is_fenced_and_published_as_ambiguous_failure():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        claim = _claim(store, tenant_id, run_id, task)
+        with store._connect(DSN) as conn:
+            conn.execute(
+                """
+                UPDATE public.devops_tasks
+                SET lease_until=clock_timestamp() - INTERVAL '1 second'
+                WHERE tenant_id=%s AND task_id=%s
+                """,
+                (tenant_id, task["task_id"]),
+            )
+
+        swept = store.sweep_expired_leases(tenant_id=tenant_id, limit=10)
+        assert swept == {"failed": 1, "reconciliation_required": 0}
+
+        current = store.get_task(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            task_id=task["task_id"],
+        )
+        assert current["status"] == "failed"
+        assert current["side_effect"] == "UNKNOWN"
+        assert current["lease_owner"] is None
+        assert current["lease_claim_id"] is None
+
+        with store._connect(DSN) as conn:
+            envelope = conn.execute(
+                """
+                SELECT envelope FROM public.devops_event_outbox
+                WHERE tenant_id=%s AND task_id=%s AND event_type='task.failed'
+                """,
+                (tenant_id, task["task_id"]),
+            ).fetchone()[0]
+        assert envelope["payload"]["category"] == "AMBIGUOUS"
+        assert envelope["payload"]["side_effect"] == "UNKNOWN"
+        assert envelope["payload"]["lease_epoch"] == claim["lease_epoch"]
+
+        replay_claim = _claim(store, tenant_id, run_id, task, "worker-instance-replay")
+        assert replay_claim["accepted"] is False
+    finally:
+        _cleanup(tenant_id)
+
+
+def test_expired_lease_after_cancel_request_requires_reconciliation():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        _claim(store, tenant_id, run_id, task)
+        cancellation = store.cancel_run(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            idempotency_key="cancel-then-expire",
+            reason_code="operator_requested",
+            requested_by="rusa_supreme_orchestrator",
+            traceparent=TRACEPARENT,
+        )
+        assert cancellation["status"] == "cancel_requested"
+
+        with store._connect(DSN) as conn:
+            conn.execute(
+                """
+                UPDATE public.devops_tasks
+                SET lease_until=clock_timestamp() - INTERVAL '1 second'
+                WHERE tenant_id=%s AND task_id=%s
+                """,
+                (tenant_id, task["task_id"]),
+            )
+
+        swept = store.sweep_expired_leases(tenant_id=tenant_id)
+        assert swept == {"failed": 0, "reconciliation_required": 1}
+
+        current = store.get_task(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            task_id=task["task_id"],
+        )
+        assert current["status"] == "cancel_requested"
+        assert current["side_effect"] == "UNKNOWN"
+        assert current["lease_owner"] is None
+
+        with store._connect(DSN) as conn:
+            cancellation_status = conn.execute(
+                """
+                SELECT status FROM public.devops_run_cancellations
+                WHERE tenant_id=%s AND run_id=%s
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+            envelope = conn.execute(
+                """
+                SELECT envelope FROM public.devops_event_outbox
+                WHERE tenant_id=%s AND task_id=%s AND event_type='audit.recorded'
+                  AND envelope->'payload'->>'action'='task.cancel.lease_expired'
+                """,
+                (tenant_id, task["task_id"]),
+            ).fetchone()[0]
+        assert cancellation_status == "reconciliation_required"
+        assert envelope["payload"]["outcome"] == "reconciliation_required"
+    finally:
+        _cleanup(tenant_id)
+
