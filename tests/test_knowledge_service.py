@@ -40,6 +40,8 @@ class FakeEmbeddings:
     def __init__(self):
         self.inputs = []
         self.batches = []
+        self.model = "test-embedding-model"
+        self.dimensions = 3
 
     def embed(self, texts):
         self.inputs.extend(texts)
@@ -64,6 +66,10 @@ def test_ingest_text_hashes_and_indexes_chunks():
     assert store.ingested["tenant_id"] == "tenant-a"
     assert store.ingested["chunks"] == ["One paragraph of useful knowledge."]
     assert len(store.ingested["embeddings"][0]) == 3
+    assert store.ingested["metadata"]["embedding_model"] == "test-embedding-model"
+    assert store.ingested["metadata"]["embedding_dimensions"] == 3
+    assert store.ingested["metadata"]["chunk_size_chars"] == 1200
+    assert store.ingested["metadata"]["chunk_overlap_chars"] == 180
 
 
 def test_search_embeds_query_and_returns_store_results():
