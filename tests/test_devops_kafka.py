@@ -1,4 +1,3 @@
-import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -97,8 +96,11 @@ def _signing_pair():
     return signer, verifier
 
 
+_NO_CONFIRMATION = object()
+
+
 class FakeProducer:
-    def __init__(self, confirmation=object()):
+    def __init__(self, confirmation=_NO_CONFIRMATION):
         self.confirmation = confirmation
         self.calls = []
 
