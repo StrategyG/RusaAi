@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from rusa_agents.devops.contracts import ContractValidationError
 from rusa_agents.devops.agent_registry import (
     AGENT_POLICIES,
     BUILD_AGENT,
@@ -196,12 +197,12 @@ def test_stage_artifact_writes_are_limited_to_their_scoped_directories():
 def test_monitor_cannot_be_given_write_tools_or_write_scope():
     task = _task("monitor")
     task["constraints"]["allowed_tools"].append("incident.write")
-    with pytest.raises(AgentAuthorizationError, match="outside the agent allowlist"):
+    with pytest.raises(ContractValidationError, match="agent_task"):
         authorize_agent_task(task, authenticated_principal=MONITOR_AGENT)
 
     task = _task("monitor")
     task["constraints"]["write_scope"] = ["reports/"]
-    with pytest.raises(AgentAuthorizationError, match="read-only"):
+    with pytest.raises(ContractValidationError, match="agent_task"):
         authorize_agent_task(task, authenticated_principal=MONITOR_AGENT)
 
 
@@ -216,7 +217,7 @@ def test_network_access_is_denied_until_a_stage_has_an_explicit_network_policy()
 def test_production_deployment_requires_an_explicit_human_approval_reference():
     task = _task("deploy")
     task["input"]["environment"] = "production"
-    with pytest.raises(AgentAuthorizationError, match="production deployment requires"):
+    with pytest.raises(ContractValidationError, match="approval_ref"):
         authorize_agent_task(task, authenticated_principal=DEPLOY_AGENT)
 
     approved = deepcopy(task)
