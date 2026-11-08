@@ -71,6 +71,9 @@ def _task(
             "metrics_window": "last-15m",
         },
     }
+    if agent_id == "rusa_security_guard_agent":
+        inputs[stage]["evidence_refs"] = ["evidence://security/review-input"]
+
     return {
         "schema_version": 1,
         "task_id": "task-agent-registry-1",
@@ -179,14 +182,18 @@ def test_authorization_binds_tenant_principal_stage_and_policy_version():
         )
 
 
-def test_code_agent_cannot_receive_capability_outside_its_registered_profile():
-    task = _task(
-        "code",
-        "rusa_code_agent",
-        tools=["repository.read", "task.create"],
+def test_narrowed_code_profile_rejects_a_capability_removed_by_policy():
+    registry = DevOpsAgentRegistry()
+    profiles = list(registry.profiles)
+    index = next(i for i, profile in enumerate(profiles) if profile.agent_id == "rusa_code_agent")
+    profiles[index] = replace(
+        profiles[index],
+        allowed_tools=profiles[index].allowed_tools - {"test.write"},
     )
+    narrowed_registry = DevOpsAgentRegistry(tuple(profiles))
+    task = _task("code", "rusa_code_agent", tools=["test.write"])
     with pytest.raises(AgentCapabilityDeniedError, match="agent registry"):
-        DevOpsAgentRegistry().authorize(
+        narrowed_registry.authorize(
             task,
             authenticated_tenant_id="tenant-a",
             authenticated_principal="rusa_code_agent",
@@ -216,29 +223,14 @@ def test_policy_engine_grant_must_cover_every_requested_capability_and_scope():
         )
 
 
-def test_monitor_and_security_guard_are_read_only_even_if_task_requests_write():
-    for agent_id, stage, inputs in (
-        ("rusa_monitor_agent", "monitor", {"service": "rusa-api", "metrics_window": "last-15m"}),
-        (
-            "rusa_security_guard_agent",
-            "deploy",
-            {
-                "release_manifest_ref": "artifact://release/manifest",
-                "environment": "staging",
-                "commit_sha": "a" * 40,
-                "artifact_digest": "sha256:" + "b" * 64,
-            },
-        ),
-    ):
-        task = _task(agent_id=agent_id, stage=stage, tools=["incident.write"])
-        task["input"] = inputs
-        with pytest.raises(AgentCapabilityDeniedError):
-            DevOpsAgentRegistry().authorize(
-                task,
-                authenticated_tenant_id="tenant-a",
-                authenticated_principal=agent_id,
-                policy_grant=_grant(task),
-            )
+def test_monitor_and_security_guard_profiles_are_read_only():
+    registry = DevOpsAgentRegistry()
+    for agent_id in ("rusa_monitor_agent", "rusa_security_guard_agent"):
+        profile = registry.profile_for(agent_id)
+        assert profile.read_only is True
+        assert profile.allowed_tools.isdisjoint(
+            {"artifact.write", "deployment.execute", "incident.write", "runbook.execute"}
+        )
 
 
 def test_plan_agent_cannot_receive_network_access_without_registry_eligibility():
@@ -417,8 +409,8 @@ async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_dest
     task = _task(
         "code",
         "rusa_code_agent",
-        tools=["repository.read", "artifact.write"],
-        write_scope=["artifacts/"],
+        tools=["repository.read", "test.write"],
+        write_scope=["test-reports/"],
         network_access=True,
         destinations=["pypi.org"],
     )
@@ -434,7 +426,7 @@ async def test_scoped_gateway_rejects_path_traversal_and_unapproved_network_dest
     )
     gateway = ScopedToolGateway(_FakeToolInvoker(), grant)
     with pytest.raises(ValueError, match="unsafe path"):
-        await gateway.invoke("artifact.write", {"path": "artifacts/../../secrets"})
+        await gateway.invoke("test.write", {"path": "test-reports/../../secrets"})
     with pytest.raises(ToolInvocationDeniedError, match="network destination"):
         await gateway.invoke("repository.read", {"url": "https://evil.example/"})
     assert await gateway.invoke("repository.read", {"url": "https://pypi.org/"}) == {"ok": True}
