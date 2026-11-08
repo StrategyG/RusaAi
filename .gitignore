@@ -19,3 +19,10 @@ __pycache__/
 .rusa-ai/
 workspaces/
 mirrors/
+
+# Model training data and generated model artifacts
+artifacts/
+llm-project/data/curated/
+*.safetensors
+adapter_model.*
+checkpoint-*/

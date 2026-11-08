@@ -1,11 +1,12 @@
-# Data pipeline module
+# RUSA-AI agent SFT data
 
-This directory is reserved for:
+Place curated JSONL files under `llm-project/data/curated/`:
 
-- data collection and ingestion
-- cleaning and normalization
-- deduplication and quality filtering
-- provenance metadata
-- multilingual and multimodal preparation
+- `train.jsonl`
+- `eval.jsonl`
 
-Status: PLANNED
+Each line must match `schemas/llm/agent-sft-example.schema.json`. Each example contains `id`, `agent_role`, `messages`, and the expected `response`. The first message is `system`; the final message is `user`. The response is the exact JSON envelope consumed by `AutonomousCodeWorker`.
+
+The validator rejects unknown roles, tool calls outside the shared role allowlist, unsafe file paths, forbidden `run_check` profiles, duplicate examples, and train/eval leakage. Training requires at least 100 reviewed train examples by default. The small examples in docs are format illustrations, not a training corpus.
+
+Data owners must document source/license/provenance, redact credentials and personal data, remove private repository content unless its use is authorized, and review prompt-injection or harmful tool-use examples. Do not commit private datasets or generated weights to Git.

@@ -446,7 +446,12 @@ class WorkspaceToolGateway:
         )
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+        if not isinstance(action, dict):
+            raise ToolDenied("Tool action must be an object")
         name = action.get("name")
+        if not isinstance(name, str) or name not in ROLE_TOOL_ALLOWLIST.get(role, frozenset()):
+            TOOL_EXECUTIONS.labels(str(name)[:64], "denied").inc()
+            raise ToolDenied(f"Tool '{name}' is not allowed for role {getattr(role, 'value', role)}")
         args = action.get("arguments", {})
         if not isinstance(args, dict):
             raise ToolDenied("Tool arguments must be an object")

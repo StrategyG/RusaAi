@@ -2,7 +2,7 @@
 
 RUSA-AI is an AI and autonomous-agent platform under active development. The repository currently contains a FastAPI inference gateway, a tenant-scoped coding-agent runtime, PostgreSQL task/lease controls, and A2A task validation.
 
-**Model status:** The repository now includes an optional local Transformers/vLLM runtime with checksum-verified model manifests and bounded streaming. No trained RUSA-AI weights are bundled. Local serving is enabled only when `RUSA_LOCAL_MODEL_PATH` points to a verified local artifact; otherwise chat completions use the configured OpenAI-compatible endpoint (`RUSA_MODEL_BASE_URL`). Production local serving requires a pinned `RUSA_MODEL_MANIFEST_SHA256`.
+**Model status:** The repository now includes an optional local Transformers/vLLM runtime with checksum-verified model manifests and bounded streaming, plus an implemented QLoRA/SFT training pipeline for the autonomous coding-agent contract. No trained RUSA-AI weights are bundled. Local serving is enabled only when `RUSA_LOCAL_MODEL_PATH` points to a verified local artifact; otherwise chat completions use the configured OpenAI-compatible endpoint (`RUSA_MODEL_BASE_URL`). Production local serving requires a pinned `RUSA_MODEL_MANIFEST_SHA256`.
 
 **Production status:** RUSA-AI is not production-certified. A passing CI run validates only the exact commit and automated checks it executed. Production release still requires approved model/provider artifacts, staging load and soak tests, adversarial tenant-isolation review, backup/restore and rollback drills, monitoring, TLS, secret management, and operator sign-off.
 
@@ -15,6 +15,7 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 - **Knowledge retrieval**: Optional tenant-scoped PostgreSQL/pgvector ingestion and hybrid retrieval, with offline Recall@K, MRR, and NDCG@K evaluation.
 - **Knowledge MCP**: Separate read-only, bearer-authenticated MCP service for tenant-scoped search and document access.
 - **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
+- **Agent fine-tuning**: Qwen3-4B-Instruct-2507 QLoRA/SFT pipeline, role-scoped dataset validation, completion-only loss, held-out contract evaluation, and checksummed model artifact workflow.
 - **A2A task validation**: Versioned JSON Schema validation for agent task envelopes.
 - **Security and reliability controls**: API-key authentication, RBAC, tenant-aware data access, rate limiting, non-root containers, and audit events; production effectiveness still requires deployment-level verification.
 - **CI quality gates**: Lint, tests, static security analysis, container builds, and vulnerability scanning.
@@ -30,6 +31,10 @@ CUDA/Linux environment. Create and verify a model manifest with
 Production deployments must pin the manifest digest with
 `RUSA_MODEL_MANIFEST_SHA256`. Model weights are not downloaded automatically.
 See `docs/INFERENCE_OPERATIONS.md`.
+
+## Agent model fine-tuning
+
+The first SFT target is the existing six-role AICode worker JSON action envelope. Use a dedicated CUDA training host and install `requirements-train.txt`; training dependencies and model weights are not part of the API image. Curated datasets belong under the ignored `llm-project/data/curated/` directory and must pass the role/tool-policy validator. Run `python llm-project/train/validate_dataset.py`, then `python llm-project/train/train_sft.py`. Evaluate the adapter, merge it, and create a pinned model manifest before configuring `RUSA_LOCAL_MODEL_PATH`. See `docs/FINETUNING_OPERATIONS.md` for hardware estimates and promotion gates. The pipeline is implemented; no fine-tuned weights or production certification are claimed.
 
 ## Optional RAG and MCP
 
