@@ -1,0 +1,64 @@
+name: RUSA-AI Benchmark Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "rusa_agents/benchmarking.py"
+      - "scripts/benchmark_reasoning.py"
+      - "scripts/benchmark_inference.py"
+      - "llm-project/data/reasoning_smoke.jsonl"
+      - "tests/test_benchmarking.py"
+      - "docs/BENCHMARKING_V2.md"
+      - ".github/workflows/benchmark-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "rusa_agents/benchmarking.py"
+      - "scripts/benchmark_reasoning.py"
+      - "scripts/benchmark_inference.py"
+      - "llm-project/data/reasoning_smoke.jsonl"
+      - "tests/test_benchmarking.py"
+      - "docs/BENCHMARKING_V2.md"
+      - ".github/workflows/benchmark-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rusa-benchmark-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-unit:
+    name: Benchmark evaluator tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install package and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Compile benchmark code
+        run: python -m compileall -q rusa_agents scripts tests
+      - name: Lint benchmark code
+        run: ruff check rusa_agents/benchmarking.py scripts/benchmark_reasoning.py scripts/benchmark_inference.py tests/test_benchmarking.py
+      - name: Validate reasoning dataset
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.benchmark_reasoning import load_dataset
+
+          cases = load_dataset(Path("llm-project/data/reasoning_smoke.jsonl"))
+          ids = [str(case["id"]) for case in cases]
+          assert len(ids) == len(set(ids)), "reasoning dataset IDs must be unique"
+          print(f"Validated {len(cases)} reasoning benchmark cases")
+          PY
+      - name: Test benchmark scoring
+        run: python -m pytest -q tests/test_benchmarking.py
