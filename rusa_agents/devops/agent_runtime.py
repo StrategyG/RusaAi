@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -183,11 +183,6 @@ _VALID_APPROVAL_SCOPES = frozenset(
         "external_publication",
     }
 )
-_PROTECTED_APPROVAL_TOOLS = frozenset(
-    {"deployment.execute", "runbook.execute", "release.prepare"}
-)
-
-
 def _validate_write_scope(value: str) -> str:
     if not isinstance(value, str) or not value or len(value) > 512:
         raise ValueError("write scope must contain 1..512 characters")
@@ -289,15 +284,25 @@ class DevOpsAgentRegistry:
 
     def __init__(self, profiles: tuple[AgentProfile, ...] = _DEFAULT_PROFILES):
         by_id = {profile.agent_id: profile for profile in profiles}
+        baseline = {profile.agent_id: profile for profile in _DEFAULT_PROFILES}
         if len(by_id) != len(profiles):
             raise ValueError("agent registry contains duplicate agent identities")
-        if set(by_id) != {profile.agent_id for profile in _DEFAULT_PROFILES}:
+        if set(by_id) != set(baseline):
             raise ValueError("the DevOps registry must define all eight stages and Security Guard")
-        for profile in by_id.values():
+        for agent_id, profile in by_id.items():
+            approved = baseline[agent_id]
+            if profile.stage != approved.stage:
+                raise ValueError(f"{agent_id} stage assignment cannot be changed")
+            if profile.allowed_tools - approved.allowed_tools:
+                raise ValueError(f"{agent_id} profile cannot expand registered capabilities")
+            if approved.read_only and not profile.read_only:
+                raise ValueError(f"{agent_id} read-only status cannot be relaxed")
+            if profile.network_eligible and not approved.network_eligible:
+                raise ValueError(f"{agent_id} network eligibility cannot be expanded")
             if profile.allowed_tools - (_READ_TOOLS | _WRITE_TOOLS):
-                raise ValueError(f"{profile.agent_id} has an unknown capability")
+                raise ValueError(f"{agent_id} has an unknown capability")
             if profile.read_only and profile.allowed_tools - _READ_TOOLS:
-                raise ValueError(f"{profile.agent_id} is read-only but has a write capability")
+                raise ValueError(f"{agent_id} is read-only but has a write capability")
         self._profiles = by_id
         self._handlers: dict[str, DevOpsAgentHandler] = {}
 
