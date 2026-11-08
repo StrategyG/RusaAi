@@ -96,6 +96,10 @@
           "type": "string",
           "format": "uri"
         },
+        "plan_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
         "acceptance_criteria_ref": {
           "type": "string",
           "format": "uri"
@@ -459,7 +463,9 @@
             "required": [
               "repository",
               "plan_ref",
-              "acceptance_criteria"
+              "acceptance_criteria",
+              "plan_evidence_ref",
+              "acceptance_criteria_ref"
             ]
           }
         }
