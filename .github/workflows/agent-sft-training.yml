@@ -63,24 +63,8 @@ jobs:
               print("BF16 is not supported; FP16 profile confirmed.")
           PY
 
-      - name: Validate curated dataset
-        run: |
-          python llm-project/train/validate_dataset.py \
-            --train-file llm-project/data/curated/train.jsonl \
-            --eval-file llm-project/data/curated/eval.jsonl
-
-      - name: Train T4 QLoRA adapter
-        run: |
-          python llm-project/train/train_sft.py \
-            --config llm-project/configs/training-t4.yaml
-
-      - name: Evaluate held-out agent contract and safety metrics
-        run: |
-          python llm-project/eval/evaluate_agent_sft.py \
-            --adapter-dir artifacts/rusa-agent-qwen3-4b-qlora-t4/adapter \
-            --eval-file llm-project/data/curated/eval.jsonl \
-            --config llm-project/configs/training-t4.yaml \
-            --output artifacts/agent-sft-evaluation-t4.json
+      - name: Train and evaluate T4 QLoRA adapter
+        run: bash scripts/train_rusa_agent_t4.sh
 
       - name: Add evaluation summary
         if: always()
