@@ -14,7 +14,15 @@ if str(SERVE_PATH) not in sys.path:
     sys.path.insert(0, str(SERVE_PATH))
 
 
-if importlib.util.find_spec("grpc_tools") is not None:
+GENERATED_DIR = ROOT / "rusa_agents" / "devops" / "generated"
+GENERATED_STUBS = (
+    GENERATED_DIR / "workflow_pb2.py",
+    GENERATED_DIR / "workflow_pb2_grpc.py",
+)
+
+if importlib.util.find_spec("grpc_tools") is not None and not all(
+    path.is_file() for path in GENERATED_STUBS
+):
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "generate_devops_proto.py")],
         cwd=ROOT,
