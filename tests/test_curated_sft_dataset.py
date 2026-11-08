@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 from rusa_training.dataset import (
@@ -18,8 +19,12 @@ def test_curated_sft_dataset_meets_seed_experiment_guardrails():
 
     assert len(train) == 120
     assert len(evaluation) == 36
-    assert {item["agent_role"] for item in train} == EXPECTED_ROLES
-    assert {item["agent_role"] for item in evaluation} == EXPECTED_ROLES
+    assert Counter(item["agent_role"] for item in train) == {
+        role: 20 for role in EXPECTED_ROLES
+    }
+    assert Counter(item["agent_role"] for item in evaluation) == {
+        role: 6 for role in EXPECTED_ROLES
+    }
 
     validate_dataset_splits(train, evaluation)
     validate_eval_distribution(
