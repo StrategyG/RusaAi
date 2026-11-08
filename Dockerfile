@@ -34,11 +34,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libffi8 libssl3t64 libbz2-1.0 liblzma5 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
-    && useradd --create-home --uid 10001 appuser \
-    && apt-get purge -y libexpat1 libsqlite3-0 liblastlog2-2 \
     && rm -rf /var/lib/apt/lists/* \
     && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
-    && ldconfig
+    && ldconfig \
+    && useradd --create-home --uid 10001 appuser
 
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /install /usr/local
