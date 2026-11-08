@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import grpc
 
-from .agent_registry import AgentAuthorizationError, authorize_agent_task
+from .agent_registry import AGENT_POLICIES, AgentAuthorizationError, authorize_agent_task
 from .contracts import ContractValidationError
 from .control_store import (
     PostgresWorkflowControlStore,
@@ -41,19 +41,8 @@ TASK_METHODS = frozenset(
         "ReportTaskResult",
     }
 )
-STAGE_AGENT_IDS = frozenset(
-    {
-        "rusa_plan_agent",
-        "rusa_code_agent",
-        "rusa_build_agent",
-        "rusa_test_agent",
-        "rusa_release_agent",
-        "rusa_deploy_agent",
-        "rusa_operate_agent",
-        "rusa_monitor_agent",
-        "rusa_security_guard_agent",
-    }
-)
+# Keep gRPC claim authority aligned with the canonical execution registry.
+STAGE_AGENT_IDS = frozenset(AGENT_POLICIES)
 
 DEFAULT_PRINCIPAL_METHODS = {
     "rusa_supreme_orchestrator": ORCHESTRATOR_METHODS,
