@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa-ai.example/schemas/certification/production-certification.schema.json",
+  "title": "RUSA-AI Production Certification Evidence Contract",
+  "description": "Evidence references and accountable human sign-offs for promotion of a staging-verified candidate to production.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "certification_id", "generated_at", "candidate", "source", "checks", "signoffs"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "certification_id": { "type": "string", "format": "uuid" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "run_id", "attestation_verified", "attestation_ref"],
+      "properties": {
+        "workflow": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "attestation_verified": { "type": "boolean" },
+        "attestation_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "checks": { "$ref": "#/$defs/checks" },
+    "signoffs": { "$ref": "#/$defs/signoffs" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit_sha", "evidence_environment", "target_environment", "release_id", "release_manifest_ref"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+        "commit_sha": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
+        "evidence_environment": { "const": "staging" },
+        "target_environment": { "const": "production" },
+        "release_id": { "type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+        "release_manifest_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["uri", "digest"],
+          "properties": {
+            "uri": { "type": "string", "minLength": 1 },
+            "digest": { "$ref": "#/$defs/sha256" }
+          }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_ref", "evidence_digest", "subject_commit_sha", "observed_at"],
+      "properties": {
+        "status": { "enum": ["PASS", "HOLD", "FAIL"] },
+        "evidence_ref": { "type": "string", "minLength": 1 },
+        "evidence_digest": { "$ref": "#/$defs/sha256" },
+        "subject_commit_sha": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "summary": { "type": "string" }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_integrity", "supply_chain", "vulnerability", "tenant_isolation", "penetration_test", "backup_restore", "disaster_recovery", "rollback", "observability", "slo", "staging_soak", "independent_qa", "erg06"],
+      "properties": {
+        "release_integrity": { "$ref": "#/$defs/check" },
+        "supply_chain": { "$ref": "#/$defs/check" },
+        "vulnerability": { "$ref": "#/$defs/check" },
+        "tenant_isolation": { "$ref": "#/$defs/check" },
+        "penetration_test": { "$ref": "#/$defs/check" },
+        "backup_restore": { "$ref": "#/$defs/check" },
+        "disaster_recovery": { "$ref": "#/$defs/check" },
+        "rollback": { "$ref": "#/$defs/check" },
+        "observability": { "$ref": "#/$defs/check" },
+        "slo": { "$ref": "#/$defs/check" },
+        "staging_soak": { "$ref": "#/$defs/check" },
+        "independent_qa": { "$ref": "#/$defs/check" },
+        "erg06": { "$ref": "#/$defs/check" }
+      }
+    },
+    "signoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewer", "approved", "approved_at", "evidence_ref"],
+      "properties": {
+        "reviewer": { "type": "string", "minLength": 1 },
+        "approved": { "type": "boolean" },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "evidence_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "signoffs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "security", "sre", "qa", "data_governance", "finops", "process_owner"],
+      "properties": {
+        "platform": { "$ref": "#/$defs/signoff" },
+        "security": { "$ref": "#/$defs/signoff" },
+        "sre": { "$ref": "#/$defs/signoff" },
+        "qa": { "$ref": "#/$defs/signoff" },
+        "data_governance": { "$ref": "#/$defs/signoff" },
+        "finops": { "$ref": "#/$defs/signoff" },
+        "process_owner": { "$ref": "#/$defs/signoff" }
+      }
+    }
+  }
+}
