@@ -20,5 +20,15 @@ export async function POST(request: NextRequest) {
     method: "POST",
     body: JSON.stringify(body)
   });
+  if (response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        "Content-Type": response.headers.get("content-type") || "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no"
+      }
+    });
+  }
   return forwardJson(response);
 }

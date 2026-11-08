@@ -76,7 +76,12 @@ const RUNTIME_COMPONENTS = [
   { name: "Security", type: "WorkerRole.SECURITY", manager: "Quality manager", detail: "Memeriksa policy dan evidence keamanan." }
 ];
 
-const ARCHITECTURE_AGENTS = [
+type ArchitectureAgent = {
+  name: string; priority: string; objective: string; responsibilities: string[];
+  inputs: string[]; outputs: string[]; guardrails: string[]; extra?: string;
+};
+
+const ARCHITECTURE_AGENTS: ArchitectureAgent[] = [
   {
     name: "Supreme Orchestrator", priority: "Critical",
     objective: "Mengubah permintaan pengguna menjadi pekerjaan yang terencana, terdelegasi, terkontrol, terverifikasi, dan menghasilkan output nyata.",
@@ -340,7 +345,7 @@ export default function RusaControlCenter() {
     { role: "assistant", content: "RUSA AI siap menerima pertanyaan. Chat menggunakan inference API; pekerjaan coding dijalankan melalui AICode Tasks." }
   ]);
 
-  const [activeAgent, setActiveAgent] = useState<(typeof ARCHITECTURE_AGENTS)[number] | null>(null);
+  const [activeAgent, setActiveAgent] = useState<ArchitectureAgent | null>(null);
   const [activeStage, setActiveStage] = useState<(typeof DEVOPS_STAGES)[number] | null>(DEVOPS_STAGES[0]);
   const [envelopeText, setEnvelopeText] = useState(DEFAULT_ENVELOPE);
   const [validation, setValidation] = useState<{ valid: boolean; errors: string[] } | null>(null);
@@ -352,7 +357,7 @@ export default function RusaControlCenter() {
   const canUseChat = session?.roles.some((role) => ["platform_admin", "tenant_admin", "developer"].includes(role)) ?? false;
   const isPlatformAdmin = session?.roles.includes("platform_admin") ?? false;
 
-  const refreshTasks = useCallback(async (offset = taskOffset, filter = taskFilter) => {
+  const refreshTasks = useCallback(async (offset = 0, filter: TaskFilter = "all") => {
     const params = new URLSearchParams({ limit: "25", offset: String(offset) });
     if (filter !== "all" && filter !== "active") params.set("status", filter);
     try {
@@ -366,7 +371,7 @@ export default function RusaControlCenter() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not refresh task queue.");
     }
-  }, [taskFilter, taskOffset]);
+  }, []);
 
   const refreshApprovals = useCallback(async () => {
     try {
@@ -573,7 +578,7 @@ export default function RusaControlCenter() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
       setNotice("Permintaan pembatalan diterima backend.");
-      await Promise.all([refreshTasks(), refreshApprovals()]);
+      await Promise.all([refreshTasks(taskOffset, taskFilter), refreshApprovals()]);
       await openTask(taskId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Cancel failed.");
@@ -774,7 +779,7 @@ export default function RusaControlCenter() {
         <section className="rc-main">
           <header className="rc-topbar">
             <div className="rc-topbar-left"><button className="rc-icon-btn rc-mobile-menu" onClick={() => setMobileOpen((value) => !value)} aria-label="Toggle navigation"><Menu size={19} /></button><div className="rc-breadcrumb">RUSA AI <span>/</span> <strong>{pageInfo.title}</strong></div></div>
-            <div className="rc-topbar-right"><span className="rc-role-pill">{session.roles.join(" · ")}</span><button className="rc-btn rc-btn-ghost" onClick={() => { void refreshTasks(); void refreshApprovals(); void refreshHealth(); if (page === "observability") void refreshMetrics(); }}><RefreshCw size={14} /> Refresh</button></div>
+            <div className="rc-topbar-right"><span className="rc-role-pill">{session.roles.join(" · ")}</span><button className="rc-btn rc-btn-ghost" onClick={() => { void refreshTasks(taskOffset, taskFilter); void refreshApprovals(); void refreshHealth(); if (page === "observability") void refreshMetrics(); }}><RefreshCw size={14} /> Refresh</button></div>
           </header>
 
           <div className="rc-content">
