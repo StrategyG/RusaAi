@@ -171,6 +171,10 @@ def test_code_agent_cannot_escalate_to_deployment_or_production_tools():
         "src/credentials/token.json",
         "src/private-key.pem",
         "pyproject.toml",
+        ".gitignore",
+        "Dockerfile",
+        "requirements-dev.txt",
+        ".devcontainer/devcontainer.json",
     ],
 )
 def test_code_agent_cannot_receive_protected_repository_write_scope(scope):
