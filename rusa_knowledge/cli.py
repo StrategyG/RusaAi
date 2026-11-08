@@ -27,9 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluation = commands.add_parser("evaluate", help="evaluate retrieval against a JSONL relevance dataset")
     evaluation.add_argument("--dataset", required=True)
     evaluation.add_argument("--tenant-id", required=True)
-    evaluation.add_argument("--collection", default="default")
-    evaluation.add_argument("--agent-id", help="trusted agent scope for agent-specific evaluation")
-    evaluation.add_argument("--project-id", help="trusted project scope for project-bound knowledge")
+    evaluation.add_argument("--collection", default="agent")
+    evaluation.add_argument("--agent-id", help="agent filter for per-agent retrieval evaluation")
+    evaluation.add_argument("--project-id", help="project filter for project-bound knowledge")
     evaluation.add_argument("--k", type=int, default=5)
     return parser
 
@@ -72,6 +72,12 @@ def main() -> int:
                 ),
                 k=args.k,
             )
+            report["scope"] = {
+                "tenant_id": args.tenant_id,
+                "collection": args.collection,
+                "agent_id": args.agent_id,
+                "project_id": args.project_id,
+            }
             print(json.dumps(report, ensure_ascii=False))
             return 0
 
