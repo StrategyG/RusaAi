@@ -699,7 +699,7 @@ class CodeAgentExecutor:
 
         branch_suffix = hashlib.sha256(
             f"{tenant_id}:{task['workflow_id']}:{task['task_id']}:{task['attempt']}:"
-            f"{lease.claim_id}:{lease.lease_epoch}".encode("utf-8")
+            f"{lease.claim_id}:{lease.lease_epoch}".encode()
         ).hexdigest()[:24]
         branch = f"feature/rusa-devops-{branch_suffix}"
         base_branch = task["input"].get("base_branch", "main")
