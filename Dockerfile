@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
+COPY requirements.txt requirements-messaging.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
     && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt -r requirements-messaging.txt
 COPY pyproject.toml .
