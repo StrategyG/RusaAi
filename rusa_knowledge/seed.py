@@ -147,6 +147,8 @@ def load_manifest(manifest_path: str | Path) -> dict[str, Any]:
             ):
                 raise ValueError(f"{prefix}.{field} must be a unique array of bounded strings")
 
+        if item["agent_ids"] and "knowledge_scope" not in item:
+            raise ValueError(f"{prefix}.knowledge_scope must be explicit when agent_ids are present")
         knowledge_scope = item.get("knowledge_scope", "shared")
         if not isinstance(knowledge_scope, str) or knowledge_scope not in {"shared", "agent_specific"}:
             raise ValueError(f"{prefix}.knowledge_scope must be shared or agent_specific")
