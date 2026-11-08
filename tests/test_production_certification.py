@@ -263,7 +263,7 @@ def test_release_manifest_rejects_unapproved_exception() -> None:
             "approved_at": "2026-11-08T10:00:00Z",
         }
     ]
-    with pytest.raises(CertificationContractError, match="is not approved"):
+    with pytest.raises(CertificationContractError, match="approved.*True was expected"):
         validate_release_manifest(payload, now=NOW)
 
 
