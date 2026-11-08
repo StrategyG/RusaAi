@@ -75,6 +75,7 @@ provenance = verify_github_slsa_provenance(
     digest="sha256:<64 lowercase hexadecimal characters>",
     repository="StrategyG/RusaAi",
     signer_workflow="StrategyG/RusaAi/.github/workflows/release.yml",
+    source_digest="<40-character source commit SHA>",
     certificate_identity=(
         "https://github.com/StrategyG/RusaAi/.github/workflows/release.yml"
         "@refs/tags/v1.0.0"
@@ -82,7 +83,7 @@ provenance = verify_github_slsa_provenance(
 )
 ```
 
-The helper does not treat arbitrary predicate fields as trusted identity.
+The verifier also requires `--source-digest` to match the expected Git commit SHA, binding the attestation to the precise source revision. The helper does not treat arbitrary predicate fields as trusted identity.
 GitHub's certificate identity and verified timestamp are the cryptographically
 verified identity evidence. Provenance still requires a trusted builder
 workflow whose execution cannot be influenced by untrusted caller input.
