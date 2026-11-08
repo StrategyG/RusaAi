@@ -90,13 +90,35 @@ The source URI is stable per source ID, so re-ingesting the same source updates 
 
 The script prints document IDs, chunk counts, and content hashes. Keep this output as the ingestion record; do not log secrets or full source bodies.
 
-## 5. Verify after ingestion
+## 5. Mine agent-specific knowledge packs
+
+The curated `agent_knowledge_map.json` maps each of the 20 documented architecture and Agentic DevOps profiles to exact Markdown heading subtrees in the pinned owner-supplied sources. It does not infer headings or agent responsibilities. The miner verifies the original four source hashes first, extracts only the configured sections, and records source line locators, source SHA-256, section SHA-256, map SHA-256, source status, and implementation status.
+
+Run a non-writing preflight:
+
+```bash
+python -m rusa_knowledge.agent_mining
+```
+
+The output lists one derived document per mapped agent, its stable `rusa://agent-knowledge/{agent_id}/{source_id}` URI, section locators, and chunk count. This command does not call the embedding provider or write to PostgreSQL.
+
+After reviewing the preflight and confirming that the tenant is authorized, explicitly ingest:
+
+```bash
+python -m rusa_knowledge.agent_mining --tenant-id '<authorized-rusa-tenant>' --apply
+```
+
+The miner creates agent-specific documents with exactly one `agent_id` each. The original architecture source documents remain shared platform context; the derived packs are focused agent knowledge. The six AICode runtime workers are intentionally not aliases for the 20 documented profiles and need a separate reviewed source map for their repository/code knowledge.
+
+## 6. Verify after ingestion
 
 Run:
 
 ```bash
 rusa-knowledge check
 ```
+
+Then run the agent retrieval evaluation after the relevant source documents have been ingested and the manually reviewed gold set has been completed.
 
 Then verify the `agent` collection for the selected tenant using the existing read-only MCP tools or a tenant-authorized database query. Confirm 4 documents and 81 chunks before enabling worker retrieval.
 
