@@ -72,9 +72,13 @@ CREATE POLICY rusa_knowledge_version_chunks_tenant_isolation
     USING (tenant_id = current_setting('rusa.tenant_id', true))
     WITH CHECK (tenant_id = current_setting('rusa.tenant_id', true));
 
-GRANT SELECT, INSERT, UPDATE, DELETE
+REVOKE ALL PRIVILEGES
+    ON public.rusa_knowledge_document_versions FROM rusa_knowledge_worker;
+REVOKE ALL PRIVILEGES
+    ON public.rusa_knowledge_version_chunks FROM rusa_knowledge_worker;
+GRANT SELECT, INSERT
     ON public.rusa_knowledge_document_versions TO rusa_knowledge_worker;
-GRANT SELECT, INSERT, UPDATE, DELETE
+GRANT SELECT, INSERT
     ON public.rusa_knowledge_version_chunks TO rusa_knowledge_worker;
 
 COMMIT;
