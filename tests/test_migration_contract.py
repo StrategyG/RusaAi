@@ -56,3 +56,20 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+def test_devops_lease_migration_has_complete_fencing_and_replay_constraints():
+    migration = Path(
+        "migrations/009_devops_task_leases_and_cancellation.sql"
+    ).read_text(encoding="utf-8")
+
+    assert migration.count("COMMIT;") == 1
+    assert "cancel_request_sha256 ~ '^[a-f0-9]{64}$'" in migration
+    assert migration.count("request_sha256 ~ '^[a-f0-9]{64}$'") == 2
+    assert "lease_claim_id" in migration
+    assert "lease_until TIMESTAMPTZ" in migration
+    assert "side_effect IN ('NONE', 'APPLIED', 'UNKNOWN')" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_run_cancellations" in migration
+    assert "CREATE TABLE IF NOT EXISTS public.devops_task_rpc_receipts" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+
