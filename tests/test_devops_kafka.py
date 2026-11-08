@@ -531,7 +531,7 @@ async def test_kafka_outbox_dispatcher_retries_without_changing_message_identity
     report = await KafkaOutboxDispatcher(
         relay=relay,
         publisher=publisher,
-        jitter=lambda low, high: low,
+        jitter=lambda low, high: high,
     ).dispatch_once()
     assert report.retried == 1
     assert relay.published == []
