@@ -8,8 +8,8 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
 from typing import Any
+from urllib.parse import urlsplit
 
 
 _DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
