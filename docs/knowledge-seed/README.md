@@ -84,7 +84,7 @@ After reviewing a successful preflight, explicitly apply:
 python -m rusa_knowledge.seed --tenant-id '<authorized-rusa-tenant>' --apply
 ```
 
-The default collection is `agent`, matching the existing worker and MCP retrieval defaults. The four initial architecture/agent source documents are marked `knowledge_scope=shared`, so all authorized agent workers may retrieve them. Future agent-specific documents must set `knowledge_scope=agent_specific` and provide one or more validated `agent_ids`; the worker gateway supplies its AICode scope ID (for example, `aicode-analyst`) from the trusted WorkerRole. Models cannot choose the scope or collection.
+The default collection is `agent`, matching the existing worker and MCP retrieval defaults. The four initial architecture/agent source documents are marked `knowledge_scope=shared`, so all authorized agent workers may retrieve them. Future agent-specific documents must set `knowledge_scope=agent_specific` and provide one or more validated `agent_ids`. If `agent_ids` is present, `knowledge_scope` must be explicit; the system will not infer shared visibility. The worker gateway supplies its AICode scope ID (for example, `aicode-analyst`) from the trusted WorkerRole. Models cannot choose the scope or collection.
 
 The source URI is stable per source ID, so re-ingesting the same source updates the same document row rather than creating a duplicate row. Re-ingestion still recomputes embeddings and replaces that document's chunks.
 
