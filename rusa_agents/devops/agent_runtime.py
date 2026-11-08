@@ -66,6 +66,9 @@ class ExecutionPolicyGrant:
     allowed_network_destinations: frozenset[str] = frozenset()
     approved_scopes: frozenset[str] = frozenset()
     approved_refs: frozenset[str] = frozenset()
+    allowed_branches: frozenset[str] = frozenset()
+    allowed_runbooks: frozenset[str] = frozenset()
+    allowed_environments: frozenset[str] = frozenset()
     max_cost_usd: float = 0.0
     max_tool_calls: int = 0
     max_runtime_seconds: int = 1
@@ -84,12 +87,36 @@ class ExecutionPolicyGrant:
             raise ValueError("policy max_runtime_seconds must be positive")
         if not isinstance(self.network_access, bool):
             raise ValueError("policy network_access must be boolean")
+        if not isinstance(self.allowed_tools, frozenset):
+            raise TypeError("policy allowed_tools must be an immutable frozenset")
+        if not isinstance(self.write_scope, tuple):
+            raise TypeError("policy write_scope must be an immutable tuple")
+        if not isinstance(self.allowed_network_destinations, frozenset):
+            raise TypeError("policy network destinations must be an immutable frozenset")
+        if not isinstance(self.approved_scopes, frozenset) or not isinstance(self.approved_refs, frozenset):
+            raise TypeError("policy approvals must use immutable frozensets")
+        if not isinstance(self.allowed_branches, frozenset):
+            raise TypeError("policy branches must use an immutable frozenset")
+        if not isinstance(self.allowed_runbooks, frozenset):
+            raise TypeError("policy runbooks must use an immutable frozenset")
+        if not isinstance(self.allowed_environments, frozenset):
+            raise TypeError("policy environments must use an immutable frozenset")
         if self.allowed_network_destinations and not self.network_access:
             raise ValueError("network destinations require network_access=true")
+        if self.allowed_tools - (_READ_TOOLS | _WRITE_TOOLS):
+            raise ValueError("policy grant contains an unknown capability")
+        if self.approved_scopes - _VALID_APPROVAL_SCOPES:
+            raise ValueError("policy grant contains an unsupported approval scope")
+        if self.allowed_environments - {"development", "eval", "staging", "production"}:
+            raise ValueError("policy grant contains an unsupported deployment environment")
         for scope in self.write_scope:
             _validate_write_scope(scope)
         for destination in self.allowed_network_destinations:
             _normalize_destination(destination)
+        for branch in self.allowed_branches:
+            _validate_feature_branch(branch)
+        if any(not isinstance(ref, str) or not ref for ref in self.allowed_runbooks):
+            raise ValueError("policy runbook allowlist contains an invalid reference")
 
 
 @dataclass(frozen=True)
@@ -104,6 +131,11 @@ class AgentExecutionGrant:
     allowed_network_destinations: frozenset[str]
     approval_scopes: frozenset[str]
     approval_ref: str | None
+    allowed_branches: frozenset[str]
+    allowed_runbooks: frozenset[str]
+    allowed_environments: frozenset[str]
+    target_environment: str | None
+    runbook_ref: str | None
     max_cost_usd: float
     max_tool_calls: int
     max_runtime_seconds: int
@@ -200,6 +232,19 @@ def _scope_covers(granted: str, requested: str) -> bool:
     grant = _validate_write_scope(granted)
     path = _validate_write_scope(requested)
     return path == grant or path.startswith(grant + "/")
+
+
+def _validate_feature_branch(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 255
+        or not value.startswith(("feature/", "feat/"))
+        or "\\" in value
+        or not re.fullmatch(r"[A-Za-z0-9._/-]+", value)
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+    ):
+        raise ValueError("Code Agent branches must be scoped feature/ or feat/ branches")
+    return value
 
 
 def _normalize_destination(value: str) -> str:
@@ -382,6 +427,15 @@ class DevOpsAgentRegistry:
                 raise AgentCapabilityDeniedError("task write scope exceeds the Policy Engine grant")
         if requested_tools & _PATH_SCOPED_TOOLS and not write_scope:
             raise AgentCapabilityDeniedError("path-writing capabilities require an explicit write scope")
+        if "repository.branch.write" in requested_tools and not policy_grant.allowed_branches:
+            raise AgentCapabilityDeniedError("branch-write capability requires a Policy Engine feature-branch allowlist")
+        if "runbook.execute" in requested_tools:
+            runbook_ref = task.get("input", {}).get("runbook_ref")
+            if not runbook_ref or runbook_ref not in policy_grant.allowed_runbooks:
+                raise AgentCapabilityDeniedError("runbook execution is outside the Policy Engine allowlist")
+        target_environment = task.get("input", {}).get("environment")
+        if task["stage"] == "deploy" and target_environment not in policy_grant.allowed_environments:
+            raise AgentCapabilityDeniedError("deployment environment is outside the Policy Engine grant")
 
         network_access = constraints.get("network_access", False)
         task_destinations = frozenset(
@@ -444,6 +498,11 @@ class DevOpsAgentRegistry:
             allowed_network_destinations=task_destinations,
             approval_scopes=approval_scopes,
             approval_ref=approval_ref,
+            allowed_branches=policy_grant.allowed_branches,
+            allowed_runbooks=policy_grant.allowed_runbooks,
+            allowed_environments=policy_grant.allowed_environments,
+            target_environment=target_environment,
+            runbook_ref=task.get("input", {}).get("runbook_ref"),
             max_cost_usd=budget["max_cost_usd"],
             max_tool_calls=budget["max_tool_calls"],
             max_runtime_seconds=budget["max_runtime_seconds"],
@@ -480,16 +539,30 @@ class ScopedToolGateway:
             if not any(_scope_covers(scope, normalized) for scope in self._grant.write_scope):
                 raise ToolInvocationDeniedError("tool path is outside the task write scope")
 
-        destination_value = arguments.get("destination") or arguments.get("url")
-        if destination_value is not None:
+        destination_values = [
+            arguments[key]
+            for key in ("destination", "url", "host", "hostname", "endpoint")
+            if arguments.get(key) is not None
+        ]
+        for destination_value in destination_values:
             if not self._grant.network_access:
                 raise ToolInvocationDeniedError("network access is not granted")
             destination = _normalize_destination(destination_value)
             if destination not in self._grant.allowed_network_destinations:
                 raise ToolInvocationDeniedError("network destination is outside the task allowlist")
 
+        if tool_id == "repository.branch.write":
+            branch = arguments.get("branch") or arguments.get("work_branch")
+            if branch not in self._grant.allowed_branches:
+                raise ToolInvocationDeniedError("branch is outside the Policy Engine feature-branch allowlist")
+            _validate_feature_branch(branch)
         if tool_id == "deployment.execute":
             environment = arguments.get("environment")
+            if (
+                environment != self._grant.target_environment
+                or environment not in self._grant.allowed_environments
+            ):
+                raise ToolInvocationDeniedError("deployment environment is outside the task grant")
             if environment == "production":
                 approval_ref = arguments.get("approval_ref")
                 if (
@@ -497,13 +570,16 @@ class ScopedToolGateway:
                     or approval_ref != self._grant.approval_ref
                 ):
                     raise AgentApprovalRequiredError("production deployment approval is missing")
-        if tool_id == "runbook.execute" and arguments.get("destructive") is True:
-            approval_ref = arguments.get("approval_ref")
-            if (
-                "destructive_action" not in self._grant.approval_scopes
-                or approval_ref != self._grant.approval_ref
-            ):
-                raise AgentApprovalRequiredError("destructive runbook approval is missing")
+        if tool_id == "runbook.execute":
+            if arguments.get("runbook_ref") != self._grant.runbook_ref:
+                raise ToolInvocationDeniedError("runbook is outside the task grant")
+            if arguments.get("destructive") is True:
+                approval_ref = arguments.get("approval_ref")
+                if (
+                    "destructive_action" not in self._grant.approval_scopes
+                    or approval_ref != self._grant.approval_ref
+                ):
+                    raise AgentApprovalRequiredError("destructive runbook approval is missing")
 
         self._tool_calls += 1
         result = self._delegate.invoke(tool_id, arguments)
