@@ -3,7 +3,7 @@
 **Version:** 1.0.0  
 **Status:** Mining baseline / proposed, not a published production corpus  
 **Architecture:** Centralized RAG with agent-scoped retrieval  
-**Scope:** 10 canonical agents, 8 Agentic DevOps agents, 2 cross-cutting DevOps roles
+**Scope:** 10 canonical agents, 8 Agentic DevOps agents, 2 cross-cutting DevOps roles, and 6 AICode runtime worker profiles
 
 ## 1. Purpose and evidence boundary
 
@@ -141,7 +141,7 @@ Extraction controls:
 
 ## 5. Per-agent knowledge profiles
 
-The ten canonical profiles come from RUSA_AI_All_Agents-2.md. The eight lifecycle profiles and two cross-cutting roles come from RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE(1).md. The profile IDs for the ten canonical agents are normalized slugs from their source headings; they are not a new authority to merge identities.
+The ten canonical profiles come from RUSA_AI_All_Agents-2.md. The eight lifecycle profiles and two cross-cutting roles come from RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE(1).md. Six additional AICode runtime worker profiles come from StrategyG/RusaAi/docs/aicode-agent-enterprise.md and the WorkerRole enum. The profile IDs for the ten canonical agents are normalized slugs from their source headings; they are not a new authority to merge identities.
 
 | Agent profile | Primary knowledge domains | Retrieval focus / questions |
 |---|---|---|
@@ -177,6 +177,21 @@ The ten canonical profiles come from RUSA_AI_All_Agents-2.md. The eight lifecycl
 | supreme-orchestrator ↔ rusa_devops_orchestrator | Different orchestration scopes; keep separate. |
 | security-policy ↔ rusa_security_guard_agent | Related security roles; keep separate until governance defines scope and delegation. |
 
+### Six AICode runtime worker scopes
+
+These are implemented worker roles in the RUSA-AI AICode subsystem, not aliases for the ten higher-level documented agents. The feature branch binds each authenticated WorkerRole to a server-derived scope ID:
+
+| Runtime role | Trusted scope ID | Documented responsibility | Existing tool permission |
+|---|---|---|---|
+| Analyst | aicode-analyst | Repository inventory, relevant code reading, defect localization | List, read, diff, knowledge read |
+| Architect | aicode-architect | Design and implementation plan | List, read, diff, knowledge read |
+| Developer | aicode-developer | Approved code, test and documentation changes | List, read, write, diff, knowledge read |
+| Debugger | aicode-debugger | Diagnose failures and propose fixes | List, read, registered checks, diff, knowledge read |
+| Tester | aicode-tester | Execute pytest validation | List, read, pytest check, diff, knowledge read |
+| Security | aicode-security | Ruff, Bandit and compile checks | List, read, registered checks, diff, knowledge read |
+
+The scope ID is derived from the trusted WorkerRole in the host gateway, not from model-generated arguments. These six scopes remain separate from the ten canonical and eight lifecycle profiles until System Architect approves a formal identity mapping.
+
 ## 6. Centralized RAG retrieval model
 
 ### Target model
@@ -198,19 +213,19 @@ The authenticated server/runtime must inject agent_id. The model must not choose
 
 ### Current implementation gap in RUSA-AI
 
-The inspected StrategyG/RusaAi code currently:
-- uses PostgreSQL 16 + pgvector with 1536-dimensional embeddings;
-- combines vector search and PostgreSQL full-text search using weighted RRF (0.7 vector / 0.3 lexical);
-- filters by tenant and collection, but does not apply an agent_id or project metadata filter in PostgresKnowledgeStore.search;
-- stores document metadata, but the current search SQL does not use it for agent-specific access;
-- exposes the collection argument through read-only MCP tools and the worker gateway;
-- derives tenant identity from the MCP bearer token, but does not establish an authenticated agent identity in that MCP context;
-- enables worker retrieval only when RUSA_RAG_ENABLED=true; default is disabled;
-- has no reranker in the inspected RUSA retrieval path;
-- uses character-based 1200-character chunks with 180-character overlap;
-- updates a document row for a stable source URI and replaces its chunks on re-ingestion; the current schema does not provide immutable document-version history.
+The base implementation inspected in StrategyG/RusaAi uses PostgreSQL 16 + pgvector with 1536-dimensional embeddings, vector plus PostgreSQL full-text retrieval, and weighted RRF (0.7 vector / 0.3 lexical). It stores document metadata but its base search path filters by tenant and collection only; it does not apply agent_id or project metadata filters. The base worker gateway also accepted a model-selected collection value.
 
-Therefore per-agent RAG is not yet enforced by the current runtime. This catalog defines profiles and target retrieval policy; implementation requires trusted agent identity and metadata-filtered retrieval before profiles can be considered isolated.
+The current feature branch adds the first agent-scope enforcement slice:
+- trusted WorkerRole is converted by the host gateway to a server-owned scope ID such as aicode-analyst;
+- vector and lexical candidates are filtered to shared records plus records whose agent_ids contain that scope;
+- document reads apply the same visibility filter;
+- worker tools no longer accept a model-selected collection argument;
+- general RUSA Knowledge MCP requests without an authenticated agent identity see shared records only;
+- metadata validation distinguishes shared and agent_specific records.
+
+These are code changes in the open feature branch, not a merged or production deployment. Project-level filtering, authenticated per-agent MCP principals, immutable source-version history, live database ingestion and end-to-end production verification remain outstanding. The inspected RUSA path still has no reranker and uses character-based 1200-character chunks with 180-character overlap.
+
+Therefore the branch establishes an initial per-runtime-worker retrieval boundary, while the full 20 documented architecture/lifecycle profiles remain catalogued for later explicit runtime binding.
 
 ### Required engineering changes before agent-scoped retrieval
 
