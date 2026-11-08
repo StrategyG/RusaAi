@@ -179,7 +179,7 @@ class AgentExecutionGrant:
 class AgentExecutionContext:
     task: dict[str, Any]
     grant: AgentExecutionGrant
-    tools: "ScopedToolGateway"
+    tools: ScopedToolGateway
 
 
 class DevOpsAgentHandler(Protocol):
