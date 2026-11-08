@@ -55,6 +55,12 @@ def test_evaluate_cli_passes_agent_and_project_scope(monkeypatch, tmp_path, caps
     assert cli.main() == 0
     report = json.loads(capsys.readouterr().out)
     assert report["recall_at_k"] == 1.0
+    assert report["scope"] == {
+        "tenant_id": "tenant-a",
+        "collection": "agent",
+        "agent_id": "aicode-analyst",
+        "project_id": "strategyg--rusaai",
+    }
     assert service.search_calls == [{
         "tenant_id": "tenant-a",
         "collection": "agent",
@@ -94,6 +100,7 @@ def test_evaluate_cli_keeps_shared_only_defaults(monkeypatch, tmp_path, capsys):
     )
 
     assert cli.main() == 0
+    assert service.search_calls[0]["collection"] == "agent"
     assert service.search_calls[0]["agent_id"] is None
     assert service.search_calls[0]["project_id"] is None
     assert service.closed is True
