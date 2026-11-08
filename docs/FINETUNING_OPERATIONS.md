@@ -118,3 +118,43 @@ A training run is not a production release. Before promotion:
 - Complete the repository's production certification, rollback, backup/restore, monitoring, and operator approval gates.
 
 A model may propose an action; only the deterministic runtime and policy layer can authorize it. Merge, deploy, release, secret changes, permission changes, and destructive operations remain human-controlled.
+
+
+## Manual GitHub Actions GPU training
+
+The repository includes a manually triggered workflow at `.github/workflows/agent-sft-training.yml`. It is deliberately not triggered by pushes or pull requests.
+
+Before running it:
+
+1. Register a trusted self-hosted GitHub Actions runner with the labels `self-hosted`, `linux`, `x64`, `cuda`, and `gpu`.
+2. Provide an NVIDIA CUDA driver, a CUDA-compatible PyTorch/bitsandbytes stack, at least 24 GiB GPU VRAM for the committed 4,096-token configuration, and sufficient host RAM and disk (64 GiB RAM and 80 GiB free disk are the recommended starting point).
+3. Configure the GitHub Actions environment `rusa-model-training` with required reviewers if GPU usage needs approval.
+4. Open Actions → **RUSA-AI Agent SFT GPU Training** → Run workflow, and explicitly set `confirm_gpu_run=true`.
+
+The workflow installs the isolated training dependencies, checks GPU capacity, validates the train/evaluation splits, runs QLoRA, and runs the held-out contract/safety evaluator. The evaluator fails the workflow if the configured promotion metrics are not met. An adapter and evaluation report are uploaded as a short-lived **unpromoted candidate artifact** for review; they are not committed to Git, merged into a base model, deployed, or certified for production.
+
+The workflow requires a runner with the exact labels above. If no eligible runner is online, the job remains queued; no CPU fallback is attempted.
+
+
+## NVIDIA T4 16 GB experiment profile
+
+Use `llm-project/configs/training-t4.yaml` for an NVIDIA Tesla T4. This profile uses 4-bit NF4, FP16 compute, a 2,048-token sequence window, batch size 1, gradient checkpointing, LoRA rank 8, and zero dataloader workers. It is an experimental starting point; GPU memory pressure depends on the installed CUDA/PyTorch/bitsandbytes stack and actual tokenized examples. If CUDA OOM occurs, run a separately reviewed experiment with a 1,024-token window and LoRA rank 4.
+
+The manual workflow requires a trusted self-hosted GitHub Actions runner registered with labels `self-hosted`, `linux`, `x64`, `cuda`, `gpu`, and `t4`. The workflow verifies that the visible device name is NVIDIA T4 and that at least 14 GiB VRAM is available. Register the runner on the machine that owns the T4; do not expose a runner with access to untrusted repositories or pull requests.
+
+To run: open Actions → **RUSA-AI Agent SFT GPU Training** → Run workflow, check `confirm_gpu_run=true`, and start the job. The run validates data, trains the adapter, evaluates the held-out set, and uploads a short-lived unpromoted candidate artifact. It does not automatically merge weights into the base model or deploy them.
+
+A T4 in a separate Colab/Kaggle session is not automatically connected to GitHub Actions. In that case, run the same training command inside that GPU notebook/runtime after checking out this repository and installing `requirements-train.txt`.
+
+
+### Run on a T4 host directly
+
+On a trusted Linux machine or GPU notebook with an NVIDIA T4 attached:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements-train.txt
+bash scripts/train_rusa_agent_t4.sh
+```
+
+The script verifies the actual CUDA device is an NVIDIA T4 with at least 14 GiB visible VRAM, validates both dataset splits, runs the T4 QLoRA profile, checks that adapter weights were saved, and runs the held-out evaluation gates. A successful training step can still produce a candidate adapter whose evaluation gate fails; such an adapter must remain unpromoted.
