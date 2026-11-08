@@ -485,6 +485,52 @@ def test_cancel_queued_task_is_terminal_without_claiming_a_worker():
         _cleanup(tenant_id)
 
 
+def test_cancel_run_requires_reconciliation_for_prior_applied_side_effects():
+    tenant_id, run_id, _, task = _create_run()
+    store = _control_store()
+    try:
+        with store._connect(DSN) as conn:
+            conn.execute(
+                """
+                UPDATE public.devops_tasks
+                SET status='completed', side_effect='APPLIED'
+                WHERE tenant_id=%s AND task_id=%s
+                """,
+                (tenant_id, task["task_id"]),
+            )
+
+        response = store.cancel_run(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            idempotency_key="cancel-after-applied-effect",
+            reason_code="operator_requested",
+            requested_by="rusa_supreme_orchestrator",
+            traceparent=TRACEPARENT,
+        )
+        assert response["accepted"] is True
+        assert response["status"] == "cancel_requested"
+
+        with store._connect(DSN) as conn:
+            run_status = conn.execute(
+                """
+                SELECT status FROM public.devops_workflows
+                WHERE tenant_id=%s AND run_id=%s
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+            cancellation_status = conn.execute(
+                """
+                SELECT status FROM public.devops_run_cancellations
+                WHERE tenant_id=%s AND run_id=%s
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+        assert run_status == "cancel_requested"
+        assert cancellation_status == "reconciliation_required"
+    finally:
+        _cleanup(tenant_id)
+
+
 def test_cancel_expired_lease_requires_operator_reconciliation():
     tenant_id, run_id, _, task = _create_run()
     store = _control_store()
