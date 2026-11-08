@@ -10,26 +10,66 @@
     "release_id",
     "created_at",
     "source",
-    "manifest_signature",
     "artifacts"
   ],
   "properties": {
-    "schema_version": { "const": "1.0" },
+    "schema_version": {
+      "const": "1.0"
+    },
     "release_id": {
       "type": "string",
       "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     },
-    "created_at": { "type": "string", "format": "date-time" },
-    "source": { "$ref": "#/$defs/source" },
-    "manifest_signature": { "$ref": "#/$defs/signature" },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
     "artifacts": {
       "type": "array",
       "minItems": 3,
-      "items": { "$ref": "#/$defs/artifact" },
+      "items": {
+        "$ref": "#/$defs/artifact"
+      },
       "allOf": [
-        { "contains": { "properties": { "name": { "const": "api" } }, "required": ["name"] } },
-        { "contains": { "properties": { "name": { "const": "worker" } }, "required": ["name"] } },
-        { "contains": { "properties": { "name": { "const": "sandbox" } }, "required": ["name"] } }
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "api"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "worker"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "sandbox"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
       ]
     }
   },
@@ -41,103 +81,294 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "commit_sha", "ref", "workflow", "workflow_run_id", "builder_identity"],
+      "required": [
+        "repository",
+        "commit_sha",
+        "ref",
+        "workflow",
+        "workflow_run_id",
+        "builder_identity"
+      ],
       "properties": {
-        "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
-        "commit_sha": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
-        "ref": { "type": "string", "minLength": 1 },
-        "workflow": { "type": "string", "minLength": 1 },
-        "workflow_run_id": { "type": "integer", "minimum": 1 },
-        "builder_identity": { "type": "string", "minLength": 1 }
+        "repository": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{40}$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflow": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflow_run_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "builder_identity": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "signature": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verified", "signer_identity", "oidc_issuer", "bundle_ref"],
+      "required": [
+        "verified",
+        "signer_identity",
+        "oidc_issuer",
+        "bundle_ref"
+      ],
       "properties": {
-        "verified": { "type": "boolean" },
-        "signer_identity": { "type": "string", "minLength": 1 },
-        "oidc_issuer": { "type": "string", "minLength": 1 },
-        "bundle_ref": { "type": "string", "minLength": 1 }
+        "verified": {
+          "type": "boolean"
+        },
+        "signer_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oidc_issuer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bundle_ref": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verified", "predicate_type", "source_repository", "source_commit", "workflow_identity", "attestation_ref"],
+      "required": [
+        "verified",
+        "predicate_type",
+        "source_repository",
+        "source_commit",
+        "workflow_identity",
+        "attestation_ref"
+      ],
       "properties": {
-        "verified": { "type": "boolean" },
-        "predicate_type": { "type": "string", "minLength": 1 },
-        "source_repository": { "type": "string", "minLength": 1 },
-        "source_commit": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" },
-        "workflow_identity": { "type": "string", "minLength": 1 },
-        "attestation_ref": { "type": "string", "minLength": 1 }
+        "verified": {
+          "type": "boolean"
+        },
+        "predicate_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{40}$"
+        },
+        "workflow_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attestation_ref": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "sbom": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["format", "uri", "digest", "subject_digest", "generated_by"],
+      "required": [
+        "format",
+        "uri",
+        "digest",
+        "subject_digest",
+        "generated_by"
+      ],
       "properties": {
-        "format": { "enum": ["SPDX-JSON", "CycloneDX-JSON"] },
-        "uri": { "type": "string", "minLength": 1 },
-        "digest": { "$ref": "#/$defs/sha256" },
-        "subject_digest": { "$ref": "#/$defs/sha256" },
-        "generated_by": { "type": "string", "minLength": 1 }
+        "format": {
+          "enum": [
+            "SPDX-JSON",
+            "CycloneDX-JSON"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "subject_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "generated_by": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "vulnerability_exception": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["finding_id", "severity", "owner", "rationale", "expires_at", "approval_ref", "approved", "approved_by", "approved_at"],
+      "required": [
+        "finding_id",
+        "severity",
+        "owner",
+        "rationale",
+        "expires_at",
+        "approval_ref",
+        "approved",
+        "approved_by",
+        "approved_at"
+      ],
       "properties": {
-        "finding_id": { "type": "string", "minLength": 1 },
-        "severity": { "const": "HIGH" },
-        "owner": { "type": "string", "minLength": 1 },
-        "rationale": { "type": "string", "minLength": 1 },
-        "expires_at": { "type": "string", "format": "date-time" },
-        "approval_ref": { "type": "string", "minLength": 1 },
-        "approved": { "const": true },
-        "approved_by": { "type": "string", "minLength": 1 },
-        "approved_at": { "type": "string", "format": "date-time" }
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "const": "HIGH"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "approval_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved": {
+          "const": true
+        },
+        "approved_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "image", "digest", "signature", "provenance", "sbom", "vulnerability_scan"],
+      "required": [
+        "name",
+        "image",
+        "digest",
+        "signature",
+        "provenance",
+        "sbom",
+        "vulnerability_scan"
+      ],
       "properties": {
-        "name": { "enum": ["api", "worker", "sandbox", "rag_mcp"] },
-        "image": { "type": "string", "pattern": "^ghcr\\.io/[a-z0-9][a-z0-9._/-]*$" },
-        "digest": { "$ref": "#/$defs/sha256" },
-        "signature": { "$ref": "#/$defs/signature" },
-        "provenance": { "$ref": "#/$defs/provenance" },
-        "sbom": { "$ref": "#/$defs/sbom" },
+        "name": {
+          "enum": [
+            "api",
+            "worker",
+            "sandbox",
+            "rag_mcp"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^ghcr\\.io/[a-z0-9][a-z0-9._/-]*$"
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signature": {
+          "$ref": "#/$defs/signature"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "sbom": {
+          "$ref": "#/$defs/sbom"
+        },
         "vulnerability_scan": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scanner", "scanned_at", "database_updated_at", "subject_digest", "counts", "disposition", "exceptions"],
+          "required": [
+            "scanner",
+            "scanned_at",
+            "database_updated_at",
+            "subject_digest",
+            "counts",
+            "disposition",
+            "exceptions"
+          ],
           "properties": {
-            "scanner": { "type": "string", "minLength": 1 },
-            "scanned_at": { "type": "string", "format": "date-time" },
-            "database_updated_at": { "type": "string", "format": "date-time" },
-            "subject_digest": { "$ref": "#/$defs/sha256" },
+            "scanner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scanned_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "database_updated_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "subject_digest": {
+              "$ref": "#/$defs/sha256"
+            },
             "counts": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["critical", "high", "medium", "low"],
+              "required": [
+                "critical",
+                "high",
+                "medium",
+                "low"
+              ],
               "properties": {
-                "critical": { "type": "integer", "minimum": 0 },
-                "high": { "type": "integer", "minimum": 0 },
-                "medium": { "type": "integer", "minimu": 0 },
-                "low": { "type": "integer", "minimum": 0 }
+                "critical": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "high": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "medium": {
+                  "type": "integer",
+                  "minimu": 0
+                },
+                "low": {
+                  "type": "integer",
+                  "minimum": 0
+                }
               }
             },
-            "disposition": { "enum": ["PASS", "EXCEPTION", "BLOCKED"] },
+            "disposition": {
+              "enum": [
+                "PASS",
+                "EXCEPTION",
+                "BLOCKED"
+              ]
+            },
             "exceptions": {
               "type": "array",
-              "items": { "$ref": "#/$defs/vulnerability_exception" }
+              "items": {
+                "$ref": "#/$defs/vulnerability_exception"
+              }
             }
           }
         }

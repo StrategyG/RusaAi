@@ -37,7 +37,6 @@ The release manifest binds:
 
 1. Repository, exact 40-character source commit, tag/ref, build workflow, run
    ID, and builder identity.
-2. A signature record for the manifest itself.
 3. API, worker, and sandbox images by immutable `sha256:` digest.
 4. A signature and provenance attestation reference for every image.
 5. An SPDX JSON or CycloneDX JSON SBOM reference and SHA-256 digest per image, bound to that image digest.
@@ -63,7 +62,7 @@ system before it sets `approved: true` in the manifest.
 
 ## 4. Production certification record
 
-The certification record references, rather than copies, detailed evidence.
+The certification record references, rather than copies, detailed evidence. It carries the detached release-manifest signature bundle metadata alongside the manifest digest, avoiding a circular signature dependency.
 Every check has:
 
 - `status`: `PASS`, `HOLD`, or `FAIL`;
@@ -134,7 +133,7 @@ measure RPO/RTO, run a staging soak test, or configure GitHub branch protection
 or environment reviewers. Those are operational evidence and repository-owner
 controls, not schema operations.
 
-The manifest schema is a new JSON contract. The currently proposed release
+The manifest schema is a new JSON contract. The detached manifest signature is carried in the certification record and signs the exact manifest bytes; it is not embedded in the payload it signs. The currently proposed release
 workflow in PR #53 emits a text `release-manifest.txt`; a follow-up integration
 must emit this JSON contract and verify/sign the manifest itself. The ERG-06
 schema and evaluator proposed in PR #60 remain the detailed staging evidence

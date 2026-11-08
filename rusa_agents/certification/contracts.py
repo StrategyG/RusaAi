@@ -106,10 +106,6 @@ def validate_release_manifest(
             "release manifest contract validation failed: " + "; ".join(errors)
         )
 
-    manifest_signature = payload["manifest_signature"]
-    if manifest_signature["verified"] is not True:
-        errors.append("release manifest signature is not verified")
-
     source = payload["source"]
     repository = source["repository"]
     commit_sha = source["commit_sha"].lower()
@@ -235,6 +231,8 @@ def evaluate_production_certification(
         failures.append("certification repository does not match the expected repository")
     if candidate["release_manifest_ref"]["digest"] != expected_release_manifest_digest:
         failures.append("release manifest digest does not match the expected immutable digest")
+    if candidate["release_manifest_ref"]["signature"]["verified"] is not True:
+        holds.append("release manifest detached signature has not been verified")
     if payload["source"]["attestation_verified"] is not True:
         holds.append("certification evidence attestation has not been verified")
 

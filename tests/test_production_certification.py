@@ -77,7 +77,6 @@ def release_manifest() -> dict[str, object]:
             "workflow_run_id": 424242,
             "builder_identity": "github-actions:StrategyG/RusaAi",
         },
-        "manifest_signature": _signature(),
         "artifacts": artifacts,
     }
 
@@ -140,6 +139,7 @@ def certification_record() -> dict[str, object]:
             "release_manifest_ref": {
                 "uri": "artifact://release/v1.0.0/release-manifest.json",
                 "digest": MANIFEST_DIGEST,
+                "signature": _signature(),
             },
         },
         "source": {
@@ -162,11 +162,18 @@ def test_release_manifest_validates_all_required_immutable_artifacts() -> None:
     )
 
 
-def test_release_manifest_requires_its_own_signature() -> None:
-    payload = release_manifest()
-    payload["manifest_signature"]["verified"] = False
-    with pytest.raises(CertificationContractError, match="manifest signature is not verified"):
-        validate_release_manifest(payload, now=NOW)
+def test_certification_holds_when_detached_manifest_signature_is_not_verified() -> None:
+    payload = certification_record()
+    payload["candidate"]["release_manifest_ref"]["signature"]["verified"] = False
+    result = evaluate_production_certification(
+        payload,
+        expected_commit_sha=COMMIT,
+        expected_release_manifest_digest=MANIFEST_DIGEST,
+        expected_repository="StrategyG/RusaAi",
+        now=NOW,
+    )
+    assert result["status"] == "HOLD"
+    assert any("detached signature" in blocker for blocker in result["blockers"])
 
 
 def test_release_manifest_rejects_image_outside_expected_registry_path() -> None:
