@@ -34,11 +34,11 @@ WORKDIR /workspace
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates libffi8 libssl3t64 libbz2-1.0 liblzma5 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
-    && apt-get purge -y libexpat1 libsqlite3-0 \
+    && useradd --create-home --uid 10001 sandbox \
+    && apt-get purge -y libexpat1 libsqlite3-0 liblastlog2-2 \
     && rm -rf /var/lib/apt/lists/* \
     && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
-    && ldconfig \
-    && useradd --create-home --uid 10001 sandbox
+    && ldconfig
 
 COPY --from=builder /usr/local /usr/local
 
