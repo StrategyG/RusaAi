@@ -47,7 +47,10 @@ class AutonomousCodeWorker:
         max_steps: int = 12,
         max_actions_per_step: int = 8,
         max_output_chars: int = 12000,
+        system_identity: str = "AICode",
     ) -> None:
+        if not isinstance(system_identity, str) or not system_identity.strip() or len(system_identity) > 128:
+            raise ValueError("system_identity must contain 1..128 characters")
         if max_steps < 1 or max_steps > 30:
             raise ValueError("max_steps must be between 1 and 30")
         self.role = role
@@ -56,6 +59,7 @@ class AutonomousCodeWorker:
         self.max_steps = max_steps
         self.max_actions_per_step = max_actions_per_step
         self.max_output_chars = max_output_chars
+        self.system_identity = system_identity
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
@@ -91,7 +95,7 @@ class AutonomousCodeWorker:
         last_message = ""
         for step in range(self.max_steps):
             system_prompt = (
-                f"You are the {self.role.value} worker in RUSA-AI AICode. "
+                f"You are the {self.role.value} worker in RUSA-AI {self.system_identity}. "
                 "Return exactly one JSON object with keys message (string), actions (array), "
                 "done (boolean), optional blocked (boolean), and blockers (string array). " "Each action has name and arguments. "
                 f"Your only available tools are: {allowed}. Never invent tool results. "
