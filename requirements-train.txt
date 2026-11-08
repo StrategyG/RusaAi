@@ -1,0 +1,4 @@
+# Install in a dedicated CUDA training environment; do not add to the API image.
+-r requirements-model.txt
+peft>=0.18,<1
+bitsandbytes>=0.46,<1
