@@ -7,6 +7,7 @@ from __future__ import annotations  # noqa: I001
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
@@ -251,6 +252,7 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        knowledge_project_id: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -262,9 +264,15 @@ class WorkspaceToolGateway:
             or not knowledge_tenant_id.strip()
         ):
             raise ValueError("knowledge tenant identity must come from the authenticated task")
+        if knowledge_project_id is not None and (
+            not isinstance(knowledge_project_id, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", knowledge_project_id)
+        ):
+            raise ValueError("knowledge project identity must be a validated server-derived identifier")
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        self.knowledge_project_id = knowledge_project_id
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -407,6 +415,7 @@ class WorkspaceToolGateway:
             query=query,
             limit=limit,
             agent_id=agent_id,
+            project_id=self.knowledge_project_id,
         )
         output = json.dumps(
             {"query": query, "collection": collection, "agent_id": agent_id, "results": results},
@@ -431,6 +440,7 @@ class WorkspaceToolGateway:
             document_id=document_id,
             max_chars=12_000,
             agent_id=agent_id,
+            project_id=self.knowledge_project_id,
         )
         output = json.dumps(
             {"found": document is not None, "document": document, "agent_id": agent_id},
@@ -442,13 +452,22 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge", "collection": collection, "agent_id": agent_id},
         )
 
-    def _list_knowledge_collections(self) -> ToolResult:
+    def _list_knowledge_collections(self, role: WorkerRole) -> ToolResult:
         service, tenant_id = self._knowledge_context()
-        collections = service.list_collections(tenant_id=tenant_id)
+        agent_id = f"aicode-{role.value}"
+        collections = service.list_collections(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            project_id=self.knowledge_project_id,
+        )
         return ToolResult(
             True,
-            json.dumps({"collections": collections}, ensure_ascii=False, default=str)[:4000],
-            {"source": "tenant_knowledge"},
+            json.dumps(
+                {"collections": collections, "agent_id": agent_id},
+                ensure_ascii=False,
+                default=str,
+            )[:4000],
+            {"source": "tenant_knowledge", "agent_id": agent_id},
         )
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
@@ -491,7 +510,7 @@ class WorkspaceToolGateway:
             elif name == "get_document":
                 result = self._get_knowledge_document(args, role)
             elif name == "list_collections":
-                result = self._list_knowledge_collections()
+                result = self._list_knowledge_collections(role)
             elif name == "git_diff":
                 result = self.git_diff()
             else:
