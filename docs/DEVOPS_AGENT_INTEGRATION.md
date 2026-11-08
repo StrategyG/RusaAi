@@ -81,6 +81,24 @@ Security Guard and Monitor are read-only identities. Empty `write_scope` does no
 
 Successful Code results require a source commit. Successful Build, Test, Release, and Deploy results require source commit and immutable artifact digest. Build, Test, Release, and Deploy task inputs carry the expected source commit; Test, Release, and Deploy also carry the expected artifact digest. Result validation compares those values with originating task inputs. Evidence from another commit or digest cannot satisfy the current release gate.
 
+## 5.1 Specialist runtime authorization
+
+The Phase 4A registry maps the eight lifecycle stage identities and the
+cross-cutting Security Guard to immutable capability profiles. A handler is
+not authorized merely because a task contract requests a capability.
+
+At execution time the runtime validates the task contract, then binds the
+task tenant and agent identity to the authenticated SPIFFE principal and a
+separate Policy Engine grant. The grant constrains allowed tools, write
+scopes, network destinations, approval references/scopes, and budgets.
+Monitor and Security Guard remain read-only. A missing handler or missing
+policy grant fails closed. Tool handlers receive only a scoped gateway.
+
+See [PHASE4A_SPECIALIST_AGENT_AUTHORIZATION.md](PHASE4A_SPECIALIST_AGENT_AUTHORIZATION.md)
+for the profile and enforcement contract. This is an authorization foundation;
+it does not claim that the eight production stage handlers or worker fleet
+have been provisioned.
+
 ## 6. Human approval boundaries
 
 - Code Agent writes only to isolated feature branch/worktree.
