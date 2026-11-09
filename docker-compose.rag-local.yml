@@ -26,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ollama-model
+      args:
+        OLLAMA_BASE_IMAGE: ${RUSA_OLLAMA_BASE_IMAGE:-ollama/ollama:latest}
     restart: unless-stopped
     init: true
     environment:
