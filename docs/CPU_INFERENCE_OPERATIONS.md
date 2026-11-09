@@ -21,13 +21,21 @@ Start with a small instruct model in a CPU-friendly GGUF quantization such as Q4
 1. Download a GGUF file from the model publisher or an approved mirror.
 2. Record the model ID, immutable source revision, license, tokenizer/chat-template details, context limit, quantization, and file size.
 3. Keep the file outside this repository. Example path: `/srv/rusa/models/model.gguf`.
-4. Calculate and record the SHA-256 checksum:
+4. Calculate and record the SHA-256 checksum in the approved model release record:
 
 ```bash
 sha256sum /srv/rusa/models/model.gguf
 ```
 
-5. Ensure the Docker container can read the file. Do not make it writable by the inference service.
+5. Set `RUSA_GGUF_MODEL_PATH` and `RUSA_GGUF_MODEL_SHA256` in `.env`, then run the repository verifier:
+
+```bash
+python scripts/verify_gguf_model.py
+```
+
+The verifier requires an absolute `.gguf` path, rejects symlinks and empty/non-regular files, and compares the complete file digest with the pinned SHA-256. Do not start the inference container if verification fails.
+
+6. Ensure the Docker container can read the file. Do not make it writable by the inference service.
 
 The existing `scripts/create_model_manifest.py` and local Transformers verifier are designed for safetensors model directories. They are not the GGUF intake mechanism. For this CPU deployment, verify the GGUF SHA-256 against the approved release record before starting the container. Never commit weights, API keys, or model access tokens.
 
@@ -39,7 +47,7 @@ From the repository root:
 cp .env.example .env
 ```
 
-Merge the values in `.env.cpu.example` into `.env` without overwriting existing secrets. Set `RUSA_GGUF_MODEL_PATH` to the absolute path of the verified GGUF file. Review the CPU thread count, memory limit, context size, and model name before deployment.
+Merge the values in `.env.cpu.example` into `.env` without overwriting existing secrets. Set `RUSA_GGUF_MODEL_PATH` to the absolute path of the verified GGUF file and `RUSA_GGUF_MODEL_SHA256` to its approved checksum. Run `python scripts/verify_gguf_model.py` before starting Compose. Review the CPU thread count, memory limit, context size, and model name before deployment.
 
 Validate the resolved Compose configuration:
 
