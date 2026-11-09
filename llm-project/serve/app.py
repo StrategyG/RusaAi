@@ -28,6 +28,7 @@ from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
+from rusa_agents.secret_scan import contains_high_confidence_secret_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -353,6 +354,15 @@ class AICodeTaskRequest(BaseModel):
     def validate_objective(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("Objective cannot be blank")
+        if contains_high_confidence_secret_text(value):
+            raise ValueError("Objective contains credential-like material; use the approved secret manager")
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def validate_context(cls, value: str) -> str:
+        if contains_high_confidence_secret_text(value):
+            raise ValueError("Context contains credential-like material; use the approved secret manager")
         return value
 
     @field_validator("acceptance_criteria")
@@ -362,6 +372,8 @@ class AICodeTaskRequest(BaseModel):
             raise ValueError("Acceptance criteria cannot contain blank items")
         if any(len(item) > 1000 for item in value):
             raise ValueError("Each acceptance criterion must be 1000 characters or fewer")
+        if any(contains_high_confidence_secret_text(item) for item in value):
+            raise ValueError("Acceptance criteria contain credential-like material; use the approved secret manager")
         return value
 
 
@@ -402,7 +414,14 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     if not config.api_key_principals and not config.api_keys:
         if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
-        return os.getenv("RUSA_DEFAULT_TENANT", "development")
+        from rusa_agents.config import ApiPrincipal
+        tenant_id = os.getenv("RUSA_DEFAULT_TENANT", "development")
+        request.state.principal = ApiPrincipal(
+            subject=f"local-development:{tenant_id}",
+            tenant_id=tenant_id,
+            roles=("tenant_admin",),
+        )
+        return tenant_id
     if not api_key or (
         (config.api_key_principals or config.environment == "production")
         and len(api_key.encode("utf-8")) < 32
