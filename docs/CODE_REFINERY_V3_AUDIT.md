@@ -6,7 +6,9 @@
 **Pull request:** [#88 — Advanced Code Refinery v3.0](https://github.com/StrategyG/RusaAi/pull/88)  
 **Commit baseline yang divalidasi pada audit awal:** `6df683a762fe2a52e10d77bc838851799c7f7621`  
 **CI historis:** [42569137903](https://github.com/StrategyG/RusaAi/actions/runs/42569137903) — seluruh job pada commit baseline tersebut lulus.  
-**Status saat ini:** Draft PR; perubahan setelah baseline ini belum disertifikasi oleh run historis. CI wajib lulus kembali pada head PR terbaru. Belum di-merge atau di-deploy.
+**Head PR yang divalidasi:** `1886c2b66ee9759e24a86d32a3a352bae7e13b3a`  
+**CI head PR:** [RUSA-AI CI #42606430262](https://github.com/StrategyG/RusaAi/actions/runs/42606430262) — PASS; [Web CI #42606429931](https://github.com/StrategyG/RusaAi/actions/runs/42606429931) — PASS.  
+**Status saat ini:** PR tetap Draft; seluruh workflow wajib lulus pada head tersebut. Belum di-merge atau di-deploy.
 
 ## 1. Ringkasan keputusan
 
@@ -143,7 +145,9 @@ The earlier CI run above is historical evidence for its exact commit only. It do
 - Alias-aware AST security analysis for aliased imports, wildcard imports, dynamic imports, and dangerous process primitives.
 - Cooperative cancellation with `cancel_requested`, `cancel_epoch`, a 30-second lease and 10-second heartbeat defaults.
 - Human reconciliation for ambiguous external side effects. Unresolved cancellation cannot be retried or cancelled again; `tenant_admin` and `platform_admin` must record `NONE` or `APPLIED` with bounded evidence through `POST /v1/aicode/tasks/{task_id}/reconcile`.
-- New migrations 010 and 011, queue/worker/API integration tests, same-origin web proxy route, and Control Center reconciliation UI.
+- New migrations 010–012, queue/worker/API integration tests, same-origin web proxy route, and Control Center reconciliation UI.
+- AICode task-list audit migration was moved from duplicate version 008 to globally unique version 012; the final constraint preserves both `task.list` and `task.reconcile`, and production readiness checks require both actions.
+- Parquet file paths are bound as DuckDB query parameters instead of interpolated into SQL, removing the Bandit B608 finding.
 - Validation errors no longer echo raw request inputs; missing mandatory verification evidence remains `awaiting_approval`, not success or an automatic retry.
 
 ### Current validation rule
@@ -151,3 +155,47 @@ The earlier CI run above is historical evidence for its exact commit only. It do
 A current green result must match the latest PR head SHA and include the backend test/lint/security workflow, RAG/MCP integration workflow, production image scan, and web type-check/build/container workflow. Pending, cancelled, skipped, or older runs do not count. The optional-service skips recorded in the historical baseline remain residual validation gaps until those services are available and the tests execute.
 
 The architecture boundary remains unchanged: this branch does not implement the proposed RabbitMQ/Kafka topology, transactional outbox, detached JWS, internal mTLS, all ten core agents, or all eight DevOps lifecycle agents. See `docs/SYSTEM_ALIGNMENT_AUDIT.md` for the complete implementation matrix.
+
+
+## 8. Validasi head PR terkini — 9 November 2026
+
+**Commit:** `1886c2b66ee9759e24a86d32a3a352bae7e13b3a`
+
+| Pemeriksaan | Hasil |
+|---|---:|
+| RUSA-AI main suite | **312 passed, 8 skipped, 1 warning** |
+| Full suite di isolated sandbox image | **284 passed, 36 skipped, 1 warning** |
+| RAG/MCP integration | **58 passed** |
+| Ruff lint | PASS |
+| Bandit security static analysis | PASS |
+| Curated SFT dataset validation | PASS |
+| API, agent sandbox, RAG/MCP, worker image builds | PASS |
+| Production Compose dan local RAG Compose validation | PASS |
+| Web type-check, Next.js build, web container build | PASS |
+
+### Trivy pada head terkini
+
+| Image | HIGH | CRITICAL |
+|---|---:|---:|
+| API | 51 | 0 |
+| Agent sandbox | 56 | 0 |
+| Worker | 55 | 0 |
+| RAG/MCP | 51 | 0 |
+
+Gate pemblokiran untuk temuan CRITICAL dan HIGH yang dapat diperbaiki lulus. Temuan HIGH yang belum memiliki perbaikan tetap menjadi residual risk; CI hijau bukan klaim bahwa image bebas kerentanan.
+
+### Batas test yang masih dilewati
+
+Delapan skip pada suite utama:
+- Parser dokumen opsional tidak terpasang.
+- `RUSA_TEST_DATABASE_URL` tidak dikonfigurasi untuk knowledge PostgreSQL integration.
+- MCP runtime opsional tidak terpasang (dua modul).
+- PyTorch tidak terpasang untuk tokenization training.
+- Dependensi local-model opsional tidak terpasang.
+- DuckDB tidak terpasang pada suite utama (dua tes); Parquet/DuckDB diuji pada job RAG/MCP yang lulus.
+
+Sebanyak 36 skip pada isolated sandbox mencakup delapan alasan tersebut serta 28 tes PostgreSQL yang tidak menerima DSN di dalam sandbox. Karena itu, tes database yang dilewati di sandbox bukan bukti kegagalan; tetapi bukan pula bukti bahwa seluruh jalur tersebut diuji di sandbox.
+
+### Keputusan rilis
+
+CI dan build untuk head PR terkini lulus, tetapi PR tetap Draft dan belum di-merge. Deployment supervisor MicroVM nyata, pengujian mTLS end-to-end, remediasi atau penerimaan risiko Trivy, serta validasi dependency/layanan opsional tetap memerlukan tindak lanjut dan persetujuan manusia.
