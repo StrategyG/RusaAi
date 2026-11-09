@@ -4,9 +4,9 @@
 **Repository:** `StrategyG/RusaAi`  
 **Branch:** `feat/aicode-code-refinery-v3`  
 **Pull request:** [#88 — Advanced Code Refinery v3.0](https://github.com/StrategyG/RusaAi/pull/88)  
-**Commit implementasi yang divalidasi:** `6df683a762fe2a52e10d77bc838851799c7f7621`  
-**CI run:** [42569137903](https://github.com/StrategyG/RusaAi/actions/runs/42569137903)  
-**Status:** Draft PR; seluruh job CI lulus. Belum di-merge atau di-deploy.
+**Commit baseline yang divalidasi pada audit awal:** `6df683a762fe2a52e10d77bc838851799c7f7621`  
+**CI historis:** [42569137903](https://github.com/StrategyG/RusaAi/actions/runs/42569137903) — seluruh job pada commit baseline tersebut lulus.  
+**Status saat ini:** Draft PR; perubahan setelah baseline ini belum disertifikasi oleh run historis. CI wajib lulus kembali pada head PR terbaru. Belum di-merge atau di-deploy.
 
 ## 1. Ringkasan keputusan
 
@@ -130,3 +130,23 @@ Angka tersebut adalah temuan package/vulnerability, bukan jumlah CVE unik. Beber
 4. Tinjau dan remediasi/terima secara formal temuan HIGH Trivy pada base image.
 5. Jalankan test tambahan dengan dependency dan layanan opsional yang saat ini di-skip.
 6. Setelah seluruh approval diberikan, maintainer dapat memutuskan merge secara manual. Tidak ada deployment yang dilakukan oleh pekerjaan ini.
+
+
+## 7. Addendum — system-wide hardening after the baseline audit
+
+The earlier CI run above is historical evidence for its exact commit only. It does not certify subsequent changes. The integration branch has since received additional cross-cutting hardening:
+
+- Strict deployment-environment normalization and fail-closed validation.
+- Explicit-empty policy allowlist preservation and invalid risk/action rejection.
+- Boundary-aware credential scanning across agent prompts, complete model action envelopes, tool output, and legacy RAG retrieval.
+- Alias-aware AST security analysis for aliased imports, wildcard imports, dynamic imports, and dangerous process primitives.
+- Cooperative cancellation with `cancel_requested`, `cancel_epoch`, a 30-second lease and 10-second heartbeat defaults.
+- Human reconciliation for ambiguous external side effects. Unresolved cancellation cannot be retried or cancelled again; `tenant_admin` and `platform_admin` must record `NONE` or `APPLIED` with bounded evidence through `POST /v1/aicode/tasks/{task_id}/reconcile`.
+- New migrations 010 and 011, queue/worker/API integration tests, same-origin web proxy route, and Control Center reconciliation UI.
+- Validation errors no longer echo raw request inputs; missing mandatory verification evidence remains `awaiting_approval`, not success or an automatic retry.
+
+### Current validation rule
+
+A current green result must match the latest PR head SHA and include the backend test/lint/security workflow, RAG/MCP integration workflow, production image scan, and web type-check/build/container workflow. Pending, cancelled, skipped, or older runs do not count. The optional-service skips recorded in the historical baseline remain residual validation gaps until those services are available and the tests execute.
+
+The architecture boundary remains unchanged: this branch does not implement the proposed RabbitMQ/Kafka topology, transactional outbox, detached JWS, internal mTLS, all ten core agents, or all eight DevOps lifecycle agents. See `docs/SYSTEM_ALIGNMENT_AUDIT.md` for the complete implementation matrix.
