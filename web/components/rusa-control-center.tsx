@@ -366,6 +366,9 @@ export default function RusaControlCenter() {
   const [approvalError, setApprovalError] = useState("");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const taskIdempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const taskMutationRequestSeqRef = useRef(0);
+  const taskMutationAbortRef = useRef<AbortController | null>(null);
   const taskRequestSeqRef = useRef(0);
   const approvalRequestSeqRef = useRef(0);
   const totalRequestSeqRef = useRef(0);
@@ -566,6 +569,7 @@ export default function RusaControlCenter() {
   }, [tasks, taskFilter, taskSearch]);
 
   const loadIdentityAndData = async (identity: Identity) => {
+    sessionGenerationRef.current += 1;
     setSession(identity);
     await Promise.all([refreshTasks(0, "all"), refreshApprovals(), refreshHealth(), refreshModels()]);
   };
@@ -600,6 +604,10 @@ export default function RusaControlCenter() {
     modelRequestSeqRef.current += 1;
     metricsRequestSeqRef.current += 1;
     taskDetailRequestSeqRef.current += 1;
+    taskMutationRequestSeqRef.current += 1;
+    sessionGenerationRef.current += 1;
+    taskMutationAbortRef.current?.abort();
+    taskMutationAbortRef.current = null;
     chatRequestSeqRef.current += 1;
     validationRequestSeqRef.current += 1;
     chatAbortControllerRef.current?.abort();
@@ -607,6 +615,7 @@ export default function RusaControlCenter() {
     taskIdempotencyRef.current = null;
 
     setSession(null);
+    setBusy(false);
     setTasks([]);
     setApprovalTasks([]);
     setApprovalTotal(0);
@@ -695,6 +704,11 @@ export default function RusaControlCenter() {
       taskIdempotencyRef.current = { fingerprint, key: window.crypto.randomUUID() };
     }
     const idempotencyKey = taskIdempotencyRef.current.key;
+    const sessionGeneration = sessionGenerationRef.current;
+    const requestSeq = ++taskMutationRequestSeqRef.current;
+    const controller = new AbortController();
+    taskMutationAbortRef.current?.abort();
+    taskMutationAbortRef.current = controller;
     setBusy(true);
     setError("");
     setNotice("");
@@ -702,9 +716,11 @@ export default function RusaControlCenter() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify(taskPayload)
+        body: JSON.stringify(taskPayload),
+        signal: controller.signal
       });
       const data = await response.json().catch(() => ({}));
+      if (sessionGeneration !== sessionGenerationRef.current || requestSeq !== taskMutationRequestSeqRef.current) return;
       if (!response.ok) throw new Error(errorText(data));
       taskIdempotencyRef.current = null;
       setNewTaskOpen(false);
@@ -719,40 +735,73 @@ export default function RusaControlCenter() {
       await refreshTasks(0, "all");
       if (data.task_id) await openTask(data.task_id);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Task could not be created.");
-    } finally { setBusy(false); }
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setError(cause instanceof Error ? cause.message : "Task could not be created.");
+      }
+    } finally {
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setBusy(false);
+        if (taskMutationAbortRef.current === controller) taskMutationAbortRef.current = null;
+      }
+    }
   }
 
   async function cancelTask(taskId: string) {
     if (!canControl || !window.confirm("Kirim permintaan pembatalan task? Operasi eksternal yang sudah berjalan mungkin memerlukan rekonsiliasi.")) return;
+    const sessionGeneration = sessionGenerationRef.current;
+    const requestSeq = ++taskMutationRequestSeqRef.current;
+    const controller = new AbortController();
+    taskMutationAbortRef.current?.abort();
+    taskMutationAbortRef.current = controller;
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId), { method: "DELETE" });
+      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId), { method: "DELETE", signal: controller.signal });
       const data = await response.json().catch(() => ({}));
+      if (sessionGeneration !== sessionGenerationRef.current || requestSeq !== taskMutationRequestSeqRef.current) return;
       if (!response.ok) throw new Error(errorText(data));
       setNotice("Permintaan pembatalan diterima backend.");
       await Promise.all([refreshTasks(taskOffset, taskFilter), refreshApprovals()]);
       await openTask(taskId);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Cancel failed.");
-    } finally { setBusy(false); }
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setError(cause instanceof Error ? cause.message : "Cancel failed.");
+      }
+    } finally {
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setBusy(false);
+        if (taskMutationAbortRef.current === controller) taskMutationAbortRef.current = null;
+      }
+    }
   }
 
   async function retryTask(taskId: string) {
     if (!canControl || !window.confirm("Retry hanya untuk task berstatus failed. Pastikan penyebab kegagalan telah ditinjau.")) return;
+    const sessionGeneration = sessionGenerationRef.current;
+    const requestSeq = ++taskMutationRequestSeqRef.current;
+    const controller = new AbortController();
+    taskMutationAbortRef.current?.abort();
+    taskMutationAbortRef.current = controller;
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId) + "/retry", { method: "POST" });
+      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId) + "/retry", { method: "POST", signal: controller.signal });
       const data = await response.json().catch(() => ({}));
+      if (sessionGeneration !== sessionGenerationRef.current || requestSeq !== taskMutationRequestSeqRef.current) return;
       if (!response.ok) throw new Error(errorText(data));
       setNotice("Task diterima kembali oleh antrean.");
       await refreshTasks(taskOffset, taskFilter);
       await openTask(taskId);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Retry failed.");
-    } finally { setBusy(false); }
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setError(cause instanceof Error ? cause.message : "Retry failed.");
+      }
+    } finally {
+      if (sessionGeneration === sessionGenerationRef.current && requestSeq === taskMutationRequestSeqRef.current) {
+        setBusy(false);
+        if (taskMutationAbortRef.current === controller) taskMutationAbortRef.current = null;
+      }
+    }
   }
 
   async function sendChat(event: FormEvent<HTMLFormElement>) {
