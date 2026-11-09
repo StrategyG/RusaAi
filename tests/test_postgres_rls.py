@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -13,30 +12,6 @@ pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is n
 def connect():
     import psycopg
     return psycopg.connect(DSN)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def apply_database_migrations():
-    if not DSN:
-        pytest.skip("PostgreSQL integration DSN is not configured")
-    migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    import psycopg
-
-    with psycopg.connect(DSN, autocommit=True) as conn:
-        for migration_name in (
-            "001_aicode_core.sql",
-            "002_aicode_lease_fencing.sql",
-            "003_aicode_task_results.sql",
-            "004_aicode_tenant_rls.sql",
-            "005_aicode_task_policy_audit.sql",
-            "006_aicode_idempotency.sql",
-            "008_aicode_task_list_audit.sql",
-            "009_aicode_explicit_approval.sql",
-        ):
-            conn.execute(
-                (migration_root / migration_name).read_text(encoding="utf-8"),
-                prepare=False,
-            )
 
 
 def set_role_and_tenant(conn, role, tenant):

@@ -14,7 +14,7 @@ if str(SERVE_PATH) not in sys.path:
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_postgres_migrations_for_integration_suite():
-    """Apply the complete ordered schema before any PostgreSQL integration test."""
+    """Apply the shared non-RAG AICode schema once before PostgreSQL integration tests."""
     dsn = os.getenv("RUSA_DATABASE_URL")
     if not dsn:
         return

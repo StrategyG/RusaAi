@@ -33,9 +33,9 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert "BEFORE TRUNCATE" in audit_migration
 
 
-def test_rls_integration_fixture_applies_migrations_once_in_version_order():
-    test_source = Path("tests/test_postgres_rls.py").read_text(encoding="utf-8")
-    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', test_source)
+def test_shared_postgres_fixture_applies_migrations_once_in_version_order():
+    fixture = Path("tests/conftest.py").read_text(encoding="utf-8")
+    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', fixture)
 
     assert migrations == [
         "001_aicode_core.sql",
@@ -83,10 +83,3 @@ def test_production_compose_cpu_budget_fits_four_core_host():
     )
     assert sandbox is not None
     assert sum(cpu_limits) + float(sandbox.group(1)) <= 4.0
-
-
-
-def test_shared_postgres_fixture_applies_explicit_approval_migration():
-    fixture = Path("tests/conftest.py").read_text(encoding="utf-8")
-    assert '"009_aicode_explicit_approval.sql"' in fixture
-    assert "in {8, 9}" in fixture
