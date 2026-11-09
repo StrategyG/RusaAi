@@ -22,6 +22,8 @@ _PATTERNS = (
         "provider API credential",
     ),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access-key identifier"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "Google API credential"),
+    (re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"), "Slack credential"),
 )
 
 
