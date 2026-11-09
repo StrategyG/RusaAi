@@ -108,9 +108,9 @@ class PostgresTaskPolicyAudit:
                            SELECT 1 FROM pg_constraint
                            WHERE conrelid='public.aicode_task_policy_events'::regclass
                              AND conname='aicode_task_policy_events_action_check'
-                             AND pg_get_constraintdef(oid) LIKE '%task.list%'
-                             AND pg_get_constraintdef(oid) LIKE '%task.approve%'
-                             AND pg_get_constraintdef(oid) LIKE '%task.reject%'
+                             AND position('task.list' in pg_get_constraintdef(oid)) > 0
+                             AND position('task.approve' in pg_get_constraintdef(oid)) > 0
+                             AND position('task.reject' in pg_get_constraintdef(oid)) > 0
                        )
                 FROM pg_roles AS db_role
                 CROSS JOIN pg_class AS table_info
