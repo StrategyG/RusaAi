@@ -27,9 +27,10 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_aicode_task_list_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/009_aicode_explicit_approval.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), append-only task policy events, idempotency records, and RAG knowledge storage. Apply migrations 001–008 in numeric order. Migration 007 requires PostgreSQL pgvector support. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), append-only task policy events, idempotency records, and RAG knowledge storage. Apply migrations 001–009 in numeric order. Migration 007 requires PostgreSQL pgvector support. Migration 009 adds separately audited approval and rejection decisions. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, approval audit actions, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -143,6 +144,9 @@ RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
 RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+RUSA_MAX_PARALLEL_WORKERS=2
+RUSA_SANDBOX_CPUS=0.75
+RUSA_SANDBOX_MEMORY=1g
 RUSA_TASK_TIMEOUT_SECONDS=3600
 RUSA_CI_TIMEOUT_SECONDS=900
 RUSA_CI_POLL_SECONDS=15
@@ -190,7 +194,7 @@ docker compose -f docker-compose.production.yml logs --tail=200 api worker
 
 The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 
-API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
+API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The production Compose CPU envelope is API 1.0 core + web 0.5 core + worker 1.5 cores + one rootless sandbox capped at 0.75 core = 3.75 cores. This leaves 0.25 core for host scheduling and daemon overhead on a 4-core host. Keep one worker service instance unless the host budget is recalculated; each worker process owns its own sandbox concurrency gate. The worker allows at most two parallel orchestrator workers, while its sandbox runs one validation container at a time. Sandbox memory is capped at 1 GiB with swap disabled. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 
 ## 9. Smoke tests
 
@@ -213,7 +217,20 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding.
+
+Human decisions are separate, tenant-scoped, and append-only audited:
+- `awaiting_approval`: an authorized `tenant_admin` or `platform_admin` must review the task and call `POST /v1/aicode/tasks/{task_id}/approve` to resume execution, or `POST /v1/aicode/tasks/{task_id}/reject` to close it as `cancelled`.
+- `failed`: use `POST /v1/aicode/tasks/{task_id}/retry` to start a new attempt. Retry cannot approve an `awaiting_approval` task.
+- Approval only resumes the task workflow. It does not merge a pull request, bypass branch protection, or deploy production.
+
+Example approval/rejection calls:
+```bash
+curl -fsS -X POST "http://127.0.0.1:8000/v1/aicode/tasks/$TASK_ID/approve" \
+  -H "X-API-Key: $RUSA_TENANT_ADMIN_KEY"
+curl -fsS -X POST "http://127.0.0.1:8000/v1/aicode/tasks/$TASK_ID/reject" \
+  -H "X-API-Key: $RUSA_TENANT_ADMIN_KEY"
+```
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
@@ -294,7 +311,7 @@ The deterministic DAG is Analyst → Architect → Developer → Debugger, with 
 
 Runtime controls:
 
-- `RUSA_MAX_PARALLEL_WORKERS`: integer from 1 to 32; default 4.
+- `RUSA_MAX_PARALLEL_WORKERS`: integer from 1 to 2 in the 4-core production profile; default 2.
 - `RUSA_MAX_REPAIR_CYCLES`: integer from 0 to 5; default 2.
 
 These controls limit in-process concurrency and repair attempts; they do not autoscale Kubernetes worker replicas.
@@ -331,10 +348,9 @@ are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
 restricted `task.authenticate/deny` shape. Events contain only tenant ID,
 task ID, actor, action, decision, and database timestamp—never credentials,
 lease tokens, or task payloads. The API and worker verify the audit table,
-RLS, grants, and append-only triggers at production startup. Task create/read/
-retry/cancel events are inserted in the same PostgreSQL transaction as their
-queue operation; worker execution allow/deny events are committed in the same
-transaction as the live-lease check. A failed audit insert therefore rolls back
+RLS, grants, and append-only triggers at production startup. Task create/read/list/retry/approve/reject/cancel events are inserted in the
+same PostgreSQL transaction as their queue operation; worker execution
+allow/deny events are committed in the same transaction as the live-lease check. A failed audit insert therefore rolls back
 the associated queue mutation or prevents workspace execution. The INFO logger
 is a secondary operational stream; PostgreSQL is the durable audit record.
 
@@ -349,3 +365,23 @@ arbitrary SQL; deployments requiring isolation against a compromised service
 process must move to per-tenant database identities or signed database
 assertions. Export the append-only audit stream to a restricted, immutable
 off-host retention system and test restore/retention independently.
+
+
+### Four-core production resource profile
+
+The production Compose profile reserves hard CPU ceilings of 1.0 core for API,
+0.5 core for web, and 1.5 cores for the worker. The worker starts at most two
+orchestrator workers in parallel. Its shared rootless Docker sandbox runs at
+most one validation container at a time, capped at 0.75 CPU and 1 GiB memory.
+The configured ceiling is therefore 3.75 CPU cores, leaving 0.25 core for host
+and Docker overhead. The worker validates these limits at production startup;
+values above the profile fail closed. Do not scale API/worker replicas or run
+additional sandbox daemons on this host without recalculating the aggregate
+budget.
+
+Human approval is a separate API operation from retry. Only tenant/platform
+administrators may approve or reject an `awaiting_approval` task. Approval
+resumes the task and rejection closes it as `cancelled`; both decisions are
+persisted as append-only `task.approve` / `task.reject` audit events by
+migration `009_aicode_explicit_approval.sql`. Retry is restricted to failed
+tasks and cannot release an approval pause.

@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -13,28 +12,6 @@ pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is n
 def connect():
     import psycopg
     return psycopg.connect(DSN)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def apply_database_migrations():
-    if not DSN:
-        pytest.skip("PostgreSQL integration DSN is not configured")
-    migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    import psycopg
-
-    with psycopg.connect(DSN, autocommit=True) as conn:
-        for migration_name in (
-            "001_aicode_core.sql",
-            "002_aicode_lease_fencing.sql",
-            "003_aicode_task_results.sql",
-            "004_aicode_tenant_rls.sql",
-            "005_aicode_task_policy_audit.sql",
-            "006_aicode_idempotency.sql",
-        ):
-            conn.execute(
-                (migration_root / migration_name).read_text(encoding="utf-8"),
-                prepare=False,
-            )
 
 
 def set_role_and_tenant(conn, role, tenant):
@@ -264,7 +241,18 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
             "UPDATE aicode_jobs SET status='cancelled' WHERE task_id=%s", (task_id,),
         ).rowcount == 0
 
-    # Ensure a cross-tenant retry would mutate an eligible row without isolation.
+    # Approval is a distinct, tenant-authorized action; retry cannot bypass it.
+    with connect() as conn:
+        conn.execute(
+            "UPDATE aicode_jobs SET status='awaiting_approval', priority=2147483647 WHERE task_id=%s",
+            (task_id,),
+        )
+    assert client.post(f"{path}/approve", headers=api_a).status_code == 409
+    assert client.post(f"{path}/retry", headers=api_b).status_code == 409
+    assert client.post(f"{path}/approve", headers=api_b).status_code == 202
+    assert client.get(path, headers=api_b).json()["status"] == "queued"
+
+    # Retry remains available only after the task has entered the failed state.
     with connect() as conn:
         conn.execute(
             "UPDATE aicode_jobs SET status='failed', priority=2147483647 WHERE task_id=%s", (task_id,),
@@ -304,9 +292,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         (None, "unauthenticated", "task.authenticate", "deny"),
         ("audit-a", "api:service-a", "task.read", "deny"),
         ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.approve", "deny"),
         ("audit-a", "api:service-a", "task.cancel", "deny"),
         ("audit-b", "api:service-b", "task.create", "allow"),
         ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.approve", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "deny"),
         ("audit-b", "api:service-b", "task.retry", "allow"),
         ("audit-b", "api:service-b", "task.cancel", "allow"),
     }
@@ -361,9 +352,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         (None, "unauthenticated", "task.authenticate", "deny"),
         ("audit-a", "api:service-a", "task.read", "deny"),
         ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.approve", "deny"),
         ("audit-a", "api:service-a", "task.cancel", "deny"),
         ("audit-b", "api:service-b", "task.create", "allow"),
         ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.approve", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "deny"),
         ("audit-b", "api:service-b", "task.retry", "allow"),
         ("audit-b", "api:service-b", "task.cancel", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),

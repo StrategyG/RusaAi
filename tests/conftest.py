@@ -14,7 +14,7 @@ if str(SERVE_PATH) not in sys.path:
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_postgres_migrations_for_integration_suite():
-    """Apply the complete ordered schema before any PostgreSQL integration test."""
+    """Apply the shared non-RAG AICode schema once before PostgreSQL integration tests."""
     dsn = os.getenv("RUSA_DATABASE_URL")
     if not dsn:
         return
@@ -25,7 +25,7 @@ def apply_postgres_migrations_for_integration_suite():
     migrations = sorted(
         path for path in migration_dir.glob("*.sql")
         if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
-        and (int(path.name.split("_", 1)[0]) <= 6 or int(path.name.split("_", 1)[0]) == 8)
+        and (int(path.name.split("_", 1)[0]) <= 6 or int(path.name.split("_", 1)[0]) in {8, 9})
     )
     expected = [
         "001_aicode_core.sql",
@@ -35,6 +35,7 @@ def apply_postgres_migrations_for_integration_suite():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "008_aicode_task_list_audit.sql",
+        "009_aicode_explicit_approval.sql",
     ]
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")

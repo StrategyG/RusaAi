@@ -39,6 +39,9 @@ class RuntimeConfig:
     model_name: str
     tenant_repositories: dict[str, list[str]]
     aicode_enabled: bool = False
+    max_parallel_workers: int = 2
+    sandbox_cpu_limit: float = 0.75
+    sandbox_memory_limit: str = "1g"
 
     @staticmethod
     def _looks_placeholder(value: str | None) -> bool:
@@ -121,6 +124,19 @@ class RuntimeConfig:
         ):
             raise ValueError("RUSA_TENANT_REPOSITORIES must map tenant IDs to repository-name arrays")
 
+        try:
+            max_parallel_workers = int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "2"))
+            sandbox_cpu_limit = float(os.getenv("RUSA_SANDBOX_CPUS", "0.75"))
+        except ValueError as exc:
+            raise ValueError("RUSA_MAX_PARALLEL_WORKERS and RUSA_SANDBOX_CPUS must be numeric") from exc
+        sandbox_memory_limit = os.getenv("RUSA_SANDBOX_MEMORY", "1g").strip().lower()
+        if not 1 <= max_parallel_workers <= 32:
+            raise ValueError("RUSA_MAX_PARALLEL_WORKERS must be between 1 and 32")
+        if not 0 < sandbox_cpu_limit <= 32:
+            raise ValueError("RUSA_SANDBOX_CPUS must be greater than 0 and at most 32")
+        if not re.fullmatch(r"[1-9][0-9]*(?:m|g)", sandbox_memory_limit):
+            raise ValueError("RUSA_SANDBOX_MEMORY must be a positive value such as 512m or 1g")
+
         legacy = os.getenv("RUSA_API_KEY")
         if legacy:
             keys.setdefault(legacy, os.getenv("RUSA_DEFAULT_TENANT", "default"))
@@ -147,6 +163,9 @@ class RuntimeConfig:
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
             tenant_repositories=tenant_repositories,
             aicode_enabled=aicode_enabled,
+            max_parallel_workers=max_parallel_workers,
+            sandbox_cpu_limit=sandbox_cpu_limit,
+            sandbox_memory_limit=sandbox_memory_limit,
         )
 
     @classmethod
@@ -257,6 +276,15 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
+        if self.max_parallel_workers > 2:
+            missing.append("RUSA_MAX_PARALLEL_WORKERS must be at most 2 for the 4-core production profile")
+        if self.sandbox_cpu_limit > 0.75:
+            missing.append("RUSA_SANDBOX_CPUS must be at most 0.75 for the 4-core production profile")
+        memory_match = re.fullmatch(r"([1-9][0-9]*)([mg])", self.sandbox_memory_limit)
+        if memory_match:
+            memory_mib = int(memory_match.group(1)) * (1024 if memory_match.group(2) == "g" else 1)
+            if memory_mib > 1024:
+                missing.append("RUSA_SANDBOX_MEMORY must be at most 1g for the 4-core production profile")
         missing.extend(self._validate_tenants_and_model())
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))

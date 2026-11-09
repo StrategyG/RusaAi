@@ -84,7 +84,7 @@ def test_postgres_rate_limiter_is_tenant_scoped():
 
 
 
-def test_postgres_queue_requires_explicit_retry_after_approval():
+def test_postgres_queue_requires_explicit_approval_before_resume():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
     task_id = str(uuid4())
@@ -100,11 +100,59 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     assert awaiting["status"] == "awaiting_approval"
     assert awaiting["result"] == review_result
     assert queue.retry(task_id, "wrong-tenant") is False
-    assert queue.retry(task_id, "tenant-approval") is True
-    retried = queue.get(task_id, "tenant-approval")
-    assert retried["status"] == "queued"
-    assert retried["result"] is None
+    assert queue.retry(task_id, "tenant-approval") is False
+    assert queue.approve(task_id, "wrong-tenant") is False
+    assert queue.approve(task_id, "tenant-approval") is True
+    approved = queue.get(task_id, "tenant-approval")
+    assert approved["status"] == "queued"
+    assert approved["result"] == review_result
+    assert queue.reject(task_id, "tenant-approval") is False
 
+    # Approval requeues the task; remove it so the next global claim is isolated.
+    with queue._connect() as conn:
+        conn.execute(
+            "DELETE FROM public.aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+            (task_id, "tenant-approval"),
+        )
+
+
+
+def test_postgres_queue_records_explicit_rejection_and_tenant_scope():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = f"tenant-rejection-{uuid4().hex}"
+    assert queue.enqueue(
+        task_id, tenant_id, {"objective": "rejection test"}, priority=2**31 - 1
+    )
+    job = queue.claim("rejection-worker", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    assert queue.await_approval(
+        job.id, tenant_id, "rejection-worker", job.lease_token,
+        "human review required", {"branch": "feature/aicode/rejection-test"},
+    )
+
+    assert queue.reject(task_id, "wrong-tenant") is False
+    assert queue.reject(task_id, tenant_id, audit_actor="api:reviewer") is True
+    rejected = queue.get(task_id, tenant_id)
+    assert rejected["status"] == "cancelled"
+    assert rejected["last_error"] == "Rejected by human reviewer"
+
+    with queue._connect() as conn:
+        queue._set_tenant(conn, tenant_id)
+        event = conn.execute(
+            """SELECT action, decision FROM public.aicode_task_policy_events
+               WHERE tenant_id=%s AND task_id=%s AND actor=%s
+               ORDER BY id DESC LIMIT 1""",
+            (tenant_id, task_id, "api:reviewer"),
+        ).fetchone()
+    assert event == ("task.reject", "allow")
+
+    with queue._connect() as conn:
+        conn.execute(
+            "DELETE FROM public.aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+            (task_id, tenant_id),
+        )
 
 
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():

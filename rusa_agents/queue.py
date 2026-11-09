@@ -69,7 +69,7 @@ class PostgresTaskQueue:
         if not isinstance(actor, str) or len(actor) > 128:
             raise ValueError("Task policy audit actor is invalid")
         if actor.startswith("api:"):
-            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.cancel"}:
+            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.approve", "task.reject", "task.cancel"}:
                 raise ValueError("API task policy audit action is invalid")
         elif actor.startswith("worker:"):
             if action != "task.execute":
@@ -612,7 +612,7 @@ class PostgresTaskQueue:
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
-        """Explicitly requeue a failed or approval-paused task for a tenant."""
+        """Requeue only failed tasks; approval-paused tasks require a separate decision."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
@@ -622,12 +622,57 @@ class PostgresTaskQueue:
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
+                WHERE task_id=%s AND tenant_id=%s AND status='failed'
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.retry",
+                "allow" if row is not None else "deny",
+            )
+        return row is not None
+
+    def approve(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> bool:
+        """Record an explicit human approval and resume an approval-paused task."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        self._require_policy_audit_actor(audit_actor)
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute("""
+                UPDATE aicode_jobs
+                SET status='queued', attempts=0, available_at=NOW(),
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                    last_error=NULL, updated_at=NOW()
+                WHERE task_id=%s AND tenant_id=%s AND status='awaiting_approval'
+                RETURNING id
+            """, (task_id, tenant_id)).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.approve",
+                "allow" if row is not None else "deny",
+            )
+        return row is not None
+
+    def reject(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> bool:
+        """Reject a human-review task and move it to a terminal cancelled state."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        self._require_policy_audit_actor(audit_actor)
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute("""
+                UPDATE aicode_jobs
+                SET status='cancelled', lease_owner=NULL, lease_until=NULL,
+                    lease_token=NULL, last_error='Rejected by human reviewer',
+                    updated_at=NOW()
+                WHERE task_id=%s AND tenant_id=%s AND status='awaiting_approval'
+                RETURNING id
+            """, (task_id, tenant_id)).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.reject",
                 "allow" if row is not None else "deny",
             )
         return row is not None

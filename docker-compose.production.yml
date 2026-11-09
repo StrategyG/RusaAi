@@ -27,7 +27,7 @@ services:
     cap_drop: ["ALL"]
     pids_limit: 128
     mem_limit: 1g
-    cpus: 2.0
+    cpus: 1.0
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     ports:
@@ -59,7 +59,7 @@ services:
     cap_drop: ["ALL"]
     pids_limit: 128
     mem_limit: 512m
-    cpus: 1.0
+    cpus: 0.5
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
       - /app/.next/cache:rw,noexec,nosuid,size=64m
@@ -88,6 +88,9 @@ services:
       RUSA_METRICS_API_KEY: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-2}
+      RUSA_SANDBOX_CPUS: ${RUSA_SANDBOX_CPUS:-0.75}
+      RUSA_SANDBOX_MEMORY: ${RUSA_SANDBOX_MEMORY:-1g}
       DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
     read_only: true
@@ -95,7 +98,7 @@ services:
     cap_drop: ["ALL"]
     pids_limit: 256
     mem_limit: 2g
-    cpus: 2.0
+    cpus: 1.5
     tmpfs:
       - /tmp:rw,nosuid,size=128m
     volumes:

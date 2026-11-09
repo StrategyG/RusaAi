@@ -132,3 +132,25 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
     )
     with pytest.raises(ValueError, match="roles"):
         RuntimeConfig.from_env()
+
+
+
+def test_production_worker_rejects_parallelism_above_four_core_budget(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MAX_PARALLEL_WORKERS", "3")
+    with pytest.raises(RuntimeError, match="RUSA_MAX_PARALLEL_WORKERS"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_sandbox_cpu_above_four_core_budget(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_CPUS", "0.8")
+    with pytest.raises(RuntimeError, match="RUSA_SANDBOX_CPUS"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_sandbox_memory_above_one_gib(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_SANDBOX_MEMORY", "2g")
+    with pytest.raises(RuntimeError, match="RUSA_SANDBOX_MEMORY"):
+        RuntimeConfig.from_env().validate_worker()

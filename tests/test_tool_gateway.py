@@ -80,6 +80,9 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
     assert result.ok
     assert result.evidence["profile"] == "pytest"
+    assert "--memory=1g" in captured_command
+    assert "--memory-swap=1g" in captured_command
+    assert "--cpus=0.75" in captured_command
     assert "PYTHONPYCACHEPREFIX=/run/rusa-tmp/pycache" in captured_command
 
 
@@ -145,3 +148,23 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+
+def test_sandbox_limits_parallel_validation_containers(tmp_path):
+    sandbox = DockerSandbox(max_concurrent_runs=1, slot_wait_seconds=0)
+    assert sandbox._slots.acquire(blocking=False)
+    try:
+        result = sandbox.run(tmp_path, "pytest")
+        assert not result.ok
+        assert "capacity is busy" in result.output
+    finally:
+        sandbox._slots.release()
+
+
+
+def test_sandbox_slot_wait_tracks_validation_timeout_budget():
+    sandbox = DockerSandbox(timeout_seconds=420)
+    assert sandbox.slot_wait_seconds == 420.0
+    assert sandbox.memory_limit == "1g"
+    assert sandbox.cpu_limit == "0.75"

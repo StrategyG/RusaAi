@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -33,9 +33,9 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert "BEFORE TRUNCATE" in audit_migration
 
 
-def test_rls_integration_fixture_applies_migrations_once_in_version_order():
-    test_source = Path("tests/test_postgres_rls.py").read_text(encoding="utf-8")
-    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', test_source)
+def test_shared_postgres_fixture_applies_migrations_once_in_version_order():
+    fixture = Path("tests/conftest.py").read_text(encoding="utf-8")
+    migrations = re.findall(r'"(\d{3}_[A-Za-z0-9_-]+\.sql)"', fixture)
 
     assert migrations == [
         "001_aicode_core.sql",
@@ -44,6 +44,8 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
+        "008_aicode_task_list_audit.sql",
+        "009_aicode_explicit_approval.sql",
     ]
 
 
@@ -56,3 +58,28 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+
+def test_explicit_approval_migration_extends_append_only_audit_actions():
+    migration = Path("migrations/009_aicode_explicit_approval.sql").read_text(encoding="utf-8")
+    assert "task.approve" in migration
+    assert "task.reject" in migration
+    assert "DROP CONSTRAINT IF EXISTS aicode_task_policy_events_action_check" in migration
+    assert "ADD CONSTRAINT aicode_task_policy_events_action_check" in migration
+
+
+
+def test_production_compose_cpu_budget_fits_four_core_host():
+    compose = Path("docker-compose.production.yml").read_text(encoding="utf-8")
+    cpu_limits = [
+        float(value)
+        for value in re.findall(r"(?m)^\s+cpus:\s*([0-9]+(?:\.[0-9]+)?)\s*$", compose)
+    ]
+    assert cpu_limits == [1.0, 0.5, 1.5]
+    sandbox = re.search(
+        r"(?m)^\s+RUSA_SANDBOX_CPUS:\s*\$\{RUSA_SANDBOX_CPUS:-([0-9.]+)\}",
+        compose,
+    )
+    assert sandbox is not None
+    assert sum(cpu_limits) + float(sandbox.group(1)) <= 4.0
