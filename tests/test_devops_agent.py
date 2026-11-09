@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -25,8 +26,7 @@ class FakeGateway:
         return {"rows": []}
 
 
-@pytest.mark.asyncio
-async def test_devops_agent_uses_authenticated_tenant_and_allowlisted_tools():
+def test_devops_agent_uses_authenticated_tenant_and_allowlisted_tools():
     response = {
         "message": "Saya akan membaca metrik CPU.",
         "actions": [{"name": "devops_get_telemetry", "arguments": {
@@ -36,13 +36,12 @@ async def test_devops_agent_uses_authenticated_tenant_and_allowlisted_tools():
     }
     gateway = FakeGateway()
     agent = DevOpsReasoningAgent(FakeProvider(response), gateway)
-    result = await agent.run("tenant-verified", "Periksa CPU host-a.")
+    result = asyncio.run(agent.run("tenant-verified", "Periksa CPU host-a."))
     assert result["infrastructure_mutations_executed"] is False
     assert gateway.calls[0][2] == "tenant-verified"
 
 
-@pytest.mark.asyncio
-async def test_devops_agent_rejects_unlisted_mutation_action():
+def test_devops_agent_rejects_unlisted_mutation_action():
     response = {
         "message": "Saya akan mengubah cluster.",
         "actions": [{"name": "kubectl_scale", "arguments": {"replicas": 10}}],
@@ -50,4 +49,4 @@ async def test_devops_agent_rejects_unlisted_mutation_action():
     }
     agent = DevOpsReasoningAgent(FakeProvider(response), FakeGateway())
     with pytest.raises(DevOpsAgentError):
-        await agent.run("tenant-verified", "Scale cluster sekarang.")
+        asyncio.run(agent.run("tenant-verified", "Scale cluster sekarang."))
