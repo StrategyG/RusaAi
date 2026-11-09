@@ -60,7 +60,19 @@
         "human.approval.requested",
         "human.approval.granted",
         "human.approval.denied",
-        "evidence.recorded"
+        "evidence.recorded",
+        "plan.completed",
+        "code.completed",
+        "build.completed",
+        "test.completed",
+        "release.approved",
+        "deploy.completed",
+        "operate.incident_detected",
+        "operate.recovered",
+        "monitor.alert_triggered",
+        "monitor.feedback_created",
+        "workflow.blocked",
+        "workflow.completed"
       ]
     },
     "occurred_at": {
