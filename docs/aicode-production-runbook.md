@@ -335,7 +335,9 @@ are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
 `task.execute` events. Unauthenticated attempts use a null tenant and the
 restricted `task.authenticate/deny` shape. Events contain only tenant ID,
 task ID, actor, action, decision, and database timestamp—never credentials,
-lease tokens, or task payloads. The API and worker verify the audit table,
+lease tokens, or task payloads. Migration 011 adds the `task.reconcile` action;
+only `tenant_admin` and `platform_admin` may submit reconciliation evidence.
+Evidence is stored with the task result and must not contain secrets. The API and worker verify the audit table,
 RLS, grants, and append-only triggers at production startup. Task create/read/
 retry/cancel events are inserted in the same PostgreSQL transaction as their
 queue operation; worker execution allow/deny events are committed in the same
