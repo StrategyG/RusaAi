@@ -353,6 +353,22 @@ try {
     assert.equal((await page.locator(".rc-page-head h1").innerText()).trim(), title, `Navigation must open ${title}`);
   }
 
+  await page.locator(".rc-nav-item").filter({ hasText: "AICode Tasks" }).click();
+  await page.getByRole("button", { name: /New AICode Task/ }).click();
+  const taskModal = page.locator(".rc-modal-wide");
+  await taskModal.waitFor({ state: "visible" });
+  await taskModal.locator("label").filter({ hasText: "Objective" }).locator("textarea").fill("Browser smoke creates a task");
+  await taskModal.locator("label").filter({ hasText: "Repository" }).locator("input").fill("StrategyG/RusaAi");
+  await taskModal.locator("label").filter({ hasText: "Base branch" }).locator("input").fill("main");
+  await taskModal.locator("label").filter({ hasText: "Acceptance criteria" }).locator("textarea").fill("The browser smoke task is accepted");
+  await taskModal.getByRole("button", { name: /Submit task/ }).click();
+  await page.locator(".rc-task-modal").waitFor({ state: "visible" });
+  assert.match(await page.locator(".rc-task-modal").innerText(), /Smoke-test task detail/);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(".rc-task-modal").getByRole("button", { name: /Retry failed task/ }).click();
+  await page.locator(".rc-alert-success").filter({ hasText: "Task diterima kembali oleh antrean" }).waitFor({ state: "visible" });
+  await page.locator(".rc-task-modal button[aria-label='Close']").click();
+
   await page.locator(".rc-nav-item").filter({ hasText: "Agent Workspace" }).click();
   await page.locator(".rc-agent-button").filter({ hasText: "Supreme Orchestrator" }).click();
   await page.locator(".rc-agent-modal").waitFor({ state: "visible" });
@@ -382,6 +398,7 @@ try {
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), true);
   await page.locator(".rc-nav-item").filter({ hasText: "Command Center" }).click();
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), false);
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
