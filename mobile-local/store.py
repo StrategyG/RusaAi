@@ -159,6 +159,9 @@ class LocalStore:
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         document_id = str(uuid.uuid4())
         safe_metadata = metadata if isinstance(metadata, dict) else {}
+        metadata_json = json.dumps(safe_metadata, ensure_ascii=False)
+        if len(metadata_json) > 12000:
+            raise ValueError("Document metadata exceeds the 12 KB limit.")
         with self._db() as db:
             existing = db.execute(
                 "SELECT id FROM documents WHERE collection_name=? AND content_hash=? LIMIT 1",
@@ -180,7 +183,7 @@ class LocalStore:
                    VALUES (?,?,?,?,?,?,?)""",
                 (
                     document_id, title.strip(), source_uri, collection, digest,
-                    json.dumps(safe_metadata, ensure_ascii=False)[:12000], _now(),
+                    metadata_json, _now(),
                 ),
             )
             for index, part in enumerate(parts):

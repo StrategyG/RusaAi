@@ -8,13 +8,13 @@ import os
 import re
 from html.parser import HTMLParser
 from io import BytesIO
+from zipfile import BadZipFile, ZipFile
 from pathlib import Path
 from urllib.parse import urlsplit
-from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -111,6 +111,24 @@ def extract_document(filename: str, raw: bytes) -> tuple[str, str]:
             from docx import Document
         except ImportError as exc:
             raise ValueError("Install the optional python-docx package to import DOCX files.") from exc
+        try:
+            with ZipFile(BytesIO(raw)) as archive:
+                entries = archive.infolist()
+                expanded_size = sum(entry.file_size for entry in entries)
+                if len(entries) > 10000 or expanded_size > 50 * 1024 * 1024:
+                    raise ValueError("DOCX archive exceeds safe expansion limits.")
+                if any(
+                    entry.file_size > 25 * 1024 * 1024
+                    or (entry.compress_size == 0 and entry.file_size > 0)
+                    or (
+                        entry.compress_size > 0
+                        and entry.file_size / entry.compress_size > 1000
+                    )
+                    for entry in entries
+                ):
+                    raise ValueError("DOCX archive contains an unsafe compression ratio.")
+        except BadZipFile as exc:
+            raise ValueError("DOCX file is not a valid ZIP archive.") from exc
         document = Document(BytesIO(raw))
         blocks = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
         for table in document.tables:
