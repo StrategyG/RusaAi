@@ -92,6 +92,7 @@ tbody tr:hover { background: rgba(42,70,99,.18); }
 .status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-queued { color: #8ecbff; background: rgba(64,145,211,.12); }
 .status-running { color: #69d0ff; background: rgba(51,163,214,.13); }
+.status-cancel_requested { color: #f2bd58; background: rgba(203,145,48,.13); }
 .status-awaiting_approval { color: #f2bd58; background: rgba(203,145,48,.13); }
 .status-succeeded { color: #55dba0; background: rgba(58,183,126,.12); }
 .status-failed, .status-blocked { color: #ff8888; background: rgba(203,77,77,.13); }
