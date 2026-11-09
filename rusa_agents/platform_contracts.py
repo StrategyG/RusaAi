@@ -175,7 +175,7 @@ def validate_agent_result(payload: Any) -> None:
             )
         if payload.get("status") == "failed" and not payload.get("error"):
             raise PlatformContractError(
-                "missing required field 'error': failed results require a structured failure reason"
+                "failed results require a structured error object; missing required field: error"
             )
     _validate("agent_result", payload)
     started = _parse_timestamp(payload["started_at"], "started_at")
