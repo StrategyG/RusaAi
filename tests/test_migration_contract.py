@@ -47,6 +47,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "009_aicode_blocked_status.sql",
         "010_aicode_cooperative_cancellation.sql",
         "011_aicode_cancellation_reconciliation.sql",
+        "012_aicode_task_list_audit.sql",
     ]
 
 
