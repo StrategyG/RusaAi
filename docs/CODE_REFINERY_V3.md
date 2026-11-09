@@ -8,7 +8,7 @@
 | Area | Configuration |
 |---|---|
 | Execution | Hybrid Docker + MicroVM |
-| LLM | Primary OpenAI-compatible endpoint, optional local OpenAI-compatible endpoint, fail-closed mock |
+| LLM | Primary OpenAI-compatible endpoint, local OpenAI-compatible fallback (required in production), fail-closed mock |
 | Approval | Human approval before merge/deploy |
 | Quality threshold | 85/100 plus mandatory syntax/security evidence |
 | Refinement | Existing AICode bounded repair cycles remain authoritative |
@@ -96,7 +96,7 @@ The readiness response must identify the exact pinned runner image when producti
 
 `POST /v1/executions` as multipart/form-data with:
 
-- `snapshot`: sanitized `workspace.tar.gz` file; no Git metadata, symlinks, credentials, secret files, or private keys.
+- `snapshot`: sanitized `workspace.tar.gz` file; no Git metadata, symlinks, or known sensitive paths/files. High-confidence embedded credentials are rejected before snapshot creation; this is not a comprehensive secret scanner.
 - `profile`: one of `pytest`, `compile`, `ruff`, `bandit`.
 - `timeout_seconds`, `cpu_count`, `memory_mib`.
 - `snapshot_sha256`: SHA-256 of the exact compressed snapshot.
