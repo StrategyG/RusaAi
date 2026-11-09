@@ -15,6 +15,7 @@ from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
 from rusa_knowledge.service import KnowledgeService
+from rusa_devops.mcp_tools import register_devops_mcp_tools
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -141,6 +142,9 @@ def answer_with_sources(question: str) -> str:
         "If evidence is missing or conflicting, say so and do not invent an answer.\n\n"
         f"Question: {question[:2000]}"
     )
+
+
+register_devops_mcp_tools(mcp, _require_tenant)
 
 
 def _allowed_hosts() -> list[str]:
