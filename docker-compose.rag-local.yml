@@ -22,7 +22,10 @@ services:
     networks: [rusa-rag-internal]
 
   ollama:
-    image: ${RUSA_OLLAMA_IMAGE:-ollama/ollama:latest}
+    image: rusa-ai-ollama-bge-m3:local
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama-model
     restart: unless-stopped
     init: true
     environment:
@@ -39,20 +42,6 @@ services:
       timeout: 10s
       retries: 15
     security_opt: ["no-new-privileges:true"]
-    networks: [rusa-rag-internal]
-
-  ollama-model-init:
-    image: ${RUSA_OLLAMA_IMAGE:-ollama/ollama:latest}
-    entrypoint: ["/bin/sh", "-ec"]
-    command: ["ollama pull bge-m3"]
-    restart: "no"
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    volumes:
-      - rusa-ollama-models:/root/.ollama
-    depends_on:
-      ollama:
-        condition: service_healthy
     networks: [rusa-rag-internal]
 
   rag-mcp:
@@ -88,8 +77,8 @@ services:
     depends_on:
       rag-db:
         condition: service_healthy
-      ollama-model-init:
-        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/ready', timeout=5)"]
       interval: 30s
