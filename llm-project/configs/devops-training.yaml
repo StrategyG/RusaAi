@@ -1,0 +1,48 @@
+project: rusa-devops-agent-sft
+status: configuration_only_until_curated_dataset_and_cuda_run
+
+model:
+  id: Qwen/Qwen3-4B-Instruct-2507
+  revision: eb25fbe4f35f7147763bc24445679d1c00588d89
+  license: apache-2.0
+
+dataset:
+  train_file: llm-project/data/devops/train.jsonl
+  eval_file: llm-project/data/devops/eval.jsonl
+  min_train_examples: 100
+  min_eval_examples: 30
+  max_seq_length: 4096
+
+qlora:
+  quant_type: nf4
+  double_quant: true
+  compute_dtype: bfloat16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: all-linear
+
+training:
+  output_dir: artifacts/rusa-devops-qwen3-4b-qlora
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 16
+  num_train_epochs: 3
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine
+  logging_steps: 5
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 3
+  gradient_checkpointing: true
+  seed: 42
+
+notes:
+  - Runtime authorization is enforced by the MCP/API policy layer, not by model output.
+  - Only telemetry reads, forecast/model-run reads, incident listing, knowledge retrieval, and capacity proposals are trainable.
+  - Direct infrastructure mutation is not part of the DevOps SFT action contract.
+  - Training requires a dedicated CUDA host and separately reviewed, tenant-redacted datasets.
