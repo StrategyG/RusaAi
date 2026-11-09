@@ -63,3 +63,13 @@ Open http://localhost:3000. Configure a tenant API key with the appropriate task
 ## Production
 
 Build and publish an immutable web image, set RUSA_WEB_IMAGE to its digest, and set RUSA_WEB_SESSION_SECRET using a secret manager. The production Compose web service binds to loopback and joins only the internal RUSA network. Place an authenticated TLS reverse proxy in front of it before exposing the UI to users. The repository README continues to state that RUSA-AI is not production-certified; adding this UI does not change that certification status.
+
+## Predictive DevOps Intelligence
+
+The DevOps page is an optional integration. It consumes same-origin BFF routes:
+- GET /api/devops/overview -> GET /v1/devops/overview
+- GET/POST /api/devops/jobs -> GET/POST /v1/devops/jobs
+- POST /api/devops/training-runs -> POST /v1/devops/training-runs
+- GET /api/devops/actions and same-origin POST approve/reject routes.
+
+The UI can queue synthetic telemetry, anomaly scans, and administrator-only forecasting runs. It shows queue state, latest model metrics, recent incidents, and capacity proposals with administrator-only approve/reject decisions. It does not expose Prometheus credentials, model artifact paths, database connections, or worker leases. Approval changes the proposal and audit state only; it does not execute infrastructure operations.
