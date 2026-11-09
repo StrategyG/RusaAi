@@ -1,4 +1,6 @@
 """Unit tests for the CPU quant modules."""
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
