@@ -20,7 +20,7 @@ from rusa_agents.code_refinery.sandbox import (
 from rusa_agents.contracts import WorkerRole
 from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents import tool_gateway as gateway_module
-from rusa_agents.tool_gateway import DockerSandbox, ToolResult, WorkspaceToolGateway
+from rusa_agents.tool_gateway import DockerSandbox, ToolDenied, ToolResult, WorkspaceToolGateway
 from rusa_agents.secret_scan import contains_high_confidence_secret
 
 
@@ -552,7 +552,7 @@ def test_gateway_withholds_embedded_credentials_from_agent_reads(tmp_path):
 def test_gateway_rejects_writes_containing_high_confidence_credentials(tmp_path):
     token = "ghp_" + "D" * 36
     gateway = WorkspaceToolGateway(tmp_path)
-    with pytest.raises(Exception, match="Writing high-confidence credential"):
+    with pytest.raises(ToolDenied, match="Writing high-confidence credential"):
         gateway.write_file("new_module.py", f"TOKEN = '{token}'\n", WorkerRole.DEVELOPER)
     assert not (tmp_path / "new_module.py").exists()
 
