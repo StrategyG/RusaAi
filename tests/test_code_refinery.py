@@ -18,7 +18,9 @@ from rusa_agents.code_refinery.sandbox import (
 )
 from rusa_agents.contracts import WorkerRole
 from rusa_agents.providers import OpenAICompatibleProvider
-from rusa_agents.tool_gateway import ToolResult, WorkspaceToolGateway
+from rusa_agents import tool_gateway as gateway_module
+from rusa_agents.tool_gateway import DockerSandbox, ToolResult, WorkspaceToolGateway
+from rusa_agents.secret_scan import contains_high_confidence_secret
 
 
 GOOD_SOURCE = '''"""Small, documented module."""
@@ -485,3 +487,23 @@ def test_microvm_invalid_utf8_response_fails_closed(tmp_path):
     result = backend.run(tmp_path, "pytest")
     assert not result.ok
     assert result.evidence["blocked"] is True
+
+
+
+def test_docker_snapshot_rejects_embedded_high_confidence_credentials(tmp_path, monkeypatch):
+    token = "ghp_" + "A" * 36
+    (tmp_path / "module.py").write_text(
+        f"TOKEN = '{token}'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gateway_module, "DOCKER_BIN", "/usr/bin/docker")
+    result = DockerSandbox().run(tmp_path, "pytest")
+    assert not result.ok
+    assert "high-confidence credential material" in result.output
+
+
+def test_shared_secret_scanner_detects_token_across_chunk_boundary(tmp_path):
+    token = "ghp_" + "B" * 36
+    source = tmp_path / "large.txt"
+    source.write_bytes(b"x" * (64 * 1024 - 2) + token.encode("ascii"))
+    assert contains_high_confidence_secret(source)
