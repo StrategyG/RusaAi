@@ -202,9 +202,9 @@ class PostgresTaskQueue:
                 reconcile_action = conn.execute("""
                     SELECT pg_get_constraintdef(oid)
                     FROM pg_constraint
-                    WHERE conrelid='public.aicode_task_policy_events'::regclass
+                    WHERE conrelid=to_regclass('public.aicode_task_policy_events')
+                      AND conname='aicode_task_policy_events_action_check'
                       AND contype='c'
-                      AND pg_get_constraintdef(oid) ILIKE '%action%'
                 """).fetchone()
                 if not reconcile_action or "'task.reconcile'" not in reconcile_action[0]:
                     raise RuntimeError(
@@ -776,7 +776,7 @@ class PostgresTaskQueue:
         audit_actor: str | None = None,
     ) -> bool:
         """Record an authorized human determination before an ambiguous task may be retried."""
-        if side_effect not in {"NONE", "APPLIED"}:
+        if not isinstance(side_effect, str) or side_effect not in {"NONE", "APPLIED"}:
             raise ValueError("side_effect must be NONE or APPLIED")
         if (
             not isinstance(evidence, str)
@@ -787,7 +787,7 @@ class PostgresTaskQueue:
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
-        if not audit_actor or not audit_actor.startswith("api:"):
+        if not isinstance(audit_actor, str) or not audit_actor.startswith("api:"):
             raise ValueError("Cancellation reconciliation requires an authenticated API actor")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
