@@ -143,3 +143,10 @@ def test_environment_rejects_unknown_values_instead_of_disabling_production_chec
     monkeypatch.setenv("ENVIRONMENT", "prodution")
     with pytest.raises(ValueError, match="ENVIRONMENT"):
         RuntimeConfig.from_env()
+
+
+
+def test_config_rejects_unknown_environment_name(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "prod ")
+    with pytest.raises(ValueError, match="ENVIRONMENT"):
+        RuntimeConfig.from_env()
