@@ -200,7 +200,7 @@ jobs:
           RUSA_MODEL_NAME: rusa-ai
           RUSA_MODEL_API_KEY: ci-model-key
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
-          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
+          RUSA_GITHUB_TOKEN: ci_github_token_placeholder_not_a_real_credential_123
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
