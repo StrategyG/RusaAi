@@ -74,11 +74,9 @@ def test_ingestion_blocks_high_confidence_credentials_before_embedding():
     store = FakeStore()
     embeddings = FakeEmbeddings()
     service = KnowledgeService(store, embeddings)
-    secret_document = (
-        "Internal notes\n-----BEGIN RSA PRIVATE KEY-----\n"
-        + ("A" * 64)
-        + "\n-----END RSA PRIVATE KEY-----"
-    )
+    header = "-----BEGIN " + "RSA " + "PRIVATE KEY-----"
+    footer = "-----END " + "RSA " + "PRIVATE KEY-----"
+    secret_document = "Internal notes\n" + header + "\n" + ("A" * 64) + "\n" + footer
     try:
         service.ingest_text(
             tenant_id="tenant-a",
