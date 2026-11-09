@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 from .ast_security import dangerous_calls
+from ..secret_scan import contains_high_confidence_secret_text
 
 MAX_FILES = 2_000
 MAX_FILE_BYTES = 1_000_000
@@ -29,10 +30,6 @@ WEIGHTS = {
     "security": 0.20,
     "testability": 0.15,
 }
-SECRET_VALUE = re.compile(
-    r"(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|"
-    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
-)
 SENSITIVE_ASSIGNMENT = re.compile(r"(?:api[_-]?key|secret|password|token|credential)", re.I)
 RISKY_CALLS = {"open", "int", "float", "json.loads", "Path.read_text", "subprocess.run"}
 
@@ -251,7 +248,7 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
 
     security_penalty = 0.0
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and SECRET_VALUE.search(node.value):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and contains_high_confidence_secret_text(node.value):
             findings.append(
                 Finding("critical", "security", "Credential-like literal detected.", path,
                         getattr(node, "lineno", None),
@@ -274,7 +271,7 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             targets = [_call_name(target) for target in node.targets]
             if any(SENSITIVE_ASSIGNMENT.search(target) for target in targets) and len(node.value.value) >= 16:
-                if SECRET_VALUE.search(node.value.value):
+                if contains_high_confidence_secret_text(node.value.value):
                     continue
                 findings.append(
                     Finding("warning", "security", "Possible hard-coded secret assignment.", path,
