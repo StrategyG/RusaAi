@@ -14,6 +14,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
+from .ast_security import dangerous_calls
+
 MAX_FILES = 2_000
 MAX_FILE_BYTES = 1_000_000
 MAX_TOTAL_SOURCE_BYTES = 100_000_000
@@ -33,18 +35,6 @@ SECRET_VALUE = re.compile(
 )
 SENSITIVE_ASSIGNMENT = re.compile(r"(?:api[_-]?key|secret|password|token|credential)", re.I)
 RISKY_CALLS = {"open", "int", "float", "json.loads", "Path.read_text", "subprocess.run"}
-DANGEROUS_CALLS = {
-    "eval", "exec", "builtins.eval", "builtins.exec", "compile", "__import__",
-    "importlib.import_module", "runpy.run_module", "runpy.run_path",
-    "os.system", "os.popen", "os.execv", "os.execve", "os.execl",
-    "os.execlp", "os.execle", "os.execvp", "os.execvpe",
-    "os.spawnl", "os.spawnle", "os.spawnlp", "os.spawnlpe",
-    "os.spawnv", "os.spawnve", "os.spawnvp", "os.spawnvpe",
-    "subprocess.Popen", "asyncio.create_subprocess_exec",
-    "asyncio.create_subprocess_shell", "pickle.loads", "marshal.loads",
-    "ctypes.CDLL", "ctypes.PyDLL", "multiprocessing.Process",
-    "socket.socket", "socket.create_connection", "urllib.request.urlopen",
-}
 
 
 @dataclass(frozen=True)
@@ -268,28 +258,16 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
                         "Remove the credential and rotate it if it was real.")
             )
             security_penalty += 100.0
-        if not isinstance(node, ast.Call):
-            continue
-        name = _call_name(node.func)
-        dangerous = name in DANGEROUS_CALLS
-        shell_enabled = name.startswith("subprocess.") and any(
-            keyword.arg == "shell"
-            and not (
-                isinstance(keyword.value, ast.Constant)
-                and keyword.value.value is False
+    for name, line in dangerous_calls(tree):
+        findings.append(
+            Finding(
+                "error", "security",
+                f"Potentially dangerous dynamic execution or process primitive: {name}.",
+                path, line,
+                "Remove the primitive or isolate and explicitly justify it behind a reviewed boundary.",
             )
-            for keyword in node.keywords
         )
-        if dangerous or name.startswith("subprocess.") and shell_enabled:
-            findings.append(
-                Finding(
-                    "error", "security",
-                    f"Potentially dangerous dynamic execution or process primitive: {name}.",
-                    path, node.lineno,
-                    "Remove the primitive or isolate and explicitly justify it behind a reviewed boundary.",
-                )
-            )
-            security_penalty += 25.0
+        security_penalty += 25.0
 
     # Detect obvious credential assignments without printing the assigned value.
     for node in ast.walk(tree):
