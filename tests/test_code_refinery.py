@@ -615,3 +615,12 @@ def test_shared_secret_scanner_detects_modern_credential_formats():
     assert contains_high_confidence_secret_text("token=github_pat_" + "a" * 40)
     assert contains_high_confidence_secret_text("key=sk-proj-" + "b" * 40)
     assert contains_high_confidence_secret_text("token=xoxb-" + "c" * 24)
+
+
+
+def test_secret_scanner_does_not_match_noncredential_text_containing_sk_hyphen():
+    from rusa_agents.secret_scan import contains_high_confidence_secret_text
+
+    assert not contains_high_confidence_secret_text(
+        "read-only-task-test-credential-000000000000"
+    )
