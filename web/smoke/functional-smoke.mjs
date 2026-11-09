@@ -94,7 +94,8 @@ const backend = createServer(async (request, response) => {
     }
     const taskMatch = url.pathname.match(/^\/v1\/aicode\/tasks\/([0-9a-f-]+)$/i);
     if (taskMatch && request.method === "GET") {
-      return json(response, 200, { ...seededTask, task_id: taskMatch[1] });
+      const task = taskMatch[1] === approvalTask.task_id ? approvalTask : seededTask;
+      return json(response, 200, { ...task, task_id: taskMatch[1] });
     }
     if (taskMatch && request.method === "DELETE") {
       if (apiKey === "readonly-key") return json(response, 403, { detail: "task:cancel permission required" });
@@ -103,6 +104,9 @@ const backend = createServer(async (request, response) => {
     const retryMatch = url.pathname.match(/^\/v1\/aicode\/tasks\/([0-9a-f-]+)\/retry$/i);
     if (retryMatch && request.method === "POST") {
       if (apiKey === "readonly-key") return json(response, 403, { detail: "task:retry permission required" });
+      if (retryMatch[1] === approvalTask.task_id) {
+        return json(response, 409, { detail: "Task is unavailable or not in a retryable state" });
+      }
       return json(response, 202, { task_id: retryMatch[1], status: "queued" });
     }
     if (url.pathname === "/v1/chat/completions" && request.method === "POST") {
@@ -236,6 +240,11 @@ try {
     method: "POST", headers: { Origin: base, Cookie: cookie }
   });
   assert.equal(retry.status, 202, "Failed-task retry route must forward the backend response");
+
+  const approvalRetry = await fetch(base + "/api/tasks/" + approvalTask.task_id + "/retry", {
+    method: "POST", headers: { Origin: base, Cookie: cookie }
+  });
+  assert.equal(approvalRetry.status, 409, "Approval-paused tasks must not be retried before a human decision");
 
   const cancelled = await fetch(base + "/api/tasks/" + seededTask.task_id, {
     method: "DELETE", headers: { Origin: base, Cookie: cookie }
@@ -380,6 +389,11 @@ try {
 
   await page.locator(".rc-nav-item").filter({ hasText: "Approvals" }).click();
   assert.equal(await page.getByRole("button", { name: /Approve|Reject/i }).count(), 0, "Approval page must not fabricate decision actions");
+  const approvalRow = page.locator(".rc-approval-row").filter({ hasText: "Smoke-test task detail" });
+  await approvalRow.getByRole("button", { name: /Inspect task/ }).click();
+  await page.locator(".rc-task-modal").waitFor({ state: "visible" });
+  assert.equal(await page.locator(".rc-task-modal").getByRole("button", { name: /Retry failed task/ }).count(), 0, "Approval-paused task detail must not expose retry");
+  await page.locator(".rc-task-modal button[aria-label='Close']").click();
 
   await page.locator(".rc-nav-item").filter({ hasText: "AI Chat" }).click();
   await page.locator(".rc-chat-compose textarea").fill("Hello from browser smoke");
