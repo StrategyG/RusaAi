@@ -1,0 +1,11 @@
+# Optional CPU-only quantitative training dependencies.
+# Install separately from the production API requirements.
+numpy>=1.26,<3
+pandas>=2.1,<4
+scipy>=1.11,<2
+statsmodels>=0.14,<1
+prophet>=1.1.6,<2
+scikit-learn>=1.4,<2
+joblib>=1.3,<2
+pyarrow>=14,<25
+pytest>=7.3,<10

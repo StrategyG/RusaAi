@@ -36,6 +36,14 @@ See `docs/INFERENCE_OPERATIONS.md`.
 
 The first SFT target is the existing six-role AICode worker JSON action envelope. Use a dedicated CUDA training host and install `requirements-train.txt`; training dependencies and model weights are not part of the API image. Curated datasets belong under the ignored `llm-project/data/curated/` directory and must pass the role/tool-policy validator. Run `python llm-project/train/validate_dataset.py`, then `python llm-project/train/train_sft.py`. Evaluate the adapter, merge it, and create a pinned model manifest before configuring `RUSA_LOCAL_MODEL_PATH`. See `docs/FINETUNING_OPERATIONS.md` for hardware estimates and promotion gates. The pipeline is implemented; no fine-tuned weights or production certification are claimed.
 
+## CPU Quantitative Training
+
+A separate CPU-first quantitative module is available under `rusa_quant/`. It provides ARIMA and Prophet forecasting, MA5/MA10/MA30 and Bollinger indicators, chronological evaluation, walk-forward backtesting helpers, a finite-game Nash solver, and a two-outcome hedge calculator. It does not replace the coding-agent SFT/QLoRA pipeline.
+
+Run the [Google Colab notebook](notebooks/RUSA_AI_QUANT_CPU_COLAB.ipynb) on a CPU runtime. The notebook mounts Google Drive and stores models, forecasts, metrics, and a training manifest under `MyDrive/RUSA_AI_TRAINING/`. Install dependencies with `pip install -r requirements-quant.txt`. See [CPU Quant Training operations](docs/QUANT_TRAINING_CPU.md) for CSV format, CLI usage, artifact layout, optional GitHub manifest publishing, and limitations.
+
+Generated datasets and model artifacts should remain in Google Drive or a controlled artifact store, not in Git. Game-theory outputs depend on supplied payoff matrices; hedge calculations are scenario calculators and do not guarantee profit.
+
 ## Optional RAG and MCP
 
 The tenant-scoped knowledge service and read-only MCP endpoint are independently
