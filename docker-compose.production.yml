@@ -151,7 +151,7 @@ services:
       RUSA_KNOWLEDGE_DB_POOL_MIN: "1"
       RUSA_KNOWLEDGE_DB_POOL_MAX: "8"
       RUSA_MCP_TENANT_KEYS: ${RUSA_MCP_TENANT_KEYS:?Set SHA-256 tenant key registry}
-      RUSA_MCP_ALLOWED_HOSTS: "localhost,localhost:8002,127.0.0.1,127.0.0.1:8002,rusa-mcp,rusa-mcp:8002,rag-mcp,rag-mcp:8002"
+      RUSA_MCP_ALLOWED_HOSTS: ${RUSA_MCP_ALLOWED_HOSTS:-localhost,localhost:8002,127.0.0.1,127.0.0.1:8002,rusa-mcp,rusa-mcp:8002,rag-mcp,rag-mcp:8002}
       RUSA_MCP_REQUESTS_PER_MINUTE: "120"
       RUSA_EMBEDDING_PROVIDER: ollama
       RUSA_EMBEDDING_BASE_URL: http://ollama:11434
