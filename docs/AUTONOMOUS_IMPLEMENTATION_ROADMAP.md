@@ -9,7 +9,7 @@ This document separates the current repository implementation from the broader a
 - `WorkspaceToolGateway` is the final enforcement point for named tools, safe paths, and sandboxed validation.
 - `AutonomyPolicy` keeps protected operations and high-risk work outside autonomous authorization.
 - PostgreSQL queue/lease, audit, tenant, inference artifact controls, bounded Code Refinery, alias-aware AST security checks, shared credential scanning, and cooperative cancellation/reconciliation are present on the integration branch.
-- Transport-neutral v1.0 task, result, and run-event JSON Schemas plus Python validators cover the four platform domains, ten core-agent roles, eight lifecycle stages, deadlines, evidence, and event ordering. A separate A2A task envelope is also defined. These are contract foundations only, not a broker, transactional outbox, event store, or cross-domain agent runtime.
+- Transport-neutral v1.0 task, result, and run-event JSON Schemas plus Python validators cover the four platform domains, ten core-agent roles, eight lifecycle stages, and eight distinct canonical DevOps stage-agent IDs. Task validation keeps `core_agent` and `devops_stage_agent` identities separate and binds stage-agent IDs to their lifecycle stages. A separate A2A task envelope is also defined. These are contract foundations only, not a broker, transactional outbox, event store, or cross-domain agent runtime.
 - The new SFT pipeline trains only the existing six-role worker response contract. It does not invent runtime support for agents that are not implemented yet.
 
 ## Mapping to the ten-agent specification
