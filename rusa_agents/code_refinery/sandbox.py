@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..metrics import REFINERY_SANDBOX_DURATION, REFINERY_SANDBOX_RUNS
+from .ast_security import dangerous_calls
 from ..secret_scan import contains_high_confidence_secret_stream
 from ..tool_gateway import DockerSandbox, ToolResult
 
@@ -43,27 +44,6 @@ SENSITIVE_SUFFIXES = {
     ".pem", ".key", ".p12", ".pfx", ".keystore", ".crt", ".cer",
     ".der", ".ppk", ".tfstate", ".tfvars",
 }
-DANGEROUS_CALLS = {
-    "eval", "exec", "builtins.eval", "builtins.exec", "__import__",
-    "importlib.import_module", "runpy.run_module", "runpy.run_path",
-    "os.system", "os.popen", "os.execv", "os.execve", "os.execl",
-    "os.execlp", "os.execle", "os.execvp", "os.execvpe",
-    "os.spawnl", "os.spawnle", "os.spawnlp", "os.spawnlpe",
-    "os.spawnv", "os.spawnve", "os.spawnvp", "os.spawnvpe",
-    "subprocess.Popen", "asyncio.create_subprocess_exec",
-    "asyncio.create_subprocess_shell", "pickle.loads", "marshal.loads",
-    "ctypes.CDLL", "ctypes.PyDLL", "multiprocessing.Process",
-    "socket.socket", "socket.create_connection", "urllib.request.urlopen",
-}
-
-
-def _call_name(node: ast.AST) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        prefix = _call_name(node.value)
-        return f"{prefix}.{node.attr}" if prefix else node.attr
-    return ""
 
 
 class SandboxRiskClassifier:
@@ -99,23 +79,11 @@ class SandboxRiskClassifier:
                     return "high", sorted(set(reasons))
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-                except (SyntaxError, UnicodeDecodeError, OSError):
+                except (SyntaxError, UnicodeError, OSError, RecursionError):
                     reasons.append(f"unclassifiable_python_source:{path.relative_to(root).as_posix()}")
                     continue
-                for node in ast.walk(tree):
-                    if not isinstance(node, ast.Call):
-                        continue
-                    name = _call_name(node.func)
-                    shell_enabled = name.startswith("subprocess.") and any(
-                        keyword.arg == "shell"
-                        and not (
-                            isinstance(keyword.value, ast.Constant)
-                            and keyword.value.value is False
-                        )
-                        for keyword in node.keywords
-                    )
-                    if name in DANGEROUS_CALLS or name.startswith("subprocess.") and shell_enabled:
-                        reasons.append(f"dynamic_or_host_process_primitive:{name}")
+                for name, _line in dangerous_calls(tree):
+                    reasons.append(f"dynamic_or_host_process_primitive:{name}")
         package_json = root / "package.json"
         if package_json.is_file() and not package_json.is_symlink():
             try:
