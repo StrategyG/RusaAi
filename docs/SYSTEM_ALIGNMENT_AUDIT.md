@@ -113,8 +113,8 @@ The following are still deployment or architecture gates, not code-completion cl
 ## 8. Recommended implementation sequence
 
 ### Phase A — Contract and control-plane foundation
-- Add versioned run/task/result/event contracts for the ten-agent and eight-stage specifications without breaking the existing AICode task contract.
-- Add transactional outbox, idempotent event consumers, state versions, correlation/causation IDs, and cursor-based status projection.
+- **Implemented on this branch:** transport-neutral v1.0 task/result/run-event JSON Schemas and Python validators for the four domains, ten core-agent roles, eight lifecycle stages, deadline and authorization references, artifact/evidence digests, and ordered event batches. Existing A2A and AICode contracts remain separate.
+- **Next:** integrate these contracts with durable cross-domain run state, transactional outbox, idempotent event consumers, event-store sequence allocation/replay, and cursor-based status projections. The schema alone does not provide these runtime capabilities.
 - Add per-agent identity/capability declarations and resource-scoped grants.
 - Add cancellation, deadline, retry budget, reconciliation, and approval contracts at the run level.
 
