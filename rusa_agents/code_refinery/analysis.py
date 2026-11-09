@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -364,7 +365,7 @@ def analyze_workspace(
 
     selected: list[Path] = []
     if paths is None:
-        for current, dirs, files in __import__("os").walk(root, followlinks=False):
+        for current, dirs, files in os.walk(root, followlinks=False):
             dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
             for name in files:
                 if name.endswith(".py"):
