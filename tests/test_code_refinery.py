@@ -277,3 +277,19 @@ def test_microvm_backend_rejects_snapshot_digest_mismatch(tmp_path):
 def test_microvm_http_is_restricted_to_tls_or_loopback():
     with pytest.raises(ValueError):
         MicroVMHTTPBackend("http://microvm.internal", "k" * 32)
+
+
+def test_production_cannot_disable_microvm_requirement(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MICROVM_REQUIRED", "false")
+    sandbox = HybridSandbox(StubSandbox(), StubMicroVM())
+    with pytest.raises(RuntimeError, match="cannot disable MicroVM"):
+        sandbox.verify_ready(require_rootless=True, require_image=True)
+
+
+def test_microvm_environment_requires_tls_in_production(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MICROVM_BASE_URL", "http://localhost:8080")
+    monkeypatch.setenv("RUSA_MICROVM_API_KEY", "k" * 32)
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        MicroVMHTTPBackend.from_env()
