@@ -1,0 +1,16 @@
+{
+  "data": {
+    "path": "/content/drive/MyDrive/RUSA_AI_TRAINING/data/market_data.csv",
+    "date_column": "date",
+    "value_column": "close"
+  },
+  "training": {
+    "device": "cpu",
+    "test_size": 0.2,
+    "forecast_horizon": 30,
+    "skip_prophet": false
+  },
+  "output": {
+    "path": "/content/drive/MyDrive/RUSA_AI_TRAINING"
+  }
+}
