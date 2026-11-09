@@ -141,18 +141,16 @@ def _complexity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
 
 def _nesting_depth(node: ast.AST) -> int:
     maximum = 0
-
-    def visit(current: ast.AST, depth: int) -> None:
-        nonlocal maximum
+    pending = [(node, 0)]
+    while pending:
+        current, depth = pending.pop()
         maximum = max(maximum, depth)
         nested = isinstance(
             current,
             (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try),
         )
-        for child in ast.iter_child_nodes(current):
-            visit(child, depth + (1 if nested else 0))
-
-    visit(node, 0)
+        child_depth = depth + (1 if nested else 0)
+        pending.extend((child, child_depth) for child in ast.iter_child_nodes(current))
     return maximum
 
 
@@ -164,6 +162,18 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
         return (
             {key: 0.0 for key in WEIGHTS},
             [Finding("critical", "syntax", exc.msg, path, exc.lineno, "Fix the syntax error.")],
+            False,
+        )
+    except RecursionError:
+        return (
+            {key: 0.0 for key in WEIGHTS},
+            [
+                Finding(
+                    "critical", "analysis",
+                    "AST parser exceeded its recursion limit for this source file.",
+                    path, recommendation="Reduce pathological nesting or split the source file.",
+                )
+            ],
             False,
         )
 
@@ -320,7 +330,14 @@ def analyze_sources(
             raise ValueError(f"Unsafe or unsupported source path: {raw_path}")
         if not isinstance(source, str):
             raise TypeError(f"Source for {raw_path} must be text")
-        source_bytes = len(source.encode("utf-8"))
+        try:
+            source_bytes = len(source.encode("utf-8"))
+        except UnicodeError:
+            findings.append(
+                Finding("critical", "input", "Source contains invalid Unicode text.", raw_path)
+            )
+            syntax_valid = False
+            continue
         total_source_bytes += source_bytes
         if total_source_bytes > MAX_TOTAL_SOURCE_BYTES:
             raise ValueError("Total source inventory exceeds the 100 MB analysis limit")
@@ -338,7 +355,7 @@ def analyze_sources(
     if not file_metrics:
         metrics = {key: 100.0 for key in WEIGHTS}
         metrics["testability"] = 100.0 if test_files_present else 60.0
-        not_applicable = True
+        not_applicable = not sources
     else:
         metrics = {
             key: sum(item[key] for item in file_metrics) / len(file_metrics)
