@@ -407,7 +407,7 @@ class PostgresTaskQueue:
         tenant_id: str | None = None,
     ) -> Job | None:
         if (
-            not worker_id or len(worker_id) > 128
+            not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 128
             or type(lease_seconds) is not int or lease_seconds < 15 or lease_seconds > 3600
             or tenant_id is not None and (not isinstance(tenant_id, str) or not tenant_id.strip())
         ):
