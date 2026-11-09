@@ -348,6 +348,8 @@ try {
   });
   assert.equal(otherTenantLogin.status, 200);
   const otherTenantCookie = (otherTenantLogin.headers.get("set-cookie") || "").split(";")[0];
+  const deniedTenantMetrics = await fetch(base + "/api/metrics", { headers: { Cookie: otherTenantCookie } });
+  assert.equal(deniedTenantMetrics.status, 403, "Tenant admins must not access platform-wide operator metrics");
   const otherTenantList = await fetch(base + "/api/tasks", { headers: { Cookie: otherTenantCookie } });
   assert.equal(otherTenantList.status, 200);
   const otherTenantItems = (await otherTenantList.json()).items;
@@ -530,6 +532,11 @@ try {
   await page.locator(".rc-nav-item").filter({ hasText: "AICode Tasks" }).click();
   await page.getByText("Other tenant smoke task", { exact: true }).waitFor({ state: "visible" });
   assert.equal(await page.getByText("Smoke-test task detail", { exact: true }).count(), 0, "A tenant switch must not retain the previous tenant task data");
+  await page.getByText("Other tenant smoke task", { exact: true }).click();
+  await page.locator(".rc-task-modal").waitFor({ state: "visible" });
+  assert.equal(await page.locator(".rc-task-modal").getByRole("button", { name: /Retry failed task/ }).count(), 1, "Tenant admins may retry failed tasks");
+  assert.equal(await page.locator(".rc-task-modal").getByRole("button", { name: /Cancel task/ }).count(), 0, "Failed tasks do not expose a cancel action");
+  await page.locator(".rc-task-modal button[aria-label='Close']").click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
 
