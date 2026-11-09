@@ -63,7 +63,7 @@ HTTPS is required except for loopback development endpoints. Production requires
 
 ## 4. Hybrid Docker + MicroVM execution
 
-The existing rootless, network-disabled Docker sandbox remains the standard backend for ordinary checks. The hybrid router classifies dynamic `pytest` execution using bounded static inspection. Detected dynamic imports, dynamic execution, shell-enabled subprocesses, host-process primitives, network-capable primitives, native/binary artifacts, install lifecycle hooks, unparseable Python, or inventory-limit uncertainty route to MicroVM. Before upload, the snapshot builder rejects high-confidence embedded credentials (common API-token formats and private-key headers), in addition to excluding sensitive paths and filenames.
+The existing rootless, network-disabled Docker sandbox remains the standard backend for ordinary checks. The hybrid router classifies dynamic `pytest` execution using bounded static inspection. Detected dynamic imports, dynamic execution, shell-enabled subprocesses, host-process primitives, network-capable primitives, native/binary artifacts, install lifecycle hooks, unparseable Python, or inventory-limit uncertainty route to MicroVM. Before either Docker or MicroVM test execution, the snapshot builder rejects high-confidence embedded credentials (common API-token formats and private-key headers), in addition to excluding sensitive paths and filenames. The scanner is deliberately high-confidence and is not a substitute for a dedicated secret-scanning product.
 
 **Fail-closed rule:** if a high-risk test requires MicroVM and the MicroVM backend is absent or returns unverifiable evidence, the task fails/blocks. The system never silently falls back to Docker for a high-risk workload.
 
