@@ -285,7 +285,7 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ).fetchone() == ("rusa_worker_login", False, False, True, True)
 
     worker = PostgresTaskQueue(worker_dsn)
-    job = worker.claim("policy-test-worker")
+    job = worker.claim("policy-test-worker", tenant_id="audit-b")
     assert job is not None and job.task_id == task_id and job.tenant_id == "audit-b"
     assert not worker.owns_lease(job.id, "audit-a", "policy-test-worker", job.lease_token)
     assert not worker.complete(job.id, "audit-a", "policy-test-worker", job.lease_token, {})
