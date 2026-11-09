@@ -19,6 +19,8 @@ The correct implementation boundary is:
 
 The ten-agent document and eight-stage DevOps lifecycle are **target specifications**, not proof that all eighteen roles are running in production. Preserve that distinction in product UI, API responses, release notes, and certification evidence.
 
+Transport-neutral v1.0 task, result, and run-event schemas plus Python validators already cover the four domains, ten core-agent roles, and eight lifecycle stages. They are a contract foundation only: they do not instantiate those agents, provide a durable cross-domain workflow engine, or deploy the broker/event infrastructure proposed by the ADR.
+
 ## 2. Alignment to the four architecture domains
 
 | Architecture domain | Repository evidence | Current status | Main gaps |
@@ -32,7 +34,7 @@ Notebook and training assets are not treated as production business services unl
 
 ## 3. Alignment to the ten core agents
 
-The repository currently defines six executable `WorkerRole` values: `analyst`, `architect`, `developer`, `debugger`, `tester`, and `security`.
+The coding runtime currently defines six executable `WorkerRole` values: `analyst`, `architect`, `developer`, `debugger`, `tester`, and `security`. Separately, `schemas/platform/agent-task-v1.schema.json` declares the ten core-agent role values and eight DevOps stages as transport-neutral task metadata; those declarations are not ten independently running agent services.
 
 | Ten-agent specification | Existing implementation | Assessment |
 |---|---|---|
@@ -68,8 +70,8 @@ The supplied communication ADR is marked **Diusulkan**. The DevOps lifecycle doc
 
 | ADR capability | Current implementation | Required next step |
 |---|---|---|
-| HTTPS + JSON API for task submission/status | Present for AICode task API | Extend consistently to cross-domain run APIs |
-| Durable command queue | PostgreSQL `aicode_jobs` queue with leases, retries, idempotency and tenant scope | Retain as current baseline; define when a separate broker is justified |
+| HTTPS + JSON API for task submission/status | Present for AICode task API; platform task/result/run-event schemas are versioned separately | Extend consistently to cross-domain run APIs and define the mapping to the ADR envelope |
+| ADR JSON message envelope v1 | Not yet implemented as the same contract; current platform task/result/run-event schemas and A2A task envelope are distinct models | Define explicit mapping and compatibility tests; do not treat these envelopes as interchangeable |
 | Workflow state and durable audit | PostgreSQL task state, task-policy audit and HMAC audit ledger | Add transactional outbox and state-versioned lifecycle events |
 | Versioned cross-domain task/result/event contracts | JSON Schema v1.0 and Python validators for task, result, and run-event envelopes | Contract foundation implemented; no durable run/event store |
 | RabbitMQ command queues | Not implemented | Implement only after queue topology, DLQ, publisher confirms and recovery are operationally specified |
@@ -115,7 +117,7 @@ The following are still deployment or architecture gates, not code-completion cl
 ### Phase A — Contract and control-plane foundation
 - **Implemented on this branch:** transport-neutral v1.0 task/result/run-event JSON Schemas and Python validators for the four domains, ten core-agent roles, eight lifecycle stages, deadline and authorization references, artifact/evidence digests, and ordered event batches. Existing A2A and AICode contracts remain separate.
 - **Next:** integrate these contracts with durable cross-domain run state, transactional outbox, idempotent event consumers, event-store sequence allocation/replay, and cursor-based status projections. The schema alone does not provide these runtime capabilities.
-- Add per-agent identity/capability declarations and resource-scoped grants.
+- Promote the task schema's `agent_id`, role, and capability fields into a governed registry with lifecycle, ownership, versioning, and resource-scoped grants.
 - Add cancellation, deadline, retry budget, reconciliation, and approval contracts at the run level.
 
 ### Phase B — Complete DevOps lifecycle
