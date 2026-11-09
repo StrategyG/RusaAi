@@ -66,7 +66,7 @@ class AICodeOrchestrator:
     QUALITY_ROLES = (WorkerRole.TESTER, WorkerRole.SECURITY)
     PIPELINE = PRIMARY_ROLES + QUALITY_ROLES
     REQUIRED_TEST_EVIDENCE = ("check:pytest",)
-    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile")
+    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile", "check:refinery")
 
     def __init__(
         self,
@@ -216,7 +216,22 @@ class AICodeOrchestrator:
     @staticmethod
     def _check_passed(result: WorkerResult, key: str) -> bool:
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        if not isinstance(evidence, dict) or evidence.get("exit_code") != 0:
+            return False
+        if key != "check:refinery":
+            return True
+        score = evidence.get("quality_score")
+        digest = evidence.get("report_sha256")
+        return (
+            isinstance(score, (int, float))
+            and not isinstance(score, bool)
+            and score >= 85.0
+            and isinstance(digest, str)
+            and len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            and evidence.get("syntax_valid") is True
+            and evidence.get("blocking_findings") == 0
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
