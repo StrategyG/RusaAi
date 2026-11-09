@@ -75,7 +75,7 @@ class OpenAICompatibleProvider:
     ):
         self.base_url = (base_url or os.getenv("RUSA_MODEL_BASE_URL", "")).rstrip("/")
         self.model = model or os.getenv("RUSA_MODEL_NAME", "rusa-ai")
-        self.api_key = api_key or os.getenv("RUSA_MODEL_API_KEY")
+        self.api_key = os.getenv("RUSA_MODEL_API_KEY") if api_key is None else api_key
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.max_response_bytes = _response_limit(max_response_bytes)
