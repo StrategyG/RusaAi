@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RUSA-AI Agent Task Contract v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "run_id",
+    "tenant_id",
+    "idempotency_key",
+    "correlation_id",
+    "created_at",
+    "deadline_at",
+    "domain",
+    "agent",
+    "action",
+    "input",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "rusa_intelligence",
+        "autonomous_software_engineering",
+        "rusa_business",
+        "rusa_ecosystem"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "code",
+        "build",
+        "test",
+        "release",
+        "deploy",
+        "operate",
+        "monitor"
+      ]
+    },
+    "agent": {
+      "$ref": "#/$defs/agent"
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.:-]*$"
+    },
+    "input": {
+      "type": "object"
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "traceparent": {
+      "type": "string",
+      "maxLength": 128
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_id",
+        "role",
+        "capabilities"
+      ],
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "supreme_orchestrator",
+            "system_architect",
+            "planner",
+            "task_decomposer",
+            "software_engineer",
+            "devops",
+            "qa_testing",
+            "security_policy",
+            "memory_knowledge",
+            "evaluation_reporting"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version",
+        "authorization_id",
+        "decision",
+        "approval_actions"
+      ],
+      "properties": {
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "authorization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "decision": {
+          "const": "allow"
+        },
+        "approval_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "merge",
+              "deploy",
+              "release",
+              "secret_change",
+              "permission_change",
+              "destructive_action"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
