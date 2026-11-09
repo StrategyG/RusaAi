@@ -25,13 +25,14 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
-psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
+psql "$RUSA_KNOWLEDGE_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_aicode_task_list_audit.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/009_aicode_blocked_status.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/010_aicode_cooperative_cancellation.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/011_aicode_cancellation_reconciliation.sql
 ```
 
-The core database uses migrations 001–006 and 008–010. Apply them in numeric order with the migration owner. Apply migration 007 separately to the pgvector-enabled knowledge database. Migration 010 adds the `cancel_requested` state and monotonic `cancel_epoch`; production workers refuse startup if it is missing. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The core database uses migrations 001–006 and 008–011. Apply them in numeric order with the migration owner. Apply migration 007 separately to the pgvector-enabled knowledge database using `RUSA_KNOWLEDGE_MIGRATION_DATABASE_URL`. Migration 010 adds the `cancel_requested` state and monotonic `cancel_epoch`; migration 011 adds the append-only `task.reconcile` audit action. Production workers refuse startup if these controls are missing. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -217,7 +218,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval`, `failed`, or `blocked` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure or reconciling external side effects. A running task may temporarily report `cancel_requested`; do not retry it until the worker acknowledges cancellation or the queue moves an expired unacknowledged cancellation to `awaiting_approval`. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `failed` or `blocked` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry`. Ordinary `awaiting_approval` tasks may also be retried after review. If the task has `cancel_reconciliation_required=true`, retry is rejected until a `platform_admin` or `tenant_admin` calls `POST /v1/aicode/tasks/{task_id}/reconcile` with a confirmed `side_effect` (`NONE` or `APPLIED`) and bounded evidence. The reconciliation event is durably audited; the task remains `awaiting_approval` until the owner separately requests retry. A running task may temporarily report `cancel_requested`; do not retry it until the worker acknowledges cancellation or the queue moves an expired unacknowledged cancellation to `awaiting_approval`. The retry endpoint does not approve PR merges or deployments.
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
