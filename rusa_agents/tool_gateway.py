@@ -11,9 +11,9 @@ import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
-from threading import BoundedSemaphore
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from threading import BoundedSemaphore
 from typing import Any
 from uuid import uuid4
 
