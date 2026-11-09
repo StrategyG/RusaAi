@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import stat
 import tarfile
 import time
 from pathlib import Path
@@ -20,7 +21,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..metrics import REFINERY_SANDBOX_DURATION, REFINERY_SANDBOX_RUNS
-from ..secret_scan import contains_high_confidence_secret
+from ..secret_scan import contains_high_confidence_secret_stream
 from ..tool_gateway import DockerSandbox, ToolResult
 
 MICROVM_PROFILES = frozenset({"pytest", "compile", "ruff", "bandit"})
@@ -255,23 +256,33 @@ class MicroVMHTTPBackend:
                         resolved = path.resolve(strict=True)
                         if root not in resolved.parents:
                             continue
-                        size = resolved.stat().st_size
-                        total_bytes += size
-                        file_count += 1
-                        if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
-                            raise ValueError("MicroVM source snapshot exceeds configured file or byte limits")
-                        if contains_high_confidence_secret(resolved):
-                            raise ValueError(
-                                "MicroVM source snapshot contains high-confidence credential material"
-                            )
-                        relative = resolved.relative_to(root).as_posix()
-                        info = tarfile.TarInfo(relative)
-                        info.size = size
-                        info.mode = 0o444
-                        info.mtime = 0
-                        info.uid = 0
-                        info.gid = 0
-                        with resolved.open("rb") as source:
+                        descriptor = os.open(
+                            resolved,
+                            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                        )
+                        with os.fdopen(descriptor, "rb") as source:
+                            metadata = os.fstat(source.fileno())
+                            if not stat.S_ISREG(metadata.st_mode):
+                                raise ValueError("MicroVM snapshots accept regular files only")
+                            size = metadata.st_size
+                            total_bytes += size
+                            file_count += 1
+                            if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
+                                raise ValueError(
+                                    "MicroVM source snapshot exceeds configured file or byte limits"
+                                )
+                            if contains_high_confidence_secret_stream(source):
+                                raise ValueError(
+                                    "MicroVM source snapshot contains high-confidence credential material"
+                                )
+                            relative = resolved.relative_to(root).as_posix()
+                            info = tarfile.TarInfo(relative)
+                            info.size = size
+                            info.mode = 0o444
+                            info.mtime = 0
+                            info.uid = 0
+                            info.gid = 0
+                            source.seek(0)
                             archive.addfile(info, source)
         data = buffer.getvalue()
         if len(data) > MAX_SNAPSHOT_BYTES:
