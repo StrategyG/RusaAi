@@ -42,3 +42,17 @@ def contains_high_confidence_secret(path: str | Path) -> bool:
     )
     with os.fdopen(descriptor, "rb") as source:
         return contains_high_confidence_secret_stream(source)
+
+
+def contains_high_confidence_secret_text(value: str | bytes) -> bool:
+    """Inspect text before it is returned to or persisted from an agent."""
+    if isinstance(value, str):
+        try:
+            content = value.encode("utf-8")
+        except UnicodeError:
+            return True
+    elif isinstance(value, bytes):
+        content = value
+    else:
+        raise TypeError("secret scanner accepts only text or bytes")
+    return any(pattern.search(content) for pattern in _SECRET_PATTERNS)
