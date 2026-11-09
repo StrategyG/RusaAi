@@ -345,6 +345,7 @@ function MetricPreview({ text }: { text: string }) {
 export default function RusaControlCenter() {
   const [session, setSession] = useState<Identity | null>(null);
   const [booting, setBooting] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [loginError, setLoginError] = useState("");
   const [page, setPage] = useState<PageId>("overview");
@@ -571,6 +572,7 @@ export default function RusaControlCenter() {
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (loggingOut) return;
     setBusy(true);
     setLoginError("");
     try {
@@ -589,6 +591,7 @@ export default function RusaControlCenter() {
   }
 
   async function logout() {
+    setLoggingOut(true);
     // Invalidate outstanding reads before clearing the tenant-scoped view.
     taskRequestSeqRef.current += 1;
     approvalRequestSeqRef.current += 1;
@@ -630,11 +633,13 @@ export default function RusaControlCenter() {
     setNotice("");
     setPage("overview");
 
-    // Clear the cookie after the local tenant view has already been discarded.
+    // Prevent a new login from racing the in-flight cookie deletion.
     try {
-      await fetch("/api/session", { method: "DELETE" });
+      await fetch("/api/session", { method: "DELETE", signal: AbortSignal.timeout(5000) });
     } catch {
-      // The next request still revalidates the encrypted cookie against the API.
+      setLoginError("Sesi lokal ditutup, tetapi penghapusan cookie belum terkonfirmasi. Masuk kembali untuk mengganti sesi.");
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -916,9 +921,9 @@ export default function RusaControlCenter() {
           <h1>Masuk ke RUSA AI</h1>
           <p>Gunakan tenant-scoped RUSA API key. Kunci disimpan dalam sesi server terenkripsi dan tidak dikirim kembali ke browser.</p>
           <form onSubmit={login} className="rc-form">
-            <label>RUSA API Key<input type="password" autoComplete="current-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key" required /></label>
+            <label>RUSA API Key<input type="password" autoComplete="current-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Masukkan API key" required disabled={loggingOut} /></label>
             {loginError && <div className="rc-alert rc-alert-danger">{loginError}</div>}
-            <button className="rc-btn rc-btn-primary rc-btn-wide" disabled={busy || !apiKey.trim()} type="submit">{busy ? "Menghubungkan…" : "Connect to RUSA AI"} <ArrowRight size={16} /></button>
+            <button className="rc-btn rc-btn-primary rc-btn-wide" disabled={busy || loggingOut || !apiKey.trim()} type="submit">{loggingOut ? "Menghapus sesi…" : busy ? "Menghubungkan…" : "Connect to RUSA AI"} <ArrowRight size={16} /></button>
           </form>
           <div className="rc-login-foot"><LockKeyhole size={15} /> Akses ditentukan oleh tenant, roles, dan permission RUSA API. Jangan gunakan API key development pada production.</div>
         </section>
