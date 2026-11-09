@@ -2,6 +2,11 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -f "$ROOT/mobile-local/.env" ]; then
+  set -a
+  . "$ROOT/mobile-local/.env"
+  set +a
+fi
 if ! printenv RUSA_MOBILE_DATA_DIR >/dev/null 2>&1; then
   export RUSA_MOBILE_DATA_DIR="$HOME/.rusa-hybrida"
 fi

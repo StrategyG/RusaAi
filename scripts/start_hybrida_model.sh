@@ -1,6 +1,13 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -f "$ROOT/mobile-local/.env" ]; then
+  set -a
+  . "$ROOT/mobile-local/.env"
+  set +a
+fi
+
 MODEL_FILE="$HOME/.rusa-hybrida/models/Qwen3-0.6B-Q4_0.gguf"
 LLAMA_SERVER="$HOME/.local/bin/llama-server"
 

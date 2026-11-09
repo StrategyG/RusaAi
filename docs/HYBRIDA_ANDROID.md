@@ -39,9 +39,10 @@ Run these commands from the repository root in Termux:
     git clone https://github.com/StrategyG/RusaAi.git
     cd RusaAi
     bash scripts/setup_hybrida_termux.sh
+    cp mobile-local/.env.example mobile-local/.env
     bash scripts/download_hybrida_model.sh
 
-The setup script installs the Python dependencies and builds the llama-server binary from the upstream llama.cpp source. The model download is separate because the model is large and is not committed to Git.
+The setup script installs the Python dependencies and builds the llama-server binary from the upstream llama.cpp source. Copy the example settings file before starting services; both start scripts load mobile-local/.env automatically. The model download is separate because the model is large and is not committed to Git.
 
 ### Start the model
 
