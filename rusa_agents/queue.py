@@ -879,7 +879,7 @@ class PostgresTaskQueue:
                   AND status IN ('queued', 'running', 'awaiting_approval')
                   AND NOT (
                       status='awaiting_approval'
-                      AND result->>'cancel_reconciliation_required'='true'
+                      AND COALESCE(result->>'cancel_reconciliation_required', 'false')='true'
                   )
                 RETURNING status
             """, (task_id, tenant_id)).fetchone()
