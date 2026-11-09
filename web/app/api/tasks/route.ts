@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
   const response = await backendFetch("/v1/aicode/tasks", session, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: request.signal
   });
   return forwardJson(response);
 }
