@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY rusa_agents ./rusa_agents
+COPY rusa_knowledge ./rusa_knowledge
+COPY rusa_training ./rusa_training
+COPY rusa_mcp ./rusa_mcp
+COPY rusa_devops ./rusa_devops
+COPY requirements-devops.txt ./
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -e . \
+    && python -m pip install -r requirements-devops.txt
+
+RUN groupadd --gid 10001 rusa && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin rusa \
+    && mkdir -p /var/lib/rusa/devops-artifacts \
+    && chown -R rusa:rusa /var/lib/rusa /app
+USER 10001:10001
+
+EXPOSE 9101
+CMD ["python", "-m", "rusa_devops.worker_main"]
