@@ -96,7 +96,7 @@ The UI shows each stage's purpose, inputs, outputs, exit criteria, and authority
 
 The task API supports the `awaiting_approval` state and the retry endpoint. It does not expose an approve/reject endpoint, an approval record, or an approver identity contract.
 
-The underlying queue retry method currently accepts both `failed` and `awaiting_approval`. The UI deliberately exposes retry only for `failed` records and does not treat retry as approval. Do not use the retry endpoint to bypass required human governance. A dedicated approval decision and audit contract is required before approve/reject controls can be added.
+The queue retry method now accepts only `failed` records. `awaiting_approval` is not retryable and the API returns HTTP 409 for that state. The UI also exposes retry only for `failed` records and does not treat retry as approval. A dedicated approval decision and audit contract is required before approve/reject controls can be added.
 
 ## Task list semantics
 
