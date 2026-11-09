@@ -44,7 +44,7 @@ Notebook and training assets are not treated as production business services unl
 
 ## 4. Alignment to the ten core agents
 
-The coding runtime currently defines six executable `WorkerRole` values: `analyst`, `architect`, `developer`, `debugger`, `tester`, and `security`. Separately, `schemas/platform/agent-task-v1.schema.json` declares the ten core-agent role values and eight DevOps stages as transport-neutral task metadata; those declarations are not ten independently running agent services.
+The coding runtime currently defines six executable `WorkerRole` values: `analyst`, `architect`, `developer`, `debugger`, `tester`, and `security`. Separately, `schemas/platform/agent-task-v1.schema.json` distinguishes `core_agent` identities (ten `core_role` values) from `devops_stage_agent` identities (eight canonical `stage_agent_id` values). The schema also binds each stage-agent ID to its matching lifecycle stage. These are transport-neutral declarations, not eighteen independently running agent services.
 
 | Ten-agent specification | Existing implementation | Assessment |
 |---|---|---|
@@ -142,7 +142,7 @@ The following are still deployment or architecture gates, not code-completion cl
 ### Phase A — Contract and control-plane foundation
 - **Implemented on this branch:** transport-neutral v1.0 task/result/run-event JSON Schemas and Python validators for the four domains, ten core-agent roles, eight lifecycle stages, deadline and authorization references, artifact/evidence digests, and ordered event batches. Existing A2A and AICode contracts remain separate.
 - **Next:** integrate these contracts with durable cross-domain run state, transactional outbox, idempotent event consumers, event-store sequence allocation/replay, and cursor-based status projections. The schema alone does not provide these runtime capabilities.
-- Promote the task schema's `agent_id`, role, and capability fields into a governed registry with lifecycle, ownership, versioning, and resource-scoped grants.
+- Promote the task schema's `agent_id`, `agent_type`, `core_role` or `stage_agent_id`, and capability fields into a governed registry with lifecycle, ownership, versioning, and resource-scoped grants.
 - Add cancellation, deadline, retry budget, reconciliation, and approval contracts at the run level.
 
 ### Phase B — Complete DevOps lifecycle
