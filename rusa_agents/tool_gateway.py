@@ -445,7 +445,7 @@ class WorkspaceToolGateway:
                 json.dumps(output, sort_keys=True, ensure_ascii=False),
                 evidence,
             )
-        except (OSError, UnicodeDecodeError, ValueError, ToolDenied) as exc:
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
             REFINERY_QUALITY_REPORTS.labels("error").inc()
             return ToolResult(
                 False,
