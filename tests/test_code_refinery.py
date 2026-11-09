@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import tarfile
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -536,3 +537,35 @@ def test_analyzer_does_not_call_oversized_input_not_applicable(monkeypatch):
     assert not report.passed
     assert not report.syntax_valid
     assert not report.not_applicable
+
+
+
+def test_gateway_withholds_embedded_credentials_from_agent_reads(tmp_path):
+    token = "ghp_" + "C" * 36
+    (tmp_path / "module.py").write_text(f"TOKEN = '{token}'\n", encoding="utf-8")
+    result = WorkspaceToolGateway(tmp_path).read_file("module.py")
+    assert not result.ok
+    assert token not in result.output
+    assert result.evidence["secret_scan"] == "blocked"
+
+
+def test_gateway_rejects_writes_containing_high_confidence_credentials(tmp_path):
+    token = "ghp_" + "D" * 36
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(Exception, match="Writing high-confidence credential"):
+        gateway.write_file("new_module.py", f"TOKEN = '{token}'\n", WorkerRole.DEVELOPER)
+    assert not (tmp_path / "new_module.py").exists()
+
+
+def test_gateway_withholds_secret_bearing_git_diff(tmp_path, monkeypatch):
+    token = "ghp_" + "E" * 36
+    monkeypatch.setattr(gateway_module, "GIT_BIN", "/usr/bin/git")
+    monkeypatch.setattr(
+        gateway_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=token, stderr=""),
+    )
+    result = WorkspaceToolGateway(tmp_path).git_diff()
+    assert not result.ok
+    assert token not in result.output
+    assert result.evidence["secret_scan"] == "blocked"
