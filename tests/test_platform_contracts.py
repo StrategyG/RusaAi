@@ -4,8 +4,10 @@ from uuid import uuid4
 import pytest
 
 from rusa_agents.platform_contracts import (
+    AgentType,
     CoreAgentRole,
     DevOpsStage,
+    DevOpsStageAgentId,
     PlatformContractError,
     PlatformDomain,
     validate_agent_result,
@@ -29,7 +31,8 @@ def _task():
         "stage": "code",
         "agent": {
             "agent_id": "software-engineer-1",
-            "role": "software_engineer",
+            "agent_type": AgentType.CORE_AGENT.value,
+            "core_role": "software_engineer",
             "capabilities": ["repo_read", "workspace_write"],
         },
         "action": "repository.change",
@@ -81,7 +84,12 @@ def _event(sequence=1, state_version=1):
         "event_type": "run.started",
         "occurred_at": "2026-11-09T10:00:00Z",
         "correlation_id": "2f1a0000-0000-4000-8000-000000000002",
-        "actor": {"actor_id": "orchestrator-1", "actor_type": "agent", "agent_role": "supreme_orchestrator"},
+        "actor": {
+            "actor_id": "orchestrator-1",
+            "actor_type": "agent",
+            "agent_type": AgentType.CORE_AGENT.value,
+            "core_role": "supreme_orchestrator",
+        },
         "payload": {"workflow": "coding"},
     }
 
@@ -91,6 +99,28 @@ def test_agent_task_contract_accepts_authorized_versioned_task():
     assert len(PlatformDomain) == 4
     assert len(CoreAgentRole) == 10
     assert len(DevOpsStage) == 8
+
+
+def test_devops_stage_agent_identity_is_not_conflated_with_core_agent_role():
+    task = _task()
+    task["stage"] = "build"
+    task["agent"] = {
+        "agent_id": DevOpsStageAgentId.BUILD.value,
+        "agent_type": AgentType.DEVOPS_STAGE_AGENT.value,
+        "stage_agent_id": DevOpsStageAgentId.BUILD.value,
+        "capabilities": ["build"],
+    }
+    validate_agent_task(task)
+    assert len(DevOpsStageAgentId) == 8
+
+    task["stage"] = "release"
+    with pytest.raises(PlatformContractError, match="lifecycle stage"):
+        validate_agent_task(task)
+
+    task["stage"] = "build"
+    task["agent"]["agent_id"] = "another-agent"
+    with pytest.raises(PlatformContractError, match="canonical stage_agent_id"):
+        validate_agent_task(task)
 
 
 def test_agent_task_contract_rejects_unknown_domain_and_policy_decision():
@@ -158,15 +188,27 @@ def test_contract_validation_diagnostics_never_echo_invalid_secret_values():
     assert secret not in str(exc_info.value)
 
 
+def test_run_event_accepts_a_distinct_devops_stage_agent_actor():
+    event = _event()
+    event["actor"] = {
+        "actor_id": DevOpsStageAgentId.BUILD.value,
+        "actor_type": "agent",
+        "agent_type": AgentType.DEVOPS_STAGE_AGENT.value,
+        "stage_agent_id": DevOpsStageAgentId.BUILD.value,
+    }
+    validate_run_event(event)
+
+
 def test_run_event_requires_agent_role_only_for_agent_actors():
     event = _event()
-    event["actor"].pop("agent_role")
+    event["actor"].pop("core_role")
     with pytest.raises(PlatformContractError, match="agent actors"):
         validate_run_event(event)
 
     event = _event()
     event["actor"]["actor_type"] = "human"
-    with pytest.raises(PlatformContractError, match="only agent actors"):
+    event["actor"].pop("agent_type")
+    with pytest.raises(PlatformContractError):
         validate_run_event(event)
 
 
