@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
             paths=args.files,
             min_score=args.min_score,
         )
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError) as exc:
         print(json.dumps({"passed": False, "error": f"{type(exc).__name__}: {exc}"}))
         return 2
     print(json.dumps(report.to_dict(), sort_keys=True, ensure_ascii=False))
