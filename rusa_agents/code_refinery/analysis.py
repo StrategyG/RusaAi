@@ -10,8 +10,8 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 MAX_FILES = 2_000
