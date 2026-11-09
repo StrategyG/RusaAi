@@ -91,10 +91,10 @@ The integration branch includes the following concrete refinements:
 5. **Alias-aware Python AST checks:** imports such as `import subprocess as proc`, `from os import system as launch`, wildcard imports, and dynamic import aliases are resolved before classifying dangerous execution primitives.
 6. **Blocked-task semantics:** a policy/quality-blocked task is not automatically requeued as a transient infrastructure failure.
 7. **Cooperative cancellation:** migration `010_aicode_cooperative_cancellation.sql` adds `cancel_requested` and monotonic `cancel_epoch`. A running task retains its lease while the worker observes cancellation through heartbeat. The default worker timing is a 30-second lease and 10-second heartbeat.
-8. **Ambiguous side effects:** if a worker cannot establish whether an external side effect occurred, the task is moved to `awaiting_approval` with `side_effect=UNKNOWN`; it is not silently retried or reported as safely cancelled.
+8. **Ambiguous side effects:** if a worker cannot establish whether an external side effect occurred, the task is moved to `awaiting_approval` with `side_effect=UNKNOWN`; retry is blocked until a tenant/platform administrator records an audited `task.reconcile` determination (`NONE` or `APPLIED`) with evidence.
 9. **API and control-center consistency:** `cancel_requested` is exposed as a distinct task status and included in task filtering and active-task views.
 
-Migration 010 is a forward-only database change. Apply it with the database migration owner before deploying code that requires cooperative cancellation. Never run an older worker that does not understand the new state concurrently with the upgraded cancellation workflow.
+Migrations 010 and 011 are forward-only database changes. Apply them with the database migration owner before deploying code that requires cooperative cancellation and audited reconciliation. Never run an older worker that does not understand the new state concurrently with the upgraded cancellation workflow.
 
 ## 7. Production qualification boundary
 
