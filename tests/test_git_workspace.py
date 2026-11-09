@@ -221,6 +221,7 @@ def test_ci_evidence_requires_all_jobs_from_latest_trusted_suite():
             conclusion=None,
             head_sha=sha,
         ),
+        _github_check_run("RAG and MCP integration tests", suite_id=101, run_id=1013, head_sha=sha),
     ]
 
     state, reason = GitHubPublisher._evaluate_check_runs(runs, sha)
@@ -309,3 +310,17 @@ def test_ci_evidence_does_not_mix_required_jobs_from_different_suites():
 
     assert state == "pending"
     assert "incomplete" in reason
+
+
+
+def test_ci_evidence_passes_only_when_all_three_jobs_succeed_in_latest_suite():
+    sha = "1" * 40
+    runs = [
+        _github_check_run("Test, lint, and security", suite_id=900, run_id=9001, head_sha=sha),
+        _github_check_run("Build, test, and scan production images", suite_id=900, run_id=9002, head_sha=sha),
+        _github_check_run("RAG and MCP integration tests", suite_id=900, run_id=9003, head_sha=sha),
+    ]
+    assert GitHubPublisher._evaluate_check_runs(runs, sha) == (
+        "success",
+        "Latest trusted GitHub Actions suite passed for the exact commit SHA",
+    )
