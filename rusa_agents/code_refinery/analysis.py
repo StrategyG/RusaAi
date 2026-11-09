@@ -222,6 +222,8 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
                 )
         complexity_score = sum(points) / len(points)
 
+    metrics["complexity"] = complexity_score
+
     long_functions = [
         node for node in functions
         if (getattr(node, "end_lineno", node.lineno) - node.lineno + 1) > 50
@@ -231,7 +233,8 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
     code_penalty = min(40.0, len(long_functions) * 5.0 + len(deep_functions) * 5.0)
     if len(lines) > 500:
         code_penalty += min(30.0, (len(lines) - 500) / 25.0)
-    metrics["code_quality"] = max(0.0, 100.0 - code_penalty)
+    maintainability_score = max(0.0, 100.0 - code_penalty)
+    metrics["code_quality"] = (naming_score + maintainability_score) / 2.0
 
     security_penalty = 0.0
     for node in ast.walk(tree):
