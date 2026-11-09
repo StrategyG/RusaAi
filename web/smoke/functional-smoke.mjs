@@ -459,6 +459,12 @@ try {
   await taskModal.locator("label").filter({ hasText: "Acceptance criteria" }).locator("textarea").fill("The browser smoke task is accepted");
   await taskModal.getByRole("button", { name: /Submit task/ }).click();
   await page.locator(".rc-task-modal").waitFor({ state: "visible" });
+  assert.match(await page.locator(".rc-task-modal").innerText(), /Browser smoke creates a task/);
+  assert.match(await page.locator(".rc-task-modal").innerText(), /QUEUED/);
+  await page.locator(".rc-task-modal button[aria-label='Close']").click();
+
+  await page.locator(".rc-table-link").filter({ hasText: "Smoke-test task detail" }).click();
+  await page.locator(".rc-task-modal").waitFor({ state: "visible" });
   assert.match(await page.locator(".rc-task-modal").innerText(), /Smoke-test task detail/);
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".rc-task-modal").getByRole("button", { name: /Retry failed task/ }).click();
