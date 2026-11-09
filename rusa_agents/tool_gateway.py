@@ -334,16 +334,15 @@ class WorkspaceToolGateway:
                 raise ToolDenied("Only regular workspace files can be read")
             if metadata.st_size > self.max_file_bytes:
                 raise ToolDenied("File exceeds configured read limit")
-            if contains_high_confidence_secret_stream(source):
-                return ToolResult(
-                    False,
-                    "File read blocked because high-confidence credential material was detected.",
-                    {"path": raw_path, "secret_scan": "blocked"},
-                )
-            source.seek(0)
             content = source.read(self.max_file_bytes + 1)
             if len(content) > self.max_file_bytes:
                 raise ToolDenied("File exceeds configured read limit")
+        if contains_high_confidence_secret_text(content):
+            return ToolResult(
+                False,
+                "File read blocked because high-confidence credential material was detected.",
+                {"path": raw_path, "secret_scan": "blocked"},
+            )
         try:
             decoded = content.decode("utf-8")
         except UnicodeError:
