@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from typing import Any, Literal
 from uuid import uuid4
@@ -58,7 +59,8 @@ def _queue(request: Request):
 
 def _store():
     try:
-        return PostgresDevOpsStore()
+        dsn = os.getenv("RUSA_API_DATABASE_URL") or os.getenv("RUSA_DATABASE_URL")
+        return PostgresDevOpsStore(dsn)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail="DevOps persistence is not configured") from exc
 
