@@ -11,8 +11,8 @@ import json
 import os
 import re
 from dataclasses import asdict, dataclass
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
-from typing import Mapping
 
 MAX_FILES = 2_000
 MAX_FILE_BYTES = 1_000_000
