@@ -61,8 +61,9 @@ Use `rusa_agents.platform_contracts`:
 
 Validation is fail-closed. A dispatchable task must carry an explicit policy
 authorization ID and `decision=allow`; a denied or approval-pending action must
-not be dispatched. A succeeded agent result cannot contain failed or held
-evidence. Event batches cannot mix tenants, runs, or correlation IDs, and their
+not be dispatched. A succeeded agent result must include at least one verification-evidence
+record, and every included record must pass; missing, failed, or held evidence
+cannot be reported as success. Event batches cannot mix tenants, runs, or correlation IDs, and their
 sequence/state versions cannot move backwards.
 
 ## Security and implementation boundary
