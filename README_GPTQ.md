@@ -133,7 +133,7 @@ The current RUSA-AI repository has `scripts/create_model_manifest.py`; it requir
 python scripts/create_model_manifest.py \
   --model-dir artifacts/quantized/model-gptq-int4 \
   --model-id "organization/model-name" \
-  -revision "40-haracter-huggingface-commit-sha" \
+  --revision "40-character-huggingface-commit-sha" \
   --license "EXACT-MODEL-LICENSE" \
   --tokenizer-id "organization/model-name" \
   --tokenizer-revision "40-character-tokenizer-commit-sha"
@@ -141,7 +141,7 @@ python scripts/create_model_manifest.py \
 
 Use the SHA-256 printed by the script as `RUSA_MODEL_MANIFEST_SHA256`. Do not guess the license or revision. If the tokenizer is hosted in a separate repository, use its actual ID and revision.
 
-Important: creating a GPTQ artifact does not automatically integrate GPTQ loading into the current RUSA-AI API. The current `TransformersBackend` loads through `AutoModelForCausalLM.from_pretrained`, and the repository's optional model requirements do not yet declare GPTQModel. Before deploying through the API, add and test the compatible GPTQModel dependency/loader path or use a separately validated serving engine such as a compatible vLLM release. A successful GPTQModel smoke test alone is not production certification.
+Important: creating a GPTQ artifact does not automatically integrate GPTQ loading into the current RUSA-AI API. The current `TransformersBackend` loads through `AutoModelForCausalLM.from_pretrained`, and the repository's optional model requirements do not yet declare GPTQModel. Before deploying through the API, add and test the compatible GPTQModel dependency/loader path or use a separately validated serving engine such as a compatible vLLMx release. A successful GPTQModel smoke test alone is not production certification.
 
 ## Troubleshooting
 
