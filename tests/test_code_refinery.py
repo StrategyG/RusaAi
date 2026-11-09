@@ -1,6 +1,8 @@
 # ruff: noqa: I001
 import asyncio
+import io
 import json
+import tarfile
 
 import httpx
 import pytest
@@ -294,3 +296,23 @@ def test_microvm_environment_requires_tls_in_production(monkeypatch):
     monkeypatch.setenv("RUSA_MICROVM_API_KEY", "k" * 32)
     with pytest.raises(ValueError, match="must use HTTPS"):
         MicroVMHTTPBackend.from_env()
+
+
+
+def test_microvm_snapshot_is_deterministic_and_excludes_secrets(tmp_path):
+    (tmp_path / "app.py").write_text(GOOD_SOURCE, encoding="utf-8")
+    (tmp_path / ".env").write_text("API_KEY=must-not-leave-workspace", encoding="utf-8")
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "token.txt").write_text("private-token", encoding="utf-8")
+
+    first, first_digest = MicroVMHTTPBackend._archive_workspace(tmp_path)
+    second, second_digest = MicroVMHTTPBackend._archive_workspace(tmp_path)
+
+    assert first_digest == second_digest
+    assert first == second
+    with tarfile.open(fileobj=io.BytesIO(first), mode="r:gz") as archive:
+        names = archive.getnames()
+        assert "app.py" in names
+        assert ".env" not in names
+        assert "secrets/token.txt" not in names
