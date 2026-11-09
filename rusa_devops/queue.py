@@ -32,9 +32,19 @@ class PostgresDevOpsQueue:
     def verify_ready(self) -> bool:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT to_regclass('public.rusa_devops_jobs'), to_regclass('public.rusa_devops_audit_events')"
+                """
+                SELECT
+                    to_regclass('public.rusa_devops_jobs') IS NOT NULL,
+                    to_regclass('public.rusa_devops_audit_events') IS NOT NULL,
+                    has_table_privilege(current_user, 'public.rusa_devops_jobs', 'SELECT'),
+                    has_table_privilege(current_user, 'public.rusa_devops_jobs', 'UPDATE'),
+                    (SELECT relrowsecurity AND relforcerowsecurity
+                     FROM pg_class WHERE oid=to_regclass('public.rusa_devops_jobs')),
+                    (SELECT pg_has_role(current_user, 'rusa_api_runtime', 'member')
+                         OR pg_has_role(current_user, 'rusa_worker_runtime', 'member'))
+                """
             ).fetchone()
-        return bool(rows and all(value is not None for value in rows))
+        return bool(rows and all(rows))
 
     def ping(self) -> bool:
         with self._connect() as conn:
