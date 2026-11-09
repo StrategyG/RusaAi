@@ -575,3 +575,110 @@ def test_aicode_task_list_rejects_unknown_status(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert response.status_code == 422
+
+
+def test_aicode_task_intake_rejects_credential_material(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}')
+
+    class StubQueue:
+        def enqueue(self, *args, **kwargs):
+            raise AssertionError("credential-bearing task must not reach the queue")
+
+    monkeypatch.setattr(app.state, "queue", StubQueue(), raising=False)
+    token = "ghp_" + ("f" * 36)
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Use this token " + token,
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["Do not persist the token"],
+        },
+    )
+    assert response.status_code == 422
+    assert token not in response.text
+
+
+def test_development_task_authentication_binds_a_local_principal(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setenv("RUSA_DEFAULT_TENANT", "local-tenant")
+    response = client.get("/v1/auth/session")
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == "local-tenant"
+    assert response.json()["roles"] == ["tenant_admin"]
+
+
+
+def test_cancellation_reconciliation_endpoint_is_tenant_admin_gated(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    raw_key = "tenant-admin-reconcile-test-key-000000000000"
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        json.dumps({
+            hashlib.sha256(raw_key.encode()).hexdigest(): {
+                "subject": "tenant-admin-reconcile",
+                "tenant_id": "tenant-reconcile",
+                "roles": ["tenant_admin"],
+            }
+        }),
+    )
+
+    class StubQueue:
+        def __init__(self):
+            self.arguments = None
+
+        def reconcile_cancellation(self, task_id, tenant_id, **kwargs):
+            self.arguments = (task_id, tenant_id, kwargs)
+            return True
+
+    queue = StubQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    task_id = str(uuid.uuid4())
+    response = TestClient(app).post(
+        f"/v1/aicode/tasks/{task_id}/reconcile",
+        headers={"X-API-Key": raw_key},
+        json={
+            "side_effect": "NONE",
+            "evidence": "Verified that no remote branch or pull request was created.",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["reconciled"] is True
+    assert response.json()["retry_requires_explicit_action"] is True
+    assert queue.arguments[0] == task_id
+    assert queue.arguments[1] == "tenant-reconcile"
+    assert queue.arguments[2]["side_effect"] == "NONE"
+
+
+def test_cancellation_reconciliation_endpoint_rejects_developer_role(monkeypatch):
+    raw_key = "developer-reconcile-test-key-000000000000"
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        json.dumps({
+            hashlib.sha256(raw_key.encode()).hexdigest(): {
+                "subject": "developer-user",
+                "tenant_id": "tenant-reconcile",
+                "roles": ["developer"],
+            }
+        }),
+    )
+    response = client.post(
+        f"/v1/aicode/tasks/{uuid.uuid4()}/reconcile",
+        headers={"X-API-Key": raw_key},
+        json={
+            "side_effect": "NONE",
+            "evidence": "Verified that no remote branch or pull request was created.",
+        },
+    )
+    assert response.status_code == 403

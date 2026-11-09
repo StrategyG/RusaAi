@@ -57,7 +57,11 @@ class RuntimeConfig:
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment not in {"development", "test", "staging", "production"}:
+            raise ValueError(
+                "ENVIRONMENT must be one of development, test, staging, or production"
+            )
         raw_enabled = os.getenv("RUSA_AICODE_ENABLED")
         if raw_enabled is None:
             aicode_enabled = environment != "production"

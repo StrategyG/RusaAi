@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RUSA-AI Run Event Contract v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "run_id",
+    "tenant_id",
+    "sequence",
+    "state_version",
+    "event_type",
+    "occurred_at",
+    "correlation_id",
+    "actor",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "state_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "run.accepted",
+        "run.started",
+        "run.progress",
+        "run.awaiting_approval",
+        "run.cancel_requested",
+        "run.cancelled",
+        "run.succeeded",
+        "run.failed",
+        "run.blocked",
+        "agent.task.dispatched",
+        "agent.task.completed",
+        "agent.task.failed",
+        "policy.decision",
+        "human.approval.requested",
+        "human.approval.granted",
+        "human.approval.denied",
+        "evidence.recorded",
+        "plan.completed",
+        "code.completed",
+        "build.completed",
+        "test.completed",
+        "release.approved",
+        "deploy.completed",
+        "operate.incident_detected",
+        "operate.recovered",
+        "monitor.alert_triggered",
+        "monitor.feedback_created",
+        "workflow.blocked",
+        "workflow.completed"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_id",
+        "actor_type"
+      ],
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent",
+            "service"
+          ]
+        },
+        "agent_type": {
+          "type": "string",
+          "enum": [
+            "core_agent",
+            "devops_stage_agent"
+          ]
+        },
+        "core_role": {
+          "type": "string",
+          "enum": [
+            "supreme_orchestrator",
+            "system_architect",
+            "planner",
+            "task_decomposer",
+            "software_engineer",
+            "devops",
+            "qa_testing",
+            "security_policy",
+            "memory_knowledge",
+            "evaluation_reporting"
+          ]
+        },
+        "stage_agent_id": {
+          "type": "string",
+          "enum": [
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "actor_type": {
+              "const": "human"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_type"
+                ]
+              },
+              {
+                "required": [
+                  "core_role"
+                ]
+              },
+              {
+                "required": [
+                  "stage_agent_id"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "service"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_type"
+                ]
+              },
+              {
+                "required": [
+                  "core_role"
+                ]
+              },
+              {
+                "required": [
+                  "stage_agent_id"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "agent"
+            },
+            "agent_type": {
+              "const": "core_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "core_role"
+          ],
+          "not": {
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "agent"
+            },
+            "agent_type": {
+              "const": "devops_stage_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "stage_agent_id"
+          ],
+          "not": {
+            "required": [
+              "core_role"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

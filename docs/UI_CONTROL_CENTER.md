@@ -17,7 +17,8 @@ The architecture document defines four pillars: AI Autonomous Software Engineeri
 | Task history | GET /v1/aicode/tasks with tenant-scoped pagination and optional status |
 | Task detail | GET /v1/aicode/tasks/{task_id} |
 | Retry | POST /v1/aicode/tasks/{task_id}/retry |
-| Cancellation | DELETE /v1/aicode/tasks/{task_id} |
+| Cancellation | DELETE /v1/aicode/tasks/{task_id} | Queued tasks cancel immediately; running tasks enter cancel_requested and retain their lease until worker acknowledgement |
+| Cancellation reconciliation | POST /v1/aicode/tasks/{task_id}/reconcile | Tenant/platform admin records NONE or APPLIED with bounded evidence before retry is enabled |
 | Chat | POST /v1/chat/completions |
 | Health | GET /health and GET /health/ready |
 
@@ -28,7 +29,7 @@ The API key is held in an encrypted JWE session cookie with HttpOnly and SameSit
 GET /v1/aicode/tasks
 
 Query parameters:
-- status: queued, running, awaiting_approval, succeeded, failed, or cancelled
+- status: queued, running, cancel_requested, awaiting_approval, succeeded, failed, blocked, or cancelled
 - limit: 1–100 (default 50)
 - offset: 0–100000 (default 0)
 
@@ -46,9 +47,9 @@ The All Agents catalogue names Supreme Orchestrator, System Architect, Planner, 
 
 The eight Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agents in the Agentic DevOps lifecycle document are displayed as architecture targets. Security Guard is represented as a cross-cutting design control; the current API's security worker role is not silently renamed to that lifecycle identity. They are not represented as live runtime agents until the corresponding worker registrations, APIs, and execution evidence exist. The source documents also use Supreme Orchestrator, Executive Orchestrator, and DevOps Orchestrator terminology; the UI deliberately does not alias these identities without an explicit architecture decision.
 
-The API supports the awaiting_approval state and an explicit retry after human review, but it does not currently expose an approve/reject endpoint. The UI therefore never marks a task approved. An authorized human must complete the review through the configured governance process before an operator uses retry.
+The API supports awaiting_approval, explicit retry, and a separate cancellation-reconciliation endpoint. Reconciliation is not approval: it only records whether an ambiguous external side effect was NONE or APPLIED. Only tenant_admin and platform_admin may record reconciliation evidence. The UI never marks a task approved and never retries automatically; a human must complete the required review and separately request retry.
 
-The API has no external WebSocket status stream. The UI polls the tenant-scoped task list every ten seconds and refreshes details on demand. A future event-stream integration should follow the ADR cursor/reconnect contract.
+A running cancellation is cooperative. If a worker does not acknowledge before lease expiry, the task is moved to awaiting_approval with cancel_reconciliation_required=true. Retry and a second cancellation are blocked until an authorized administrator records reconciliation evidence. The API has no external WebSocket status stream. The UI polls the tenant-scoped task list every ten seconds and refreshes details on demand. A future event-stream integration should follow the ADR cursor/reconnect contract.
 
 ## Run locally
 

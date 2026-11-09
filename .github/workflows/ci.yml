@@ -108,9 +108,9 @@ jobs:
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # immutable action commit
         with:
-          version: v0.70.0
+          version: v0.76.2
           cache: true
       - name: Report all CRITICAL and HIGH image vulnerabilities
         shell: bash
@@ -190,9 +190,13 @@ jobs:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WEB_IMAGE: example.invalid/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_RAG_MCP_IMAGE: example.invalid/rusa-ai-rag-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_OLLAMA_IMAGE: ollama/ollama@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_KNOWLEDGE_DATABASE_URL: postgresql://rusa_rag_runtime:secret@db.internal/knowledge?sslmode=verify-full
+          RUSA_MCP_TENANT_KEYS: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":"tenant-ci"}'
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
@@ -200,7 +204,7 @@ jobs:
           RUSA_MODEL_NAME: rusa-ai
           RUSA_MODEL_API_KEY: ci-model-key
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
-          RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
+          RUSA_GITHUB_TOKEN: ci_github_token_placeholder_not_a_real_credential_123
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
@@ -215,6 +219,13 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
+      - name: Validate local RAG Compose configuration
+        env:
+          RUSA_RAG_ADMIN_PASSWORD: ci-rag-admin-password-12345678901234567890
+          RUSA_RAG_DB_PASSWORD: ci-rag-runtime-password-12345678901234567890
+          RUSA_MCP_TENANT_KEYS: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":"tenant-ci"}'
+          RUSA_KNOWLEDGE_INPUT_DIR: /tmp/rusa-knowledge-input
+        run: docker compose -f docker-compose.rag-local.yml config --quiet
 
   rag-mcp:
     name: RAG and MCP integration tests
@@ -255,6 +266,8 @@ jobs:
           python -m pytest -q \
             tests/test_knowledge_chunking.py \
             tests/test_knowledge_embeddings.py \
+            tests/test_knowledge_ollama_embeddings.py \
+            tests/test_knowledge_parquet.py \
             tests/test_knowledge_evaluation.py \
             tests/test_knowledge_migration.py \
             tests/test_knowledge_parsers.py \

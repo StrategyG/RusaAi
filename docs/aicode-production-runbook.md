@@ -25,11 +25,14 @@ psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_aicode_
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_aicode_tenant_rls.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/005_aicode_task_policy_audit.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/006_aicode_idempotency.sql
-psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
+psql "$RUSA_KNOWLEDGE_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/007_rag_knowledge_pgvector.sql
 psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/008_aicode_task_list_audit.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/009_aicode_blocked_status.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/010_aicode_cooperative_cancellation.sql
+psql "$RUSA_MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/011_aicode_cancellation_reconciliation.sql
 ```
 
-The migrations create the durable task queue, tenant memory, rate limits, immutable audit ledger, lease fencing, task-result storage, forced row-level security (RLS), append-only task policy events, idempotency records, and RAG knowledge storage. Apply migrations 001–008 in numeric order. Migration 007 requires PostgreSQL pgvector support. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
+The core database uses migrations 001–006 and 008–011. Apply them in numeric order with the migration owner. Apply migration 007 separately to the pgvector-enabled knowledge database using `RUSA_KNOWLEDGE_MIGRATION_DATABASE_URL`. Migration 010 adds the `cancel_requested` state and monotonic `cancel_epoch`; migration 011 adds the append-only `task.reconcile` audit action. Production workers refuse startup if these controls are missing. The API and worker fail closed if expected columns, RLS flags, policies, audit grants, or append-only triggers are missing.
 
 Create two independent login roles using a secret manager for passwords:
 
@@ -144,6 +147,8 @@ RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
 RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
 RUSA_TASK_TIMEOUT_SECONDS=3600
+RUSA_TASK_LEASE_SECONDS=30
+RUSA_TASK_HEARTBEAT_SECONDS=10
 RUSA_CI_TIMEOUT_SECONDS=900
 RUSA_CI_POLL_SECONDS=15
 RUSA_METRICS_PORT=9100
@@ -154,7 +159,7 @@ RUSA_DOCKER_GID=1001
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
 
-Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: the API then rejects new task submissions/retries and workers stop claiming new jobs. Already-running work is not forcibly terminated; cancel it through the API or let it reach a safe checkpoint. Existing task status, cancellation, health, and metrics endpoints remain available.
+Keep `RUSA_AICODE_ENABLED=false` during installation, migration, smoke testing, security review, and restore drills. The API rejects task intake/retry and workers do not claim jobs while disabled. Set it to `true` only after the final release gate is signed off. To pause AICode, set it to `false` and restart the API and worker services: this stops new admission and claims but does not cancel work already running. Use the task cancellation API for an active task. A running task moves to `cancel_requested`; its worker observes the control state on heartbeat (default 10 seconds) and acknowledges cancellation. If an external side effect may have happened but its outcome is unknown, the task is moved to `awaiting_approval` for reconciliation rather than being reported as safely cancelled.
 
 Generate raw API keys with a cryptographically secure generator, give each raw key only to its client through a secret manager, and configure only its lowercase SHA-256 digest in `RUSA_API_KEYS_JSON`. Each registry claim must include a unique subject, tenant_id, and one or more supported roles (`platform_admin`, `tenant_admin`, `developer`, `read_only`). Production rejects legacy raw `RUSA_API_KEYS` and `RUSA_API_KEY`. Keep the audit HMAC key at least 32 UTF-8 bytes. Never put credentials in task context, repository files, Docker build arguments, or Git remotes.
 
@@ -213,7 +218,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `failed` or `blocked` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry`. Ordinary `awaiting_approval` tasks may also be retried after review. If the task has `cancel_reconciliation_required=true`, retry is rejected until a `platform_admin` or `tenant_admin` calls `POST /v1/aicode/tasks/{task_id}/reconcile` with a confirmed `side_effect` (`NONE` or `APPLIED`) and bounded evidence. The reconciliation event is durably audited; the task remains `awaiting_approval` until the owner separately requests retry. A running task may temporarily report `cancel_requested`; do not retry it until the worker acknowledges cancellation or the queue moves an expired unacknowledged cancellation to `awaiting_approval`. The retry endpoint does not approve PR merges or deployments.
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
@@ -221,7 +226,7 @@ A successful task creates a draft pull request and requires both GitHub Actions 
 
 Scrape authenticated API `/metrics` and internal worker `worker:9100/metrics`. Metric families include API request count/duration, AICode task count/duration, worker steps, and tool executions.
 
-Alert on API 5xx/p95 latency, rate-limit rejections, queue age/retries/awaiting-approval backlog, worker lease loss, sandbox timeouts, CI verification failures, audit integrity failures, and PostgreSQL saturation.
+Alert on API 5xx/p95 latency, rate-limit rejections, queue age/retries/`cancel_requested`/awaiting-approval backlog, unacknowledged cancellations, worker lease loss, sandbox timeouts, CI verification failures, audit integrity failures, and PostgreSQL saturation.
 
 The repository exposes metrics and logs but does not provision Prometheus, dashboards, alert rules, or distributed tracing. Those remain deployment responsibilities.
 
@@ -305,9 +310,9 @@ The current code still requires independent verification before it can be certif
 
 - Database RLS and separate API/worker database identities are implemented through migrations 004–005 and fail-closed startup checks. Before certification, execute adversarial cross-tenant tests against the actual production login roles and verify grants, policies, audit immutability, and off-host retention on the target PostgreSQL instance.
 - The current `docker-compose.yml` uses the bootstrap PostgreSQL account `rusa` for both API and worker connections. Treat this compose profile as development-only; do not use it as a production credential model.
-- The runtime still uses the custom PostgreSQL lease queue rather than Temporal. Agent manager dispatch is currently in-process (no external A2A transport), and the workspace tool gateway is not yet exposed through an MCP server/client implementation.
+- The runtime still uses the custom PostgreSQL lease queue rather than Temporal. Running-task cancellation is now cooperative and lease-fenced, but agent manager dispatch remains in-process (no external A2A transport), and the workspace tool gateway is not yet exposed through an MCP server/client implementation.
 - Production rollout still requires independent verification of the least-privilege role split, tenant RLS policies, TLS-enabled database URLs, and a migration/rollback plan. The Compose syntax check does not certify these controls.
-- Semantic/vector memory (pgvector) and model-generated dynamic DAG planning remain unimplemented. The current runtime now has repository, engineering, and quality managers, a deterministic dependency DAG, parallel QA dispatch, and a bounded repair loop. It does not yet autoscale worker replicas.
+- Tenant-scoped pgvector RAG retrieval exists as an optional knowledge service; a unified episodic/semantic/procedural agent-memory layer and model-generated dynamic DAG planning remain unimplemented. The current runtime has repository, engineering, and quality managers, a deterministic dependency DAG, parallel QA dispatch, and a bounded repair loop. It does not yet autoscale worker replicas.
 - Run PostgreSQL integration tests, rootless Docker sandbox adversarial tests, load/soak tests, restore drills, and external security review against the target deployment.
 - Keep merge, release, production deployment, secret rotation, permission changes, and database migration execution under explicit operator approval.
 
@@ -330,7 +335,9 @@ are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
 `task.execute` events. Unauthenticated attempts use a null tenant and the
 restricted `task.authenticate/deny` shape. Events contain only tenant ID,
 task ID, actor, action, decision, and database timestamp—never credentials,
-lease tokens, or task payloads. The API and worker verify the audit table,
+lease tokens, or task payloads. Migration 011 adds the `task.reconcile` action;
+only `tenant_admin` and `platform_admin` may submit reconciliation evidence.
+Evidence is stored with the task result and must not contain secrets. The API and worker verify the audit table,
 RLS, grants, and append-only triggers at production startup. Task create/read/
 retry/cancel events are inserted in the same PostgreSQL transaction as their
 queue operation; worker execution allow/deny events are committed in the same
@@ -340,8 +347,12 @@ is a secondary operational stream; PostgreSQL is the durable audit record.
 
 The worker queue role is intentionally a trusted cross-tenant consumer so it
 can claim jobs. Before opening a workspace it validates the row's tenant
-repository allowlist and current lease. Queue mutations remain fenced by
-tenant, worker ID, lease token, running status, and lease expiry. The custom
+repository allowlist and current lease. Worker execution and publication remain fenced by
+tenant, worker ID, lease token, running status, and lease expiry. Cancellation
+uses the separate `cancel_requested` state while preserving the active lease;
+the worker must acknowledge it with the same lease token. If that lease expires
+before acknowledgement, the queue moves the task to `awaiting_approval` and
+records `side_effect=UNKNOWN` so an operator can reconcile before retry. The custom
 transaction-local `rusa.tenant_id` setting is a defense against accidental
 unscoped SQL, not a cryptographic boundary against arbitrary SQL execution
 under a shared runtime login. Keep all SQL parameterized and do not expose

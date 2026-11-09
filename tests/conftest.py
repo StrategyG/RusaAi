@@ -25,7 +25,7 @@ def apply_postgres_migrations_for_integration_suite():
     migrations = sorted(
         path for path in migration_dir.glob("*.sql")
         if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
-        and (int(path.name.split("_", 1)[0]) <= 6 or int(path.name.split("_", 1)[0]) == 8)
+        and (int(path.name.split("_", 1)[0]) <= 6 or int(path.name.split("_", 1)[0]) == 12)
     )
     expected = [
         "001_aicode_core.sql",
@@ -34,7 +34,7 @@ def apply_postgres_migrations_for_integration_suite():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
-        "008_aicode_task_list_audit.sql",
+        "012_aicode_task_list_audit.sql",
     ]
     if [path.name for path in migrations] != expected:
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")

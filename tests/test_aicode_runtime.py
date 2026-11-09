@@ -36,6 +36,7 @@ def workers(with_evidence=True):
         "check:bandit": {"exit_code": 0},
         "check:ruff": {"exit_code": 0},
         "check:compile": {"exit_code": 0},
+        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
     } if with_evidence else {}
     return [
         StubWorker(WorkerRole.ANALYST),
@@ -121,6 +122,7 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
                     "check:bandit": {"exit_code": 0},
                     "check:ruff": {"exit_code": 0},
                     "check:compile": {"exit_code": 0},
+                    "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                 }
             super().__init__(role, evidence)
             self.seen_prior = []
@@ -209,6 +211,7 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
                         "check:bandit": {"exit_code": 0},
                         "check:ruff": {"exit_code": 0},
                         "check:compile": {"exit_code": 0},
+                        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                     },
                 )
             )
@@ -263,6 +266,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                     "check:bandit": {"exit_code": 0},
                     "check:ruff": {"exit_code": 0},
                     "check:compile": {"exit_code": 0},
+                    "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                 },
             )
             self.calls = 0
@@ -297,3 +301,18 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_orchestrator_does_not_certify_low_refinery_score(tmp_path):
+    low_quality_workers = workers()
+    low_quality_workers[-1].evidence["check:refinery"]["quality_score"] = 84.9
+    orchestrator = AICodeOrchestrator(
+        low_quality_workers,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("check:refinery" in error for error in record.errors)

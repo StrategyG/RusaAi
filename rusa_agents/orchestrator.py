@@ -66,7 +66,7 @@ class AICodeOrchestrator:
     QUALITY_ROLES = (WorkerRole.TESTER, WorkerRole.SECURITY)
     PIPELINE = PRIMARY_ROLES + QUALITY_ROLES
     REQUIRED_TEST_EVIDENCE = ("check:pytest",)
-    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile")
+    REQUIRED_SECURITY_EVIDENCE = ("check:bandit", "check:ruff", "check:compile", "check:refinery")
 
     def __init__(
         self,
@@ -191,6 +191,26 @@ class AICodeOrchestrator:
             )
         return result
 
+    @staticmethod
+    def _evidence_summary(evidence: dict) -> dict:
+        """Keep compact, reproducible check evidence in the tamper-evident audit log."""
+        summary = {}
+        scalar_fields = (
+            "exit_code", "quality_score", "report_sha256", "files_analyzed",
+            "backend", "run_id", "snapshot_sha256", "runner_image_digest",
+            "syntax_valid", "blocking_findings", "critical_security_findings",
+        )
+        for key, value in list(evidence.items())[:20]:
+            if not isinstance(value, dict):
+                continue
+            item = {field: value[field] for field in scalar_fields if field in value}
+            if isinstance(value.get("metrics"), dict):
+                item["metrics"] = value["metrics"]
+            if isinstance(value.get("findings"), list):
+                item["findings"] = value["findings"][:20]
+            summary[key] = item
+        return summary
+
     async def _record_result(
         self,
         record: TaskRecord,
@@ -209,6 +229,7 @@ class AICodeOrchestrator:
                 "manager": manager_name,
                 "success": result.success,
                 "summary": result.summary[:500],
+                "evidence_summary": self._evidence_summary(result.evidence),
             },
         )
         await self._persist(record)
@@ -216,7 +237,22 @@ class AICodeOrchestrator:
     @staticmethod
     def _check_passed(result: WorkerResult, key: str) -> bool:
         evidence = result.evidence.get(key)
-        return isinstance(evidence, dict) and evidence.get("exit_code") == 0
+        if not isinstance(evidence, dict) or evidence.get("exit_code") != 0:
+            return False
+        if key != "check:refinery":
+            return True
+        score = evidence.get("quality_score")
+        digest = evidence.get("report_sha256")
+        return (
+            isinstance(score, (int, float))
+            and not isinstance(score, bool)
+            and score >= 85.0
+            and isinstance(digest, str)
+            and len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            and evidence.get("syntax_valid") is True
+            and evidence.get("blocking_findings") == 0
+        )
 
     def _verify_evidence(self, record: TaskRecord) -> bool | None:
         tester = next(
@@ -276,7 +312,9 @@ class AICodeOrchestrator:
             decision = self.policy.evaluate(action)
             if not decision.allowed:
                 record.errors.append(decision.reason)
-                record.transition(TaskState.BLOCKED)
+                record.transition(
+                    TaskState.AWAITING_APPROVAL if decision.requires_approval else TaskState.BLOCKED
+                )
                 return
             result = await self._execute(
                 role,

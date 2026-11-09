@@ -1,3 +1,5 @@
+import pytest
+
 from rusa_knowledge.service import KnowledgeService
 
 
@@ -52,6 +54,12 @@ def test_ingest_text_hashes_and_indexes_chunks():
     assert store.ingested["tenant_id"] == "tenant-a"
     assert store.ingested["chunks"] == ["One paragraph of useful knowledge."]
     assert len(store.ingested["embeddings"][0]) == 3
+    assert store.ingested["metadata"]["embedding_profile"] == {
+        "provider": "openai-compatible",
+        "model": "configured-model",
+        "native_dimensions": 1536,
+        "output_dimensions": 1536,
+    }
 
 
 def test_search_embeds_query_and_returns_store_results():
@@ -67,6 +75,9 @@ def test_search_embeds_query_and_returns_store_results():
     assert results[0]["content"] == "evidence"
     assert store.search_args["tenant_id"] == "tenant-a"
     assert store.search_args["query_embedding"] == [0.1, 0.2, 0.3]
+    assert store.search_args["vector_weight"] == pytest.approx(0.7)
+    assert store.search_args["lexical_weight"] == pytest.approx(0.3)
+    assert store.search_args["hnsw_ef_search"] == 80
 
 
 
@@ -74,11 +85,9 @@ def test_ingestion_blocks_high_confidence_credentials_before_embedding():
     store = FakeStore()
     embeddings = FakeEmbeddings()
     service = KnowledgeService(store, embeddings)
-    secret_document = (
-        "Internal notes\n-----BEGIN RSA PRIVATE KEY-----\n"
-        + ("A" * 64)
-        + "\n-----END RSA PRIVATE KEY-----"
-    )
+    header = "-----BEGIN " + "RSA " + "PRIVATE KEY-----"
+    footer = "-----END " + "RSA " + "PRIVATE KEY-----"
+    secret_document = "Internal notes\n" + header + "\n" + ("A" * 64) + "\n" + footer
     try:
         service.ingest_text(
             tenant_id="tenant-a",
@@ -172,3 +181,54 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+def test_search_withholds_legacy_documents_containing_credentials():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    secret = "github_pat_" + ("z" * 40)
+
+    def unsafe_search(**kwargs):
+        return [{"document_id": "legacy-doc", "content": "legacy token: " + secret}]
+
+    store.search = unsafe_search
+    service = KnowledgeService(store, embeddings)
+    with pytest.raises(ValueError, match="GitHub credential") as exc_info:
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="legacy migration",
+        )
+    assert secret not in str(exc_info.value)
+
+
+def test_get_document_withholds_legacy_credentials():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    secret = "ghp_" + ("y" * 36)
+    store.get_document = lambda **kwargs: {
+        "document_id": kwargs["document_id"],
+        "content": "legacy token: " + secret,
+    }
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.get_document(
+            tenant_id="tenant-a",
+            collection="agent",
+            document_id="legacy-doc",
+        )
+    except ValueError as exc:
+        assert "GitHub credential" in str(exc)
+        assert secret not in str(exc)
+    else:
+        raise AssertionError("legacy credential-bearing document was returned")
+
+
+def test_retrieval_weights_are_normalized_and_zero_weights_are_rejected():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings, vector_weight=7, lexical_weight=3)
+    assert service.vector_weight == pytest.approx(0.7)
+    assert service.lexical_weight == pytest.approx(0.3)
+    with pytest.raises(ValueError, match="not both zero"):
+        KnowledgeService(store, embeddings, vector_weight=0, lexical_weight=0)

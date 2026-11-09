@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from .secret_scan import contains_high_confidence_secret_text
+
 
 class IdempotencyConflictError(ValueError):
     """An idempotency key was reused for a different tenant task payload."""
@@ -52,7 +54,7 @@ class PostgresTaskQueue:
 
     @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
-        if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
+        if os.getenv("ENVIRONMENT", "development").strip().lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
 
     @staticmethod
@@ -69,7 +71,10 @@ class PostgresTaskQueue:
         if not isinstance(actor, str) or len(actor) > 128:
             raise ValueError("Task policy audit actor is invalid")
         if actor.startswith("api:"):
-            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.cancel"}:
+            if action not in {
+                "task.create", "task.read", "task.list", "task.retry",
+                "task.cancel", "task.reconcile",
+            }:
                 raise ValueError("API task policy audit action is invalid")
         elif actor.startswith("worker:"):
             if action != "task.execute":
@@ -165,6 +170,52 @@ class PostgresTaskQueue:
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                status_constraint = conn.execute("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid='public.aicode_jobs'::regclass
+                      AND contype='c'
+                      AND pg_get_constraintdef(oid) ILIKE '%status%'
+                """).fetchone()
+                if (
+                    not status_constraint
+                    or "'blocked'" not in status_constraint[0]
+                    or "'cancel_requested'" not in status_constraint[0]
+                ):
+                    raise RuntimeError(
+                        "Production blocked/cancellation task states are not installed; "
+                        "apply migrations/009_aicode_blocked_status.sql and "
+                        "migrations/010_aicode_cooperative_cancellation.sql"
+                    )
+                cancel_epoch_column = conn.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='aicode_jobs'
+                          AND column_name='cancel_epoch'
+                    )
+                """).fetchone()
+                if not cancel_epoch_column or not cancel_epoch_column[0]:
+                    raise RuntimeError(
+                        "Production cooperative cancellation is not installed; "
+                        "apply migrations/010_aicode_cooperative_cancellation.sql"
+                    )
+                reconcile_action = conn.execute("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid=to_regclass('public.aicode_task_policy_events')
+                      AND conname='aicode_task_policy_events_action_check'
+                      AND contype='c'
+                """).fetchone()
+                if (
+                    not reconcile_action
+                    or "'task.reconcile'" not in reconcile_action[0]
+                    or "'task.list'" not in reconcile_action[0]
+                ):
+                    raise RuntimeError(
+                        "Production task-list/cancellation audit is not installed; "
+                        "apply migrations/011_aicode_cancellation_reconciliation.sql "
+                        "and migrations/012_aicode_task_list_audit.sql"
+                    )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
@@ -211,7 +262,7 @@ class PostgresTaskQueue:
                     tenant_id TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     status TEXT NOT NULL DEFAULT 'queued'
-                        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')),
+                        CHECK (status IN ('queued', 'running', 'cancel_requested', 'awaiting_approval', 'succeeded', 'failed', 'blocked', 'cancelled')),
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
                     max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
                     priority INTEGER NOT NULL DEFAULT 0,
@@ -221,6 +272,7 @@ class PostgresTaskQueue:
                     lease_token UUID,
                     result JSONB,
                     idempotency_key TEXT,
+                    cancel_epoch BIGINT NOT NULL DEFAULT 0 CHECK (cancel_epoch >= 0),
                     last_error TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -230,6 +282,17 @@ class PostgresTaskQueue:
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS lease_token UUID")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS result JSONB")
             conn.execute("ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT")
+            conn.execute(
+                "ALTER TABLE aicode_jobs ADD COLUMN IF NOT EXISTS cancel_epoch BIGINT NOT NULL DEFAULT 0"
+            )
+            conn.execute("ALTER TABLE aicode_jobs DROP CONSTRAINT IF EXISTS aicode_jobs_status_check")
+            conn.execute("""
+                ALTER TABLE aicode_jobs ADD CONSTRAINT aicode_jobs_status_check
+                CHECK (status IN (
+                    'queued', 'running', 'cancel_requested', 'awaiting_approval',
+                    'succeeded', 'failed', 'blocked', 'cancelled'
+                ))
+            """)
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_aicode_jobs_idempotency
                 ON aicode_jobs(tenant_id, idempotency_key)
@@ -358,11 +421,34 @@ class PostgresTaskQueue:
             )
             return str(existing[0]), False, str(existing[2])
 
-    def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
-        if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
-            raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
+    def claim(
+        self,
+        worker_id: str,
+        lease_seconds: int = 180,
+        *,
+        tenant_id: str | None = None,
+    ) -> Job | None:
+        if (
+            not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 128
+            or type(lease_seconds) is not int or lease_seconds < 15 or lease_seconds > 3600
+            or tenant_id is not None and (not isinstance(tenant_id, str) or not tenant_id.strip())
+        ):
+            raise ValueError("worker_id, optional tenant_id, and lease_seconds must be valid")
         lease_token = str(uuid4())
         with self._connect() as conn:
+            conn.execute("""
+                UPDATE aicode_jobs
+                SET status='awaiting_approval',
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                    result=COALESCE(result, '{}'::jsonb) ||
+                        jsonb_build_object(
+                            'side_effect', 'UNKNOWN',
+                            'cancel_reconciliation_required', true
+                        ),
+                    last_error='Cancellation was not acknowledged before lease expiry; side effects require reconciliation',
+                    updated_at=NOW()
+                WHERE status='cancel_requested' AND lease_until < NOW()
+            """)
             conn.execute("""
                 UPDATE aicode_jobs
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
@@ -373,6 +459,7 @@ class PostgresTaskQueue:
                 WITH candidate AS (
                     SELECT id FROM aicode_jobs
                     WHERE attempts < max_attempts
+                      AND (%s::text IS NULL OR tenant_id=%s)
                       AND ((status='queued' AND available_at <= NOW())
                         OR (status='running' AND lease_until < NOW()))
                     ORDER BY priority DESC, created_at ASC
@@ -387,27 +474,65 @@ class PostgresTaskQueue:
                 WHERE job.id=candidate.id
                 RETURNING job.id, job.task_id::text, job.tenant_id, job.payload,
                           job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text
-            """, (worker_id, lease_token, lease_seconds)).fetchone()
+            """, (tenant_id, tenant_id, worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = row[3] if isinstance(row[3], dict) else json.loads(row[3])
         return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7])
 
+    def heartbeat_state(
+        self, job_id: int, tenant_id: str, worker_id: str,
+        lease_token: str, lease_seconds: int = 180,
+    ) -> str | None:
+        """Renew a live lease and return its authoritative execution-control state."""
+        if (
+            type(job_id) is not int or job_id <= 0
+            or not tenant_id or not worker_id or len(worker_id) > 128
+            or not lease_token or not 15 <= lease_seconds <= 3600
+        ):
+            raise ValueError("A valid lease identity and duration between 15 and 3600 seconds are required")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute("""
+                UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid
+                  AND status IN ('running', 'cancel_requested')
+                  AND lease_until > NOW()
+                RETURNING status
+            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token)).fetchone()
+        return row[0] if row else None
+
     def heartbeat(
         self, job_id: int, tenant_id: str, worker_id: str,
         lease_token: str, lease_seconds: int = 180,
     ) -> bool:
-        if not lease_token or not 15 <= lease_seconds <= 3600:
-            raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
+        """Backward-compatible heartbeat; cancellation is deliberately not reported as running."""
+        return self.heartbeat_state(
+            job_id, tenant_id, worker_id, lease_token, lease_seconds
+        ) == "running"
+
+    def lease_status(
+        self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
+    ) -> str | None:
+        """Read current lease state without renewing it."""
+        if (
+            type(job_id) is not int or job_id <= 0
+            or not tenant_id or not worker_id or len(worker_id) > 128
+            or not lease_token
+        ):
+            raise ValueError("Worker lease identity is invalid")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            cur = conn.execute("""
-                UPDATE aicode_jobs SET lease_until=NOW() + (%s * INTERVAL '1 second'),
-                    updated_at=NOW()
+            row = conn.execute("""
+                SELECT status FROM aicode_jobs
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
-                  AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
-            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
-        return cur.rowcount == 1
+                  AND lease_token=%s::uuid
+                  AND status IN ('running', 'cancel_requested')
+                  AND lease_until > NOW()
+            """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
+        return row[0] if row else None
 
     def publish_if_lease_owned(
         self,
@@ -499,7 +624,8 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs SET status='succeeded', result=%s::jsonb,
+                UPDATE aicode_jobs SET status='succeeded',
+                    result=COALESCE(result, '{}'::jsonb) || COALESCE(%s::jsonb, '{}'::jsonb),
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
@@ -521,7 +647,8 @@ class PostgresTaskQueue:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs SET status='awaiting_approval', result=%s::jsonb,
+                UPDATE aicode_jobs SET status='awaiting_approval',
+                    result=COALESCE(result, '{}'::jsonb) || COALESCE(%s::jsonb, '{}'::jsonb),
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
@@ -535,19 +662,26 @@ class PostgresTaskQueue:
     def fail(
         self, job_id: int, tenant_id: str, worker_id: str,
         lease_token: str, error: str, retry_delay_seconds: int = 30,
+        *, retryable: bool = True,
     ) -> bool:
+        if type(retryable) is not bool:
+            raise ValueError("retryable must be a boolean")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs
-                SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
+                SET status=CASE
+                        WHEN NOT %s THEN 'blocked'
+                        WHEN attempts >= max_attempts THEN 'failed'
+                        ELSE 'queued'
+                    END,
                     available_at=NOW() + (%s * INTERVAL '1 second'),
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (
-                max(0, retry_delay_seconds), error[:4000],
+                retryable, max(0, retry_delay_seconds), error[:4000],
                 job_id, tenant_id, worker_id, lease_token,
             ))
         return cur.rowcount == 1
@@ -620,10 +754,15 @@ class PostgresTaskQueue:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 UPDATE aicode_jobs
-                SET status='queued', attempts=0, available_at=NOW(), result=NULL,
+                SET status='queued', attempts=0, available_at=NOW(),
+                    result=CASE
+                        WHEN result->>'cancel_reconciliation_required'='false' THEN result
+                        ELSE NULL
+                    END,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
+                  AND status IN ('awaiting_approval', 'failed', 'blocked')
+                  AND COALESCE(result->>'cancel_reconciliation_required', 'false') <> 'true'
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
@@ -632,22 +771,128 @@ class PostgresTaskQueue:
             )
         return row is not None
 
-    def cancel(
-        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    def reconcile_cancellation(
+        self,
+        task_id: str,
+        tenant_id: str,
+        *,
+        side_effect: str,
+        evidence: str,
+        audit_actor: str | None = None,
     ) -> bool:
+        """Record an authorized human determination before an ambiguous task may be retried."""
+        if not isinstance(side_effect, str) or side_effect not in {"NONE", "APPLIED"}:
+            raise ValueError("side_effect must be NONE or APPLIED")
+        if (
+            not isinstance(evidence, str)
+            or not 10 <= len(evidence.strip()) <= 2000
+            or contains_high_confidence_secret_text(evidence)
+        ):
+            raise ValueError("Reconciliation evidence must be 10-2000 safe characters")
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
+        if not isinstance(audit_actor, str) or not audit_actor.startswith("api:"):
+            raise ValueError("Cancellation reconciliation requires an authenticated API actor")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute("""
+                UPDATE aicode_jobs
+                SET result=COALESCE(result, '{}'::jsonb) || jsonb_build_object(
+                        'side_effect', %s::text,
+                        'cancel_reconciliation_required', false,
+                        'reconciliation', jsonb_build_object(
+                            'outcome', %s::text,
+                            'evidence', %s::text,
+                            'actor', %s::text,
+                            'reconciled_at', NOW()
+                        )
+                    ),
+                    last_error='Cancellation side effects reconciled; explicit retry is still required',
+                    updated_at=NOW()
+                WHERE task_id=%s AND tenant_id=%s
+                  AND status='awaiting_approval'
+                  AND result->>'cancel_reconciliation_required'='true'
+                RETURNING id
+            """, (
+                side_effect, side_effect, evidence.strip(), audit_actor,
+                task_id, tenant_id,
+            )).fetchone()
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.reconcile",
+                "allow" if row is not None else "deny",
+            )
+        return row is not None
+
+    def finish_cancelled(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        *,
+        side_effect: str = "NONE",
+        result: dict[str, Any] | None = None,
+    ) -> bool:
+        """Acknowledge cancellation; uncertain external effects remain in human reconciliation."""
+        if not isinstance(side_effect, str) or side_effect not in {"NONE", "APPLIED", "UNKNOWN"}:
+            raise ValueError("side_effect must be NONE, APPLIED, or UNKNOWN")
+        if result is not None and not isinstance(result, dict):
+            raise ValueError("cancellation result must be an object")
+        payload = dict(result or {})
+        payload["side_effect"] = side_effect
+        payload["cancel_reconciliation_required"] = side_effect == "UNKNOWN"
+        status = "awaiting_approval" if side_effect == "UNKNOWN" else "cancelled"
+        message = (
+            "Cancellation completed with an unknown external side effect; reconciliation required"
+            if side_effect == "UNKNOWN"
+            else "Cancellation acknowledged by the active worker"
+        )
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
-                    lease_until=NULL, lease_token=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
-            """, (task_id, tenant_id))
+                UPDATE aicode_jobs
+                SET status=%s, result=%s::jsonb, last_error=%s,
+                    lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='cancel_requested'
+                  AND lease_until > NOW()
+            """, (
+                status, json.dumps(payload, ensure_ascii=False, default=str),
+                message, job_id, tenant_id, worker_id, lease_token,
+            ))
+        return cur.rowcount == 1
+
+    def cancel(
+        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+    ) -> bool:
+        """Cancel queued work immediately; request cooperative cancellation for a live worker."""
+        if not task_id or not tenant_id:
+            raise ValueError("task_id and tenant_id are required")
+        self._require_policy_audit_actor(audit_actor)
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute("""
+                UPDATE aicode_jobs
+                SET status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,
+                    cancel_epoch=cancel_epoch+1,
+                    lease_owner=CASE WHEN status='running' THEN lease_owner ELSE NULL END,
+                    lease_until=CASE WHEN status='running' THEN lease_until ELSE NULL END,
+                    lease_token=CASE WHEN status='running' THEN lease_token ELSE NULL END,
+                    updated_at=NOW()
+                WHERE task_id=%s AND tenant_id=%s
+                  AND status IN ('queued', 'running', 'awaiting_approval')
+                  AND NOT (
+                      status='awaiting_approval'
+                      AND COALESCE(result->>'cancel_reconciliation_required', 'false')='true'
+                  )
+                RETURNING status
+            """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.cancel",
-                "allow" if cur.rowcount == 1 else "deny",
+                "allow" if row is not None else "deny",
             )
-        return cur.rowcount == 1
+        return row is not None
 
     def list(
         self,
@@ -661,7 +906,8 @@ class PostgresTaskQueue:
         """Return a tenant-scoped, newest-first page of durable task records."""
         self._require_policy_audit_actor(audit_actor)
         valid_statuses = {
-            "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled",
+            "queued", "running", "cancel_requested", "awaiting_approval",
+            "succeeded", "failed", "blocked", "cancelled",
         }
         if status_filter is not None and status_filter not in valid_statuses:
             raise ValueError("Unsupported task status filter")

@@ -91,6 +91,10 @@ class PostgresKnowledgeStore:
                         FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_chunks')
                     ), false),
                     COALESCE((
+                        SELECT relrowsecurity AND relforcerowsecurity
+                        FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_collection_profiles')
+                    ), false),
+                    COALESCE((
                         SELECT format_type(a.atttypid, a.atttypmod) = 'vector(1536)'
                         FROM pg_attribute a
                         WHERE a.attrelid = to_regclass('public.rusa_knowledge_chunks')
@@ -108,11 +112,20 @@ class PostgresKnowledgeStore:
                           AND tablename='rusa_knowledge_chunks'
                           AND policyname='rusa_knowledge_chunks_tenant_isolation'
                     ),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_collection_profiles'
+                          AND policyname='rusa_knowledge_profiles_tenant_isolation'
+                    ),
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_documents', 'SELECT'
                     ),
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_chunks', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_collection_profiles', 'SELECT'
                     ),
                     EXISTS (
                         SELECT 1 FROM pg_roles
@@ -122,6 +135,85 @@ class PostgresKnowledgeStore:
             ).fetchone()
         return bool(row and all(row))
 
+    @staticmethod
+    def _embedding_profile_values(profile: dict[str, Any]) -> tuple[str, str, int, int]:
+        if not isinstance(profile, dict):
+            raise ValueError("embedding profile must be an object")
+        provider = profile.get("provider")
+        model = profile.get("model")
+        native_dimensions = profile.get("native_dimensions")
+        output_dimensions = profile.get("output_dimensions")
+        if (
+            not isinstance(provider, str) or not 1 <= len(provider) <= 64
+            or not isinstance(model, str) or not 1 <= len(model) <= 200
+            or isinstance(native_dimensions, bool) or not isinstance(native_dimensions, int)
+            or isinstance(output_dimensions, bool) or not isinstance(output_dimensions, int)
+            or not 1 <= native_dimensions <= output_dimensions <= 8192
+        ):
+            raise ValueError("embedding profile fields are invalid")
+        return provider, model, native_dimensions, output_dimensions
+
+    def _ensure_embedding_profile(
+        self, connection: Any, tenant_id: str, collection: str, profile: dict[str, Any]
+    ) -> None:
+        values = self._embedding_profile_values(profile)
+        connection.execute(
+            """
+            INSERT INTO rusa_knowledge_collection_profiles
+                (tenant_id, collection, embedding_provider, embedding_model,
+                 native_dimensions, output_dimensions)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, collection) DO NOTHING
+            """,
+            (tenant_id, collection, *values),
+        )
+        row = connection.execute(
+            """
+            SELECT embedding_provider, embedding_model, native_dimensions, output_dimensions
+            FROM rusa_knowledge_collection_profiles
+            WHERE tenant_id=%s AND collection=%s
+            FOR UPDATE
+            """,
+            (tenant_id, collection),
+        ).fetchone()
+        if row is None or tuple(row) != values:
+            raise ValueError(
+                "embedding profile mismatch for this collection; use a new collection "
+                "or re-embed every document before switching models"
+            )
+
+    def _assert_embedding_profile(
+        self, connection: Any, tenant_id: str, collection: str, profile: dict[str, Any]
+    ) -> None:
+        values = self._embedding_profile_values(profile)
+        row = connection.execute(
+            """
+            SELECT embedding_provider, embedding_model, native_dimensions, output_dimensions
+            FROM rusa_knowledge_collection_profiles
+            WHERE tenant_id=%s AND collection=%s
+            """,
+            (tenant_id, collection),
+        ).fetchone()
+        if row is None:
+            has_documents = connection.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM rusa_knowledge_documents
+                    WHERE tenant_id=%s AND collection=%s
+                )
+                """,
+                (tenant_id, collection),
+            ).fetchone()[0]
+            if has_documents:
+                raise ValueError(
+                    "collection has no registered embedding profile; reindex it into a new collection"
+                )
+            return
+        if tuple(row) != values:
+            raise ValueError(
+                "query embedding profile does not match the indexed collection; "
+                "use the original model or re-embed the collection"
+            )
     def ingest_document(
         self,
         *,
@@ -170,6 +262,11 @@ class PostgresKnowledgeStore:
 
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
+            embedding_profile = metadata.get("embedding_profile")
+            if embedding_profile is not None:
+                self._ensure_embedding_profile(
+                    connection, tenant_id, collection, embedding_profile
+                )
             document = connection.execute(
                 """
                 INSERT INTO rusa_knowledge_documents
@@ -220,14 +317,31 @@ class PostgresKnowledgeStore:
         query: str,
         query_embedding: list[float],
         limit: int = 5,
+        vector_weight: float = 0.7,
+        lexical_weight: float = 0.3,
+        hnsw_ef_search: int = 80,
+        embedding_profile: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         self._validate_scope(tenant_id, collection)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         if not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20")
+        if (
+            not math.isfinite(vector_weight)
+            or not math.isfinite(lexical_weight)
+            or vector_weight < 0
+            or lexical_weight < 0
+            or vector_weight + lexical_weight <= 0
+        ):
+            raise ValueError("retrieval weights must be finite, non-negative, and not both zero")
+        if isinstance(hnsw_ef_search, bool) or not 1 <= hnsw_ef_search <= 1000:
+            raise ValueError("HNSW ef_search must be between 1 and 1000")
+        weight_total = vector_weight + lexical_weight
+        vector_weight /= weight_total
+        lexical_weight /= weight_total
         vector = _vector_literal(query_embedding, self.dimensions)
-        candidate_limit = min(max(limit * 4, 20), 100)
+        candidate_limit = min(max(limit * 8, 40), 200)
 
         sql = """
             WITH vector_candidates AS (
@@ -251,8 +365,8 @@ class PostgresKnowledgeStore:
             ),
             combined AS (
                 SELECT COALESCE(v.chunk_id, l.chunk_id) AS chunk_id,
-                       0.7 * COALESCE(1.0 / (60 + v.vector_rank), 0.0)
-                     + 0.3 * COALESCE(1.0 / (60 + l.lexical_rank), 0.0) AS rrf_score
+                       %s * COALESCE(1.0 / (60 + v.vector_rank), 0.0)
+                     + %s * COALESCE(1.0 / (60 + l.lexical_rank), 0.0) AS rrf_score
                 FROM vector_candidates v
                 FULL OUTER JOIN lexical_candidates l ON v.chunk_id = l.chunk_id
             )
@@ -270,10 +384,18 @@ class PostgresKnowledgeStore:
         params = (
             vector, tenant_id, collection, vector, candidate_limit,
             query, tenant_id, collection, query, query, candidate_limit,
-            vector, tenant_id, limit,
+            vector_weight, lexical_weight, vector, tenant_id, limit,
         )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
+            if embedding_profile is not None:
+                self._assert_embedding_profile(
+                    connection, tenant_id, collection, embedding_profile
+                )
+            connection.execute(
+                "SELECT set_config('hnsw.ef_search', %s, true)",
+                (str(hnsw_ef_search),),
+            )
             rows = connection.execute(sql, params).fetchall()
         return [
             {
@@ -363,6 +485,10 @@ class PostgresKnowledgeStore:
             self._set_tenant(connection, tenant_id)
             cursor = connection.execute(
                 "DELETE FROM rusa_knowledge_documents WHERE tenant_id=%s",
+                (tenant_id,),
+            )
+            connection.execute(
+                "DELETE FROM rusa_knowledge_collection_profiles WHERE tenant_id=%s",
                 (tenant_id,),
             )
             return cursor.rowcount

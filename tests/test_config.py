@@ -132,3 +132,21 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
     )
     with pytest.raises(ValueError, match="roles"):
         RuntimeConfig.from_env()
+
+
+def test_environment_is_trimmed_and_case_normalized(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "  Production  ")
+    assert RuntimeConfig.from_env().environment == "production"
+
+
+def test_environment_rejects_unknown_values_instead_of_disabling_production_checks(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "prodution")
+    with pytest.raises(ValueError, match="ENVIRONMENT"):
+        RuntimeConfig.from_env()
+
+
+
+def test_config_rejects_unknown_environment_name(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "prod ")
+    with pytest.raises(ValueError, match="ENVIRONMENT"):
+        RuntimeConfig.from_env()

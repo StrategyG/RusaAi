@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.aicode_jobs (
     tenant_id TEXT NOT NULL,
     payload JSONB NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued'
-        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')),
+        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'blocked', 'cancelled')),
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
     priority INTEGER NOT NULL DEFAULT 0,

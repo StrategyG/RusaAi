@@ -15,7 +15,8 @@ from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -28,6 +29,7 @@ from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
+from rusa_agents.secret_scan import contains_high_confidence_secret_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -217,6 +219,22 @@ app = FastAPI(
 )
 app.state.inference_admission = InferenceAdmissionController(8, 32, 10.0)
 
+@app.exception_handler(RequestValidationError)
+async def sanitized_request_validation_error(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Do not reflect raw request values (which may contain credentials) in 422 responses."""
+    safe_errors = [
+        {
+            key: error[key]
+            for key in ("loc", "msg", "type")
+            if key in error
+        }
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
+
 
 def _request_body_limit() -> int:
     try:
@@ -353,6 +371,15 @@ class AICodeTaskRequest(BaseModel):
     def validate_objective(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("Objective cannot be blank")
+        if contains_high_confidence_secret_text(value):
+            raise ValueError("Objective contains credential-like material; use the approved secret manager")
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def validate_context(cls, value: str) -> str:
+        if contains_high_confidence_secret_text(value):
+            raise ValueError("Context contains credential-like material; use the approved secret manager")
         return value
 
     @field_validator("acceptance_criteria")
@@ -362,7 +389,23 @@ class AICodeTaskRequest(BaseModel):
             raise ValueError("Acceptance criteria cannot contain blank items")
         if any(len(item) > 1000 for item in value):
             raise ValueError("Each acceptance criterion must be 1000 characters or fewer")
+        if any(contains_high_confidence_secret_text(item) for item in value):
+            raise ValueError("Acceptance criteria contain credential-like material; use the approved secret manager")
         return value
+
+
+class AICodeTaskReconciliationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    side_effect: Literal["NONE", "APPLIED"]
+    evidence: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str) -> str:
+        if not value.strip() or contains_high_confidence_secret_text(value):
+            raise ValueError("Reconciliation evidence must be non-empty and must not contain credential-like material")
+        return value.strip()
 
 
 class AICodeTaskResponse(BaseModel):
@@ -402,7 +445,14 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     if not config.api_key_principals and not config.api_keys:
         if require_key or config.environment == "production":
             raise HTTPException(status_code=503, detail="API authentication is not configured")
-        return os.getenv("RUSA_DEFAULT_TENANT", "development")
+        from rusa_agents.config import ApiPrincipal
+        tenant_id = os.getenv("RUSA_DEFAULT_TENANT", "development")
+        request.state.principal = ApiPrincipal(
+            subject=f"local-development:{tenant_id}",
+            tenant_id=tenant_id,
+            roles=("tenant_admin",),
+        )
+        return tenant_id
     if not api_key or (
         (config.api_key_principals or config.environment == "production")
         and len(api_key.encode("utf-8")) < 32
@@ -460,8 +510,12 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
 
 
 TASK_ROLE_PERMISSIONS = {
-    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
-    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "platform_admin": frozenset({
+        "task:create", "task:read", "task:retry", "task:cancel", "task:reconcile",
+    }),
+    "tenant_admin": frozenset({
+        "task:create", "task:read", "task:retry", "task:cancel", "task:reconcile",
+    }),
     "developer": frozenset({"task:create", "task:read"}),
     "read_only": frozenset({"task:read"}),
 }
@@ -916,7 +970,8 @@ def create_aicode_task(
 def list_aicode_tasks(
     request: Request,
     status_filter: Literal[
-        "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled"
+        "queued", "running", "cancel_requested", "awaiting_approval",
+        "succeeded", "failed", "blocked", "cancelled"
     ] | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=100000),
@@ -971,6 +1026,51 @@ def get_aicode_task(
 
 
 
+@app.post("/v1/aicode/tasks/{task_id}/reconcile", status_code=200)
+def reconcile_aicode_task(
+    task_id: UUID,
+    body: AICodeTaskReconciliationRequest,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:reconcile")),
+):
+    """Require an authorized human determination before an ambiguous cancellation can be retried."""
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    actor = _api_task_actor(http_request)
+    try:
+        reconciled = queue.reconcile_cancellation(
+            str(task_id),
+            tenant_id,
+            side_effect=body.side_effect,
+            evidence=body.evidence,
+            audit_actor=actor,
+        )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Could not reconcile AICode task cancellation")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.reconcile", reconciled, persist=False
+    )
+    if not reconciled:
+        raise HTTPException(
+            status_code=409,
+            detail="Task has no unresolved cancellation side effect to reconcile",
+        )
+    return {
+        "task_id": str(task_id),
+        "status": "awaiting_approval",
+        "reconciled": True,
+        "side_effect": body.side_effect,
+        "retry_requires_explicit_action": True,
+    }
+
+
 @app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
 def retry_aicode_task(
     task_id: UUID,
@@ -1011,9 +1111,14 @@ def cancel_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    actor = _api_task_actor(http_request)
     try:
         cancelled = queue.cancel(
-            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+            str(task_id), tenant_id, audit_actor=actor
+        )
+        current = (
+            queue.get(str(task_id), tenant_id, audit_actor=actor)
+            if cancelled else None
         )
     except Exception:
         logger.exception("Could not cancel AICode task")
@@ -1022,6 +1127,6 @@ def cancel_aicode_task(
     audit_api_task(
         http_request, tenant_id, str(task_id), "task.cancel", cancelled, persist=False
     )
-    if not cancelled:
+    if not cancelled or current is None:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
-    return {"task_id": str(task_id), "status": "cancelled"}
+    return {"task_id": str(task_id), "status": current["status"]}

@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RUSA-AI Agent Task Contract v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "run_id",
+    "tenant_id",
+    "idempotency_key",
+    "correlation_id",
+    "created_at",
+    "deadline_at",
+    "domain",
+    "agent",
+    "action",
+    "input",
+    "policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "rusa_intelligence",
+        "autonomous_software_engineering",
+        "rusa_business",
+        "rusa_ecosystem"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "code",
+        "build",
+        "test",
+        "release",
+        "deploy",
+        "operate",
+        "monitor"
+      ]
+    },
+    "agent": {
+      "$ref": "#/$defs/agent"
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_.:-]*$"
+    },
+    "input": {
+      "type": "object"
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "traceparent": {
+      "type": "string",
+      "maxLength": 128
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_id",
+        "agent_type",
+        "capabilities"
+      ],
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "agent_type": {
+          "type": "string",
+          "enum": [
+            "core_agent",
+            "devops_stage_agent"
+          ]
+        },
+        "core_role": {
+          "type": "string",
+          "enum": [
+            "supreme_orchestrator",
+            "system_architect",
+            "planner",
+            "task_decomposer",
+            "software_engineer",
+            "devops",
+            "qa_testing",
+            "security_policy",
+            "memory_knowledge",
+            "evaluation_reporting"
+          ]
+        },
+        "stage_agent_id": {
+          "type": "string",
+          "enum": [
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "agent_type": {
+              "const": "core_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "core_role"
+          ],
+          "not": {
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "agent_type": {
+              "const": "devops_stage_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "stage_agent_id"
+          ],
+          "not": {
+            "required": [
+              "core_role"
+            ]
+          }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version",
+        "authorization_id",
+        "decision",
+        "approval_actions"
+      ],
+      "properties": {
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "authorization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "decision": {
+          "const": "allow"
+        },
+        "approval_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "merge",
+              "deploy",
+              "release",
+              "secret_change",
+              "permission_change",
+              "destructive_action"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_plan_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "plan"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_code_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "code"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_build_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "build"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_test_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "test"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_release_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "release"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_deploy_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "deploy"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_operate_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "operate"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent": {
+            "properties": {
+              "stage_agent_id": {
+                "const": "rusa_monitor_agent"
+              }
+            },
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        "required": [
+          "agent"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stage": {
+            "const": "monitor"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    }
+  ]
+}

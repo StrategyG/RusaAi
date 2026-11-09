@@ -73,7 +73,9 @@ Workers run sequentially within a task to preserve a predictable handoff. Multip
 
 The master owns the task state machine:
 
-`received -> observing -> planning -> executing -> verifying -> succeeded | awaiting_approval | blocked | failed | cancelled`
+`received -> observing -> planning -> executing -> verifying -> succeeded | awaiting_approval | blocked | failed | cancelled
+
+Queue-level control states are `queued`, `running`, and `cancel_requested`. A running cancellation retains its lease until the worker acknowledges it. If the lease expires before acknowledgement, the queue quarantines the task in `awaiting_approval` with `cancel_reconciliation_required=true`.`
 
 Only the master may transition task state. Invalid transitions raise an error.
 
@@ -173,7 +175,9 @@ The coding model must reliably honor JSON-object response format. The model endp
 | `/v1/aicode/tasks` | POST | Tenant-scoped task intake |
 | `/v1/aicode/tasks` | GET | Tenant-scoped task history with status filter and pagination |
 | `/v1/aicode/tasks/{task_id}` | GET | Tenant-scoped task status |
-| `/v1/aicode/tasks/{task_id}` | DELETE | Cancel queued/running/awaiting task |
+| `/v1/aicode/tasks/{task_id}` | DELETE | Cancel queued/approval-paused task immediately or request cooperative cancellation for a running task |
+| `/v1/aicode/tasks/{task_id}/reconcile` | POST | Tenant/platform admin records confirmed NONE/APPLIED external side-effect outcome with evidence |
+| `/v1/aicode/tasks/{task_id}/retry` | POST | Explicitly retry failed/blocked/reviewed tasks; unresolved cancellation reconciliation is rejected |
 
 API authentication maps long random API keys to tenant IDs. Production requires keys of at least 32 UTF-8 bytes, a repository allowlist per tenant, PostgreSQL-backed rate limits, and a configured inference endpoint.
 
@@ -196,7 +200,7 @@ Missing or unverifiable evidence is not treated as success. Human approval is st
 | Hierarchical orchestration | Master + six typed workers | Unit/integration tests |
 | Bounded autonomy | Role permissions, allowlists, state machine | Adversarial tests |
 | Tenant isolation | API keys, repository allowlist, tenant-scoped DB keys | Cross-tenant penetration tests |
-| Durable queue | PostgreSQL leases, retries, cancellation | Multi-worker concurrency tests |
+| Durable queue | PostgreSQL leases, retries, cooperative cancellation epoch and reconciliation gate | Multi-worker concurrency, cancellation acknowledgement and ambiguous-side-effect tests |
 | Persistent memory | PostgreSQL tenant-scoped storage | Restart/recovery tests |
 | Audit integrity | HMAC chain and immutable DB triggers | Tamper and restore tests |
 | Sandbox | Rootless Docker, network disabled, source snapshot | Escape/resource-exhaustion tests |

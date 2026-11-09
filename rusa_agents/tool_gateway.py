@@ -18,7 +18,11 @@ from uuid import uuid4
 
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
-from .metrics import TOOL_EXECUTIONS
+from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
+from .secret_scan import (
+    contains_high_confidence_secret_stream,
+    contains_high_confidence_secret_text,
+)
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -98,14 +102,27 @@ class DockerSandbox:
         totals = [0]
 
         def bounded_copy(source: str, destination: str) -> str:
-            size = Path(source).stat().st_size
-            totals[0] += size
-            if totals[0] > self.max_snapshot_bytes:
-                raise ToolDenied("Sandbox snapshot exceeds configured size limit")
-            copied = shutil.copy2(source, destination)
-            mode = stat.S_IMODE(Path(copied).stat().st_mode)
-            os.chmod(copied, (mode | 0o444) & ~0o222)
-            return copied
+            descriptor = os.open(
+                Path(source),
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            )
+            with os.fdopen(descriptor, "rb") as source_stream:
+                metadata = os.fstat(source_stream.fileno())
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ToolDenied("Sandbox snapshot accepts regular files only")
+                totals[0] += metadata.st_size
+                if totals[0] > self.max_snapshot_bytes:
+                    raise ToolDenied("Sandbox snapshot exceeds configured size limit")
+                if contains_high_confidence_secret_stream(source_stream):
+                    raise ToolDenied(
+                        "Sandbox snapshot contains high-confidence credential material"
+                    )
+                source_stream.seek(0)
+                with Path(destination).open("xb") as destination_stream:
+                    shutil.copyfileobj(source_stream, destination_stream, length=64 * 1024)
+            mode = stat.S_IMODE(metadata.st_mode)
+            os.chmod(destination, (mode | 0o444) & ~0o222)
+            return destination
 
         sensitive_parts = {
             ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
@@ -113,6 +130,7 @@ class DockerSandbox:
         }
         sensitive_names = {
             ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
+            "id_dsa", "id_ecdsa", "private_key", "privatekey",
             "authorized_keys", "known_hosts", "credentials.json",
             "service-account.json", "secrets.json", "token.json",
         }
@@ -306,15 +324,42 @@ class WorkspaceToolGateway:
         target = self._resolve(raw_path)
         if not target.is_file():
             return ToolResult(False, f"File not found: {raw_path}")
-        if target.stat().st_size > self.max_file_bytes:
-            raise ToolDenied("File exceeds configured read limit")
-        return ToolResult(True, target.read_text(encoding="utf-8"), {"path": raw_path})
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as source:
+            metadata = os.fstat(source.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ToolDenied("Only regular workspace files can be read")
+            if metadata.st_size > self.max_file_bytes:
+                raise ToolDenied("File exceeds configured read limit")
+            content = source.read(self.max_file_bytes + 1)
+            if len(content) > self.max_file_bytes:
+                raise ToolDenied("File exceeds configured read limit")
+        if contains_high_confidence_secret_text(content):
+            return ToolResult(
+                False,
+                "File read blocked because high-confidence credential material was detected.",
+                {"path": raw_path, "secret_scan": "blocked"},
+            )
+        try:
+            decoded = content.decode("utf-8")
+        except UnicodeError:
+            return ToolResult(
+                False,
+                "File read blocked because the content is not valid UTF-8 text.",
+                {"path": raw_path, "encoding": "invalid"},
+            )
+        return ToolResult(True, decoded, {"path": raw_path})
 
     def write_file(self, raw_path: str, content: str, role: WorkerRole) -> ToolResult:
         if role != WorkerRole.DEVELOPER:
             raise ToolDenied("Only the developer worker may modify workspace files")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
+        if contains_high_confidence_secret_text(content):
+            raise ToolDenied("Writing high-confidence credential material is prohibited")
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
         if (
@@ -367,12 +412,100 @@ class WorkspaceToolGateway:
                 files.append(rel)
         return ToolResult(True, "\n".join(files), {"count": len(files)})
 
+    def _run_refinery(self) -> ToolResult:
+        """Score only changed Python files; AST parsing never imports or executes code."""
+        from .code_refinery.analysis import analyze_workspace
+
+        try:
+            min_score = float(os.getenv("RUSA_REFINERY_MIN_SCORE", "85"))
+            if not 0 <= min_score <= 100:
+                raise ValueError("RUSA_REFINERY_MIN_SCORE must be between 0 and 100")
+            changed_paths: list[str] | None = None
+            if GIT_BIN and (self.workspace / ".git").exists():
+                names: set[str] = set()
+                commands = (
+                    ("diff", "--name-only", "--no-ext-diff", "--no-textconv", "--"),
+                    ("diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv", "--"),
+                    ("ls-files", "--others", "--exclude-standard"),
+                )
+                for arguments in commands:
+                    completed = subprocess.run(
+                        [GIT_BIN, "-C", str(self.workspace), *arguments],
+                        check=False, capture_output=True, text=True, timeout=30,
+                    )
+                    if completed.returncode != 0:
+                        return ToolResult(
+                            False,
+                            "Could not determine changed files for the refinery quality gate.",
+                            {"profile": "refinery", "exit_code": 2},
+                        )
+                    names.update(line for line in completed.stdout.splitlines() if line)
+                changed_paths = []
+                for name in sorted(names):
+                    if not name.lower().endswith(".py"):
+                        continue
+                    target = self._resolve(name)
+                    if target.is_file() and not target.is_symlink():
+                        changed_paths.append(name)
+            report = analyze_workspace(
+                self.workspace, paths=changed_paths, min_score=min_score
+            )
+            payload = report.to_dict()
+            exit_code = 0 if report.passed else 1
+            REFINERY_QUALITY_SCORE.observe(report.overall_score)
+            outcome = (
+                "not_applicable"
+                if report.not_applicable and report.passed
+                else "pass" if report.passed else "fail"
+            )
+            REFINERY_QUALITY_REPORTS.labels(outcome).inc()
+            evidence = {
+                "profile": "refinery",
+                "exit_code": exit_code,
+                "quality_score": report.overall_score,
+                "min_score": min_score,
+                "report_sha256": payload["report_sha256"],
+                "files_analyzed": report.files_analyzed,
+                "syntax_valid": report.syntax_valid,
+                "blocking_findings": report.blocking_findings,
+                "critical_security_findings": report.critical_security_findings,
+                "not_applicable": report.not_applicable,
+                "metrics": report.metrics,
+                "findings": payload["findings"][:20],
+            }
+            output = {
+                "report_sha256": payload["report_sha256"],
+                "overall_score": report.overall_score,
+                "metrics": report.metrics,
+                "files_analyzed": report.files_analyzed,
+                "syntax_valid": report.syntax_valid,
+                "blocking_findings": report.blocking_findings,
+                "critical_security_findings": report.critical_security_findings,
+                "passed": report.passed,
+                "not_applicable": report.not_applicable,
+                "findings": payload["findings"][:20],
+            }
+            return ToolResult(
+                report.passed,
+                json.dumps(output, sort_keys=True, ensure_ascii=False),
+                evidence,
+            )
+        except (OSError, UnicodeError, ValueError) as exc:
+            REFINERY_QUALITY_REPORTS.labels("error").inc()
+            return ToolResult(
+                False,
+                f"Refinery quality gate failed closed: {type(exc).__name__}: {str(exc)[:500]}",
+                {"profile": "refinery", "exit_code": 2, "error_type": type(exc).__name__},
+            )
+
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
         allowed_profiles = ROLE_CHECK_PROFILES
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
+        if profile == "refinery":
+            return self._run_refinery()
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:
@@ -384,6 +517,12 @@ class WorkspaceToolGateway:
         )
         if completed.returncode != 0:
             return ToolResult(False, completed.stderr[-8000:])
+        if contains_high_confidence_secret_text(completed.stdout):
+            return ToolResult(
+                False,
+                "Git diff withheld because high-confidence credential material was detected.",
+                {"exit_code": completed.returncode, "secret_scan": "blocked"},
+            )
         return ToolResult(True, completed.stdout[-20000:], {"exit_code": completed.returncode})
 
     def _knowledge_context(self) -> tuple[Any, str]:
@@ -487,6 +626,16 @@ class WorkspaceToolGateway:
                 result = self.git_diff()
             else:
                 raise ToolDenied(f"Tool '{name}' is not registered")
+            evidence_text = json.dumps(result.evidence or {}, ensure_ascii=False, default=str)
+            if (
+                contains_high_confidence_secret_text(result.output)
+                or contains_high_confidence_secret_text(evidence_text)
+            ):
+                result = ToolResult(
+                    False,
+                    "Tool output withheld because high-confidence credential material was detected.",
+                    {"secret_scan": "blocked", "tool": name},
+                )
             TOOL_EXECUTIONS.labels(name, "success" if result.ok else "failure").inc()
             return result
         except ToolDenied:

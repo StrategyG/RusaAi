@@ -8,9 +8,12 @@ import socket
 import time
 from collections.abc import Coroutine
 from typing import Any
+from urllib.parse import urlparse
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
+from .code_refinery.providers import HybridCodeProvider, MockCodeProvider
+from .code_refinery.sandbox import HybridSandbox, MicroVMHTTPBackend
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
@@ -24,10 +27,20 @@ from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
 
+class TaskCancelledError(RuntimeError):
+    """The durable queue requested cooperative cancellation for the active lease."""
+
+
 class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
         self.config.validate_worker()
+        self.lease_seconds = self._bounded_env_int("RUSA_TASK_LEASE_SECONDS", 30, 15, 300)
+        self.heartbeat_interval_seconds = self._bounded_env_int(
+            "RUSA_TASK_HEARTBEAT_SECONDS", 10, 3, 100
+        )
+        if self.heartbeat_interval_seconds * 3 > self.lease_seconds:
+            raise ValueError("RUSA_TASK_HEARTBEAT_SECONDS must be at most one third of the task lease")
         if not self.config.worker_database_url or not self.config.workspace_root or not self.config.git_mirror_root:
             raise RuntimeError("Database, workspace root, and Git mirror root are required")
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
@@ -44,9 +57,55 @@ class AICodeRuntime:
             self.config.workspace_root,
             github_token=self.config.github_token,
         )
-        self.provider = OpenAICompatibleProvider()
+        primary_provider = OpenAICompatibleProvider(
+            base_url=self.config.model_base_url,
+            model=self.config.model_name,
+        )
+        local_provider = None
+        local_model_url = os.getenv("RUSA_LOCAL_MODEL_BASE_URL", "").strip()
+        if self.config.environment == "production" and not local_model_url:
+            raise RuntimeError(
+                "Production hybrid LLM requires RUSA_LOCAL_MODEL_BASE_URL; "
+                "mock fallback is a circuit breaker, not a local inference backend"
+            )
+        if local_model_url:
+            parsed_local_url = urlparse(local_model_url)
+            local_hosts = {"localhost", "127.0.0.1", "::1"}
+            if (
+                parsed_local_url.scheme not in {"https", "http"}
+                or not parsed_local_url.hostname
+                or parsed_local_url.username
+                or parsed_local_url.password
+                or parsed_local_url.query
+                or parsed_local_url.fragment
+                or (
+                    parsed_local_url.scheme != "https"
+                    and parsed_local_url.hostname not in local_hosts
+                )
+                or (
+                    self.config.environment == "production"
+                    and parsed_local_url.scheme != "https"
+                )
+            ):
+                raise RuntimeError(
+                    "RUSA_LOCAL_MODEL_BASE_URL must use credential-free HTTPS "
+                    "(loopback HTTP is permitted only outside production)"
+                )
+            local_provider = OpenAICompatibleProvider(
+                base_url=local_model_url,
+                model=os.getenv("RUSA_LOCAL_MODEL_NAME", "rusa-local"),
+                api_key=os.getenv("RUSA_LOCAL_MODEL_API_KEY", ""),
+            )
+        self.provider = HybridCodeProvider(
+            primary=primary_provider,
+            local=local_provider,
+            mock=MockCodeProvider(),
+        )
         self.publisher = GitHubPublisher(self.config.github_token)
-        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        self.sandbox = HybridSandbox(
+            docker=DockerSandbox(image=self.config.sandbox_image),
+            microvm=MicroVMHTTPBackend.from_env(),
+        )
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
@@ -60,6 +119,16 @@ class AICodeRuntime:
                 database_url=knowledge_dsn,
             )
 
+
+    @staticmethod
+    def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(os.getenv(name, str(default)))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+        return value
 
     def close(self) -> None:
         """Release optional retrieval resources during worker shutdown."""
@@ -127,15 +196,26 @@ class AICodeRuntime:
         )
 
     async def _await_with_lease(
-        self, operation: Coroutine, lost_lease: asyncio.Event
+        self,
+        operation: Coroutine,
+        lost_lease: asyncio.Event,
+        cancel_requested: asyncio.Event,
     ) -> Any:
         operation_task = asyncio.create_task(operation)
         lease_watch = asyncio.create_task(lost_lease.wait())
+        cancel_watch = asyncio.create_task(cancel_requested.wait())
         try:
             done, _ = await asyncio.wait(
-                {operation_task, lease_watch},
+                {operation_task, lease_watch, cancel_watch},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if cancel_watch in done and cancel_requested.is_set():
+                operation_task.cancel()
+                try:
+                    await operation_task
+                except asyncio.CancelledError:
+                    pass
+                raise TaskCancelledError("Task cancellation was requested by the control plane")
             if lease_watch in done and lost_lease.is_set():
                 operation_task.cancel()
                 try:
@@ -145,39 +225,61 @@ class AICodeRuntime:
                 raise RuntimeError("Worker lost its task lease; operation cancelled")
             return await operation_task
         finally:
-            lease_watch.cancel()
-            try:
-                await lease_watch
-            except asyncio.CancelledError:
-                pass
+            for watcher in (lease_watch, cancel_watch):
+                watcher.cancel()
+            await asyncio.gather(lease_watch, cancel_watch, return_exceptions=True)
 
-    async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
+    async def _heartbeat(
+        self,
+        job: Job,
+        lost_lease: asyncio.Event,
+        cancel_requested: asyncio.Event,
+    ) -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.heartbeat_interval_seconds)
             try:
-                renewed = await asyncio.to_thread(
-                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
+                lease_state = await asyncio.to_thread(
+                    self.queue.heartbeat_state,
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
+                    self.lease_seconds,
                 )
             except Exception:
                 logger.exception("Lease heartbeat failed for job %s", job.id)
                 lost_lease.set()
                 return
-            if not renewed:
+            if lease_state == "cancel_requested":
+                cancel_requested.set()
+                logger.info("Cooperative cancellation requested for job %s", job.id)
+                return
+            if lease_state != "running":
                 lost_lease.set()
                 logger.error("Lease lost for job %s", job.id)
                 return
 
-    async def _assert_lease(self, job: Job, lost_lease: asyncio.Event) -> None:
+    async def _assert_lease(
+        self,
+        job: Job,
+        lost_lease: asyncio.Event,
+        cancel_requested: asyncio.Event,
+    ) -> None:
+        if cancel_requested.is_set():
+            raise TaskCancelledError("Task cancellation was requested by the control plane")
         if lost_lease.is_set():
             raise RuntimeError("Worker has already lost its task lease")
-        owned = await asyncio.to_thread(
-            self.queue.owns_lease,
+        lease_state = await asyncio.to_thread(
+            self.queue.lease_status,
             job.id,
             job.tenant_id,
             self.worker_id,
             job.lease_token,
         )
-        if not owned:
+        if lease_state == "cancel_requested":
+            cancel_requested.set()
+            raise TaskCancelledError("Task cancellation was requested by the control plane")
+        if lease_state != "running":
             lost_lease.set()
             raise RuntimeError("Task lease is no longer owned by this worker")
 
@@ -211,13 +313,21 @@ class AICodeRuntime:
     async def run_once(self) -> bool:
         if not self.config.aicode_enabled:
             return False
-        job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
+        job = await asyncio.to_thread(self.queue.claim, self.worker_id, self.lease_seconds)
         if job is None:
             return False
         started = time.perf_counter()
         outcome = "failed"
         lost_lease = asyncio.Event()
-        heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
+        cancel_requested = asyncio.Event()
+        heartbeat = asyncio.create_task(
+            self._heartbeat(job, lost_lease, cancel_requested)
+        )
+        workspace: str | None = None
+        task: CodingTask | None = None
+        side_effect = "NONE"
+        commit_sha: str | None = None
+        pr_url: str | None = None
         authorized = False
         policy_audited = False
         try:
@@ -228,7 +338,7 @@ class AICodeRuntime:
             if self.config.environment == "production" and not allowed_repositories:
                 raise PermissionError("Tenant has no configured repository permissions")
 
-            await self._assert_lease(job, lost_lease)
+            await self._assert_lease(job, lost_lease, cancel_requested)
             authorized = await asyncio.to_thread(
                 self.queue.authorize_execution,
                 job.id,
@@ -249,14 +359,14 @@ class AICodeRuntime:
                 lost_lease.set()
                 raise RuntimeError("Worker is not authorized by the current task lease")
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
-            if lost_lease.is_set():
-                raise RuntimeError("Worker lost its task lease before execution")
+            await self._assert_lease(job, lost_lease, cancel_requested)
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
             if not 60 <= task_timeout <= 86400:
                 raise ValueError("RUSA_TASK_TIMEOUT_SECONDS must be between 60 and 86400")
             record = await self._await_with_lease(
                 asyncio.wait_for(orchestrator.run(task), timeout=task_timeout),
                 lost_lease,
+                cancel_requested,
             )
             if record.state == TaskState.AWAITING_APPROVAL:
                 await self._await_human_review(
@@ -268,14 +378,23 @@ class AICodeRuntime:
                 outcome = "awaiting_approval"
                 return True
             if record.state != TaskState.SUCCEEDED:
-                await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
+                blocked = record.state == TaskState.BLOCKED
+                failed = await asyncio.to_thread(
+                    self.queue.fail,
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
+                    retryable=not blocked,
                 )
-                outcome = "failed"
+                if not failed:
+                    raise RuntimeError("Queue rejected task failure transition because the lease or control state changed")
+                outcome = "blocked" if blocked else "failed"
                 return True
 
-            await self._assert_lease(job, lost_lease)
+            await self._assert_lease(job, lost_lease, cancel_requested)
+            side_effect = "UNKNOWN"
             commit_sha = await asyncio.to_thread(
                 self.queue.publish_if_lease_owned,
                 job.id,
@@ -290,7 +409,9 @@ class AICodeRuntime:
                 ),
                 lease_seconds=900,
             )
-            await self._assert_lease(job, lost_lease)
+            side_effect = "APPLIED"
+            await self._assert_lease(job, lost_lease, cancel_requested)
+            side_effect = "UNKNOWN"
             pr_url = await self._await_with_lease(
                 self.publisher.create_or_get_draft_pr(
                     task.repository.full_name,
@@ -308,7 +429,9 @@ class AICodeRuntime:
                     ),
                 ),
                 lost_lease,
+                cancel_requested,
             )
+            side_effect = "APPLIED"
             await asyncio.to_thread(
                 self.audit.record,
                 "pull_request.created",
@@ -327,6 +450,7 @@ class AICodeRuntime:
                     timeout_seconds=ci_timeout, poll_seconds=ci_poll,
                 ),
                 lost_lease,
+                cancel_requested,
             )
             if not ci_ok:
                 await self._await_human_review(
@@ -373,37 +497,111 @@ class AICodeRuntime:
         except Exception as exc:
             if isinstance(exc, LeaseLostError):
                 lost_lease.set()
-            if not policy_audited:
+
+            if not lost_lease.is_set() and not cancel_requested.is_set():
                 try:
-                    record_task_policy(
+                    lease_state = await asyncio.to_thread(
+                        self.queue.lease_status,
+                        job.id,
                         job.tenant_id,
-                        job.task_id,
-                        f"worker:{self.worker_id}",
-                        "task.execute",
-                        False,
-                        sink=self.task_policy_audit,
-                        required=self.config.environment == "production",
+                        self.worker_id,
+                        job.lease_token,
                     )
+                    if lease_state == "cancel_requested":
+                        cancel_requested.set()
                 except Exception:
-                    logger.error("Could not persist denied task execution audit event")
-            elif not authorized:
-                record_task_policy(
-                    job.tenant_id, job.task_id, f"worker:{self.worker_id}",
-                    "task.execute", False,
-                )
-            logger.exception("AICode task %s failed", job.task_id)
-            outcome = "lease_lost" if lost_lease.is_set() else "failed"
-            if not lost_lease.is_set():
-                await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
-                    f"{type(exc).__name__}: {exc}",
-                )
+                    logger.exception("Could not read task control state after worker failure")
+
+            if cancel_requested.is_set() or isinstance(exc, TaskCancelledError):
+                try:
+                    acknowledged = await asyncio.to_thread(
+                        self.queue.finish_cancelled,
+                        job.id,
+                        job.tenant_id,
+                        self.worker_id,
+                        job.lease_token,
+                        side_effect=side_effect,
+                        result={
+                            "branch": task.repository.work_branch if task else None,
+                            "commit_sha": commit_sha,
+                            "pull_request_url": pr_url,
+                        },
+                    )
+                    if acknowledged:
+                        outcome = (
+                            "awaiting_approval" if side_effect == "UNKNOWN" else "cancelled"
+                        )
+                        try:
+                            await asyncio.to_thread(
+                                self.audit.record,
+                                "task.cancelled",
+                                job.task_id,
+                                self.worker_id,
+                                {
+                                    "side_effect": side_effect,
+                                    "reconciliation_required": side_effect == "UNKNOWN",
+                                },
+                                tenant_id=job.tenant_id,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Cancellation state persisted but HMAC audit event failed for task %s",
+                                job.task_id,
+                            )
+                    else:
+                        outcome = "lease_lost"
+                except Exception:
+                    logger.exception("Could not acknowledge cancellation for task %s", job.task_id)
+                    outcome = "lease_lost"
+            else:
+                if not policy_audited:
+                    try:
+                        record_task_policy(
+                            job.tenant_id,
+                            job.task_id,
+                            f"worker:{self.worker_id}",
+                            "task.execute",
+                            False,
+                            sink=self.task_policy_audit,
+                            required=self.config.environment == "production",
+                        )
+                    except Exception:
+                        logger.error("Could not persist denied task execution audit event")
+                elif not authorized:
+                    record_task_policy(
+                        job.tenant_id, job.task_id, f"worker:{self.worker_id}",
+                        "task.execute", False,
+                    )
+                logger.error("AICode task %s failed with %s", job.task_id, type(exc).__name__)
+                retryable = not isinstance(exc, (PermissionError, ValueError))
+                outcome = "lease_lost" if lost_lease.is_set() else ("failed" if retryable else "blocked")
+                if not lost_lease.is_set():
+                    await asyncio.to_thread(
+                        self.queue.fail,
+                        job.id,
+                        job.tenant_id,
+                        self.worker_id,
+                        job.lease_token,
+                        f"{type(exc).__name__}: task execution failed; inspect restricted worker diagnostics",
+                        retryable=retryable,
+                    )
         finally:
             heartbeat.cancel()
             try:
                 await heartbeat
             except asyncio.CancelledError:
                 pass
+            if workspace and outcome in {"failed", "blocked", "lease_lost", "cancelled"}:
+                try:
+                    await asyncio.to_thread(
+                        self.workspace_manager.cleanup, task, job.tenant_id
+                    )
+                except Exception as cleanup_exc:
+                    logger.error(
+                        "Could not clean workspace for task %s (%s)",
+                        job.task_id,
+                        type(cleanup_exc).__name__,
+                    )
             AICODE_TASKS.labels(outcome).inc()
             AICODE_TASK_DURATION.labels(outcome).observe(time.perf_counter() - started)
         return True
