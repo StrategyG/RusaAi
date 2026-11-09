@@ -17,6 +17,7 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 - **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
 - **Agent fine-tuning**: Qwen3-4B-Instruct-2507 QLoRA/SFT pipeline, role-scoped dataset validation, completion-only loss, held-out contract evaluation, and checksummed model artifact workflow.
 - **A2A task validation**: Versioned JSON Schema validation for agent task envelopes.
+- **Predictive DevOps Intelligence**: Optional tenant-scoped telemetry, Prophet + ARIMA forecasting, Bayesian anomaly scoring, cost-sensitive capacity proposals, a dedicated PostgreSQL queue, and read-only MCP tools. Disabled by default; no infrastructure mutation is enabled.
 - **Security and reliability controls**: API-key authentication, RBAC, tenant-aware data access, rate limiting, non-root containers, and audit events; production effectiveness still requires deployment-level verification.
 - **CI quality gates**: Lint, tests, static security analysis, container builds, and vulnerability scanning.
 
@@ -35,6 +36,10 @@ See `docs/INFERENCE_OPERATIONS.md`.
 ## Agent model fine-tuning
 
 The first SFT target is the existing six-role AICode worker JSON action envelope. Use a dedicated CUDA training host and install `requirements-train.txt`; training dependencies and model weights are not part of the API image. Curated datasets belong under the ignored `llm-project/data/curated/` directory and must pass the role/tool-policy validator. Run `python llm-project/train/validate_dataset.py`, then `python llm-project/train/train_sft.py`. Evaluate the adapter, merge it, and create a pinned model manifest before configuring `RUSA_LOCAL_MODEL_PATH`. See `docs/FINETUNING_OPERATIONS.md` for hardware estimates and promotion gates. The pipeline is implemented; no fine-tuned weights or production certification are claimed.
+
+## Optional Predictive DevOps Intelligence
+
+PDIE is an optional worker subsystem. Install `requirements-devops.txt`, apply `migrations/009_rusa_devops_intelligence.sql` after migrations 001-008, set `RUSA_DEVOPS_ENABLED=true`, and start the separate worker with `python -m rusa_devops.worker_main` or `RUSA_DEVOPS_ENABLED=true docker compose --profile devops up --build devops-worker`. See `docs/PREDICTIVE_DEVOPS_INTELLIGENCE.md`. Forecast training, anomaly detection, and capacity proposals are implemented; infrastructure writes remain disabled and no DevOps model weights are bundled.
 
 ## Optional RAG and MCP
 
