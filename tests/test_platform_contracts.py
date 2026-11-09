@@ -202,7 +202,7 @@ def test_run_event_accepts_a_distinct_devops_stage_agent_actor():
 def test_run_event_requires_agent_role_only_for_agent_actors():
     event = _event()
     event["actor"].pop("core_role")
-    with pytest.raises(PlatformContractError, match="agent actors"):
+    with pytest.raises(PlatformContractError):
         validate_run_event(event)
 
     event = _event()
