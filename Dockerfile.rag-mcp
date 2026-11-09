@@ -58,6 +58,7 @@ RUN apt-get update \
 COPY --from=builder /usr/local /usr/local
 COPY rusa_knowledge /app/rusa_knowledge
 COPY rusa_mcp /app/rusa_mcp
+COPY rusa_devops /app/rusa_devops
 
 RUN ldd /usr/local/bin/python3.11 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
@@ -71,7 +72,7 @@ for package in ("pip", "setuptools", "wheel", "jaraco.context"):
         continue
     raise SystemExit(f"Build-only package {package} remains in MCP runtime")
 
-for module in ("bs4", "httpx", "mcp", "psycopg_pool", "pypdf", "docx", "uvicorn"):
+for module in ("bs4", "httpx", "mcp", "psycopg_pool", "pypdf", "docx", "uvicorn", "rusa_devops.mcp_tools"):
     import_module(module)
 print("MCP runtime imports verified; build tooling is absent.")
 PY
