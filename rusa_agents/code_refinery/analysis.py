@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 
 MAX_FILES = 2_000
 MAX_FILE_BYTES = 1_000_000
+MAX_TOTAL_SOURCE_BYTES = 100_000_000
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "dist", "build", ".tox", "__pycache__"}
 WEIGHTS = {
     "type_safety": 0.15,
@@ -297,13 +298,18 @@ def analyze_sources(
     findings: list[Finding] = []
     file_metrics: list[dict[str, float]] = []
     syntax_valid = True
+    total_source_bytes = 0
     for raw_path, source in sorted(sources.items()):
         path = PurePosixPath(raw_path)
         if path.is_absolute() or ".." in path.parts or path.suffix.lower() != ".py":
             raise ValueError(f"Unsafe or unsupported source path: {raw_path}")
         if not isinstance(source, str):
             raise TypeError(f"Source for {raw_path} must be text")
-        if len(source.encode("utf-8")) > MAX_FILE_BYTES:
+        source_bytes = len(source.encode("utf-8"))
+        total_source_bytes += source_bytes
+        if total_source_bytes > MAX_TOTAL_SOURCE_BYTES:
+            raise ValueError("Total source inventory exceeds the 100 MB analysis limit")
+        if source_bytes > MAX_FILE_BYTES:
             findings.append(
                 Finding("critical", "input", "Source file exceeds the 1 MB analysis limit.", raw_path)
             )
@@ -387,15 +393,21 @@ def analyze_workspace(
                 selected.append(candidate)
 
     sources: dict[str, str] = {}
+    total_source_bytes = 0
     for candidate in sorted(set(selected)):
         if candidate.is_symlink():
             continue
         resolved = candidate.resolve(strict=True)
         if root not in resolved.parents:
             raise ValueError("Source file escapes the assigned workspace")
-        if resolved.stat().st_size > MAX_FILE_BYTES:
-            sources[resolved.relative_to(root).as_posix()] = " " * (MAX_FILE_BYTES + 1)
-            continue
+        source_size = resolved.stat().st_size
+        total_source_bytes += source_size
+        if total_source_bytes > MAX_TOTAL_SOURCE_BYTES:
+            raise ValueError("Total source inventory exceeds the 100 MB analysis limit")
+        if source_size > MAX_FILE_BYTES:
+            raise ValueError(
+                f"Source file exceeds the 1 MB analysis limit: {resolved.relative_to(root).as_posix()}"
+            )
         sources[resolved.relative_to(root).as_posix()] = resolved.read_text(encoding="utf-8")
     return analyze_sources(
         sources, test_files_present=test_files_present, min_score=min_score
