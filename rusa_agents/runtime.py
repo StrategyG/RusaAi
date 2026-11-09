@@ -326,6 +326,8 @@ class AICodeRuntime:
         workspace: str | None = None
         task: CodingTask | None = None
         side_effect = "NONE"
+        commit_sha: str | None = None
+        pr_url: str | None = None
         authorized = False
         policy_audited = False
         try:
@@ -357,10 +359,7 @@ class AICodeRuntime:
                 lost_lease.set()
                 raise RuntimeError("Worker is not authorized by the current task lease")
             orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
-            if cancel_requested.is_set():
-                raise TaskCancelledError("Task cancellation was requested before execution")
-            if lost_lease.is_set():
-                raise RuntimeError("Worker lost its task lease before execution")
+            await self._assert_lease(job, lost_lease, cancel_requested)
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
             if not 60 <= task_timeout <= 86400:
                 raise ValueError("RUSA_TASK_TIMEOUT_SECONDS must be between 60 and 86400")
@@ -380,7 +379,7 @@ class AICodeRuntime:
                 return True
             if record.state != TaskState.SUCCEEDED:
                 blocked = record.state == TaskState.BLOCKED
-                await asyncio.to_thread(
+                failed = await asyncio.to_thread(
                     self.queue.fail,
                     job.id,
                     job.tenant_id,
@@ -389,6 +388,8 @@ class AICodeRuntime:
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
                     retryable=not blocked,
                 )
+                if not failed:
+                    raise RuntimeError("Queue rejected task failure transition because the lease or control state changed")
                 outcome = "blocked" if blocked else "failed"
                 return True
 
@@ -519,7 +520,11 @@ class AICodeRuntime:
                         self.worker_id,
                         job.lease_token,
                         side_effect=side_effect,
-                        result={"branch": task.repository.work_branch} if task else {},
+                        result={
+                            "branch": task.repository.work_branch if task else None,
+                            "commit_sha": commit_sha,
+                            "pull_request_url": pr_url,
+                        },
                     )
                     if acknowledged:
                         outcome = (
