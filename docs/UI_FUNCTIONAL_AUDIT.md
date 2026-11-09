@@ -1,6 +1,6 @@
 # RUSA AI Control Center — Functional Audit
 
-**Audited revision:** c658ff59fbaab3a52a14e152dffa05fdf9e500a0  
+**Audited code revision:** bdf5a4106a3406ac9c7d3ae35aec8debb4330a76  
 **Application:** Next.js 15 / React 19  
 **Audit type:** source/API contract review, BFF smoke tests, and Chromium browser smoke tests  
 **Environment:** CI standalone web server connected to a deterministic mock RUSA API

@@ -38,3 +38,8 @@ The root Compose file includes a web service. Set `RUSA_WEB_SESSION_SECRET` in t
 The backend currently has no external WebSocket endpoint, approval-decision endpoint, live agent registry, dedicated repository-browsing endpoint, memory API, or evaluation API. The UI polls task state, surfaces awaiting_approval records without approve/reject actions, and shows artifact references returned in task results. The eight-stage DevOps lifecycle and ten architecture agents remain separate from the source-defined AICode worker roles.
 
 See [UI Control Center integration notes](../docs/UI_CONTROL_CENTER.md) and [UI/UX precision matrix](../docs/UI_UX_PRECISION_MATRIX.md).
+
+
+## Functional smoke coverage
+
+Run `npm run build`, then `npm run smoke` to start the built standalone server against a deterministic mock RUSA API and exercise the BFF plus Chromium UI. The smoke suite covers platform_admin, tenant_admin, developer, and read_only boundaries; cross-tenant task-detail denial and tenant switching; failed-only retry and approval-paused retry denial; all fourteen workspace destinations; chat, A2A validation, metrics, responsive navigation, and logout. This verifies the web adapter and UI contract; staging verification against the real API, database, worker, and model provider remains a separate release gate.
