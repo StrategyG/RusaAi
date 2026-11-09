@@ -1,3 +1,5 @@
+import pytest
+
 from rusa_knowledge.service import KnowledgeService
 
 
