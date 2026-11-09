@@ -182,17 +182,13 @@ def test_search_withholds_legacy_documents_containing_credentials():
 
     store.search = unsafe_search
     service = KnowledgeService(store, embeddings)
-    try:
+    with pytest.raises(ValueError, match="GitHub credential") as exc_info:
         service.search(
             tenant_id="tenant-a",
             collection="agent",
             query="legacy migration",
         )
-    except ValueError as exc:
-        assert "GitHub credential" in str(exc)
-    else:
-        raise AssertionError("legacy credential-bearing retrieval was returned")
-    assert secret not in str(exc) if "exc" in locals() else True
+    assert secret not in str(exc_info.value)
 
 
 def test_get_document_withholds_legacy_credentials():
