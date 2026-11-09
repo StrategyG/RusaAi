@@ -475,7 +475,7 @@ def test_microvm_invalid_utf8_response_fails_closed(tmp_path):
     (tmp_path / "sample.py").write_text(GOOD_SOURCE, encoding="utf-8")
 
     def handler(request):
-        return httpx.Response(200, content=b"\\xff")
+        return httpx.Response(200, content=bytes([255]))
 
     backend = MicroVMHTTPBackend(
         "https://microvm.internal",
