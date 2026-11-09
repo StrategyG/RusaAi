@@ -143,6 +143,10 @@ def validate_agent_result(payload: Any) -> None:
             raise PlatformContractError(
                 "a succeeded result cannot contain failed or held evidence"
             )
+    if payload["status"] == "failed" and "error" not in payload:
+        raise PlatformContractError(
+            "failed results require a structured error object"
+        )
 
 
 def validate_run_event(payload: Any) -> None:
