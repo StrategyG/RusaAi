@@ -63,11 +63,11 @@ def test_crashed_worker_lease_is_reclaimed_and_old_token_is_fenced():
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "crash recovery"}, priority=2**31 - 1)
-        crashed = queue.claim("crashed-worker", lease_seconds=30)
+        crashed = queue.claim("crashed-worker", lease_seconds=30, tenant_id=tenant)
         assert crashed and crashed.task_id == task_id
         expire_lease(crashed.id, tenant)
 
-        recovered = queue.claim("recovery-worker", lease_seconds=30)
+        recovered = queue.claim("recovery-worker", lease_seconds=30, tenant_id=tenant)
         assert recovered and recovered.task_id == task_id
         assert recovered.lease_token != crashed.lease_token
         assert not queue.complete(
@@ -105,7 +105,7 @@ def test_two_workers_cannot_claim_the_same_job_concurrently():
         assert queue.enqueue(task_id, tenant, {"objective": "exclusive claim"}, priority=2**31 - 1)
         with ThreadPoolExecutor(max_workers=2) as pool:
             claims = list(pool.map(
-                lambda worker: queue.claim(worker, lease_seconds=30),
+                lambda worker: queue.claim(worker, lease_seconds=30, tenant_id=tenant),
                 ("claim-worker-a", "claim-worker-b"),
             ))
         owned = [item for item in claims if item is not None and item.task_id == task_id]
@@ -121,7 +121,7 @@ def test_cancel_racing_with_successful_completion_is_linearizable():
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "cancel race"}, priority=2**31 - 1)
-        job = queue.claim("cancel-race-worker", lease_seconds=30)
+        job = queue.claim("cancel-race-worker", lease_seconds=30, tenant_id=tenant)
         assert job and job.task_id == task_id
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -162,14 +162,14 @@ def test_expired_worker_attempt_limit_moves_job_to_failed():
             task_id, tenant, {"objective": "attempt limit"},
             max_attempts=2, priority=2**31 - 1,
         )
-        first = queue.claim("retry-worker-a", lease_seconds=30)
+        first = queue.claim("retry-worker-a", lease_seconds=30, tenant_id=tenant)
         assert first and first.task_id == task_id
         expire_lease(first.id, tenant)
-        second = queue.claim("retry-worker-b", lease_seconds=30)
+        second = queue.claim("retry-worker-b", lease_seconds=30, tenant_id=tenant)
         assert second and second.task_id == task_id
         expire_lease(second.id, tenant)
 
-        third = queue.claim("retry-worker-c", lease_seconds=30)
+        third = queue.claim("retry-worker-c", lease_seconds=30, tenant_id=tenant)
         assert third is None or third.task_id != task_id
         current = queue.get(task_id, tenant)
         assert current is not None
@@ -276,7 +276,7 @@ def test_running_cancel_requires_worker_acknowledgement_and_preserves_lease():
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "cooperative cancellation"})
-        job = queue.claim("cooperative-cancel-worker", lease_seconds=30)
+        job = queue.claim("cooperative-cancel-worker", lease_seconds=30, tenant_id=tenant)
         assert job and job.task_id == task_id
         assert queue.cancel(task_id, tenant)
         current = queue.get(task_id, tenant)
@@ -299,7 +299,7 @@ def test_cancel_with_unknown_side_effect_requires_reconciliation():
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "ambiguous side effect"})
-        job = queue.claim("cancel-reconcile-worker", lease_seconds=30)
+        job = queue.claim("cancel-reconcile-worker", lease_seconds=30, tenant_id=tenant)
         assert job and job.task_id == task_id
         assert queue.cancel(task_id, tenant)
         assert queue.finish_cancelled(
@@ -320,11 +320,11 @@ def test_unacknowledged_cancel_is_quarantined_after_lease_expiry():
     task_id = str(uuid4())
     try:
         assert queue.enqueue(task_id, tenant, {"objective": "worker crash during cancellation"})
-        job = queue.claim("cancel-expiry-worker", lease_seconds=30)
+        job = queue.claim("cancel-expiry-worker", lease_seconds=30, tenant_id=tenant)
         assert job and job.task_id == task_id
         assert queue.cancel(task_id, tenant)
         expire_lease(job.id, tenant)
-        queue.claim("recovery-worker", lease_seconds=30)
+        queue.claim("recovery-worker", lease_seconds=30, tenant_id=tenant)
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "awaiting_approval"
         assert current["result"]["side_effect"] == "UNKNOWN"
