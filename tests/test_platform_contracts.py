@@ -94,6 +94,12 @@ def _event(sequence=1, state_version=1):
     }
 
 
+def test_all_platform_schema_files_are_resolved_from_the_active_install():
+    from rusa_agents.platform_contracts import _SCHEMA_DIR, _SCHEMA_FILES
+
+    assert all((_SCHEMA_DIR / filename).is_file() for filename in _SCHEMA_FILES.values())
+
+
 def test_agent_task_contract_accepts_authorized_versioned_task():
     validate_agent_task(_task())
     assert len(PlatformDomain) == 4
