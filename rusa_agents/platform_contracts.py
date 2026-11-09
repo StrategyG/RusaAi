@@ -42,6 +42,11 @@ class CoreAgentRole(str, Enum):
     EVALUATION_REPORTING = "evaluation_reporting"
 
 
+class AgentType(str, Enum):
+    CORE_AGENT = "core_agent"
+    DEVOPS_STAGE_AGENT = "devops_stage_agent"
+
+
 class DevOpsStage(str, Enum):
     PLAN = "plan"
     CODE = "code"
@@ -51,6 +56,29 @@ class DevOpsStage(str, Enum):
     DEPLOY = "deploy"
     OPERATE = "operate"
     MONITOR = "monitor"
+
+
+class DevOpsStageAgentId(str, Enum):
+    PLAN = "rusa_plan_agent"
+    CODE = "rusa_code_agent"
+    BUILD = "rusa_build_agent"
+    TEST = "rusa_test_agent"
+    RELEASE = "rusa_release_agent"
+    DEPLOY = "rusa_deploy_agent"
+    OPERATE = "rusa_operate_agent"
+    MONITOR = "rusa_monitor_agent"
+
+
+_STAGE_AGENT_STAGE = {
+    DevOpsStageAgentId.PLAN.value: DevOpsStage.PLAN.value,
+    DevOpsStageAgentId.CODE.value: DevOpsStage.CODE.value,
+    DevOpsStageAgentId.BUILD.value: DevOpsStage.BUILD.value,
+    DevOpsStageAgentId.TEST.value: DevOpsStage.TEST.value,
+    DevOpsStageAgentId.RELEASE.value: DevOpsStage.RELEASE.value,
+    DevOpsStageAgentId.DEPLOY.value: DevOpsStage.DEPLOY.value,
+    DevOpsStageAgentId.OPERATE.value: DevOpsStage.OPERATE.value,
+    DevOpsStageAgentId.MONITOR.value: DevOpsStage.MONITOR.value,
+}
 
 
 class PlatformContractError(ValueError):
@@ -116,6 +144,17 @@ def _parse_timestamp(value: str, field: str) -> datetime:
 def validate_agent_task(payload: Any) -> None:
     """Validate a dispatchable task and its authorization/deadline envelope."""
     _validate("agent_task", payload)
+    agent = payload["agent"]
+    if agent["agent_type"] == AgentType.DEVOPS_STAGE_AGENT.value:
+        if agent["agent_id"] != agent["stage_agent_id"]:
+            raise PlatformContractError(
+                "stage agent_id must match its canonical stage_agent_id"
+            )
+        expected_stage = _STAGE_AGENT_STAGE[agent["stage_agent_id"]]
+        if payload.get("stage") != expected_stage:
+            raise PlatformContractError(
+                "DevOps stage-agent identity must match the task lifecycle stage"
+            )
     created = _parse_timestamp(payload["created_at"], "created_at")
     deadline = _parse_timestamp(payload["deadline_at"], "deadline_at")
     if deadline <= created:
@@ -156,10 +195,12 @@ def validate_run_event(payload: Any) -> None:
     """Validate one event envelope; sequence allocation remains an event-store duty."""
     _validate("run_event", payload)
     actor = payload["actor"]
-    if actor["actor_type"] == "agent" and "agent_role" not in actor:
-        raise PlatformContractError("agent actors must declare their registered agent_role")
-    if actor["actor_type"] != "agent" and "agent_role" in actor:
-        raise PlatformContractError("only agent actors may declare agent_role")
+    if actor["actor_type"] == "agent" and actor["agent_type"] == AgentType.DEVOPS_STAGE_AGENT.value:
+        if actor["stage_agent_id"] not in {item.value for item in DevOpsStageAgentId}:
+            raise PlatformContractError("agent actor must declare a registered stage_agent_id")
+    elif actor["actor_type"] == "agent" and actor["agent_type"] == AgentType.CORE_AGENT.value:
+        if actor["core_role"] not in {item.value for item in CoreAgentRole}:
+            raise PlatformContractError("agent actor must declare a registered core_role")
 
 
 def validate_run_event_batch(events: Any) -> None:
