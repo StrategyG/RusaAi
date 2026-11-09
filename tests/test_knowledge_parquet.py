@@ -6,7 +6,7 @@ from rusa_knowledge.parquet import iter_telemetry_aggregates
 
 
 def test_parquet_telemetry_aggregation_is_grouped_and_batched(tmp_path: Path):
-    pytest.importorskip("duckdb")
+    duckdb = pytest.importorskip("duckdb")
     parquet = tmp_path / "telemetry.parquet"
     connection = duckdb.connect()
     try:
