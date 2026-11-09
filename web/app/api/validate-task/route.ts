@@ -28,7 +28,8 @@ export async function POST(request: NextRequest) {
   }
   const response = await backendFetch("/v1/validate-task", session, {
     method: "POST",
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: request.signal
   });
   return forwardJson(response);
 }
