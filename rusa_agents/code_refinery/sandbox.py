@@ -128,6 +128,7 @@ class MicroVMHTTPBackend:
         api_key: str,
         *,
         timeout_seconds: int = 900,
+        expected_runner_image_digest: str | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         parsed = urlparse(base_url)
@@ -151,9 +152,14 @@ class MicroVMHTTPBackend:
             raise ValueError("MicroVM API key must be a real secret of at least 24 UTF-8 bytes")
         if timeout_seconds < 30 or timeout_seconds > 3600:
             raise ValueError("MicroVM timeout must be between 30 and 3600 seconds")
+        if expected_runner_image_digest is not None and not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", expected_runner_image_digest
+        ):
+            raise ValueError("Expected MicroVM runner image must be a pinned SHA-256 digest")
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.expected_runner_image_digest = expected_runner_image_digest
         self.transport = transport
 
     @classmethod
@@ -162,15 +168,19 @@ class MicroVMHTTPBackend:
         if not base_url:
             return None
         api_key = os.getenv("RUSA_MICROVM_API_KEY", "")
-        if (
-            os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
-            and urlparse(base_url).scheme != "https"
-        ):
+        production = os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
+        if production and urlparse(base_url).scheme != "https":
             raise ValueError("Production MicroVM supervisor must use HTTPS")
+        expected_digest = os.getenv("RUSA_MICROVM_RUNNER_IMAGE_DIGEST", "").strip() or None
+        if production and expected_digest is None:
+            raise ValueError(
+                "Production MicroVM requires RUSA_MICROVM_RUNNER_IMAGE_DIGEST"
+            )
         return cls(
             base_url,
             api_key,
             timeout_seconds=int(os.getenv("RUSA_MICROVM_TIMEOUT_SECONDS", "900")),
+            expected_runner_image_digest=expected_digest,
         )
 
     def _headers(self) -> dict[str, str]:
@@ -196,6 +206,9 @@ class MicroVMHTTPBackend:
             payload = json.loads(bytes(body))
         if not isinstance(payload, dict) or payload.get("ready") is not True:
             raise RuntimeError("MicroVM supervisor is not ready")
+        if self.expected_runner_image_digest is not None:
+            if payload.get("runner_image_digest") != self.expected_runner_image_digest:
+                raise RuntimeError("MicroVM readiness runner image digest does not match the pinned image")
 
     @staticmethod
     def _archive_workspace(workspace: Path) -> tuple[bytes, str]:
@@ -298,6 +311,11 @@ class MicroVMHTTPBackend:
                 raise ValueError("MicroVM snapshot digest mismatch")
             if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
                 raise ValueError("MicroVM response has no immutable runner image digest")
+            if (
+                self.expected_runner_image_digest is not None
+                and image_digest != self.expected_runner_image_digest
+            ):
+                raise ValueError("MicroVM runner image digest does not match the pinned image")
             if not isinstance(stdout, str) or not isinstance(stderr, str):
                 raise ValueError("MicroVM stdout/stderr must be text")
             output = (stdout + "\n" + stderr)[-20_000:]
