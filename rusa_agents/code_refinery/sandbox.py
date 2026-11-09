@@ -42,10 +42,23 @@ SENSITIVE_SUFFIXES = {
     ".der", ".ppk", ".tfstate", ".tfvars",
 }
 DANGEROUS_CALLS = {
-    "eval", "exec", "__import__", "os.system", "os.popen", "subprocess.Popen",
-    "pickle.loads", "marshal.loads", "ctypes.CDLL", "ctypes.PyDLL",
-    "multiprocessing.Process", "socket.socket",
+    "eval", "exec", "builtins.eval", "builtins.exec", "__import__",
+    "importlib.import_module", "runpy.run_module", "runpy.run_path",
+    "os.system", "os.popen", "os.execv", "os.execve", "os.execl",
+    "os.execlp", "os.execle", "os.execvp", "os.execvpe",
+    "os.spawnl", "os.spawnle", "os.spawnlp", "os.spawnlpe",
+    "os.spawnv", "os.spawnve", "os.spawnvp", "os.spawnvpe",
+    "subprocess.Popen", "asyncio.create_subprocess_exec",
+    "asyncio.create_subprocess_shell", "pickle.loads", "marshal.loads",
+    "ctypes.CDLL", "ctypes.PyDLL", "multiprocessing.Process",
+    "socket.socket", "socket.create_connection", "urllib.request.urlopen",
 }
+SECRET_CONTENT_PATTERNS = (
+    re.compile(rb"sk-[A-Za-z0-9]{20,}"),
+    re.compile(rb"gh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(rb"AKIA[A-Z0-9]{16}"),
+    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+)
 
 
 def _call_name(node: ast.AST) -> str:
@@ -97,13 +110,15 @@ class SandboxRiskClassifier:
                     if not isinstance(node, ast.Call):
                         continue
                     name = _call_name(node.func)
-                    shell_true = name.startswith("subprocess.") and any(
+                    shell_enabled = name.startswith("subprocess.") and any(
                         keyword.arg == "shell"
-                        and isinstance(keyword.value, ast.Constant)
-                        and keyword.value.value is True
+                        and not (
+                            isinstance(keyword.value, ast.Constant)
+                            and keyword.value.value is False
+                        )
                         for keyword in node.keywords
                     )
-                    if name in DANGEROUS_CALLS or shell_true:
+                    if name in DANGEROUS_CALLS or name.startswith("subprocess.") and shell_enabled:
                         reasons.append(f"dynamic_or_host_process_primitive:{name}")
         package_json = root / "package.json"
         if package_json.is_file() and not package_json.is_symlink():
@@ -211,6 +226,17 @@ class MicroVMHTTPBackend:
                 raise RuntimeError("MicroVM readiness runner image digest does not match the pinned image")
 
     @staticmethod
+    def _contains_high_confidence_secret(path: Path) -> bool:
+        overlap = b""
+        with path.open("rb") as source:
+            while chunk := source.read(64 * 1024):
+                sample = overlap + chunk
+                if any(pattern.search(sample) for pattern in SECRET_CONTENT_PATTERNS):
+                    return True
+                overlap = sample[-256:]
+        return False
+
+    @staticmethod
     def _archive_workspace(workspace: Path) -> tuple[bytes, str]:
         buffer = io.BytesIO()
         total_bytes = 0
@@ -246,6 +272,10 @@ class MicroVMHTTPBackend:
                         if root not in resolved.parents:
                             continue
                         size = resolved.stat().st_size
+                        if MicroVMHTTPBackend._contains_high_confidence_secret(resolved):
+                            raise ValueError(
+                                "MicroVM source snapshot contains high-confidence credential material"
+                            )
                         total_bytes += size
                         file_count += 1
                         if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
@@ -328,7 +358,7 @@ class MicroVMHTTPBackend:
                 "runner_image_digest": image_digest,
             }
             return ToolResult(exit_code == 0, output, evidence)
-        except (httpx.HTTPError, OSError, ValueError) as exc:
+        except (httpx.HTTPError, OSError, UnicodeError, ValueError, tarfile.TarError) as exc:
             return ToolResult(
                 False,
                 f"MicroVM execution failed closed: {type(exc).__name__}",
