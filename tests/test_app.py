@@ -575,3 +575,40 @@ def test_aicode_task_list_rejects_unknown_status(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert response.status_code == 422
+
+
+def test_aicode_task_intake_rejects_credential_material(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}')
+
+    class StubQueue:
+        def enqueue(self, *args, **kwargs):
+            raise AssertionError("credential-bearing task must not reach the queue")
+
+    monkeypatch.setattr(app.state, "queue", StubQueue(), raising=False)
+    token = "ghp_" + ("f" * 36)
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Use this token " + token,
+            "repository": {"full_name": "StrategyG/RusaAi"},
+            "acceptance_criteria": ["Do not persist the token"],
+        },
+    )
+    assert response.status_code == 422
+    assert token not in response.text
+
+
+def test_development_task_authentication_binds_a_local_principal(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setenv("RUSA_DEFAULT_TENANT", "local-tenant")
+    response = client.get("/v1/auth/session")
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == "local-tenant"
+    assert response.json()["roles"] == ["tenant_admin"]
