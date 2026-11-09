@@ -794,12 +794,12 @@ class PostgresTaskQueue:
             row = conn.execute("""
                 UPDATE aicode_jobs
                 SET result=COALESCE(result, '{}'::jsonb) || jsonb_build_object(
-                        'side_effect', %s,
+                        'side_effect', %s::text,
                         'cancel_reconciliation_required', false,
                         'reconciliation', jsonb_build_object(
-                            'outcome', %s,
-                            'evidence', %s,
-                            'actor', %s,
+                            'outcome', %s::text,
+                            'evidence', %s::text,
+                            'actor', %s::text,
                             'reconciled_at', NOW()
                         )
                     ),
