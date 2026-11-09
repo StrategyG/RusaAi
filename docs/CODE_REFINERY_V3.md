@@ -37,7 +37,7 @@ Weights:
 | Security | 20% |
 | Testability | 15% |
 
-The default threshold is 85. Configure with `RUSA_REFINERY_MIN_SCORE`. Syntax errors, credential-like literals, and AST-detected dangerous execution primitives block the gate independently of the aggregate score. The orchestrator verifies the numeric score, report digest, syntax status, and blocking-finding count; a model-authored claim cannot satisfy the gate.
+The default threshold is 85. Configure with `RUSA_REFINERY_MIN_SCORE`. Pytest modules are not penalized for omitting annotations or docstrings on test functions; complexity, maintainability, and security checks still apply. Syntax errors, credential-like literals, and AST-detected dangerous execution primitives block the gate independently of the aggregate score. The orchestrator verifies the numeric score, report digest, syntax status, and blocking-finding count; a model-authored claim cannot satisfy the gate.
 
 Scores are deterministic heuristics. They do not prove functional correctness, test coverage, absence of vulnerabilities, or release readiness. Pytest, Ruff, Bandit, compile checks, and CI remain separate required evidence.
 
