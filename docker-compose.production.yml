@@ -113,9 +113,83 @@ services:
       retries: 3
     networks: [rusa-internal, rusa-egress]
 
+  ollama:
+    image: ${RUSA_OLLAMA_IMAGE:?Set RUSA_OLLAMA_IMAGE to an immutable image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    environment:
+      OLLAMA_KEEP_ALIVE: 10m
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - rusa-ollama-models:/root/.ollama
+    expose:
+      - "11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 256
+    mem_limit: 8g
+    cpus: 4.0
+    networks: [rusa-internal]
+
+  rag-mcp:
+    image: ${RUSA_RAG_MCP_IMAGE:?Set RUSA_RAG_MCP_IMAGE to an immutable image digest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    hostname: rusa-mcp
+    environment:
+      ENVIRONMENT: production
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_KNOWLEDGE_DATABASE_URL:?Set restricted RAG PostgreSQL login DSN}
+      RUSA_KNOWLEDGE_DB_ROLE: rusa_knowledge_worker
+      RUSA_KNOWLEDGE_DB_POOL_MIN: "1"
+      RUSA_KNOWLEDGE_DB_POOL_MAX: "8"
+      RUSA_MCP_TENANT_KEYS: ${RUSA_MCP_TENANT_KEYS:?Set SHA-256 tenant key registry}
+      RUSA_MCP_ALLOWED_HOSTS: "localhost,localhost:8002,127.0.0.1,127.0.0.1:8002,rusa-mcp,rusa-mcp:8002,rag-mcp,rag-mcp:8002"
+      RUSA_MCP_REQUESTS_PER_MINUTE: "120"
+      RUSA_EMBEDDING_PROVIDER: ollama
+      RUSA_EMBEDDING_BASE_URL: http://ollama:11434
+      RUSA_EMBEDDING_ALLOWED_HOSTS: ollama
+      RUSA_EMBEDDING_MODEL: bge-m3
+      RUSA_EMBEDDING_NATIVE_DIMENSIONS: "1024"
+      RUSA_EMBEDDING_TIMEOUT: "60"
+      RUSA_EMBEDDING_MAX_RETRIES: "2"
+      RUSA_RAG_VECTOR_WEIGHT: "0.7"
+      RUSA_RAG_LEXICAL_WEIGHT: "0.3"
+      RUSA_RAG_HNSW_EF_SEARCH: "80"
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/ready', timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 60s
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    networks: [rusa-internal, rusa-egress]
+
 networks:
   rusa-internal:
     driver: bridge
     internal: true
   rusa-egress:
     driver: bridge
+
+volumes:
+  rusa-ollama-models:
