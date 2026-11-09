@@ -71,7 +71,7 @@ The supplied communication ADR is marked **Diusulkan**. The DevOps lifecycle doc
 | HTTPS + JSON API for task submission/status | Present for AICode task API | Extend consistently to cross-domain run APIs |
 | Durable command queue | PostgreSQL `aicode_jobs` queue with leases, retries, idempotency and tenant scope | Retain as current baseline; define when a separate broker is justified |
 | Workflow state and durable audit | PostgreSQL task state, task-policy audit and HMAC audit ledger | Add transactional outbox and state-versioned lifecycle events |
-| gRPC + Protobuf internal RPC | Not implemented for agent manager dispatch | Define versioned RPC contracts only where cross-process boundaries require them |
+| Versioned cross-domain task/result/event contracts | JSON Schema v1.0 and Python validators for task, result, and run-event envelopes | Contract foundation implemented; no durable run/event store |
 | RabbitMQ command queues | Not implemented | Implement only after queue topology, DLQ, publisher confirms and recovery are operationally specified |
 | Kafka/event-log replay | Not implemented | Add event log and consumer projections after transactional outbox exists |
 | WebSocket/gRPC streaming with cursor recovery | Not implemented as an AICode run stream | Add progress cursor and reconnect/snapshot semantics |
