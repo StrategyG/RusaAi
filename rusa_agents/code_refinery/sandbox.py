@@ -256,14 +256,14 @@ class MicroVMHTTPBackend:
                         if root not in resolved.parents:
                             continue
                         size = resolved.stat().st_size
-                        if contains_high_confidence_secret(resolved):
-                            raise ValueError(
-                                "MicroVM source snapshot contains high-confidence credential material"
-                            )
                         total_bytes += size
                         file_count += 1
                         if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
                             raise ValueError("MicroVM source snapshot exceeds configured file or byte limits")
+                        if contains_high_confidence_secret(resolved):
+                            raise ValueError(
+                                "MicroVM source snapshot contains high-confidence credential material"
+                            )
                         relative = resolved.relative_to(root).as_posix()
                         info = tarfile.TarInfo(relative)
                         info.size = size
