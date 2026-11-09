@@ -9,6 +9,7 @@ The model server is an inference component only. It does not replace the RUSA-AI
 ## 1. Host requirements
 
 - Linux server with Docker Engine and Docker Compose plugin.
+- Python 3.10+ with the base project dependencies installed if running the host-side GGUF verifier (`python -m pip install -e .`).
 - CPU architecture supported by the selected llama.cpp server image.
 - RAM sized for the GGUF weights, context/KV cache, server overhead, and operating system. Do not size RAM from the quantization label alone.
 - Persistent storage for model files, outside the Git working tree.

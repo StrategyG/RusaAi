@@ -132,3 +132,19 @@ def test_api_key_registry_rejects_unknown_roles(monkeypatch):
     )
     with pytest.raises(ValueError, match="roles"):
         RuntimeConfig.from_env()
+
+
+def test_production_api_rejects_plain_http_model_endpoint(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "http://llama-cpp:8080/v1")
+
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_worker_rejects_plain_http_model_endpoint(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "http://llama-cpp:8080/v1")
+
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_worker()
