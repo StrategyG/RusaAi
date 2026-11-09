@@ -569,3 +569,49 @@ def test_gateway_withholds_secret_bearing_git_diff(tmp_path, monkeypatch):
     assert not result.ok
     assert token not in result.output
     assert result.evidence["secret_scan"] == "blocked"
+
+
+def test_analyzer_resolves_aliased_dynamic_import_and_process_calls():
+    source = '''"""Alias-aware security sample."""
+import importlib as loader
+import subprocess as proc
+from os import system as launch
+
+def load_plugin(name: str):
+    return loader.import_module(name)
+
+def execute(command: str, shell_mode: bool):
+    proc.run(command, shell=shell_mode)
+    launch(command)
+'''
+    report = analyze_sources({"src/aliases.py": source}, test_files_present=True)
+    assert not report.passed
+    assert report.blocking_findings >= 3
+    names = [item.message for item in report.findings if item.category == "security"]
+    assert any("importlib.import_module" in item for item in names)
+    assert any("subprocess.run" in item for item in names)
+    assert any("os.system" in item for item in names)
+
+
+def test_classifier_routes_aliased_dynamic_execution_to_microvm(tmp_path):
+    source = '''"""Aliased subprocess test."""
+import subprocess as proc
+from importlib import import_module as load
+
+def test_run(flag):
+    proc.run("echo x", shell=flag)
+    load("optional_plugin")
+'''
+    (tmp_path / "test_aliases.py").write_text(source, encoding="utf-8")
+    risk, reasons = SandboxRiskClassifier().classify(tmp_path, "pytest")
+    assert risk == "high"
+    assert any("subprocess.run" in reason for reason in reasons)
+    assert any("importlib.import_module" in reason for reason in reasons)
+
+
+def test_shared_secret_scanner_detects_modern_credential_formats():
+    from rusa_agents.secret_scan import contains_high_confidence_secret_text
+
+    assert contains_high_confidence_secret_text("token=github_pat_" + "a" * 40)
+    assert contains_high_confidence_secret_text("key=sk-proj-" + "b" * 40)
+    assert contains_high_confidence_secret_text("token=xoxb-" + "c" * 24)
