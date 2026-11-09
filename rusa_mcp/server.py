@@ -167,12 +167,6 @@ def _allowed_hosts() -> list[str]:
 class TenantAuthMiddleware:
     """Pure ASGI middleware; authentication and tenant context are per request."""
 
-    def __init__(self, app: Any, key_hashes: dict[str, str] | None = None) -> None:
-        self.app = app
-        self.key_hashes = key_hashes if key_hashes is not None else parse_tenant_key_hashes(
-            os.getenv("RUSA_MCP_TENANT_KEYS")
-        )
-
     def __init__(
         self,
         app: Any,
