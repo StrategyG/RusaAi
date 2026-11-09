@@ -55,13 +55,21 @@ Validate the resolved Compose configuration:
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml config
 ```
 
-Start the API, PostgreSQL, web control center, and CPU model server:
+For the API, PostgreSQL, web control center, and CPU model server only, run:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
 ```
 
-The override configures the API provider URL as `http://llama-cpp:8080/v1`. The llama.cpp service has no published host port, is reachable only on the internal Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU.
+For the complete autonomous coding/DevOps workflow, enable the existing worker profile:
+
+```bash
+docker compose --profile worker -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+```
+
+The worker profile requires the dedicated rootless Docker socket, workspace and Git mirror paths from `.env.example`, plus the agent sandbox image built on that same rootless Docker daemon. For example, after loading the `.env` values in your shell, build the sandbox with `DOCKER_HOST="unix://${RUSA_DOCKER_SOCKET}" docker build -f Dockerfile.agent-sandbox -t "${RUSA_SANDBOX_IMAGE}" .`. Do not expose or mount the host's rootful Docker socket into the worker.
+
+The CPU override configures both API Gateway and Worker to use `http://llama-cpp:8080/v1`, clears any inherited remote model API key, and sets worker parallelism to one by default. The llama.cpp service has no published host port, is reachable only on the internal Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU. Without `--profile worker`, the API and model are available but autonomous background task execution is not started.
 
 ## 4. Initial CPU tuning
 

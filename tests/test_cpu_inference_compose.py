@@ -8,7 +8,14 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     compose = (ROOT / "docker-compose.cpu.yml").read_text(encoding="utf-8")
     model = compose.split("  llama-cpp:\n", 1)[1]
 
-    assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in compose
+    api = compose.split("  api:\n", 1)[1].split("\n  worker:\n", 1)[0]
+    worker = compose.split("  worker:\n", 1)[1].split("\n  llama-cpp:\n", 1)[0]
+
+    assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in api
+    assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in worker
+    assert "RUSA_MODEL_API_KEY: \"\"" in api
+    assert "RUSA_MODEL_API_KEY: \"\"" in worker
+    assert "${RUSA_MAX_PARALLEL_WORKERS:-1}" in worker
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
     assert "${RUSA_MAX_WAITING_INFERENCES:-4}" in compose
     assert "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}" in model

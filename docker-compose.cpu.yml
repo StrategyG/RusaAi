@@ -7,12 +7,22 @@ services:
       RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-4}
       RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
+      RUSA_MODEL_API_KEY: ""
     depends_on:
       llama-cpp:
         condition: service_started
     healthcheck:
       start_period: 10m
 
+  worker:
+    environment:
+      RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-cpu}
+      RUSA_MODEL_API_KEY: ""
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
+    depends_on:
+      llama-cpp:
+        condition: service_started
   llama-cpp:
     image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
