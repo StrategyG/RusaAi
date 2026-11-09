@@ -54,6 +54,12 @@ def test_ingest_text_hashes_and_indexes_chunks():
     assert store.ingested["tenant_id"] == "tenant-a"
     assert store.ingested["chunks"] == ["One paragraph of useful knowledge."]
     assert len(store.ingested["embeddings"][0]) == 3
+    assert store.ingested["metadata"]["embedding_profile"] == {
+        "provider": "openai-compatible",
+        "model": "configured-model",
+        "native_dimensions": 1536,
+        "output_dimensions": 1536,
+    }
 
 
 def test_search_embeds_query_and_returns_store_results():
@@ -69,6 +75,9 @@ def test_search_embeds_query_and_returns_store_results():
     assert results[0]["content"] == "evidence"
     assert store.search_args["tenant_id"] == "tenant-a"
     assert store.search_args["query_embedding"] == [0.1, 0.2, 0.3]
+    assert store.search_args["vector_weight"] == pytest.approx(0.7)
+    assert store.search_args["lexical_weight"] == pytest.approx(0.3)
+    assert store.search_args["hnsw_ef_search"] == 80
 
 
 
@@ -213,3 +222,13 @@ def test_get_document_withholds_legacy_credentials():
         assert secret not in str(exc)
     else:
         raise AssertionError("legacy credential-bearing document was returned")
+
+
+def test_retrieval_weights_are_normalized_and_zero_weights_are_rejected():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    service = KnowledgeService(store, embeddings, vector_weight=7, lexical_weight=3)
+    assert service.vector_weight == pytest.approx(0.7)
+    assert service.lexical_weight == pytest.approx(0.3)
+    with pytest.raises(ValueError, match="not both zero"):
+        KnowledgeService(store, embeddings, vector_weight=0, lexical_weight=0)
