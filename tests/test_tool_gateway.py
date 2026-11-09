@@ -160,3 +160,11 @@ def test_sandbox_limits_parallel_validation_containers(tmp_path):
         assert "capacity is busy" in result.output
     finally:
         sandbox._slots.release()
+
+
+
+def test_sandbox_slot_wait_tracks_validation_timeout_budget():
+    sandbox = DockerSandbox(timeout_seconds=420)
+    assert sandbox.slot_wait_seconds == 420.0
+    assert sandbox.memory_limit == "1g"
+    assert sandbox.cpu_limit == "0.75"

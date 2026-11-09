@@ -54,10 +54,12 @@ class DockerSandbox:
         cpu_limit: str = "0.75",
         max_snapshot_bytes: int = 100_000_000,
         max_concurrent_runs: int = 1,
-        slot_wait_seconds: float = 30.0,
+        slot_wait_seconds: float | None = None,
     ) -> None:
         if type(max_concurrent_runs) is not int or max_concurrent_runs < 1:
             raise ValueError("max_concurrent_runs must be a positive integer")
+        if slot_wait_seconds is None:
+            slot_wait_seconds = float(timeout_seconds)
         if slot_wait_seconds < 0:
             raise ValueError("slot_wait_seconds cannot be negative")
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")

@@ -110,6 +110,36 @@ def test_postgres_queue_requires_explicit_approval_before_resume():
 
 
 
+def test_postgres_queue_records_explicit_rejection_and_tenant_scope():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = f"tenant-rejection-{uuid4().hex}"
+    assert queue.enqueue(task_id, tenant_id, {"objective": "rejection test"})
+    job = queue.claim("rejection-worker", lease_seconds=30)
+    assert job is not None and job.task_id == task_id
+    assert queue.await_approval(
+        job.id, tenant_id, "rejection-worker", job.lease_token,
+        "human review required", {"branch": "feature/aicode/rejection-test"},
+    )
+
+    assert queue.reject(task_id, "wrong-tenant") is False
+    assert queue.reject(task_id, tenant_id, audit_actor="api:reviewer") is True
+    rejected = queue.get(task_id, tenant_id)
+    assert rejected["status"] == "cancelled"
+    assert rejected["last_error"] == "Rejected by human reviewer"
+
+    with queue._connect() as conn:
+        queue._set_tenant(conn, tenant_id)
+        event = conn.execute(
+            """SELECT action, decision FROM public.aicode_task_policy_events
+               WHERE tenant_id=%s AND task_id=%s AND actor=%s
+               ORDER BY id DESC LIMIT 1""",
+            (tenant_id, task_id, "api:reviewer"),
+        ).fetchone()
+    assert event == ("task.reject", "allow")
+
+
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()

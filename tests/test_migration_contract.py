@@ -67,3 +67,19 @@ def test_explicit_approval_migration_extends_append_only_audit_actions():
     assert "task.reject" in migration
     assert "DROP CONSTRAINT IF EXISTS aicode_task_policy_events_action_check" in migration
     assert "ADD CONSTRAINT aicode_task_policy_events_action_check" in migration
+
+
+
+def test_production_compose_cpu_budget_fits_four_core_host():
+    compose = Path("docker-compose.production.yml").read_text(encoding="utf-8")
+    cpu_limits = [
+        float(value)
+        for value in re.findall(r"(?m)^\s+cpus:\s*([0-9]+(?:\.[0-9]+)?)\s*$", compose)
+    ]
+    assert cpu_limits == [1.0, 0.5, 1.5]
+    sandbox = re.search(
+        r"(?m)^\s+RUSA_SANDBOX_CPUS:\s*\$\{RUSA_SANDBOX_CPUS:-([0-9.]+)\}",
+        compose,
+    )
+    assert sandbox is not None
+    assert sum(cpu_limits) + float(sandbox.group(1)) <= 4.0
