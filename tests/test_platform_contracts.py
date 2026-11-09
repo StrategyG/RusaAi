@@ -170,6 +170,29 @@ def test_run_event_requires_agent_role_only_for_agent_actors():
         validate_run_event(event)
 
 
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "plan.completed",
+        "code.completed",
+        "build.completed",
+        "test.completed",
+        "release.approved",
+        "deploy.completed",
+        "operate.incident_detected",
+        "operate.recovered",
+        "monitor.alert_triggered",
+        "monitor.feedback_created",
+        "workflow.blocked",
+        "workflow.completed",
+    ],
+)
+def test_devops_lifecycle_event_vocabulary_is_supported(event_type):
+    event = _event()
+    event["event_type"] = event_type
+    validate_run_event(event)
+
+
 def test_run_event_contract_and_monotonic_batch():
     first = _event(1, 1)
     second = _event(2, 2)
