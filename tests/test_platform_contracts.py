@@ -203,6 +203,19 @@ def test_contract_validation_diagnostics_never_echo_invalid_secret_values():
     assert secret not in str(exc_info.value)
 
 
+def test_agent_task_contract_rejects_non_string_stage_agent_identity_safely():
+    task = _task()
+    task["agent"] = {
+        "agent_id": "rusa_build_agent",
+        "agent_type": AgentType.DEVOPS_STAGE_AGENT.value,
+        "stage_agent_id": ["rusa_build_agent"],
+        "capabilities": ["build"],
+    }
+    task["stage"] = "build"
+    with pytest.raises(PlatformContractError):
+        validate_agent_task(task)
+
+
 def test_run_event_accepts_a_distinct_devops_stage_agent_actor():
     event = _event()
     event["actor"] = {
