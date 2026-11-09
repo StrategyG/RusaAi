@@ -635,7 +635,8 @@ export default function RusaControlCenter() {
 
     // Prevent a new login from racing the in-flight cookie deletion.
     try {
-      await fetch("/api/session", { method: "DELETE", signal: AbortSignal.timeout(5000) });
+      const response = await fetch("/api/session", { method: "DELETE", signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error("Session cookie deletion was rejected.");
     } catch {
       setLoginError("Sesi lokal ditutup, tetapi penghapusan cookie belum terkonfirmasi. Masuk kembali untuk mengganti sesi.");
     } finally {
