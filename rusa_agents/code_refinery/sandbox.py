@@ -12,11 +12,13 @@ import json
 import os
 import re
 import tarfile
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 
+from ..metrics import REFINERY_SANDBOX_DURATION, REFINERY_SANDBOX_RUNS
 from ..tool_gateway import DockerSandbox, ToolResult
 
 MICROVM_PROFILES = frozenset({"pytest", "compile", "ruff", "bandit"})
@@ -132,8 +134,12 @@ class MicroVMHTTPBackend:
             raise ValueError("MicroVM base URL must be an absolute credential-free HTTP(S) URL")
         if parsed.scheme != "https" and parsed.hostname not in local_hosts:
             raise ValueError("MicroVM HTTP is permitted only for loopback development endpoints")
-        if not isinstance(api_key, str) or len(api_key.encode("utf-8")) < 24:
-            raise ValueError("MicroVM API key must contain at least 24 UTF-8 bytes")
+        if (
+            not isinstance(api_key, str)
+            or len(api_key.encode("utf-8")) < 24
+            or any(marker in api_key.lower() for marker in ("placeholder", "replace-with", "redacted"))
+        ):
+            raise ValueError("MicroVM API key must be a real secret of at least 24 UTF-8 bytes")
         if timeout_seconds < 30 or timeout_seconds > 3600:
             raise ValueError("MicroVM timeout must be between 30 and 3600 seconds")
         self.base_url = base_url.rstrip("/")
@@ -272,7 +278,7 @@ class MicroVMHTTPBackend:
                 "runner_image_digest": image_digest,
             }
             return ToolResult(exit_code == 0, output, evidence)
-        except (httpx.HTTPError, OSError, ValueError, json.JSONDecodeError) as exc:
+        except (httpx.HTTPError, OSError, ValueError) as exc:
             return ToolResult(
                 False,
                 f"MicroVM execution failed closed: {type(exc).__name__}",
@@ -307,25 +313,40 @@ class HybridSandbox:
             "1", "true", "yes", "on", "0", "false", "no", "off"
         }:
             raise RuntimeError("RUSA_MICROVM_REQUIRED must be a boolean value")
+        if production and raw_required is not None and raw_required.strip().lower() in {
+            "0", "false", "no", "off"
+        }:
+            raise RuntimeError("RUSA_MICROVM_REQUIRED cannot disable MicroVM in production")
         if required and self.microvm is None:
             raise RuntimeError("Hybrid sandbox requires RUSA_MICROVM_BASE_URL and RUSA_MICROVM_API_KEY")
         if self.microvm is not None:
             self.microvm.verify_ready()
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
+        started = time.perf_counter()
         risk, reasons = self.classifier.classify(workspace, profile)
         if risk == "high":
+            backend = "microvm"
             if self.microvm is None:
-                return ToolResult(
+                result = ToolResult(
                     False,
                     "High-risk dynamic execution requires the configured MicroVM backend; Docker fallback is prohibited.",
-                    {"backend": "microvm", "risk": risk, "blocked": True, "reasons": reasons},
+                    {"backend": backend, "risk": risk, "blocked": True, "reasons": reasons},
                 )
-            result = self.microvm.run(workspace, profile)
+            else:
+                result = self.microvm.run(workspace, profile)
+                evidence = dict(result.evidence or {})
+                evidence.update({"risk": risk, "risk_reasons": reasons})
+                result = ToolResult(result.ok, result.output, evidence)
+        else:
+            backend = "docker"
+            result = self.docker.run(workspace, profile)
             evidence = dict(result.evidence or {})
-            evidence.update({"risk": risk, "risk_reasons": reasons})
-            return ToolResult(result.ok, result.output, evidence)
-        result = self.docker.run(workspace, profile)
-        evidence = dict(result.evidence or {})
-        evidence.update({"backend": "docker", "risk": risk})
-        return ToolResult(result.ok, result.output, evidence)
+            evidence.update({"backend": backend, "risk": risk})
+            result = ToolResult(result.ok, result.output, evidence)
+        outcome = "success" if result.ok else (
+            "blocked" if (result.evidence or {}).get("blocked") else "failure"
+        )
+        REFINERY_SANDBOX_RUNS.labels(backend, outcome).inc()
+        REFINERY_SANDBOX_DURATION.labels(backend).observe(time.perf_counter() - started)
+        return result
