@@ -126,13 +126,19 @@ class KnowledgeService:
             raise ValueError("query must contain 1 to 2000 characters")
         reject_credential_material(query)
         vector = self.embeddings.embed([query])[0]
-        return self.store.search(
+        results = self.store.search(
             tenant_id=tenant_id,
             collection=collection,
             query=query,
             query_embedding=vector,
             limit=limit,
         )
+        # Older records may predate ingestion-time credential checks. Re-scan
+        # retrieved material before it enters an agent or MCP context.
+        import json
+
+        reject_credential_material(json.dumps(results, ensure_ascii=False, default=str))
+        return results
 
     def get_document(
         self,
@@ -142,12 +148,17 @@ class KnowledgeService:
         document_id: str,
         max_chars: int = 20_000,
     ) -> dict[str, Any] | None:
-        return self.store.get_document(
+        document = self.store.get_document(
             tenant_id=tenant_id,
             collection=collection,
             document_id=document_id,
             max_chars=max_chars,
         )
+        if document is not None:
+            import json
+
+            reject_credential_material(json.dumps(document, ensure_ascii=False, default=str))
+        return document
 
     def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
         return self.store.list_collections(tenant_id=tenant_id)
