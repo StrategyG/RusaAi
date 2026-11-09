@@ -977,7 +977,7 @@ def retry_aicode_task(
     http_request: Request,
     tenant_id: str = Depends(require_task_permission("task:retry")),
 ):
-    """Require a tenant-authorized retry after failure or human review."""
+    """Retry a failed task only; awaiting_approval requires a separate human decision contract."""
     if not RuntimeConfig.from_env().aicode_enabled:
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
