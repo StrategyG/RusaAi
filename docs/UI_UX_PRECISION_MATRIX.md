@@ -19,7 +19,7 @@
 |---|---|---|---|
 | Command Center | Understand task volume and service readiness | GET /v1/aicode/tasks, /health, /health/ready | Active/failed counts are loaded-page samples; approval queue capped at 100 |
 | Orchestrator | Understand AICode execution and proposed communication | AICodeOrchestrator source, All Agents, ADR-COMM-001 | Current pipeline and proposed ADR topology shown separately |
-| AICode Tasks | Create, find, inspect, retry failed, cancel | POST/GET /v1/aicode/tasks and task detail/retry/delete | Retry button only for failed tasks; backend tenant RBAC remains authoritative |
+| AICode Tasks | Create, find, inspect, retry failed, cancel | POST/GET /v1/aicode/tasks and task detail/retry/delete | UI and queue enforce failed-only retry; awaiting_approval retry returns HTTP 409; backend tenant RBAC remains authoritative |
 | Approval Center | Inspect awaiting_approval tasks | GET /v1/aicode/tasks?status=awaiting_approval | No approve/reject controls; no approval record API exists |
 | Agent Workspace | Inspect runtime inventory and agent contracts | WorkerRole, AgentManager, AICodeOrchestrator, All Agents | 7 source-defined runtime components; 10 architecture roles not shown as online |
 | Agentic DevOps | Inspect Plan–Monitor lifecycle contract | Agentic DevOps Lifecycle document | Eight stage contracts; no live lifecycle registry |
@@ -101,6 +101,7 @@ ADR-COMM-001 is marked Diusulkan. Its example JSON envelope is a proposed contra
 - Tenant filtering and permission enforcement stay in FastAPI.
 - Platform metrics are server-proxied and restricted to platform_admin.
 - Failed-task retry and task cancellation require admin roles in the UI; backend checks remain authoritative.
+- Explicit retry is enforced by the queue for `failed` only; `awaiting_approval` returns HTTP 409.
 - awaiting_approval is never treated as approved. The UI does not expose retry from the approval queue.
 - No mock metrics, fabricated agent status, synthetic event stream, or pretend artifact download.
 - Task list polls every 10 seconds; health polls every 30 seconds.
