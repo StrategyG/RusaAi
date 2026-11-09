@@ -191,6 +191,26 @@ class AICodeOrchestrator:
             )
         return result
 
+    @staticmethod
+    def _evidence_summary(evidence: dict) -> dict:
+        """Keep compact, reproducible check evidence in the tamper-evident audit log."""
+        summary = {}
+        scalar_fields = (
+            "exit_code", "quality_score", "report_sha256", "files_analyzed",
+            "backend", "run_id", "snapshot_sha256", "runner_image_digest",
+            "syntax_valid", "blocking_findings", "critical_security_findings",
+        )
+        for key, value in list(evidence.items())[:20]:
+            if not isinstance(value, dict):
+                continue
+            item = {field: value[field] for field in scalar_fields if field in value}
+            if isinstance(value.get("metrics"), dict):
+                item["metrics"] = value["metrics"]
+            if isinstance(value.get("findings"), list):
+                item["findings"] = value["findings"][:20]
+            summary[key] = item
+        return summary
+
     async def _record_result(
         self,
         record: TaskRecord,
@@ -209,19 +229,7 @@ class AICodeOrchestrator:
                 "manager": manager_name,
                 "success": result.success,
                 "summary": result.summary[:500],
-                "evidence_summary": {
-                    key: {
-                        field: value[field]
-                        for field in (
-                            "exit_code", "quality_score", "report_sha256",
-                            "files_analyzed", "backend", "run_id",
-                            "snapshot_sha256", "runner_image_digest",
-                        )
-                        if field in value
-                    }
-                    for key, value in list(result.evidence.items())[:20]
-                    if isinstance(value, dict)
-                },
+                "evidence_summary": self._evidence_summary(result.evidence),
             },
         )
         await self._persist(record)
