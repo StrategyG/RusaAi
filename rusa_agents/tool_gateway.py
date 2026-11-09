@@ -626,6 +626,16 @@ class WorkspaceToolGateway:
                 result = self.git_diff()
             else:
                 raise ToolDenied(f"Tool '{name}' is not registered")
+            evidence_text = json.dumps(result.evidence or {}, ensure_ascii=False, default=str)
+            if (
+                contains_high_confidence_secret_text(result.output)
+                or contains_high_confidence_secret_text(evidence_text)
+            ):
+                result = ToolResult(
+                    False,
+                    "Tool output withheld because high-confidence credential material was detected.",
+                    {"secret_scan": "blocked", "tool": name},
+                )
             TOOL_EXECUTIONS.labels(name, "success" if result.ok else "failure").inc()
             return result
         except ToolDenied:
