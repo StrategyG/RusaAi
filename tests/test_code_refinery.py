@@ -624,3 +624,34 @@ def test_secret_scanner_does_not_match_noncredential_text_containing_sk_hyphen()
     assert not contains_high_confidence_secret_text(
         "read-only-task-test-credential-000000000000"
     )
+
+
+
+def test_analyzer_resolves_aliased_and_wildcard_dangerous_calls():
+    report = analyze_sources({
+        "src/aliased.py": (
+            "import subprocess as proc\n"
+            "proc.run('echo unsafe', shell=True)\n"
+            "from os import system as launch\n"
+            "launch('unsafe')\n"
+        ),
+        "src/wildcard.py": (
+            "from subprocess import *\n"
+            "Popen(['echo', 'unsafe'])\n"
+        ),
+    })
+    assert not report.passed
+    assert any("subprocess.run" in finding.message for finding in report.findings)
+    assert any("os.system" in finding.message for finding in report.findings)
+    assert any("subprocess.Popen" in finding.message for finding in report.findings)
+
+
+def test_sandbox_classifier_routes_aliased_dynamic_execution_to_microvm(tmp_path):
+    source = tmp_path / "test_alias.py"
+    source.write_text(
+        "import subprocess as proc\nproc.run('echo unsafe', shell=True)\n",
+        encoding="utf-8",
+    )
+    risk, reasons = SandboxRiskClassifier().classify(tmp_path, "pytest")
+    assert risk == "high"
+    assert any("subprocess.run" in reason for reason in reasons)
