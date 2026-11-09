@@ -160,6 +160,10 @@ def validate_agent_task(payload: Any) -> None:
                     "DevOps stage-agent identity must match the task lifecycle stage"
                 )
     _validate("agent_task", payload)
+    if payload["action"] in payload["policy"]["approval_actions"]:
+        raise PlatformContractError(
+            "task action requires human approval and cannot be dispatched"
+        )
     created = _parse_timestamp(payload["created_at"], "created_at")
     deadline = _parse_timestamp(payload["deadline_at"], "deadline_at")
     if deadline <= created:
@@ -173,7 +177,7 @@ def validate_agent_result(payload: Any) -> None:
             raise PlatformContractError(
                 "a succeeded result requires mandatory verification evidence"
             )
-        if payload.get("status") == "failed" and not payload.get("error"):
+        if payload.get("status") == "failed" and "error" not in payload:
             raise PlatformContractError(
                 "failed results require a structured error object; missing required field: error"
             )
