@@ -31,6 +31,12 @@ class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
         self.config.validate_worker()
+        self.lease_seconds = self._bounded_env_int("RUSA_TASK_LEASE_SECONDS", 30, 15, 300)
+        self.heartbeat_interval_seconds = self._bounded_env_int(
+            "RUSA_TASK_HEARTBEAT_SECONDS", 10, 3, 100
+        )
+        if self.heartbeat_interval_seconds * 3 > self.lease_seconds:
+            raise ValueError("RUSA_TASK_HEARTBEAT_SECONDS must be at most one third of the task lease")
         if not self.config.worker_database_url or not self.config.workspace_root or not self.config.git_mirror_root:
             raise RuntimeError("Database, workspace root, and Git mirror root are required")
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
@@ -109,6 +115,16 @@ class AICodeRuntime:
                 database_url=knowledge_dsn,
             )
 
+
+    @staticmethod
+    def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(os.getenv(name, str(default)))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+        if not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+        return value
 
     def close(self) -> None:
         """Release optional retrieval resources during worker shutdown."""
@@ -202,10 +218,11 @@ class AICodeRuntime:
 
     async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.heartbeat_interval_seconds)
             try:
                 renewed = await asyncio.to_thread(
-                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
+                    self.queue.heartbeat, job.id, job.tenant_id, self.worker_id,
+                    job.lease_token, self.lease_seconds
                 )
             except Exception:
                 logger.exception("Lease heartbeat failed for job %s", job.id)
@@ -260,13 +277,14 @@ class AICodeRuntime:
     async def run_once(self) -> bool:
         if not self.config.aicode_enabled:
             return False
-        job = await asyncio.to_thread(self.queue.claim, self.worker_id, 180)
+        job = await asyncio.to_thread(self.queue.claim, self.worker_id, self.lease_seconds)
         if job is None:
             return False
         started = time.perf_counter()
         outcome = "failed"
         lost_lease = asyncio.Event()
         heartbeat = asyncio.create_task(self._heartbeat(job, lost_lease))
+        workspace: str | None = None
         authorized = False
         policy_audited = False
         try:
@@ -317,11 +335,17 @@ class AICodeRuntime:
                 outcome = "awaiting_approval"
                 return True
             if record.state != TaskState.SUCCEEDED:
+                blocked = record.state == TaskState.BLOCKED
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
+                    self.queue.fail,
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
+                    retryable=not blocked,
                 )
-                outcome = "failed"
+                outcome = "blocked" if blocked else "failed"
                 return True
 
             await self._assert_lease(job, lost_lease)
@@ -440,12 +464,18 @@ class AICodeRuntime:
                     job.tenant_id, job.task_id, f"worker:{self.worker_id}",
                     "task.execute", False,
                 )
-            logger.exception("AICode task %s failed", job.task_id)
-            outcome = "lease_lost" if lost_lease.is_set() else "failed"
+            logger.error("AICode task %s failed with %s", job.task_id, type(exc).__name__)
+            retryable = not isinstance(exc, (PermissionError, ValueError))
+            outcome = "lease_lost" if lost_lease.is_set() else ("failed" if retryable else "blocked")
             if not lost_lease.is_set():
                 await asyncio.to_thread(
-                    self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
-                    f"{type(exc).__name__}: {exc}",
+                    self.queue.fail,
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
+                    f"{type(exc).__name__}: task execution failed; inspect restricted worker diagnostics",
+                    retryable=retryable,
                 )
         finally:
             heartbeat.cancel()
@@ -453,6 +483,17 @@ class AICodeRuntime:
                 await heartbeat
             except asyncio.CancelledError:
                 pass
+            if workspace and outcome in {"failed", "blocked", "lease_lost"}:
+                try:
+                    await asyncio.to_thread(
+                        self.workspace_manager.cleanup, task, job.tenant_id
+                    )
+                except Exception as cleanup_exc:
+                    logger.error(
+                        "Could not clean workspace for task %s (%s)",
+                        job.task_id,
+                        type(cleanup_exc).__name__,
+                    )
             AICODE_TASKS.labels(outcome).inc()
             AICODE_TASK_DURATION.labels(outcome).observe(time.perf_counter() - started)
         return True
