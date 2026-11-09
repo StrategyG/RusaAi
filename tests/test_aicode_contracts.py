@@ -6,6 +6,7 @@ from rusa_agents.contracts import (
     TaskRecord,
     TaskState,
 )
+from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
 def make_task() -> CodingTask:
@@ -38,9 +39,6 @@ def test_valid_state_path():
     ):
         record.transition(state)
     assert record.state == TaskState.AWAITING_APPROVAL
-
-
-from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
 
 def test_explicit_empty_policy_allowlist_denies_every_unprotected_action():
