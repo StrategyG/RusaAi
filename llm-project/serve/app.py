@@ -1030,9 +1030,14 @@ def cancel_aicode_task(
     if queue is None:
         audit_api_task(http_request, tenant_id, str(task_id), "task.cancel", False)
         raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    actor = _api_task_actor(http_request)
     try:
         cancelled = queue.cancel(
-            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+            str(task_id), tenant_id, audit_actor=actor
+        )
+        current = (
+            queue.get(str(task_id), tenant_id, audit_actor=actor)
+            if cancelled else None
         )
     except Exception:
         logger.exception("Could not cancel AICode task")
@@ -1041,6 +1046,6 @@ def cancel_aicode_task(
     audit_api_task(
         http_request, tenant_id, str(task_id), "task.cancel", cancelled, persist=False
     )
-    if not cancelled:
+    if not cancelled or current is None:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
-    return {"task_id": str(task_id), "status": "cancelled"}
+    return {"task_id": str(task_id), "status": current["status"]}
