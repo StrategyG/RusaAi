@@ -143,18 +143,23 @@ def _parse_timestamp(value: str, field: str) -> datetime:
 
 def validate_agent_task(payload: Any) -> None:
     """Validate a dispatchable task and its authorization/deadline envelope."""
+    if isinstance(payload, dict) and isinstance(payload.get("agent"), dict):
+        agent = payload["agent"]
+        if agent.get("agent_type") == AgentType.DEVOPS_STAGE_AGENT.value:
+            stage_agent_id = agent.get("stage_agent_id")
+            expected_stage = _STAGE_AGENT_STAGE.get(stage_agent_id)
+            if (
+                isinstance(stage_agent_id, str)
+                and agent.get("agent_id") != stage_agent_id
+            ):
+                raise PlatformContractError(
+                    "stage agent_id must match its canonical stage_agent_id"
+                )
+            if expected_stage is not None and payload.get("stage") != expected_stage:
+                raise PlatformContractError(
+                    "DevOps stage-agent identity must match the task lifecycle stage"
+                )
     _validate("agent_task", payload)
-    agent = payload["agent"]
-    if agent["agent_type"] == AgentType.DEVOPS_STAGE_AGENT.value:
-        if agent["agent_id"] != agent["stage_agent_id"]:
-            raise PlatformContractError(
-                "stage agent_id must match its canonical stage_agent_id"
-            )
-        expected_stage = _STAGE_AGENT_STAGE[agent["stage_agent_id"]]
-        if payload.get("stage") != expected_stage:
-            raise PlatformContractError(
-                "DevOps stage-agent identity must match the task lifecycle stage"
-            )
     created = _parse_timestamp(payload["created_at"], "created_at")
     deadline = _parse_timestamp(payload["deadline_at"], "deadline_at")
     if deadline <= created:
@@ -170,7 +175,7 @@ def validate_agent_result(payload: Any) -> None:
             )
         if payload.get("status") == "failed" and not payload.get("error"):
             raise PlatformContractError(
-                "failed results require a structured error object"
+                "missing required field 'error': failed results require a structured failure reason"
             )
     _validate("agent_result", payload)
     started = _parse_timestamp(payload["started_at"], "started_at")
