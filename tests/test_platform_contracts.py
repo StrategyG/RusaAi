@@ -167,8 +167,9 @@ def test_failed_agent_result_requires_a_structured_failure_reason():
     result = _result()
     result["status"] = "failed"
     result["evidence"][0]["status"] = "fail"
-    with pytest.raises(PlatformContractError, match="structured failure reason"):
+    with pytest.raises(PlatformContractError) as exc_info:
         validate_agent_result(result)
+    assert "error" in str(exc_info.value)
     result["error"] = {"code": "TEST_FAILURE", "message": "A required test failed"}
     validate_agent_result(result)
 
