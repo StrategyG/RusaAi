@@ -19,7 +19,7 @@ The existing AICode runtime, PostgreSQL task queue, six specialist workers, tool
 
 The Security worker receives a new `run_check(profile="refinery")` profile. The gateway:
 
-1. Determines changed, staged, and untracked Python files from the assigned Git worktree.
+1. Determines changed, staged, and untracked Python files from the assigned Git worktree (maximum 2,000 files, 1 MB per file, 100 MB aggregate).
 2. Reads only those files through the bounded workspace path resolver.
 3. Parses source with Python AST; analyzed code is never imported or executed.
 4. Calculates type safety, documentation, error handling, code quality, complexity, security, and testability scores.
@@ -51,7 +51,7 @@ The coding runtime uses this fallback order:
 2. Local endpoint `RUSA_LOCAL_MODEL_BASE_URL` / `RUSA_LOCAL_MODEL_NAME` (required in production).
 3. Mock circuit-breaker response.
 
-Both live providers must return the bounded JSON action envelope already required by AICode. Invalid JSON, unknown fields, or malformed actions cause fallback. The mock never fabricates code or test evidence; it returns `blocked=true`, causing the worker to stop safely.
+Both live providers must return the bounded JSON action envelope already required by AICode. Invalid JSON, unknown fields, or malformed actions cause fallback. The local provider has an independent API-key setting and never inherits the primary provider's credential. The mock never fabricates code or test evidence; it returns `blocked=true`, causing the worker to stop safely.
 
 Local endpoint configuration (required in production; optional in development):
 
