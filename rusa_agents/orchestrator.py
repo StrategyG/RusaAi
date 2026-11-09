@@ -265,7 +265,7 @@ class AICodeOrchestrator:
         )
         if tester is None or security is None:
             record.errors.append("Tester or security worker did not produce a result.")
-            return False
+            return None
         required = [
             (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
         ] + [
@@ -279,7 +279,7 @@ class AICodeOrchestrator:
             record.errors.append(
                 "Missing mandatory verification evidence: " + ", ".join(missing)
             )
-            return False
+            return None
         failed = [
             key for worker_result, key in required
             if not self._check_passed(worker_result, key)
