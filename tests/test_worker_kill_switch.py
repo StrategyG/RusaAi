@@ -38,6 +38,7 @@ def test_worker_heartbeat_distinguishes_cancellation_from_lease_loss():
 
     runtime = object.__new__(AICodeRuntime)
     runtime.heartbeat_interval_seconds = 0
+    runtime.lease_seconds = 30
     runtime.queue = Queue()
     runtime.worker_id = "cancel-worker"
     job = Job(1, "task-1", "tenant-a", {}, 1, 3, "cancel-worker", "lease-token")
