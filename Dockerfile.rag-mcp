@@ -71,7 +71,7 @@ for package in ("pip", "setuptools", "wheel", "jaraco.context"):
         continue
     raise SystemExit(f"Build-only package {package} remains in MCP runtime")
 
-for module in ("bs4", "httpx", "mcp", "psycopg_pool", "pypdf", "docx", "uvicorn"):
+for module in ("bs4", "duckdb", "httpx", "mcp", "psycopg_pool", "pypdf", "docx", "uvicorn"):
     import_module(module)
 print("MCP runtime imports verified; build tooling is absent.")
 PY
