@@ -341,3 +341,14 @@ def test_ast_analysis_enforces_aggregate_source_limit(monkeypatch):
     monkeypatch.setattr(analysis_module, "MAX_TOTAL_SOURCE_BYTES", 4)
     with pytest.raises(ValueError, match="Total source inventory"):
         analyze_sources({"one.py": "12345"})
+
+
+def test_test_modules_are_not_penalized_for_optional_annotations_or_docstrings():
+    source = "def test_simple_case():\n    assert 2 + 2 == 4\n"
+    report = analyze_sources(
+        {"tests/test_simple_case.py": source},
+        test_files_present=True,
+    )
+    assert report.passed
+    assert report.metrics["type_safety"] == 100
+    assert report.metrics["documentation"] == 100
