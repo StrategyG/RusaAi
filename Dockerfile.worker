@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml README.md requirements-rag-worker.txt ./
 COPY rusa_agents ./rusa_agents
+COPY schemas ./schemas
 COPY rusa_knowledge ./rusa_knowledge
 ARG RUSA_INSTALL_RAG=0
 RUN python -m pip install --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
