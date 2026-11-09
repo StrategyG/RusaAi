@@ -37,6 +37,13 @@ const seededTask = {
   result: { branch: "feature/smoke", commit_sha: "0123456789abcdef0123456789abcdef01234567" }
 };
 const approvalTask = { ...seededTask, task_id: "00000000-0000-4000-8000-000000000002", status: "awaiting_approval" };
+const createdTask = {
+  ...seededTask,
+  task_id: "00000000-0000-4000-8000-000000000003",
+  status: "queued",
+  payload: { ...seededTask.payload, objective: "Browser smoke creates a task" },
+  result: null
+};
 const otherTenantTask = {
   ...seededTask,
   task_id: "00000000-0000-4000-8000-000000000004",
@@ -105,7 +112,7 @@ const backend = createServer(async (request, response) => {
       return json(response, 202, { task_id: "00000000-0000-4000-8000-000000000003", tenant_id: "tenant-smoke", status: "queued" });
     }
     const taskMatch = url.pathname.match(/^\/v1\/aicode\/tasks\/([0-9a-f-]+)$/i);
-    const taskForId = (taskId) => [seededTask, approvalTask, otherTenantTask].find((task) => task.task_id === taskId);
+    const taskForId = (taskId) => [seededTask, approvalTask, createdTask, otherTenantTask].find((task) => task.task_id === taskId);
     if (taskMatch && request.method === "GET") {
       const identity = identityFor(apiKey);
       const task = taskForId(taskMatch[1]);
