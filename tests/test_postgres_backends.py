@@ -21,7 +21,7 @@ def test_postgres_queue_tenant_scope_and_idempotency():
     assert not queue.enqueue(task_id, "tenant-alpha", {"objective": "duplicate"}, priority=100)
     assert queue.get(task_id, "tenant-beta") is None
 
-    job = queue.claim("pytest-worker", lease_seconds=30)
+    job = queue.claim("pytest-worker", lease_seconds=30, tenant_id="tenant-alpha")
     assert job is not None
     assert job.task_id == task_id
     assert job.tenant_id == "tenant-alpha"
@@ -46,11 +46,11 @@ def test_postgres_queue_retries_then_dead_letters():
     task_id = str(uuid4())
     assert queue.enqueue(task_id, "tenant-retry", {"objective": "retry"}, max_attempts=2, priority=200)
 
-    first = queue.claim("retry-worker", lease_seconds=30)
+    first = queue.claim("retry-worker", lease_seconds=30, tenant_id="tenant-retry")
     assert first is not None and first.task_id == task_id
     assert queue.fail(first.id, first.tenant_id, "retry-worker", first.lease_token, "first failure", retry_delay_seconds=0)
 
-    second = queue.claim("retry-worker", lease_seconds=30)
+    second = queue.claim("retry-worker", lease_seconds=30, tenant_id="tenant-retry")
     assert second is not None and second.task_id == task_id
     assert second.attempts == 2
     assert queue.fail(second.id, second.tenant_id, "retry-worker", second.lease_token, "second failure", retry_delay_seconds=0)
@@ -89,7 +89,7 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     queue.initialize()
     task_id = str(uuid4())
     assert queue.enqueue(task_id, "tenant-approval", {"objective": "approval test"})
-    job = queue.claim("approval-worker", lease_seconds=30)
+    job = queue.claim("approval-worker", lease_seconds=30, tenant_id="tenant-approval")
     assert job is not None and job.task_id == task_id
     review_result = {"branch": "feature/aicode/review-deadbeef"}
     assert queue.await_approval(
@@ -114,7 +114,7 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     tenant_id = "tenant-fencing-" + task_id[:8]
     assert queue.enqueue(task_id, tenant_id, {"objective": "fencing"}, max_attempts=3, priority=10000)
 
-    stale = queue.claim("stale-worker", lease_seconds=30)
+    stale = queue.claim("stale-worker", lease_seconds=30, tenant_id=tenant_id)
     assert stale is not None and stale.task_id == task_id
 
     with queue._connect() as conn:
@@ -123,7 +123,7 @@ def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
             (stale.id,),
         )
 
-    current = queue.claim("current-worker", lease_seconds=30)
+    current = queue.claim("current-worker", lease_seconds=30, tenant_id=tenant_id)
     assert current is not None and current.task_id == task_id
     assert current.lease_token != stale.lease_token
     assert queue.owns_lease(current.id, tenant_id, "current-worker", current.lease_token)
@@ -246,7 +246,7 @@ def test_postgres_queue_marks_policy_blocked_work_terminal_until_manual_retry():
     tenant_id = "tenant-blocked-" + uuid4().hex
     try:
         assert queue.enqueue(task_id, tenant_id, {"objective": "blocked task"})
-        job = queue.claim("blocked-worker", lease_seconds=30)
+        job = queue.claim("blocked-worker", lease_seconds=30, tenant_id=tenant_id)
         assert job is not None and job.task_id == task_id
         assert queue.fail(
             job.id,
@@ -258,7 +258,7 @@ def test_postgres_queue_marks_policy_blocked_work_terminal_until_manual_retry():
         )
         blocked = queue.get(task_id, tenant_id)
         assert blocked["status"] == "blocked"
-        assert queue.claim("another-worker", lease_seconds=30) is None
+        assert queue.claim("another-worker", lease_seconds=30, tenant_id=tenant_id) is None
         assert queue.retry(task_id, tenant_id) is True
         assert queue.get(task_id, tenant_id)["status"] == "queued"
     finally:
