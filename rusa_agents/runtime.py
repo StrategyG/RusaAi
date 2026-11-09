@@ -12,9 +12,9 @@ from urllib.parse import urlparse
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
-from .config import RuntimeConfig
 from .code_refinery.providers import HybridCodeProvider, MockCodeProvider
 from .code_refinery.sandbox import HybridSandbox, MicroVMHTTPBackend
+from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
