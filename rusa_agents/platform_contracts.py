@@ -87,11 +87,17 @@ def _validate(contract_name: str, payload: Any) -> None:
         # jsonschema's default error.message may echo the invalid value. Contract
         # payloads can contain credential-like material, so expose only the path
         # and schema keyword in diagnostics.
-        messages = [
-            f"{'.'.join(str(part) for part in error.absolute_path) or '<root>'}: "
-            f"violates {error.validator or 'schema'} constraint"
-            for error in errors[:25]
-        ]
+        messages = []
+        for error in errors[:25]:
+            location = ".".join(str(part) for part in error.absolute_path) or "<root>"
+            if error.validator == "required" and isinstance(error.instance, dict):
+                missing = [
+                    field for field in error.validator_value if field not in error.instance
+                ]
+                detail = f"missing required field(s): {', '.join(missing)}"
+            else:
+                detail = f"violates {error.validator or 'schema'} constraint"
+            messages.append(f"{location}: {detail}")
         raise PlatformContractError(
             f"{contract_name} contract validation failed: " + "; ".join(messages)
         )
