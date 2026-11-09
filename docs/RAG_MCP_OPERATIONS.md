@@ -66,11 +66,12 @@ docker compose -f docker-compose.rag-local.yml ps
 docker compose -f docker-compose.rag-local.yml exec rag-mcp rusa-knowledge check
 ```
 
-The first start downloads `bge-m3` into the persistent Ollama volume. The
-default profile is CPU-based. For GPU acceleration, use a host-specific Compose
-override with the supported NVIDIA Container Toolkit or equivalent device
-configuration. Pin `RUSA_OLLAMA_IMAGE` to an immutable digest when using this
-stack beyond local development.
+The local Ollama image is built from `Dockerfile.ollama-model`; the build
+pulls `bge-m3` into an immutable image layer before runtime. Pin the upstream
+base with `RUSA_OLLAMA_BASE_IMAGE` (prefer an immutable digest) when building
+the local image. The default runtime profile is CPU-based. For GPU acceleration,
+use a host-specific Compose override with the supported NVIDIA Container
+Toolkit or equivalent device configuration.
 
 The MCP endpoint is:
 
@@ -200,6 +201,8 @@ login DSN and tenant token digest registry.
 The RAG/MCP container runs as an unprivileged user with a read-only application
 filesystem, dropped Linux capabilities, bounded process count, and a bounded
 temporary filesystem. Ollama is reachable only on the internal Compose network.
+Because the model is baked into its image, the runtime Ollama service does not
+need outbound model-registry access.
 The MCP application rate limiter is per process; use an ingress/API gateway
 limit as well when deploying multiple replicas.
 
