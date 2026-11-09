@@ -19,7 +19,7 @@ from uuid import uuid4
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
-from .secret_scan import contains_high_confidence_secret
+from .secret_scan import contains_high_confidence_secret_stream
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -99,19 +99,27 @@ class DockerSandbox:
         totals = [0]
 
         def bounded_copy(source: str, destination: str) -> str:
-            source_path = Path(source)
-            size = source_path.stat().st_size
-            totals[0] += size
-            if totals[0] > self.max_snapshot_bytes:
-                raise ToolDenied("Sandbox snapshot exceeds configured size limit")
-            if contains_high_confidence_secret(source_path):
-                raise ToolDenied(
-                    "Sandbox snapshot contains high-confidence credential material"
-                )
-            copied = shutil.copy2(source, destination)
-            mode = stat.S_IMODE(Path(copied).stat().st_mode)
-            os.chmod(copied, (mode | 0o444) & ~0o222)
-            return copied
+            descriptor = os.open(
+                Path(source),
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            )
+            with os.fdopen(descriptor, "rb") as source_stream:
+                metadata = os.fstat(source_stream.fileno())
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ToolDenied("Sandbox snapshot accepts regular files only")
+                totals[0] += metadata.st_size
+                if totals[0] > self.max_snapshot_bytes:
+                    raise ToolDenied("Sandbox snapshot exceeds configured size limit")
+                if contains_high_confidence_secret_stream(source_stream):
+                    raise ToolDenied(
+                        "Sandbox snapshot contains high-confidence credential material"
+                    )
+                source_stream.seek(0)
+                with Path(destination).open("xb") as destination_stream:
+                    shutil.copyfileobj(source_stream, destination_stream, length=64 * 1024)
+            mode = stat.S_IMODE(metadata.st_mode)
+            os.chmod(destination, (mode | 0o444) & ~0o222)
+            return destination
 
         sensitive_parts = {
             ".git", ".secrets", "secrets", "credentials", ".ssh", ".aws",
