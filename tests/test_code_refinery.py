@@ -304,6 +304,68 @@ def test_microvm_environment_requires_tls_in_production(monkeypatch):
 
 
 
+def test_microvm_production_requires_client_certificate_and_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MICROVM_BASE_URL", "https://microvm.internal")
+    monkeypatch.setenv("RUSA_MICROVM_API_KEY", "k" * 32)
+    monkeypatch.setenv("RUSA_MICROVM_RUNNER_IMAGE_DIGEST", "sha256:" + "a" * 64)
+    monkeypatch.delenv("RUSA_MICROVM_MTLS_REQUIRED", raising=False)
+    monkeypatch.delenv("RUSA_MICROVM_CLIENT_CERT", raising=False)
+    monkeypatch.delenv("RUSA_MICROVM_CLIENT_KEY", raising=False)
+    with pytest.raises(ValueError, match="RUSA_MICROVM_CLIENT_CERT"):
+        MicroVMHTTPBackend.from_env()
+
+
+def test_microvm_production_cannot_disable_mtls(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MICROVM_BASE_URL", "https://microvm.internal")
+    monkeypatch.setenv("RUSA_MICROVM_API_KEY", "k" * 32)
+    monkeypatch.setenv("RUSA_MICROVM_RUNNER_IMAGE_DIGEST", "sha256:" + "a" * 64)
+    monkeypatch.setenv("RUSA_MICROVM_MTLS_REQUIRED", "false")
+    with pytest.raises(ValueError, match="cannot disable mTLS"):
+        MicroVMHTTPBackend.from_env()
+
+
+def test_microvm_mtls_requires_a_certificate_key_pair(tmp_path):
+    certificate = tmp_path / "client.crt"
+    certificate.write_text("test certificate", encoding="utf-8")
+    with pytest.raises(ValueError, match="both client certificate and private key"):
+        MicroVMHTTPBackend(
+            "https://microvm.internal",
+            "k" * 32,
+            client_cert_path=str(certificate),
+        )
+
+
+def test_microvm_tls_context_loads_custom_ca_and_client_identity(monkeypatch, tmp_path):
+    certificate = tmp_path / "client.crt"
+    private_key = tmp_path / "client.key"
+    ca_bundle = tmp_path / "ca.crt"
+    certificate.write_text("certificate", encoding="utf-8")
+    private_key.write_text("private key", encoding="utf-8")
+    ca_bundle.write_text("CA bundle", encoding="utf-8")
+    loaded = []
+    context = SimpleNamespace(
+        load_cert_chain=lambda certfile, keyfile: loaded.append((certfile, keyfile))
+    )
+    ca_paths = []
+    monkeypatch.setattr(
+        "rusa_agents.code_refinery.sandbox.ssl.create_default_context",
+        lambda cafile=None: (ca_paths.append(cafile) or context),
+    )
+    backend = MicroVMHTTPBackend(
+        "https://microvm.internal",
+        "k" * 32,
+        client_cert_path=str(certificate),
+        client_key_path=str(private_key),
+        ca_bundle_path=str(ca_bundle),
+        require_mtls=True,
+    )
+    assert backend._tls_context() is context
+    assert ca_paths == [str(ca_bundle.resolve())]
+    assert loaded == [(str(certificate.resolve()), str(private_key.resolve()))]
+
+
 def test_microvm_snapshot_is_deterministic_and_excludes_secrets(tmp_path):
     (tmp_path / "app.py").write_text(GOOD_SOURCE, encoding="utf-8")
     (tmp_path / ".env").write_text("API_KEY=must-not-leave-workspace", encoding="utf-8")
