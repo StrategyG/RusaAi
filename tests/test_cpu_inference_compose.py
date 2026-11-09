@@ -20,5 +20,5 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}" in model
     assert "    ports:" not in model
     assert '      - --n-gpu-layers\n      - "0"' in model
-    assert "      - --no-webui" in model
+    assert "--no-webui" not in model
     assert '      - "8080"' in model
