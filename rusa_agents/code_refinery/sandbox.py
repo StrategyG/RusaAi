@@ -66,6 +66,7 @@ class SandboxRiskClassifier:
         root = Path(workspace).resolve(strict=True)
         reasons: list[str] = []
         inspected = 0
+        total_source_bytes = 0
         for current, dirs, files in os.walk(root, followlinks=False):
             dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
             for name in files:
@@ -78,7 +79,13 @@ class SandboxRiskClassifier:
                 if path.suffix.lower() != ".py":
                     continue
                 inspected += 1
-                if inspected > MAX_FILES or path.stat().st_size > MAX_FILE_BYTES:
+                source_size = path.stat().st_size
+                total_source_bytes += source_size
+                if (
+                    inspected > MAX_FILES
+                    or source_size > MAX_FILE_BYTES
+                    or total_source_bytes > MAX_SNAPSHOT_BYTES
+                ):
                     reasons.append("source_inventory_exceeds_static_classifier_limits")
                     return "high", sorted(set(reasons))
                 try:
@@ -174,7 +181,9 @@ class MicroVMHTTPBackend:
 
     def verify_ready(self) -> None:
         timeout = httpx.Timeout(10.0, connect=5.0)
-        with httpx.Client(timeout=timeout, follow_redirects=False, transport=self.transport) as client:
+        with httpx.Client(
+            timeout=timeout, follow_redirects=False, trust_env=False, transport=self.transport
+        ) as client:
             with client.stream(
                 "GET", f"{self.base_url}/health/ready", headers=self._headers()
             ) as response:
@@ -257,7 +266,7 @@ class MicroVMHTTPBackend:
             }
             files = {"snapshot": ("workspace.tar.gz", snapshot, "application/gzip")}
             with httpx.Client(
-                timeout=timeout, follow_redirects=False, transport=self.transport
+                timeout=timeout, follow_redirects=False, trust_env=False, transport=self.transport
             ) as client:
                 with client.stream(
                     "POST",
