@@ -52,7 +52,7 @@ class PostgresTaskQueue:
 
     @staticmethod
     def _require_policy_audit_actor(actor: str | None) -> None:
-        if os.getenv("ENVIRONMENT", "development").lower() == "production" and actor is None:
+        if os.getenv("ENVIRONMENT", "development").strip().lower() == "production" and actor is None:
             raise RuntimeError("Production task queue operations require a policy audit actor")
 
     @staticmethod
@@ -165,6 +165,18 @@ class PostgresTaskQueue:
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                status_constraint = conn.execute("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid='public.aicode_jobs'::regclass
+                      AND contype='c'
+                      AND pg_get_constraintdef(oid) ILIKE '%status%'
+                """).fetchone()
+                if not status_constraint or "'blocked'" not in status_constraint[0]:
+                    raise RuntimeError(
+                        "Production blocked-task status is not installed; "
+                        "apply migrations/009_aicode_blocked_status.sql"
+                    )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
