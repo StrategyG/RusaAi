@@ -367,12 +367,78 @@ class WorkspaceToolGateway:
                 files.append(rel)
         return ToolResult(True, "\n".join(files), {"count": len(files)})
 
+    def _run_refinery(self) -> ToolResult:
+        """Score only changed Python files; AST parsing never imports or executes code."""
+        from .code_refinery.analysis import analyze_workspace
+
+        try:
+            min_score = float(os.getenv("RUSA_REFINERY_MIN_SCORE", "85"))
+            if not 0 <= min_score <= 100:
+                raise ValueError("RUSA_REFINERY_MIN_SCORE must be between 0 and 100")
+            changed_paths: list[str] | None = None
+            if GIT_BIN and (self.workspace / ".git").exists():
+                names: set[str] = set()
+                commands = (
+                    ("diff", "--name-only", "--no-ext-diff", "--no-textconv", "--"),
+                    ("diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv", "--"),
+                    ("ls-files", "--others", "--exclude-standard"),
+                )
+                for arguments in commands:
+                    completed = subprocess.run(
+                        [GIT_BIN, "-C", str(self.workspace), *arguments],
+                        check=False, capture_output=True, text=True, timeout=30,
+                    )
+                    if completed.returncode != 0:
+                        return ToolResult(
+                            False,
+                            "Could not determine changed files for the refinery quality gate.",
+                            {"profile": "refinery", "exit_code": 2},
+                        )
+                    names.update(line for line in completed.stdout.splitlines() if line)
+                changed_paths = []
+                for name in sorted(names):
+                    if not name.lower().endswith(".py"):
+                        continue
+                    target = self._resolve(name)
+                    if target.is_file() and not target.is_symlink():
+                        changed_paths.append(name)
+            report = analyze_workspace(
+                self.workspace, paths=changed_paths, min_score=min_score
+            )
+            payload = report.to_dict()
+            exit_code = 0 if report.passed else 1
+            evidence = {
+                "profile": "refinery",
+                "exit_code": exit_code,
+                "quality_score": report.overall_score,
+                "min_score": min_score,
+                "report_sha256": payload["report_sha256"],
+                "files_analyzed": report.files_analyzed,
+                "syntax_valid": report.syntax_valid,
+                "blocking_findings": report.blocking_findings,
+                "critical_security_findings": report.critical_security_findings,
+                "not_applicable": report.not_applicable,
+            }
+            return ToolResult(
+                report.passed,
+                json.dumps(payload, sort_keys=True, ensure_ascii=False)[:20_000],
+                evidence,
+            )
+        except (OSError, UnicodeDecodeError, ValueError, ToolDenied) as exc:
+            return ToolResult(
+                False,
+                f"Refinery quality gate failed closed: {type(exc).__name__}: {str(exc)[:500]}",
+                {"profile": "refinery", "exit_code": 2, "error_type": type(exc).__name__},
+            )
+
     def run_check(self, profile: str, role: WorkerRole) -> ToolResult:
         if role not in {WorkerRole.TESTER, WorkerRole.DEBUGGER, WorkerRole.SECURITY}:
             raise ToolDenied("Only tester, debugger, or security workers may run validation profiles")
         allowed_profiles = ROLE_CHECK_PROFILES
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
+        if profile == "refinery":
+            return self._run_refinery()
         return self.sandbox.run(self.workspace, profile)
 
     def git_diff(self) -> ToolResult:
