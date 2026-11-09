@@ -830,8 +830,10 @@ class PostgresTaskQueue:
         result: dict[str, Any] | None = None,
     ) -> bool:
         """Acknowledge cancellation; uncertain external effects remain in human reconciliation."""
-        if side_effect not in {"NONE", "APPLIED", "UNKNOWN"}:
+        if not isinstance(side_effect, str) or side_effect not in {"NONE", "APPLIED", "UNKNOWN"}:
             raise ValueError("side_effect must be NONE, APPLIED, or UNKNOWN")
+        if result is not None and not isinstance(result, dict):
+            raise ValueError("cancellation result must be an object")
         payload = dict(result or {})
         payload["side_effect"] = side_effect
         payload["cancel_reconciliation_required"] = side_effect == "UNKNOWN"
@@ -875,6 +877,10 @@ class PostgresTaskQueue:
                     updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
                   AND status IN ('queued', 'running', 'awaiting_approval')
+                  AND NOT (
+                      status='awaiting_approval'
+                      AND result->>'cancel_reconciliation_required'='true'
+                  )
                 RETURNING status
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
