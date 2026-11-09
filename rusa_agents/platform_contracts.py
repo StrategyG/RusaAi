@@ -118,14 +118,15 @@ def validate_agent_task(payload: Any) -> None:
 
 def validate_agent_result(payload: Any) -> None:
     """Validate a result and ensure its execution interval is chronological."""
-    if (
-        isinstance(payload, dict)
-        and payload.get("status") == "succeeded"
-        and not payload.get("evidence")
-    ):
-        raise PlatformContractError(
-            "a succeeded result requires mandatory verification evidence"
-        )
+    if isinstance(payload, dict):
+        if payload.get("status") == "succeeded" and not payload.get("evidence"):
+            raise PlatformContractError(
+                "a succeeded result requires mandatory verification evidence"
+            )
+        if payload.get("status") == "failed" and not payload.get("error"):
+            raise PlatformContractError(
+                "failed results require a structured error object"
+            )
     _validate("agent_result", payload)
     started = _parse_timestamp(payload["started_at"], "started_at")
     completed = _parse_timestamp(payload["completed_at"], "completed_at")
@@ -143,10 +144,6 @@ def validate_agent_result(payload: Any) -> None:
             raise PlatformContractError(
                 "a succeeded result cannot contain failed or held evidence"
             )
-    if payload["status"] == "failed" and "error" not in payload:
-        raise PlatformContractError(
-            "failed results require a structured error object"
-        )
 
 
 def validate_run_event(payload: Any) -> None:
