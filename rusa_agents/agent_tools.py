@@ -38,5 +38,5 @@ ROLE_TOOL_ALLOWLIST = {
 ROLE_CHECK_PROFILES = {
     WorkerRole.TESTER: frozenset({"pytest"}),
     WorkerRole.DEBUGGER: frozenset({"pytest", "compile", "ruff"}),
-    WorkerRole.SECURITY: frozenset({"bandit", "ruff", "compile"}),
+    WorkerRole.SECURITY: frozenset({"bandit", "ruff", "compile", "refinery"}),
 }
