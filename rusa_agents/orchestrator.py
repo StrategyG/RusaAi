@@ -209,6 +209,19 @@ class AICodeOrchestrator:
                 "manager": manager_name,
                 "success": result.success,
                 "summary": result.summary[:500],
+                "evidence_summary": {
+                    key: {
+                        field: value[field]
+                        for field in (
+                            "exit_code", "quality_score", "report_sha256",
+                            "files_analyzed", "backend", "run_id",
+                            "snapshot_sha256", "runner_image_digest",
+                        )
+                        if field in value
+                    }
+                    for key, value in list(result.evidence.items())[:20]
+                    if isinstance(value, dict)
+                },
             },
         )
         await self._persist(record)
