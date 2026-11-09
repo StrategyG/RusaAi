@@ -32,7 +32,7 @@ For CPU-only servers, use the llama.cpp server through the existing OpenAI-compa
 4. Start the CPU stack with `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d`.
 5. Check `GET /health/ready`, then send chat requests to the regular RUSA-AI API. The llama.cpp service is private to the Compose network and the GGUF file is mounted read-only.
 
-See [docs/CPU_INFERENCE_OPERATIONS.md](docs/CPU_INFERENCE_OPERATIONS.md) for model sizing, CPU tuning, smoke tests, and operational limits. The GPTQ pipeline remains a separate GPU-only workflow.
+See [docs/CPU_INFERENCE_OPERATIONS.md](docs/CPU_INFERENCE_OPERATIONS.md) for model sizing, CPU tuning, smoke tests, and operational limits. The GPTQ pipeline remains a separate GPU-only workflow. The supplied HTTP Compose override is for development/staging; production requires the HTTPS model-endpoint boundary described in the runbook.
 
 ## Optional local model runtime
 

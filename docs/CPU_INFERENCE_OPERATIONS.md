@@ -110,6 +110,11 @@ Run the existing task, policy, tenant-isolation, and audit tests independently o
 - Monitor host RAM, swap, CPU utilization, request latency, queue wait, 429 responses, timeouts, and model-server restarts.
 - Keep model weights and calibration/evaluation datasets out of Git unless their licenses and data governance explicitly permit redistribution.
 
+
+### Production TLS boundary
+
+The supplied `docker-compose.cpu.yml` override uses plain HTTP between containers on the isolated Compose network and is intended for development or staging. The production API configuration deliberately requires a credential-free HTTPS `RUSA_MODEL_BASE_URL`. For production, place the llama.cpp server behind a trusted internal TLS reverse proxy, configure the API to use that HTTPS endpoint, and install the issuing CA in the API container trust store. Do not weaken the production HTTPS validation to make the development override work.
+
 ## 8. Rollback and limitations
 
 To stop the CPU model stack, use the same Compose file pair:
