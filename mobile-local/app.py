@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
 import httpx
@@ -107,10 +108,6 @@ def extract_document(filename: str, raw: bytes) -> tuple[str, str]:
         text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
     else:
         try:
-            from docx import Document
-        except ImportError as exc:
-            raise ValueError("Install the optional python-docx package to import DOCX files.") from exc
-        try:
             with ZipFile(BytesIO(raw)) as archive:
                 entries = archive.infolist()
                 expanded_size = sum(entry.file_size for entry in entries)
@@ -126,15 +123,19 @@ def extract_document(filename: str, raw: bytes) -> tuple[str, str]:
                     for entry in entries
                 ):
                     raise ValueError("DOCX archive contains an unsafe compression ratio.")
+                if "word/document.xml" not in archive.namelist():
+                    raise ValueError("DOCX document.xml is missing.")
+                xml_content = archive.read("word/document.xml")
         except BadZipFile as exc:
             raise ValueError("DOCX file is not a valid ZIP archive.") from exc
-        document = Document(BytesIO(raw))
-        blocks = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-        for table in document.tables:
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                if cells:
-                    blocks.append(" | ".join(cells))
+        root = ElementTree.fromstring(xml_content)
+        paragraph_tag = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"
+        text_tag = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+        blocks = []
+        for paragraph in root.iter(paragraph_tag):
+            value = "".join(node.text or "" for node in paragraph.iter(text_tag))
+            if value.strip():
+                blocks.append(value)
         text = "\n".join(blocks)
     text = re.sub(r"\x00", " ", text).strip()
     if not text:
