@@ -12,11 +12,11 @@ if not DSN:
 
 @pytest.fixture(scope="module")
 def knowledge_store():
+    from pathlib import Path
+
     import psycopg
     from psycopg import sql
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
-
-    from pathlib import Path
 
     migration_paths = (
         "migrations/007_rag_knowledge_pgvector.sql",
