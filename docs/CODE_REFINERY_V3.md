@@ -55,7 +55,7 @@ Both live providers must return the bounded JSON action envelope already require
 
 Local endpoint configuration (required in production; optional in development):
 
-- `RUSA_LOCAL_MODEL_BASE_URL`
+- `RUSA_LOCAL_MODEL_BASE_URL` (HTTPS required in production)
 - `RUSA_LOCAL_MODEL_NAME` (default `rusa-local`)
 - `RUSA_LOCAL_MODEL_API_KEY` (optional where the endpoint requires it)
 
@@ -63,7 +63,7 @@ HTTPS is required except for loopback development endpoints. Production requires
 
 ## 4. Hybrid Docker + MicroVM execution
 
-The existing rootless, network-disabled Docker sandbox remains the standard backend for ordinary checks. The hybrid router classifies dynamic `pytest` execution using bounded static inspection. Detected dynamic execution, shell-enabled subprocesses, native/binary artifacts, install lifecycle hooks, unparseable Python, or inventory-limit uncertainty route to MicroVM.
+The existing rootless, network-disabled Docker sandbox remains the standard backend for ordinary checks. The hybrid router classifies dynamic `pytest` execution using bounded static inspection. Detected dynamic imports, dynamic execution, shell-enabled subprocesses, host-process primitives, network-capable primitives, native/binary artifacts, install lifecycle hooks, unparseable Python, or inventory-limit uncertainty route to MicroVM. Before upload, the snapshot builder rejects high-confidence embedded credentials (common API-token formats and private-key headers), in addition to excluding sensitive paths and filenames.
 
 **Fail-closed rule:** if a high-risk test requires MicroVM and the MicroVM backend is absent or returns unverifiable evidence, the task fails/blocks. The system never silently falls back to Docker for a high-risk workload.
 
@@ -71,6 +71,7 @@ Production startup requires the MicroVM backend by default. Environment:
 
 - `RUSA_MICROVM_BASE_URL`: internal HTTPS URL of the trusted MicroVM supervisor.
 - `RUSA_MICROVM_API_KEY`: bearer credential, at least 24 UTF-8 bytes.
+- `RUSA_MICROVM_RUNNER_IMAGE_DIGEST`: pinned `sha256:<64 lowercase hex>` runner image digest; mandatory in production and checked at readiness and execution.
 - `RUSA_MICROVM_REQUIRED`: Optional Boolean for non-production. Production always requires MicroVM and rejects an explicit false value.
 - `RUSA_MICROVM_TIMEOUT_SECONDS`: 30–3600 seconds, default 900.
 
@@ -83,8 +84,13 @@ The HTTP adapter contract is:
 Expected JSON:
 
 ```json
-{"ready": true}
+{
+  "ready": true,
+  "runner_image_digest": "sha256:64-hex-character-digest"
+}
 ```
+
+The readiness response must identify the exact pinned runner image when production digest pinning is enabled.
 
 ### Execute a fixed profile
 
@@ -135,6 +141,6 @@ New unit tests cover:
 - rejection of model-supplied evidence fields;
 - Docker vs MicroVM routing;
 - fail-closed behavior when MicroVM is unavailable;
-- MicroVM readiness, TLS requirement, snapshot digest binding, and image digest validation.
+- MicroVM readiness, TLS requirement, snapshot digest binding, pinned image digest validation, deterministic secret-free snapshots, and high-confidence embedded-secret rejection.
 
 The repository CI must pass on the exact PR head. MockTransport tests validate the HTTP client contract only; they are not evidence that a real Firecracker supervisor is available or secure.
