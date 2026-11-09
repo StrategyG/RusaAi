@@ -1,0 +1,52 @@
+services:
+  api:
+    environment:
+      RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-cpu}
+      RUSA_MAX_CONCURRENT_INFERENCES: ${RUSA_MAX_CONCURRENT_INFERENCES:-1}
+      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-4}
+      RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
+      RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
+    depends_on:
+      llama-cpp:
+        condition: service_started
+    healthcheck:
+      start_period: 10m
+
+  llama-cpp:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    restart: unless-stopped
+    init: true
+    command:
+      - --model
+      - /models/model.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - "${RUSA_MODEL_CONTEXT:-4096}"
+      - --threads
+      - "${RUSA_CPU_THREADS:-4}"
+      - --threads-batch
+      - "${RUSA_CPU_THREADS:-4}"
+      - --parallel
+      - "${RUSA_MODEL_PARALLEL:-1}"
+      - --n-gpu-layers
+      - "0"
+      - --alias
+      - "${RUSA_MODEL_NAME:-rusa-cpu}"
+      - --no-webui
+    volumes:
+      - "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}:/models/model.gguf:ro"
+    expose:
+      - "8080"
+    mem_limit: ${RUSA_MODEL_MEMORY_LIMIT:-8g}
+    cpus: ${RUSA_MODEL_CPU_LIMIT:-4.0}
+    pids_limit: 128
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    networks: [rusa-internal]

@@ -153,3 +153,11 @@ Do not infer concurrency safety from a passing unit test. Capacity is specific t
 - [ ] Human owner approves production promotion.
 
 Until every applicable item is evidenced, the service remains a production candidate, not production-certified.
+
+## 11. CPU-only GGUF serving
+
+For a CPU-only server, use the separate llama.cpp GGUF deployment described in [CPU inference operations](CPU_INFERENCE_OPERATIONS.md). The API talks to llama.cpp through the existing OpenAI-compatible provider. This keeps agent orchestration, task queues, policy checks, audit, and RAG boundaries independent from the inference engine.
+
+The Transformers backend remains available for validated safetensors artifacts. The GGUF path does not use the safetensors-only model manifest generator; record the approved GGUF source revision and SHA-256 checksum separately. Do not add model weights to Git.
+
+Set inference concurrency conservatively on CPU (initially one active generation), use a bounded waiting queue, and increase limits only after a benchmark on the exact model, CPU, RAM, context size, and prompt distribution. Tool calling and structured JSON output must be tested with the chosen model before enabling agent workflows.

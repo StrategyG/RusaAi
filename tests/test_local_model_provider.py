@@ -2,12 +2,14 @@ import asyncio
 import os
 import sys
 
+import pytest
+
 sys.path.insert(
     0,
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../llm-project/serve")),
 )
 
-from app import LocalModelInferenceProvider
+from app import LocalModelInferenceProvider, _model_timeout_seconds
 from model_runtime import GenerationEvent, GenerationResult
 
 
@@ -77,3 +79,13 @@ def test_local_provider_readiness_and_close():
     assert asyncio.run(provider.check_ready()) is True
     asyncio.run(provider.close())
     assert backend.closed is True
+
+
+def test_model_timeout_is_configurable_and_bounded(monkeypatch):
+    monkeypatch.setenv("RUSA_GENERATION_TIMEOUT_SECONDS", "300")
+    monkeypatch.delenv("RUSA_MODEL_TIMEOUT_SECONDS", raising=False)
+    assert _model_timeout_seconds() == 300
+
+    monkeypatch.setenv("RUSA_MODEL_TIMEOUT_SECONDS", "0")
+    with pytest.raises(RuntimeError, match="between 1 and 3600"):
+        _model_timeout_seconds()

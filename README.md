@@ -2,7 +2,7 @@
 
 RUSA-AI is an AI and autonomous-agent platform under active development. The repository currently contains a FastAPI inference gateway, a tenant-scoped coding-agent runtime, PostgreSQL task/lease controls, and A2A task validation.
 
-**Model status:** The repository now includes an optional local Transformers/vLLM runtime with checksum-verified model manifests and bounded streaming, plus an implemented QLoRA/SFT training pipeline for the autonomous coding-agent contract. No trained RUSA-AI weights are bundled. Local serving is enabled only when `RUSA_LOCAL_MODEL_PATH` points to a verified local artifact; otherwise chat completions use the configured OpenAI-compatible endpoint (`RUSA_MODEL_BASE_URL`). Production local serving requires a pinned `RUSA_MODEL_MANIFEST_SHA256`.
+**Model status:** The repository includes an optional checksum-verified Transformers/vLLM runtime, a CPU-only GGUF inference profile powered by llama.cpp, and an implemented QLoRA/SFT training pipeline for the autonomous coding-agent contract. GGUF weights are mounted outside Git and served through the existing OpenAI-compatible provider boundary. No trained RUSA-AI weights are bundled. Local serving is enabled only when `RUSA_LOCAL_MODEL_PATH` points to a verified local artifact; otherwise chat completions use the configured OpenAI-compatible endpoint (`RUSA_MODEL_BASE_URL`). Production local serving requires a pinned `RUSA_MODEL_MANIFEST_SHA256`.
 
 **Production status:** RUSA-AI is not production-certified. A passing CI run validates only the exact commit and automated checks it executed. Production release still requires approved model/provider artifacts, staging load and soak tests, adversarial tenant-isolation review, backup/restore and rollback drills, monitoring, TLS, secret management, and operator sign-off.
 
@@ -21,6 +21,18 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 - **CI quality gates**: Lint, tests, static security analysis, container builds, and vulnerability scanning.
 
 ---
+
+## CPU-first GGUF inference (no GPU)
+
+For CPU-only servers, use the llama.cpp server through the existing OpenAI-compatible inference provider. This avoids installing PyTorch, CUDA, Transformers, or GPTQ on the serving host.
+
+1. Obtain an approved GGUF model and place it outside the repository (for example, `/srv/rusa/models/model.gguf`). Review its license, immutable source revision, chat template, and context limit.
+2. Record and verify the model checksum with `sha256sum /srv/rusa/models/model.gguf`.
+3. Copy `.env.example` to `.env`, then merge the CPU settings from `.env.cpu.example` into `.env` and set `RUSA_GGUF_MODEL_PATH` to the absolute model path.
+4. Start the CPU stack with `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d`.
+5. Check `GET /health/ready`, then send chat requests to the regular RUSA-AI API. The llama.cpp service is private to the Compose network and the GGUF file is mounted read-only.
+
+See [docs/CPU_INFERENCE_OPERATIONS.md](docs/CPU_INFERENCE_OPERATIONS.md) for model sizing, CPU tuning, smoke tests, and operational limits. The GPTQ pipeline remains a separate GPU-only workflow.
 
 ## Optional local model runtime
 

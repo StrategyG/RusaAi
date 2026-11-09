@@ -124,6 +124,18 @@ class InferenceAdmissionController:
         self._semaphore.release()
 
 
+def _model_timeout_seconds() -> float:
+    raw_value = os.getenv("RUSA_MODEL_TIMEOUT_SECONDS") or os.getenv(
+        "RUSA_GENERATION_TIMEOUT_SECONDS", "120"
+    )
+    try:
+        timeout = float(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("Model timeout must be numeric") from exc
+    if not 1 <= timeout <= 3600:
+        raise RuntimeError("Model timeout must be between 1 and 3600 seconds")
+    return timeout
+
 def _new_inference_admission_controller() -> InferenceAdmissionController:
     try:
         max_active = int(os.getenv("RUSA_MAX_CONCURRENT_INFERENCES", "8"))
@@ -169,7 +181,7 @@ async def lifespan(application: FastAPI):
                 local_backend = load_inference_backend(
                     str(verified.root),
                     backend_name=os.getenv("RUSA_INFERENCE_BACKEND", "transformers"),
-                    timeout_seconds=float(os.getenv("RUSA_MODEL_TIMEOUT_SECONDS") or os.getenv("RUSA_GENERATION_TIMEOUT_SECONDS", "120")),
+                    timeout_seconds=_model_timeout_seconds(),
                     max_model_len=max_model_len,
                     max_num_seqs=int(os.getenv("RUSA_VLLM_MAX_NUM_SEQS") or os.getenv("RUSA_MAX_NUM_SEQS", "8")),
                     max_num_batched_tokens=int(os.getenv("RUSA_VLLM_MAX_BATCHED_TOKENS") or os.getenv("RUSA_MAX_NUM_BATCHED_TOKENS", "8192")),
@@ -186,6 +198,7 @@ async def lifespan(application: FastAPI):
                     config.model_base_url,
                     default_model=config.model_name,
                     api_key=os.getenv("RUSA_MODEL_API_KEY"),
+                    timeout_seconds=_model_timeout_seconds(),
                 )
             )
         else:
