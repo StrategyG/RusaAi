@@ -33,7 +33,8 @@ SKIP_DIRS = {
 }
 SENSITIVE_NAMES = {
     ".env", ".env.local", ".env.production", ".npmrc", ".pypirc", ".netrc",
-    "id_rsa", "id_ed25519", "credentials.json", "service-account.json",
+    "id_rsa", "id_ed25519", "id_dsa", "id_ecdsa", "private_key", "privatekey",
+    "authorized_keys", "known_hosts", "credentials.json", "service-account.json",
     "secrets.json", "token.json", "terraform.tfstate",
 }
 SENSITIVE_SUFFIXES = {
@@ -154,6 +155,11 @@ class MicroVMHTTPBackend:
         if not base_url:
             return None
         api_key = os.getenv("RUSA_MICROVM_API_KEY", "")
+        if (
+            os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
+            and urlparse(base_url).scheme != "https"
+        ):
+            raise ValueError("Production MicroVM supervisor must use HTTPS")
         return cls(
             base_url,
             api_key,
@@ -206,6 +212,7 @@ class MicroVMHTTPBackend:
                             or "credential" in lowered
                             or "secret" in lowered
                             or path.suffix.lower() in SENSITIVE_SUFFIXES
+                            or lowered.endswith((".tfstate", ".tfstate.backup"))
                         ):
                             continue
                         resolved = path.resolve(strict=True)
