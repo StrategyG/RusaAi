@@ -575,3 +575,92 @@ def test_aicode_task_list_rejects_unknown_status(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert response.status_code == 422
+
+
+
+def test_aicode_approval_is_separate_from_failed_task_retry(monkeypatch):
+    class DecisionQueue:
+        def __init__(self):
+            self.status = "awaiting_approval"
+
+        def approve(self, task_id, tenant_id, *, audit_actor=None):
+            if tenant_id != "tenant-approval" or self.status != "awaiting_approval":
+                return False
+            self.status = "queued"
+            return True
+
+        def reject(self, task_id, tenant_id, *, audit_actor=None):
+            if tenant_id != "tenant-approval" or self.status != "awaiting_approval":
+                return False
+            self.status = "cancelled"
+            return True
+
+        def retry(self, task_id, tenant_id, *, audit_actor=None):
+            if tenant_id != "tenant-approval" or self.status != "failed":
+                return False
+            self.status = "queued"
+            return True
+
+    admin_key = "tenant-admin-approval-key-000000000000000000"
+    developer_key = "developer-approval-key-00000000000000000000"
+    registry = {
+        hashlib.sha256(admin_key.encode()).hexdigest(): {
+            "subject": "reviewer", "tenant_id": "tenant-approval",
+            "roles": ["tenant_admin"],
+        },
+        hashlib.sha256(developer_key.encode()).hexdigest(): {
+            "subject": "developer", "tenant_id": "tenant-approval",
+            "roles": ["developer"],
+        },
+    }
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS_JSON", json.dumps(registry))
+    monkeypatch.setenv("RUSA_API_KEYS", "{}")
+    queue = DecisionQueue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    task_id = str(uuid.uuid4())
+
+    denied = client.post(
+        f"/v1/aicode/tasks/{task_id}/approve",
+        headers={"X-API-Key": developer_key},
+    )
+    assert denied.status_code == 403
+
+    approval_bypass = client.post(
+        f"/v1/aicode/tasks/{task_id}/retry",
+        headers={"X-API-Key": admin_key},
+    )
+    assert approval_bypass.status_code == 409
+    assert queue.status == "awaiting_approval"
+
+    approved = client.post(
+        f"/v1/aicode/tasks/{task_id}/approve",
+        headers={"X-API-Key": admin_key},
+    )
+    assert approved.status_code == 202
+    assert approved.json()["status"] == "queued"
+    assert queue.status == "queued"
+
+    retry_queued = client.post(
+        f"/v1/aicode/tasks/{task_id}/retry",
+        headers={"X-API-Key": admin_key},
+    )
+    assert retry_queued.status_code == 409
+
+    queue.status = "failed"
+    retried = client.post(
+        f"/v1/aicode/tasks/{task_id}/retry",
+        headers={"X-API-Key": admin_key},
+    )
+    assert retried.status_code == 202
+    assert queue.status == "queued"
+
+    queue.status = "awaiting_approval"
+    rejected = client.post(
+        f"/v1/aicode/tasks/{task_id}/reject",
+        headers={"X-API-Key": admin_key},
+    )
+    assert rejected.status_code == 202
+    assert rejected.json()["status"] == "cancelled"
+    assert queue.status == "cancelled"

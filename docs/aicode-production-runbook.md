@@ -294,7 +294,7 @@ The deterministic DAG is Analyst → Architect → Developer → Debugger, with 
 
 Runtime controls:
 
-- `RUSA_MAX_PARALLEL_WORKERS`: integer from 1 to 32; default 4.
+- `RUSA_MAX_PARALLEL_WORKERS`: integer from 1 to 2 in the 4-core production profile; default 2.
 - `RUSA_MAX_REPAIR_CYCLES`: integer from 0 to 5; default 2.
 
 These controls limit in-process concurrency and repair attempts; they do not autoscale Kubernetes worker replicas.
@@ -331,10 +331,9 @@ are prefixed `api:`; worker actors are prefixed `worker:` and may emit only
 restricted `task.authenticate/deny` shape. Events contain only tenant ID,
 task ID, actor, action, decision, and database timestamp—never credentials,
 lease tokens, or task payloads. The API and worker verify the audit table,
-RLS, grants, and append-only triggers at production startup. Task create/read/
-retry/cancel events are inserted in the same PostgreSQL transaction as their
-queue operation; worker execution allow/deny events are committed in the same
-transaction as the live-lease check. A failed audit insert therefore rolls back
+RLS, grants, and append-only triggers at production startup. Task create/read/list/retry/approve/reject/cancel events are inserted in the
+same PostgreSQL transaction as their queue operation; worker execution
+allow/deny events are committed in the same transaction as the live-lease check. A failed audit insert therefore rolls back
 the associated queue mutation or prevents workspace execution. The INFO logger
 is a secondary operational stream; PostgreSQL is the durable audit record.
 
@@ -349,3 +348,23 @@ arbitrary SQL; deployments requiring isolation against a compromised service
 process must move to per-tenant database identities or signed database
 assertions. Export the append-only audit stream to a restricted, immutable
 off-host retention system and test restore/retention independently.
+
+
+### Four-core production resource profile
+
+The production Compose profile reserves hard CPU ceilings of 1.0 core for API,
+0.5 core for web, and 1.5 cores for the worker. The worker starts at most two
+orchestrator workers in parallel. Its shared rootless Docker sandbox runs at
+most one validation container at a time, capped at 0.75 CPU and 1 GiB memory.
+The configured ceiling is therefore 3.75 CPU cores, leaving 0.25 core for host
+and Docker overhead. The worker validates these limits at production startup;
+values above the profile fail closed. Do not scale API/worker replicas or run
+additional sandbox daemons on this host without recalculating the aggregate
+budget.
+
+Human approval is a separate API operation from retry. Only tenant/platform
+administrators may approve or reject an `awaiting_approval` task. Approval
+resumes the task and rejection closes it as `cancelled`; both decisions are
+persisted as append-only `task.approve` / `task.reject` audit events by
+migration `009_aicode_explicit_approval.sql`. Retry is restricted to failed
+tasks and cannot release an approval pause.

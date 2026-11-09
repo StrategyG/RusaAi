@@ -460,8 +460,8 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
 
 
 TASK_ROLE_PERMISSIONS = {
-    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
-    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:approve", "task:reject", "task:cancel"}),
+    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:approve", "task:reject", "task:cancel"}),
     "developer": frozenset({"task:create", "task:read"}),
     "read_only": frozenset({"task:read"}),
 }
@@ -977,7 +977,7 @@ def retry_aicode_task(
     http_request: Request,
     tenant_id: str = Depends(require_task_permission("task:retry")),
 ):
-    """Require a tenant-authorized retry after failure or human review."""
+    """Require a tenant-authorized retry of a failed task; approvals use a separate endpoint."""
     if not RuntimeConfig.from_env().aicode_enabled:
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
@@ -999,6 +999,66 @@ def retry_aicode_task(
     if not retried:
         raise HTTPException(status_code=409, detail="Task is unavailable or not in a retryable state")
     return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
+
+
+@app.post("/v1/aicode/tasks/{task_id}/approve", status_code=202)
+def approve_aicode_task(
+    task_id: UUID,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:approve")),
+):
+    """Resume a task only after an explicit, authorized human approval."""
+    if not RuntimeConfig.from_env().aicode_enabled:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False)
+        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        approved = queue.approve(
+            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+        )
+    except Exception:
+        logger.exception("Could not approve AICode task")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.approve", approved, persist=False
+    )
+    if not approved:
+        raise HTTPException(status_code=409, detail="Task is unavailable or not awaiting approval")
+    return {"task_id": str(task_id), "status": "queued", "tenant_id": tenant_id}
+
+
+@app.post("/v1/aicode/tasks/{task_id}/reject", status_code=202)
+def reject_aicode_task(
+    task_id: UUID,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:reject")),
+):
+    """Reject an approval-paused task and preserve the decision in the audit trail."""
+    if not RuntimeConfig.from_env().aicode_enabled:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reject", False)
+        raise HTTPException(status_code=503, detail="AICode task intake is disabled")
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reject", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        rejected = queue.reject(
+            str(task_id), tenant_id, audit_actor=_api_task_actor(http_request)
+        )
+    except Exception:
+        logger.exception("Could not reject AICode task")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reject", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.reject", rejected, persist=False
+    )
+    if not rejected:
+        raise HTTPException(status_code=409, detail="Task is unavailable or not awaiting approval")
+    return {"task_id": str(task_id), "status": "cancelled", "tenant_id": tenant_id}
 
 
 @app.delete("/v1/aicode/tasks/{task_id}", status_code=202)

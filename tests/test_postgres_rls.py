@@ -30,6 +30,8 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            "008_aicode_task_list_audit.sql",
+            "009_aicode_explicit_approval.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -264,7 +266,18 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
             "UPDATE aicode_jobs SET status='cancelled' WHERE task_id=%s", (task_id,),
         ).rowcount == 0
 
-    # Ensure a cross-tenant retry would mutate an eligible row without isolation.
+    # Approval is a distinct, tenant-authorized action; retry cannot bypass it.
+    with connect() as conn:
+        conn.execute(
+            "UPDATE aicode_jobs SET status='awaiting_approval', priority=2147483647 WHERE task_id=%s",
+            (task_id,),
+        )
+    assert client.post(f"{path}/approve", headers=api_a).status_code == 409
+    assert client.post(f"{path}/retry", headers=api_b).status_code == 409
+    assert client.post(f"{path}/approve", headers=api_b).status_code == 202
+    assert client.get(path, headers=api_b).json()["status"] == "queued"
+
+    # Retry remains available only after the task has entered the failed state.
     with connect() as conn:
         conn.execute(
             "UPDATE aicode_jobs SET status='failed', priority=2147483647 WHERE task_id=%s", (task_id,),
@@ -304,9 +317,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         (None, "unauthenticated", "task.authenticate", "deny"),
         ("audit-a", "api:service-a", "task.read", "deny"),
         ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.approve", "deny"),
         ("audit-a", "api:service-a", "task.cancel", "deny"),
         ("audit-b", "api:service-b", "task.create", "allow"),
         ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.approve", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "deny"),
         ("audit-b", "api:service-b", "task.retry", "allow"),
         ("audit-b", "api:service-b", "task.cancel", "allow"),
     }
@@ -361,9 +377,12 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         (None, "unauthenticated", "task.authenticate", "deny"),
         ("audit-a", "api:service-a", "task.read", "deny"),
         ("audit-a", "api:service-a", "task.retry", "deny"),
+        ("audit-a", "api:service-a", "task.approve", "deny"),
         ("audit-a", "api:service-a", "task.cancel", "deny"),
         ("audit-b", "api:service-b", "task.create", "allow"),
         ("audit-b", "api:service-b", "task.read", "allow"),
+        ("audit-b", "api:service-b", "task.approve", "allow"),
+        ("audit-b", "api:service-b", "task.retry", "deny"),
         ("audit-b", "api:service-b", "task.retry", "allow"),
         ("audit-b", "api:service-b", "task.cancel", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),

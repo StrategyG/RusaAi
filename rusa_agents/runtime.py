@@ -46,7 +46,12 @@ class AICodeRuntime:
         )
         self.provider = OpenAICompatibleProvider()
         self.publisher = GitHubPublisher(self.config.github_token)
-        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        self.sandbox = DockerSandbox(
+            image=self.config.sandbox_image,
+            cpu_limit=str(self.config.sandbox_cpu_limit),
+            memory_limit=self.config.sandbox_memory_limit,
+            max_concurrent_runs=1,
+        )
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
@@ -120,7 +125,7 @@ class AICodeRuntime:
                 workers=workers,
                 memory=self.memory,
                 audit=self.audit,
-                max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
+                max_parallel_workers=self.config.max_parallel_workers,
                 max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
             ),
             str(workspace),

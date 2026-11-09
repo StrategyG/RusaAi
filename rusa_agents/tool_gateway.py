@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+from threading import BoundedSemaphore
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -49,15 +50,23 @@ class DockerSandbox:
         self,
         image: str | None = None,
         timeout_seconds: int = 600,
-        memory_limit: str = "2g",
-        cpu_limit: str = "2",
+        memory_limit: str = "1g",
+        cpu_limit: str = "0.75",
         max_snapshot_bytes: int = 100_000_000,
+        max_concurrent_runs: int = 1,
+        slot_wait_seconds: float = 30.0,
     ) -> None:
+        if type(max_concurrent_runs) is not int or max_concurrent_runs < 1:
+            raise ValueError("max_concurrent_runs must be a positive integer")
+        if slot_wait_seconds < 0:
+            raise ValueError("slot_wait_seconds cannot be negative")
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
+        self._slots = BoundedSemaphore(max_concurrent_runs)
+        self.slot_wait_seconds = slot_wait_seconds
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
@@ -87,6 +96,17 @@ class DockerSandbox:
                 )
 
     def run(self, workspace: Path, profile: str) -> ToolResult:
+        if not self._slots.acquire(timeout=self.slot_wait_seconds):
+            return ToolResult(
+                False,
+                "Sandbox capacity is busy; retry after the active validation finishes.",
+            )
+        try:
+            return self._run(workspace, profile)
+        finally:
+            self._slots.release()
+
+    def _run(self, workspace: Path, profile: str) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:

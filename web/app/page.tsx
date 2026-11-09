@@ -244,7 +244,7 @@ export default function Home() {
   }
 
   async function retryTask(taskId: string) {
-    if (!window.confirm("Pastikan human review yang diwajibkan telah dilakukan sebelum mengirim retry.")) return;
+    if (!window.confirm("Task hanya dapat di-retry setelah berstatus failed. Lanjutkan retry?")) return;
     setBusy(true);
     try {
       const response = await fetch("/api/tasks/" + encodeURIComponent(taskId) + "/retry", { method: "POST" });
@@ -255,6 +255,40 @@ export default function Home() {
       await openTask(taskId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Retry failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveTask(taskId: string) {
+    if (!window.confirm("Setujui hasil review manusia dan masukkan task kembali ke antrean?")) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId) + "/approve", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(errorText(data));
+      setNotice("Persetujuan tercatat. Task kembali ke antrean.");
+      await refreshTasks();
+      await openTask(taskId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Approval failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rejectTask(taskId: string) {
+    if (!window.confirm("Tolak task ini? Task akan ditutup sebagai cancelled dan keputusan dicatat dalam audit trail.")) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/tasks/" + encodeURIComponent(taskId) + "/reject", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(errorText(data));
+      setNotice("Penolakan tercatat. Task ditutup.");
+      await refreshTasks();
+      await openTask(taskId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Rejection failed.");
     } finally {
       setBusy(false);
     }
@@ -320,7 +354,7 @@ export default function Home() {
 
   const pageSubtitle: Record<string, string> = {
     Overview: "Ringkasan task execution dan kesiapan layanan yang benar-benar dilaporkan oleh backend.",
-    Tasks: "Buat, pantau, batalkan, dan retry task coding dalam tenant Anda.",
+    Tasks: "Buat dan pantau task coding; retry hanya tersedia untuk task yang gagal.",
     Approvals: "Task yang menunggu keputusan manusia; UI tidak melewati Policy Engine.",
     Agents: "Pisahkan worker yang ada di runtime saat ini dari target lifecycle arsitektur.",
     Chat: "Inference melalui OpenAI-compatible RUSA chat endpoint.",
@@ -453,7 +487,7 @@ export default function Home() {
             {page === "Approvals" && (
               <section className="panel">
                 <div className="panel-header"><div><div className="panel-title">Human review queue</div><div className="panel-subtitle">Only tasks explicitly marked awaiting_approval appear here</div></div><ShieldAlert size={18} className="text-amber-300" /></div>
-                <div className="inline-alert mb-4">RUSA backend saat ini menyediakan state awaiting_approval dan retry, tetapi belum menyediakan endpoint approve/reject. Karena itu UI tidak menampilkan tombol persetujuan palsu. Lakukan review melalui proses otorisasi yang berlaku; retry hanya boleh dilakukan setelah persetujuan manusia benar-benar diberikan.</div>
+                <div className="inline-alert mb-4">Review hasil dan evidence sebelum mengambil keputusan. Approve akan mencatat keputusan manusia lalu melanjutkan task; Reject menutup task sebagai cancelled. Retry terpisah dan hanya berlaku untuk task berstatus failed.</div>
                 {tasks.filter((task) => task.status === "awaiting_approval").length === 0
                   ? <div className="empty"><CheckCircle2 size={25} /><div>No pending approvals.</div></div>
                   : tasks.filter((task) => task.status === "awaiting_approval").map((task) => (
@@ -461,7 +495,8 @@ export default function Home() {
                       <div className="list-icon"><ShieldAlert size={16} /></div>
                       <div className="list-main"><button className="task-link" onClick={() => void openTask(task.task_id)}>{taskObjective(task)}</button><div className="list-desc">{task.task_id} · {task.payload?.repository?.full_name || "Repository not provided"}</div></div>
                       <span className={statusClass(task.status)}>Awaiting approval</span>
-                      {canControl && <button className="btn btn-small" onClick={() => void retryTask(task.task_id)}>Retry after review</button>}
+                      {canControl && <button className="btn btn-small btn-primary" disabled={busy} onClick={() => void approveTask(task.task_id)}><CheckCircle2 size={13} /> Approve</button>}
+                      {canControl && <button className="btn btn-small btn-danger" disabled={busy} onClick={() => void rejectTask(task.task_id)}><X size={13} /> Reject</button>}
                     </div>
                   ))}
               </section>
@@ -542,7 +577,7 @@ export default function Home() {
                 </section>
               </div>
             )}
-            <div className="footer-note">RUSA AI Control Center · API-backed values only · Task list refreshes every 10 seconds · No production deployment or approval is triggered by this interface.</div>
+            <div className="footer-note">RUSA AI Control Center · API-backed values only · Task list refreshes every 10 seconds · No production deployment is triggered by this interface.</div>
           </div>
         </section>
       </div>
@@ -579,8 +614,10 @@ export default function Home() {
             <div className="panel-subtitle mb-2">Task result / execution evidence</div>
             <pre className="json">{JSON.stringify(selectedTask.result || { message: "No result has been recorded yet." }, null, 2)}</pre>
             <div className="flex flex-wrap justify-end gap-2 mt-4">
-              {canControl && ["failed", "awaiting_approval"].includes(selectedTask.status) && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
-              {canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && <button className="btn btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}
+              {canControl && selectedTask.status === "failed" && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
+              {canControl && selectedTask.status === "awaiting_approval" && <button className="btn btn-primary" disabled={busy} onClick={() => void approveTask(selectedTask.task_id)}><CheckCircle2 size={14} /> Approve</button>}
+              {canControl && selectedTask.status === "awaiting_approval" && <button className="btn btn-danger" disabled={busy} onClick={() => void rejectTask(selectedTask.task_id)}><X size={14} /> Reject</button>}
+              {canControl && ["queued", "running"].includes(selectedTask.status) && <button className="btn btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}
               <button className="btn" onClick={() => setSelectedTask(null)}>Close</button>
             </div>
           </section>
