@@ -14,16 +14,16 @@ _PATTERNS = (
         "private-key material",
     ),
     (
-        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+        re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}(?![A-Za-z0-9])|github_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_]))"),
         "GitHub credential",
     ),
     (
-        re.compile(r"\bsk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}\b"),
+        re.compile(r"(?<![A-Za-z0-9])sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"),
         "provider API credential",
     ),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access-key identifier"),
-    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "Google API credential"),
-    (re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"), "Slack credential"),
+    (re.compile(r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])"), "AWS access-key identifier"),
+    (re.compile(r"(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{35}(?![A-Za-z0-9_-])"), "Google API credential"),
+    (re.compile(r"(?<![A-Za-z0-9])xox[baprs]-[0-9A-Za-z-]{10,}(?![A-Za-z0-9-])"), "Slack credential"),
 )
 
 
