@@ -9,10 +9,11 @@ import re
 import sqlite3
 import uuid
 from collections import Counter
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 TOKEN_RE = re.compile(r"[\w]{2,}", re.UNICODE)
 MAX_DOCUMENT_CHARS = 2_000_000
@@ -265,7 +266,7 @@ class LocalStore:
             }
             query_norm = math.sqrt(sum(value * value for value in query_vector.values())) or 1.0
             vector_scores: list[tuple[str, float]] = []
-            for row, counter in zip(rows, counters):
+            for row, counter in zip(rows, counters, strict=True):
                 weights = {
                     token: (1.0 + math.log(count)) * idf[token]
                     for token, count in counter.items()

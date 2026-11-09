@@ -8,17 +8,16 @@ import os
 import re
 from html.parser import HTMLParser
 from io import BytesIO
-from zipfile import BadZipFile, ZipFile
 from pathlib import Path
 from urllib.parse import urlsplit
+from zipfile import BadZipFile, ZipFile
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-
 from mcp_tools import TOOL_SPECS, call_local_tool, configure_store, streamable_http_app
+from pydantic import BaseModel, Field
 from store import LocalStore
 
 DATA_DIR = Path(os.getenv("RUSA_MOBILE_DATA_DIR", "~/.rusa-hybrida")).expanduser()
@@ -309,7 +308,7 @@ async def list_documents(collection: str | None = None):
 
 
 @app.post("/api/documents")
-async def upload_document(file: UploadFile = File(...), collection: str = "default"):
+async def upload_document(file: UploadFile = File(...), collection: str = "default"):  # noqa: B008
     filename = Path(file.filename or "document.txt").name[:255]
     try:
         raw = await file.read(MAX_UPLOAD_BYTES + 1)

@@ -10,7 +10,6 @@ from typing import Any
 
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-
 from store import LocalStore
 
 _STORE: LocalStore | None = None
