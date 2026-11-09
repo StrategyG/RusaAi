@@ -151,6 +151,12 @@ def test_contract_validation_diagnostics_never_echo_invalid_secret_values():
         validate_agent_task(task)
     assert secret not in str(exc_info.value)
 
+    task = _task()
+    task["domain"] = secret
+    with pytest.raises(PlatformContractError) as exc_info:
+        validate_agent_task(task)
+    assert secret not in str(exc_info.value)
+
 
 def test_run_event_requires_agent_role_only_for_agent_actors():
     event = _event()
