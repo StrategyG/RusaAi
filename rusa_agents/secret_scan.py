@@ -1,6 +1,7 @@
 """Bounded high-confidence credential-content scanner for sandbox snapshots."""
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -17,7 +18,11 @@ _SECRET_PATTERNS = (
 def contains_high_confidence_secret(path: str | Path) -> bool:
     """Scan a file in bounded chunks; return only a Boolean, never the matched value."""
     overlap = b""
-    with Path(path).open("rb") as source:
+    descriptor = os.open(
+        Path(path),
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+    )
+    with os.fdopen(descriptor, "rb") as source:
         while chunk := source.read(64 * 1024):
             sample = overlap + chunk
             if any(pattern.search(sample) for pattern in _SECRET_PATTERNS):
