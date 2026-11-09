@@ -108,6 +108,13 @@ def test_postgres_queue_requires_explicit_approval_before_resume():
     assert approved["result"] == review_result
     assert queue.reject(task_id, "tenant-approval") is False
 
+    # Approval requeues the task; remove it so the next global claim is isolated.
+    with queue._connect() as conn:
+        conn.execute(
+            "DELETE FROM public.aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+            (task_id, "tenant-approval"),
+        )
+
 
 
 def test_postgres_queue_records_explicit_rejection_and_tenant_scope():
@@ -115,7 +122,9 @@ def test_postgres_queue_records_explicit_rejection_and_tenant_scope():
     queue.initialize()
     task_id = str(uuid4())
     tenant_id = f"tenant-rejection-{uuid4().hex}"
-    assert queue.enqueue(task_id, tenant_id, {"objective": "rejection test"})
+    assert queue.enqueue(
+        task_id, tenant_id, {"objective": "rejection test"}, priority=2**31 - 1
+    )
     job = queue.claim("rejection-worker", lease_seconds=30)
     assert job is not None and job.task_id == task_id
     assert queue.await_approval(
@@ -138,6 +147,12 @@ def test_postgres_queue_records_explicit_rejection_and_tenant_scope():
             (tenant_id, task_id, "api:reviewer"),
         ).fetchone()
     assert event == ("task.reject", "allow")
+
+    with queue._connect() as conn:
+        conn.execute(
+            "DELETE FROM public.aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+            (task_id, tenant_id),
+        )
 
 
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
