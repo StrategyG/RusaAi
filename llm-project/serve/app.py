@@ -935,7 +935,8 @@ def create_aicode_task(
 def list_aicode_tasks(
     request: Request,
     status_filter: Literal[
-        "queued", "running", "awaiting_approval", "succeeded", "failed", "blocked", "cancelled"
+        "queued", "running", "cancel_requested", "awaiting_approval",
+        "succeeded", "failed", "blocked", "cancelled"
     ] | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=100000),
