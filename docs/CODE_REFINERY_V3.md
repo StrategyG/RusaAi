@@ -71,7 +71,7 @@ Production startup requires the MicroVM backend by default. Environment:
 
 - `RUSA_MICROVM_BASE_URL`: internal HTTPS URL of the trusted MicroVM supervisor.
 - `RUSA_MICROVM_API_KEY`: bearer credential, at least 24 UTF-8 bytes.
-- `RUSA_MICROVM_REQUIRED`: Boolean override; defaults to true in production and false outside production.
+- `RUSA_MICROVM_REQUIRED`: Optional Boolean for non-production. Production always requires MicroVM and rejects an explicit false value.
 - `RUSA_MICROVM_TIMEOUT_SECONDS`: 30–3600 seconds, default 900.
 
 The HTTP adapter contract is:
