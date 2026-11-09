@@ -42,7 +42,7 @@ SENSITIVE_SUFFIXES = {
     ".der", ".ppk", ".tfstate", ".tfvars",
 }
 DANGEROUS_CALLS = {
-    "eval", "exec", "os.system", "os.popen", "subprocess.Popen",
+    "eval", "exec", "__import__", "os.system", "os.popen", "subprocess.Popen",
     "pickle.loads", "marshal.loads", "ctypes.CDLL", "ctypes.PyDLL",
     "multiprocessing.Process", "socket.socket",
 }
