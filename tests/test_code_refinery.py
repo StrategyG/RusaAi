@@ -506,7 +506,7 @@ def test_docker_snapshot_rejects_embedded_high_confidence_credentials(tmp_path, 
 def test_shared_secret_scanner_detects_token_across_chunk_boundary(tmp_path):
     token = "ghp_" + "B" * 36
     source = tmp_path / "large.txt"
-    source.write_bytes(b"x" * (64 * 1024 - 2) + token.encode("ascii"))
+    source.write_bytes(b"x" * (64 * 1024 - 3) + b" " + token.encode("ascii"))
     assert contains_high_confidence_secret(source)
 
 
