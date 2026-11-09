@@ -27,6 +27,8 @@ def register_devops_mcp_tools(mcp, require_tenant: Callable[[], str]) -> None:
         """Read one tenant-scoped forecasting model run and held-out metrics."""
         tenant_id = require_tenant()
         result = _store().get_model_run(tenant_id, run_id)
+        if result is not None:
+            result.pop("artifact_uri", None)
         return {"found": result is not None, "model_run": result}
 
     @mcp.tool()
