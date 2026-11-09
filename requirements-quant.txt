@@ -1,0 +1,5 @@
+# RUSA-AI GPTQ quantization environment
+# GPTQModel brings its declared runtime dependencies (including Torch/Transformers).
+# Check that the installed Torch build matches the CUDA driver/runtime before quantizing.
+gptqmodel==7.9.0
+PyYAML>=6.0,<7

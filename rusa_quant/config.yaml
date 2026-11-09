@@ -1,0 +1,32 @@
+# Replace model.id with the Hugging Face model ID or local dense-model directory.
+# For reproducibility, set model.revision to an immutable Hugging Face commit SHA.
+model:
+  id: "REPLACE_WITH_HF_MODEL_ID"
+  revision: null
+  trust_remote_code: false
+  device: "cuda:0"
+  dtype: "float16"
+
+quantization:
+  method: "gptq"
+  bits: 4
+  group_size: 128
+  sym: true
+  desc_act: false
+  true_sequential: true
+
+calibration:
+  file: "data/calibration/calibration.jsonl"
+  max_samples: 128
+  min_samples: 32
+  max_length: 512
+  batch_size: 1
+  min_tokens: 10
+
+output:
+  directory: "artifacts/quantized/model-gptq-int4"
+  log_directory: "logs/quantization"
+
+validation:
+  prompt: "Jelaskan secara ringkas tujuan utama model ini dan berikan satu contoh penggunaannya."
+  max_new_tokens: 64
