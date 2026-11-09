@@ -4,7 +4,10 @@ from uuid import uuid4
 import pytest
 
 from rusa_agents.platform_contracts import (
+    CoreAgentRole,
+    DevOpsStage,
     PlatformContractError,
+    PlatformDomain,
     validate_agent_result,
     validate_agent_task,
     validate_run_event,
@@ -85,6 +88,9 @@ def _event(sequence=1, state_version=1):
 
 def test_agent_task_contract_accepts_authorized_versioned_task():
     validate_agent_task(_task())
+    assert len(PlatformDomain) == 4
+    assert len(CoreAgentRole) == 10
+    assert len(DevOpsStage) == 8
 
 
 def test_agent_task_contract_rejects_unknown_domain_and_policy_decision():
@@ -110,6 +116,13 @@ def test_agent_result_contract_requires_success_evidence_to_pass():
     validate_agent_result(result)
     result["evidence"][0]["status"] = "hold"
     with pytest.raises(PlatformContractError, match="succeeded result"):
+        validate_agent_result(result)
+
+
+def test_agent_result_contract_rejects_success_without_verification_evidence():
+    result = _result()
+    result["evidence"] = []
+    with pytest.raises(PlatformContractError, match="requires mandatory verification evidence"):
         validate_agent_result(result)
 
 
