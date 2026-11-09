@@ -10,8 +10,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .evaluation import evaluate_retrieval
-from .parsers import parse_file
 from .parquet import iter_telemetry_aggregates
+from .parsers import parse_file
 from .service import KnowledgeService
 
 
@@ -61,7 +61,7 @@ def _parquet_options(args: argparse.Namespace) -> dict:
         raise ValueError("Parquet input must be a regular local file, not a symlink")
     stat = path.stat()
     fingerprint = hashlib.sha256(
-        f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8")
+        f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}".encode()
     ).hexdigest()[:20]
     metrics = [item.strip() for item in args.metric_columns.split(",") if item.strip()]
     if not 1 <= args.rows_per_document <= 500:
@@ -140,7 +140,6 @@ def _ingest_parquet(args: argparse.Namespace, service: KnowledgeService, options
         )
         document_count += 1
         raw_row_count += source_rows
-        print(json.dumps(result, ensure_ascii=False))
         pending.clear()
 
     for aggregate in _iter_parquet(args, options):
