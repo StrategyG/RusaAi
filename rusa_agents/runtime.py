@@ -53,6 +53,11 @@ class AICodeRuntime:
         )
         local_provider = None
         local_model_url = os.getenv("RUSA_LOCAL_MODEL_BASE_URL", "").strip()
+        if self.config.environment == "production" and not local_model_url:
+            raise RuntimeError(
+                "Production hybrid LLM requires RUSA_LOCAL_MODEL_BASE_URL; "
+                "mock fallback is a circuit breaker, not a local inference backend"
+            )
         if local_model_url:
             parsed_local_url = urlparse(local_model_url)
             local_hosts = {"localhost", "127.0.0.1", "::1"}
