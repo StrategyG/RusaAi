@@ -140,6 +140,44 @@ def test_agent_result_contract_rejects_inverted_execution_interval():
         validate_agent_result(result)
 
 
+def test_succeeded_agent_result_requires_non_empty_passing_evidence():
+    result = _result()
+    result["evidence"] = []
+    with pytest.raises(PlatformContractError, match="requires at least one evidence"):
+        validate_agent_result(result)
+
+
+def test_failed_agent_result_requires_a_structured_failure_reason():
+    result = _result()
+    result["status"] = "failed"
+    result["evidence"][0]["status"] = "fail"
+    with pytest.raises(PlatformContractError, match="structured error"):
+        validate_agent_result(result)
+    result["error"] = {"code": "TEST_FAILURE", "message": "A required test failed"}
+    validate_agent_result(result)
+
+
+def test_contract_validation_diagnostics_never_echo_invalid_secret_values():
+    task = _task()
+    secret = "ghp_" + "A" * 36
+    task["task_id"] = secret
+    with pytest.raises(PlatformContractError) as exc_info:
+        validate_agent_task(task)
+    assert secret not in str(exc_info.value)
+
+
+def test_run_event_requires_agent_role_only_for_agent_actors():
+    event = _event()
+    event["actor"].pop("agent_role")
+    with pytest.raises(PlatformContractError, match="agent actors"):
+        validate_run_event(event)
+
+    event = _event()
+    event["actor"]["actor_type"] = "human"
+    with pytest.raises(PlatformContractError, match="only agent actors"):
+        validate_run_event(event)
+
+
 def test_run_event_contract_and_monotonic_batch():
     first = _event(1, 1)
     second = _event(2, 2)
