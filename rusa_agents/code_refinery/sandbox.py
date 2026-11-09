@@ -6,6 +6,7 @@ operated MicroVM supervisor; absence or uncertainty fails closed (no Docker fall
 from __future__ import annotations
 
 import ast
+import gzip
 import hashlib
 import io
 import json
@@ -182,38 +183,48 @@ class MicroVMHTTPBackend:
         total_bytes = 0
         file_count = 0
         root = workspace.resolve(strict=True)
-        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-            for current, dirs, files in os.walk(root, followlinks=False):
-                dirs[:] = [
-                    name for name in dirs
-                    if name not in SKIP_DIRS
-                    and name.lower() not in {".secrets", "secrets", "credentials", ".ssh", ".aws", ".azure"}
-                ]
-                for name in sorted(files):
-                    path = Path(current) / name
-                    if path.is_symlink() or name.lower() in SENSITIVE_NAMES:
-                        continue
-                    if name.lower().startswith(".env") and name.lower() != ".env.example":
-                        continue
-                    if path.suffix.lower() in SENSITIVE_SUFFIXES:
-                        continue
-                    resolved = path.resolve(strict=True)
-                    if root not in resolved.parents:
-                        continue
-                    size = resolved.stat().st_size
-                    total_bytes += size
-                    file_count += 1
-                    if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
-                        raise ValueError("MicroVM source snapshot exceeds configured file or byte limits")
-                    relative = resolved.relative_to(root).as_posix()
-                    info = tarfile.TarInfo(relative)
-                    info.size = size
-                    info.mode = 0o444
-                    info.mtime = 0
-                    info.uid = 0
-                    info.gid = 0
-                    with resolved.open("rb") as source:
-                        archive.addfile(info, source)
+        with gzip.GzipFile(fileobj=buffer, mode="wb", mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w") as archive:
+                for current, dirs, files in os.walk(root, followlinks=False):
+                    dirs[:] = [
+                        name for name in dirs
+                        if name not in SKIP_DIRS
+                        and name.lower() not in {
+                            ".secrets", "secrets", "credentials", ".ssh", ".aws",
+                            ".azure", ".terraform", ".rusa-ai",
+                        }
+                        and not (Path(current) / name).is_symlink()
+                    ]
+                    dirs.sort()
+                    for name in sorted(files):
+                        path = Path(current) / name
+                        lowered = name.lower()
+                        if (
+                            path.is_symlink()
+                            or lowered in SENSITIVE_NAMES
+                            or (lowered.startswith(".env") and lowered != ".env.example")
+                            or "credential" in lowered
+                            or "secret" in lowered
+                            or path.suffix.lower() in SENSITIVE_SUFFIXES
+                        ):
+                            continue
+                        resolved = path.resolve(strict=True)
+                        if root not in resolved.parents:
+                            continue
+                        size = resolved.stat().st_size
+                        total_bytes += size
+                        file_count += 1
+                        if total_bytes > MAX_SNAPSHOT_BYTES or file_count > MAX_FILES:
+                            raise ValueError("MicroVM source snapshot exceeds configured file or byte limits")
+                        relative = resolved.relative_to(root).as_posix()
+                        info = tarfile.TarInfo(relative)
+                        info.size = size
+                        info.mode = 0o444
+                        info.mtime = 0
+                        info.uid = 0
+                        info.gid = 0
+                        with resolved.open("rb") as source:
+                            archive.addfile(info, source)
         data = buffer.getvalue()
         if len(data) > MAX_SNAPSHOT_BYTES:
             raise ValueError("Compressed MicroVM source snapshot exceeds 100 MB")
