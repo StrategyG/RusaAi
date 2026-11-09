@@ -92,14 +92,16 @@ class ProphetARIMAForecaster:
         if future.empty:
             raise ValueError("prediction timestamps cannot be empty")
         base = self.prophet_model.predict(future[["ds"]])
-        residual = np.asarray(self.arima_model.forecast(steps=len(future)), dtype=float)
+        residual_forecast = self.arima_model.get_forecast(steps=len(future))
+        residual = np.asarray(residual_forecast.predicted_mean, dtype=float)
+        residual_interval = np.asarray(residual_forecast.conf_int(alpha=0.05), dtype=float)
         return pd.DataFrame({
             "ds": future["ds"],
             "prophet_yhat": base["yhat"].to_numpy(dtype=float),
             "residual_yhat": residual,
             "hybrid_yhat": base["yhat"].to_numpy(dtype=float) + residual + self.safety_offset,
-            "yhat_lower": base["yhat_lower"].to_numpy(dtype=float) + residual + self.safety_offset,
-            "yhat_upper": base["yhat_upper"].to_numpy(dtype=float) + residual + self.safety_offset,
+            "yhat_lower": base["yhat_lower"].to_numpy(dtype=float) + residual_interval[:, 0] + self.safety_offset,
+            "yhat_upper": base["yhat_upper"].to_numpy(dtype=float) + residual_interval[:, 1] + self.safety_offset,
         })
 
     def save(self, path: str | Path) -> str:
