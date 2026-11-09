@@ -28,6 +28,10 @@ from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
+from rusa_devops.api import create_devops_router
+from rusa_devops.config import DevOpsConfig
+from rusa_devops.queue import PostgresDevOpsQueue
+from rusa_devops.store import PostgresDevOpsStore
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -151,6 +155,7 @@ async def lifespan(application: FastAPI):
     application.state.queue = None
     application.state.rate_limiter = None
     application.state.task_policy_audit = None
+    application.state.devops_queue = None
     application.state.inference_admission = _new_inference_admission_controller()
     local_backend = None
     try:
@@ -201,6 +206,14 @@ async def lifespan(application: FastAPI):
             if config.environment == "production":
                 task_policy_audit.verify_ready("rusa_api_runtime")
             application.state.task_policy_audit = task_policy_audit
+        devops_config = DevOpsConfig.from_env()
+        if devops_config.enabled:
+            if not config.api_database_url:
+                raise RuntimeError("DevOps requires the existing API PostgreSQL database URL")
+            devops_queue = PostgresDevOpsQueue(config.api_database_url)
+            if not devops_queue.verify_ready() or not PostgresDevOpsStore(config.api_database_url).check_ready():
+                raise RuntimeError("DevOps database schema is not ready; apply migrations/009_rusa_devops_intelligence.sql")
+            application.state.devops_queue = devops_queue
         yield
 
     finally:
@@ -1025,3 +1038,35 @@ def cancel_aicode_task(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Task not found or no longer cancellable")
     return {"task_id": str(task_id), "status": "cancelled"}
+
+
+DEVOPS_ROLE_PERMISSIONS = {
+    "read": frozenset({"platform_admin", "tenant_admin", "developer", "read_only"}),
+    "operate": frozenset({"platform_admin", "tenant_admin", "developer"}),
+    "admin": frozenset({"platform_admin", "tenant_admin"}),
+}
+
+
+def require_devops_permission(permission: str):
+    if permission not in DEVOPS_ROLE_PERMISSIONS:
+        raise ValueError("Unknown DevOps permission")
+
+    def dependency(
+        request: Request,
+        api_key: str | None = Depends(api_key_header),
+    ) -> str:
+        tenant_id = authenticate_api_key(request, api_key)
+        principal = getattr(request.state, "principal", None)
+        config = getattr(request.app.state, "config", None) or RuntimeConfig.from_env()
+        if principal is None:
+            if config.environment == "production":
+                raise HTTPException(status_code=403, detail="DevOps identity is not configured")
+            return tenant_id
+        if not DEVOPS_ROLE_PERMISSIONS[permission].intersection(principal.roles):
+            raise HTTPException(status_code=403, detail="Insufficient DevOps permissions")
+        return tenant_id
+
+    return dependency
+
+
+app.include_router(create_devops_router(require_devops_permission))
