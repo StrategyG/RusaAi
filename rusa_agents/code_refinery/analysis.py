@@ -14,8 +14,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
-from .ast_security import dangerous_calls
 from ..secret_scan import contains_high_confidence_secret_text
+from .ast_security import dangerous_calls
 
 MAX_FILES = 2_000
 MAX_FILE_BYTES = 1_000_000
