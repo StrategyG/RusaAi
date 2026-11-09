@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..metrics import REFINERY_SANDBOX_DURATION, REFINERY_SANDBOX_RUNS
+from ..secret_scan import contains_high_confidence_secret
 from ..tool_gateway import DockerSandbox, ToolResult
 
 MICROVM_PROFILES = frozenset({"pytest", "compile", "ruff", "bandit"})
@@ -53,12 +54,6 @@ DANGEROUS_CALLS = {
     "ctypes.CDLL", "ctypes.PyDLL", "multiprocessing.Process",
     "socket.socket", "socket.create_connection", "urllib.request.urlopen",
 }
-SECRET_CONTENT_PATTERNS = (
-    re.compile(rb"sk-[A-Za-z0-9]{20,}"),
-    re.compile(rb"gh[pousr]_[A-Za-z0-9]{20,}"),
-    re.compile(rb"AKIA[A-Z0-9]{16}"),
-    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-)
 
 
 def _call_name(node: ast.AST) -> str:
@@ -226,17 +221,6 @@ class MicroVMHTTPBackend:
                 raise RuntimeError("MicroVM readiness runner image digest does not match the pinned image")
 
     @staticmethod
-    def _contains_high_confidence_secret(path: Path) -> bool:
-        overlap = b""
-        with path.open("rb") as source:
-            while chunk := source.read(64 * 1024):
-                sample = overlap + chunk
-                if any(pattern.search(sample) for pattern in SECRET_CONTENT_PATTERNS):
-                    return True
-                overlap = sample[-256:]
-        return False
-
-    @staticmethod
     def _archive_workspace(workspace: Path) -> tuple[bytes, str]:
         buffer = io.BytesIO()
         total_bytes = 0
@@ -272,7 +256,7 @@ class MicroVMHTTPBackend:
                         if root not in resolved.parents:
                             continue
                         size = resolved.stat().st_size
-                        if MicroVMHTTPBackend._contains_high_confidence_secret(resolved):
+                        if contains_high_confidence_secret(resolved):
                             raise ValueError(
                                 "MicroVM source snapshot contains high-confidence credential material"
                             )
