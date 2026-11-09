@@ -32,6 +32,7 @@ def apply_database_migrations():
             "006_aicode_idempotency.sql",
             "009_aicode_blocked_status.sql",
             "010_aicode_cooperative_cancellation.sql",
+            "011_aicode_cancellation_reconciliation.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
