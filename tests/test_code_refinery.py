@@ -507,3 +507,31 @@ def test_shared_secret_scanner_detects_token_across_chunk_boundary(tmp_path):
     source = tmp_path / "large.txt"
     source.write_bytes(b"x" * (64 * 1024 - 2) + token.encode("ascii"))
     assert contains_high_confidence_secret(source)
+
+
+
+def test_analyzer_marks_invalid_unicode_as_blocking_input():
+    report = analyze_sources({"src/invalid.py": "value = '\udcff'\n"})
+    assert not report.passed
+    assert not report.syntax_valid
+    assert not report.not_applicable
+    assert any(item.category == "input" for item in report.findings)
+
+
+def test_analyzer_fails_closed_when_parser_exceeds_recursion_limit(monkeypatch):
+    def fail_parse(source, filename):
+        raise RecursionError("parser recursion limit")
+
+    monkeypatch.setattr(analysis_module.ast, "parse", fail_parse)
+    report = analyze_sources({"src/deep.py": "value = 1\n"})
+    assert not report.passed
+    assert not report.syntax_valid
+    assert any(item.category == "analysis" for item in report.findings)
+
+
+def test_analyzer_does_not_call_oversized_input_not_applicable(monkeypatch):
+    monkeypatch.setattr(analysis_module, "MAX_FILE_BYTES", 4)
+    report = analyze_sources({"src/oversized.py": "12345"})
+    assert not report.passed
+    assert not report.syntax_valid
+    assert not report.not_applicable
