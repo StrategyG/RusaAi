@@ -176,7 +176,7 @@ All task endpoints require `X-API-Key` and map the key to a tenant.
 |---|---|---|
 | `/v1/aicode/tasks` | POST | Enqueue a repository-scoped coding task |
 | `/v1/aicode/tasks/{task_id}` | GET | Read task status within the authenticated tenant |
-| `/v1/aicode/tasks/{task_id}/retry` | POST | Explicitly retry a failed or approval-paused task |
+| `/v1/aicode/tasks/{task_id}/retry` | POST | Explicitly retry a failed task only; `awaiting_approval` returns HTTP 409 until a human-approval contract exists |
 | `/v1/aicode/tasks/{task_id}` | DELETE | Cancel a cancellable task |
 | `/health/ready` | GET | Verify model and database readiness |
 | `/metrics` | GET | Authenticated Prometheus API metrics |
