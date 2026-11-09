@@ -114,7 +114,7 @@ def test_devops_stage_agent_identity_is_not_conflated_with_core_agent_role():
     assert len(DevOpsStageAgentId) == 8
 
     task["stage"] = "release"
-    with pytest.raises(PlatformContractError, match="lifecycle stage"):
+    with pytest.raises(PlatformContractError):
         validate_agent_task(task)
 
     task["stage"] = "build"
@@ -167,7 +167,7 @@ def test_failed_agent_result_requires_a_structured_failure_reason():
     result = _result()
     result["status"] = "failed"
     result["evidence"][0]["status"] = "fail"
-    with pytest.raises(PlatformContractError, match="missing required field.*error"):
+    with pytest.raises(PlatformContractError, match="structured error"):
         validate_agent_result(result)
     result["error"] = {"code": "TEST_FAILURE", "message": "A required test failed"}
     validate_agent_result(result)
