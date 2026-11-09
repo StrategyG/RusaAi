@@ -18,8 +18,8 @@
 |---|---|---|---|
 | Command Center | Tenant task totals, loaded-page task sample, liveness/readiness, product-pillar overview | Browser navigation; BFF task and health routes | Active/failed are loaded-page samples. Production health was not exercised. |
 | Orchestrator | Displays current AICode sequence, separate ten-step architecture workflow, and proposed ADR communication design | Browser navigation | Architecture view only. No /runs workflow API, event log, broker, or WebSocket runtime is exposed. |
-| AICode Tasks | Create, tenant-scoped list, pagination/filter, detail, failed-task retry, and cancellation | BFF create/list/detail/retry/cancel; browser create/detail/retry | Real execution still depends on the deployed API, durable queue, worker, AICode flag, and tenant repository allowlist. |
-| Approval Center | Lists awaiting_approval records and opens task detail | BFF approval-list route; browser verifies no fabricated approve/reject controls | No approval decision endpoint, durable approval record, or approver identity contract. |
+| AICode Tasks | Create, tenant-scoped list, pagination/filter, detail, failed-task retry, and cancellation | BFF create/list/detail/retry/cancel; browser create/detail/retry; queue policy unit test | Explicit retry is backend-enforced for failed tasks only; awaiting_approval receives HTTP 409. Real execution still depends on the deployed API, durable queue, worker, AICode flag, and tenant repository allowlist. |
+| Approval Center | Lists awaiting_approval records and opens task detail | BFF approval-list route; browser verifies no fabricated approve/reject or retry controls on approval-paused task detail; BFF retry returns HTTP 409 | No approval decision endpoint, durable approval record, or approver identity contract. |
 | Agent Workspace | Displays seven code-defined AICode runtime components and ten architecture-role contracts | Browser navigation and role-detail modal | No live agent registry, heartbeat, instance health, or agent invocation API. |
 | Agentic DevOps | Displays eight stage contracts, inputs, outputs, exit criteria, and authority boundaries | Browser navigation and stage-selection interaction | Lifecycle stages are architecture contracts, not eight registered runtime agents. |
 | RUSA AI Chat | Discovers models and sends streaming or non-streaming inference requests | BFF model and chat SSE/JSON routes; browser streaming interaction | CI uses a mock provider. Actual model-provider availability, latency, and quality require staging verification. |
@@ -44,9 +44,9 @@ The smoke command starts the built standalone web server and a deterministic moc
 
 - Encrypted HttpOnly session cookie, identity revalidation, and no raw API-key return to browser code.
 - Missing-session rejection, same-origin mutation protection, and read-only role denials.
-- Tenant task list, approval list, task detail, task creation, retry, and cancellation proxy routes.
+- Tenant task list, approval list, task detail, task creation, failed-task retry, approval-paused retry denial (HTTP 409), and cancellation proxy routes.
 - Model discovery, liveness/readiness, platform-admin metrics authorization and server-side metrics key, chat SSE and JSON responses, and A2A validation.
-- Chromium login/logout, all fourteen workspace navigation destinations, task creation/detail/retry, architecture-role detail, DevOps stage selection, approval-page safety, chat streaming, A2A validation, metrics display, and mobile navigation drawer.
+- Chromium login/logout, all fourteen workspace navigation destinations, task creation/detail/retry, architecture-role detail, DevOps stage selection, approval-page safety and no-retry detail state, chat streaming, A2A validation, metrics display, and mobile navigation drawer.
 
 The browser and BFF tests use a mock API that follows the web adapter contracts. They verify the web application and its server-side BFF behavior; they do **not** prove that the production API, database, worker, model provider, or optional RAG/MCP deployment is reachable.
 
@@ -54,7 +54,7 @@ The separate RUSA-AI CI workflow continues to test backend compilation, lint, se
 
 ## Governance note: awaiting approval
 
-The current API has an awaiting_approval state but no structured approve/reject endpoint or durable approval-decision record. The queue's existing retry method accepts both failed and awaiting_approval; its task-retry audit event is not a substitute for a dedicated approval record. The Control Center intentionally does not expose retry from the Approval Center and never labels a task approved. A dedicated approval contract is still required before the UI can offer an approval decision.
+The current API has an awaiting_approval state but no structured approve/reject endpoint or durable approval-decision record. The queue retry method is now restricted to failed tasks only; awaiting_approval returns HTTP 409. A task-retry audit event is not a substitute for a dedicated approval record. The Control Center intentionally does not expose retry from the Approval Center and never labels a task approved. A dedicated approval contract is still required before the UI can offer an approval decision.
 
 ## Production readiness boundary
 
