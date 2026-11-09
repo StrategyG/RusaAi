@@ -119,7 +119,14 @@
             "service"
           ]
         },
-        "agent_role": {
+        "agent_type": {
+          "type": "string",
+          "enum": [
+            "core_agent",
+            "devops_stage_agent"
+          ]
+        },
+        "core_role": {
           "type": "string",
           "enum": [
             "supreme_orchestrator",
@@ -133,8 +140,113 @@
             "memory_knowledge",
             "evaluation_reporting"
           ]
+        },
+        "stage_agent_id": {
+          "type": "string",
+          "enum": [
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent"
+          ]
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "actor_type": {
+              "const": "human"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_type"
+                ]
+              },
+              {
+                "required": [
+                  "core_role"
+                ]
+              },
+              {
+                "required": [
+                  "stage_agent_id"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "service"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "agent_type"
+                ]
+              },
+              {
+                "required": [
+                  "core_role"
+                ]
+              },
+              {
+                "required": [
+                  "stage_agent_id"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "agent"
+            },
+            "agent_type": {
+              "const": "core_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "core_role"
+          ],
+          "not": {
+            "required": [
+              "stage_agent_id"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "actor_type": {
+              "const": "agent"
+            },
+            "agent_type": {
+              "const": "devops_stage_agent"
+            }
+          },
+          "required": [
+            "agent_type",
+            "stage_agent_id"
+          ],
+          "not": {
+            "required": [
+              "core_role"
+            ]
+          }
+        }
+      ]
     }
   }
 }
