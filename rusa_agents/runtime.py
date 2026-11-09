@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import time
+from urllib.parse import urlparse
 from collections.abc import Coroutine
 from typing import Any
 
@@ -13,6 +14,8 @@ from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
+from .code_refinery.providers import HybridCodeProvider, MockCodeProvider
+from .code_refinery.sandbox import HybridSandbox, MicroVMHTTPBackend
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
@@ -44,9 +47,50 @@ class AICodeRuntime:
             self.config.workspace_root,
             github_token=self.config.github_token,
         )
-        self.provider = OpenAICompatibleProvider()
+        primary_provider = OpenAICompatibleProvider(
+            base_url=self.config.model_base_url,
+            model=self.config.model_name,
+        )
+        local_provider = None
+        local_model_url = os.getenv("RUSA_LOCAL_MODEL_BASE_URL", "").strip()
+        if local_model_url:
+            parsed_local_url = urlparse(local_model_url)
+            local_hosts = {"localhost", "127.0.0.1", "::1"}
+            if (
+                parsed_local_url.scheme not in {"https", "http"}
+                or not parsed_local_url.hostname
+                or parsed_local_url.username
+                or parsed_local_url.password
+                or parsed_local_url.query
+                or parsed_local_url.fragment
+                or (
+                    parsed_local_url.scheme != "https"
+                    and parsed_local_url.hostname not in local_hosts
+                )
+                or (
+                    self.config.environment == "production"
+                    and parsed_local_url.scheme != "https"
+                )
+            ):
+                raise RuntimeError(
+                    "RUSA_LOCAL_MODEL_BASE_URL must use credential-free HTTPS "
+                    "(loopback HTTP is permitted only outside production)"
+                )
+            local_provider = OpenAICompatibleProvider(
+                base_url=local_model_url,
+                model=os.getenv("RUSA_LOCAL_MODEL_NAME", "rusa-local"),
+                api_key=os.getenv("RUSA_LOCAL_MODEL_API_KEY"),
+            )
+        self.provider = HybridCodeProvider(
+            primary=primary_provider,
+            local=local_provider,
+            mock=MockCodeProvider(),
+        )
         self.publisher = GitHubPublisher(self.config.github_token)
-        self.sandbox = DockerSandbox(image=self.config.sandbox_image)
+        self.sandbox = HybridSandbox(
+            docker=DockerSandbox(image=self.config.sandbox_image),
+            microvm=MicroVMHTTPBackend.from_env(),
+        )
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
