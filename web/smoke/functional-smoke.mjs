@@ -428,6 +428,12 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Toggle navigation" }).click();
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), true);
+  const mobileChatNav = page.locator(".rc-nav-item").filter({ hasText: "AI Chat" });
+  await mobileChatNav.scrollIntoViewIfNeeded();
+  await mobileChatNav.click();
+  await page.locator(".rc-page-head h1").filter({ hasText: "RUSA AI Chat" }).waitFor({ state: "visible" });
+  assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), false);
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.locator(".rc-nav-item").filter({ hasText: "Command Center" }).click();
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), false);
   await page.setViewportSize({ width: 1280, height: 900 });
