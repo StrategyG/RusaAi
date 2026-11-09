@@ -189,7 +189,6 @@ async function sendMessage(text) {
         message,
         use_rag: $("#ragToggle").checked,
         temperature: 0.6,
-        max_tokens: 512
       })
     });
     if (!response.ok) {

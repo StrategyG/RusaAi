@@ -88,6 +88,9 @@ The scripts default to:
 - RUSA_MOBILE_DATA_DIR=~/.rusa-hybrida
 - RUSA_LLAMA_BASE_URL=http://127.0.0.1:8081/v1
 - RUSA_LLAMA_MODEL=qwen-local
+- RUSA_MOBILE_CONTEXT=2048 (llama.cpp context window)
+- RUSA_MOBILE_MAX_TOKENS=512 (maximum generated tokens)
+- RUSA_MOBILE_THREADS=4 (CPU inference threads)
 
 Override the model endpoint only with another HTTP loopback endpoint. The app rejects non-loopback model URLs. Keep downloaded model files in the Termux home directory rather than shared Android storage for better file access performance.
 

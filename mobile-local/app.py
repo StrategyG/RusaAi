@@ -27,6 +27,7 @@ STORE = LocalStore(DATA_DIR / "hybrida.sqlite3")
 configure_store(STORE)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_TOKENS = int(os.getenv("RUSA_MOBILE_MAX_TOKENS", "512"))
 ALLOWED_EXTENSIONS = {".txt", ".md", ".html", ".htm", ".pdf", ".docx"}
 
 
@@ -54,7 +55,7 @@ class ChatInput(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     use_rag: bool = True
     temperature: float = Field(default=0.6, ge=0.0, le=1.2)
-    max_tokens: int = Field(default=512, ge=32, le=1024)
+    max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=32, le=1024)
 
 
 class ToolCallInput(BaseModel):
@@ -128,7 +129,10 @@ def extract_document(filename: str, raw: bytes) -> tuple[str, str]:
                 xml_content = archive.read("word/document.xml")
         except BadZipFile as exc:
             raise ValueError("DOCX file is not a valid ZIP archive.") from exc
-        root = ElementTree.fromstring(xml_content)
+        try:
+            root = ElementTree.fromstring(xml_content)
+        except ElementTree.ParseError as exc:
+            raise ValueError("DOCX document XML is invalid.") from exc
         paragraph_tag = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"
         text_tag = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
         blocks = []
