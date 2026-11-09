@@ -27,7 +27,7 @@ STORE = LocalStore(DATA_DIR / "hybrida.sqlite3")
 configure_store(STORE)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-DEFAULT_MAX_TOKENS = int(os.getenv("RUSA_MOBILE_MAX_TOKENS", "512"))
+DEFAULT_MAX_TOKENS = int(os.getenv("RUSA_MOBILE_MAX_TOKENS", "384"))
 ALLOWED_EXTENSIONS = {".txt", ".md", ".html", ".htm", ".pdf", ".docx"}
 
 
@@ -52,10 +52,10 @@ def _sse(event: str, payload: dict) -> str:
 
 class ChatInput(BaseModel):
     chat_id: str | None = None
-    message: str = Field(min_length=1, max_length=8000)
+    message: str = Field(min_length=1, max_length=4000)
     use_rag: bool = True
     temperature: float = Field(default=0.6, ge=0.0, le=1.2)
-    max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=32, le=1024)
+    max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=32, le=768)
 
 
 class ToolCallInput(BaseModel):
@@ -232,7 +232,7 @@ async def chat(payload: ChatInput):
         raise HTTPException(status_code=404, detail="Conversation not found.")
     STORE.append_message(chat_id, "user", message)
 
-    sources = STORE.search(message, collection="default", limit=5) if payload.use_rag else []
+    sources = STORE.search(message, collection="default", limit=3) if payload.use_rag else []
     system_prompt = (
         "You are HYBRIDA, a helpful local AI assistant. Answer in the user's language. "
         "Be clear and honest about uncertainty. You run locally on an Android phone with limited memory. "
@@ -245,15 +245,26 @@ async def chat(payload: ChatInput):
             for index, item in enumerate(sources, 1):
                 evidence.append(
                     "[S" + str(index) + "] " + item["title"] + " | " + item["source_uri"]
-                    + " | document_id=" + item["document_id"] + "\n" + item["content"][:1800]
+                    + " | document_id=" + item["document_id"] + "\n" + item["content"][:500]
                 )
             system_prompt += "\n\nLOCAL KNOWLEDGE EVIDENCE:\n" + "\n\n".join(evidence)
         else:
             system_prompt += "\n\nNo matching local document was found. Do not claim that local documents support the answer."
 
-    history = STORE.get_messages(chat_id, limit=16)
+    history = STORE.get_messages(chat_id, limit=12)
+    history_budget = 4200
+    bounded_history = []
+    for item in reversed(history):
+        content = item["content"]
+        if len(content) > history_budget:
+            content = content[-history_budget:]
+        if content:
+            bounded_history.append({"role": item["role"], "content": content})
+            history_budget -= len(content)
+        if history_budget <= 0:
+            break
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend({"role": item["role"], "content": item["content"]} for item in history)
+    messages.extend(reversed(bounded_history))
     request_body = {
         "model": os.getenv("RUSA_LLAMA_MODEL", "qwen-local"),
         "messages": messages,
