@@ -94,7 +94,7 @@ The integration branch includes the following concrete refinements:
 8. **Ambiguous side effects:** if a worker cannot establish whether an external side effect occurred, the task is moved to `awaiting_approval` with `side_effect=UNKNOWN`; retry is blocked until a tenant/platform administrator records an audited `task.reconcile` determination (`NONE` or `APPLIED`) with evidence.
 9. **API and control-center consistency:** `cancel_requested` is exposed as a distinct task status and included in task filtering and active-task views.
 
-Migrations 010 and 011 are forward-only database changes. Apply them with the database migration owner before deploying code that requires cooperative cancellation and audited reconciliation. Never run an older worker that does not understand the new state concurrently with the upgraded cancellation workflow.
+Migrations 010 and 011 are forward-only database changes. Apply them with the database migration owner before deploying code that requires cooperative cancellation and audited reconciliation. The reconciliation endpoint is restricted to `tenant_admin` and `platform_admin`; unresolved side effects cannot be cancelled again or retried until reconciled. Never run an older worker that does not understand the new state concurrently with the upgraded cancellation workflow.
 
 ## 7. Production qualification boundary
 
