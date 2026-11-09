@@ -84,9 +84,12 @@ def _validate(contract_name: str, payload: Any) -> None:
         ),
     )
     if errors:
+        # jsonschema's default error.message may echo the invalid value. Contract
+        # payloads can contain credential-like material, so expose only the path
+        # and schema keyword in diagnostics.
         messages = [
             f"{'.'.join(str(part) for part in error.absolute_path) or '<root>'}: "
-            f"{error.message}"
+            f"violates {error.validator or 'schema'} constraint"
             for error in errors[:25]
         ]
         raise PlatformContractError(
@@ -137,6 +140,11 @@ def validate_agent_result(payload: Any) -> None:
 def validate_run_event(payload: Any) -> None:
     """Validate one event envelope; sequence allocation remains an event-store duty."""
     _validate("run_event", payload)
+    actor = payload["actor"]
+    if actor["actor_type"] == "agent" and "agent_role" not in actor:
+        raise PlatformContractError("agent actors must declare their registered agent_role")
+    if actor["actor_type"] != "agent" and "agent_role" in actor:
+        raise PlatformContractError("only agent actors may declare agent_role")
 
 
 def validate_run_event_batch(events: Any) -> None:
