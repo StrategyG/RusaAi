@@ -6,8 +6,12 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
-from rusa_agents.gguf import verify_gguf_file
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from rusa_agents.gguf import verify_gguf_file  # noqa: E402
 
 
 def main() -> int:
