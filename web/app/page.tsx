@@ -579,7 +579,7 @@ export default function Home() {
             <div className="panel-subtitle mb-2">Task result / execution evidence</div>
             <pre className="json">{JSON.stringify(selectedTask.result || { message: "No result has been recorded yet." }, null, 2)}</pre>
             <div className="flex flex-wrap justify-end gap-2 mt-4">
-              {canControl && ["failed", "awaiting_approval"].includes(selectedTask.status) && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
+              {canControl && ["failed", "blocked", "awaiting_approval"].includes(selectedTask.status) && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
               {canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && <button className="btn btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}
               <button className="btn" onClick={() => setSelectedTask(null)}>Close</button>
             </div>
