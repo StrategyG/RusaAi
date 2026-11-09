@@ -48,12 +48,12 @@ If no Python files changed, the refinery reports `not_applicable=true` with an a
 The coding runtime uses this fallback order:
 
 1. Primary `RUSA_MODEL_BASE_URL` / `RUSA_MODEL_NAME`.
-2. Optional local endpoint `RUSA_LOCAL_MODEL_BASE_URL` / `RUSA_LOCAL_MODEL_NAME`.
+2. Local endpoint `RUSA_LOCAL_MODEL_BASE_URL` / `RUSA_LOCAL_MODEL_NAME` (required in production).
 3. Mock circuit-breaker response.
 
 Both live providers must return the bounded JSON action envelope already required by AICode. Invalid JSON, unknown fields, or malformed actions cause fallback. The mock never fabricates code or test evidence; it returns `blocked=true`, causing the worker to stop safely.
 
-Local endpoint configuration:
+Local endpoint configuration (required in production; optional in development):
 
 - `RUSA_LOCAL_MODEL_BASE_URL`
 - `RUSA_LOCAL_MODEL_NAME` (default `rusa-local`)
