@@ -92,6 +92,21 @@ The supplied communication ADR is marked **Diusulkan**. The DevOps lifecycle doc
 
 Do not describe the current PostgreSQL queue as RabbitMQ/Kafka, do not claim an outbox exists, and do not claim signed events or mTLS are deployed. The model is never the authority for tenant identity, policy, lease ownership, or approval.
 
+### 6.1 Status and message vocabulary compatibility
+
+The supplied documents define several related but distinct vocabularies. They must not be silently collapsed into one enum:
+
+| Source contract | Values or meaning |
+|---|---|
+| Ten-agent communication contract | `PENDING`, `READY`, `RUNNING`, `BLOCKED`, `NEEDS_APPROVAL`, `REVIEW`, `COMPLETED`, `FAILED`, `CANCELLED` |
+| Eight-stage DevOps lifecycle | `queued`, `running`, `passed`, `failed`, `blocked`, `needs_approval`, `cancelled`, `skipped` |
+| Communication ADR v1 | Message types such as `task.request`, `task.accepted`, `task.progress`, `task.completed`, `task.failed`, `task.cancel.requested`, and `task.cancelled`; these are message/event types, not task statuses |
+| Platform result v1.0 | `succeeded`, `failed`, `blocked`, `awaiting_approval`, `cancelled` |
+| AICode durable queue | `queued`, `running`, `cancel_requested`, `awaiting_approval`, `succeeded`, `failed`, `blocked`, `cancelled` |
+| In-process coding state machine | `received`, `observing`, `planning`, `executing`, `verifying`, `awaiting_approval`, `succeeded`, `failed`, `blocked`, `cancelled` |
+
+Before cross-domain orchestration is wired to the AICode queue, define and test an explicit mapping for each transition, including `passed` versus `succeeded`, `needs_approval` versus `awaiting_approval`, and `cancel_requested` versus terminal `cancelled`. Preserve the source status in audit events; an unmapped status must be rejected or held for review, not guessed.
+
 ## 7. Engineering and safety corrections on this branch
 
 The integration branch includes the following concrete refinements:
