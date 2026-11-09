@@ -237,3 +237,33 @@ def test_postgres_queue_idempotency_key_replays_and_rejects_payload_changes():
                 "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
                 (tenant, key),
             )
+
+
+def test_postgres_queue_marks_policy_blocked_work_terminal_until_manual_retry():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = "tenant-blocked-" + uuid4().hex
+    try:
+        assert queue.enqueue(task_id, tenant_id, {"objective": "blocked task"})
+        job = queue.claim("blocked-worker", lease_seconds=30)
+        assert job is not None and job.task_id == task_id
+        assert queue.fail(
+            job.id,
+            tenant_id,
+            "blocked-worker",
+            job.lease_token,
+            "policy denied",
+            retryable=False,
+        )
+        blocked = queue.get(task_id, tenant_id)
+        assert blocked["status"] == "blocked"
+        assert queue.claim("another-worker", lease_seconds=30) is None
+        assert queue.retry(task_id, tenant_id) is True
+        assert queue.get(task_id, tenant_id)["status"] == "queued"
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
