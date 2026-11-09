@@ -51,6 +51,7 @@ async function readJson(request) {
 }
 function identityFor(key) {
   if (key === "platform-key") return { subject: "smoke-admin", tenant_id: "tenant-smoke", roles: ["platform_admin"] };
+  if (key === "developer-key") return { subject: "smoke-developer", tenant_id: "tenant-smoke", roles: ["developer"] };
   if (key === "readonly-key") return { subject: "smoke-reader", tenant_id: "tenant-smoke", roles: ["read_only"] };
   return null;
 }
@@ -319,6 +320,23 @@ try {
   });
   assert.equal(deniedCreate.status, 403, "Backend task RBAC denial must pass through the BFF");
 
+  const deniedRetry = await fetch(base + "/api/tasks/" + seededTask.task_id + "/retry", {
+    method: "POST", headers: { Origin: base, Cookie: readOnlyCookie }
+  });
+  assert.equal(deniedRetry.status, 403, "Read-only users must not retry tasks");
+
+  const deniedCancel = await fetch(base + "/api/tasks/" + seededTask.task_id, {
+    method: "DELETE", headers: { Origin: base, Cookie: readOnlyCookie }
+  });
+  assert.equal(deniedCancel.status, 403, "Read-only users must not cancel tasks");
+
+  const deniedChat = await fetch(base + "/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base, Cookie: readOnlyCookie },
+    body: JSON.stringify({ messages: [{ role: "user", content: "must be denied" }], stream: false })
+  });
+  assert.equal(deniedChat.status, 403, "Read-only users must not use inference");
+
   const logout = await fetch(base + "/api/session", { method: "DELETE", headers: { Origin: base, Cookie: cookie } });
   assert.equal(logout.status, 200, "Logout must clear the session cookie");
   assert.match(logout.headers.get("set-cookie") || "", /Max-Age=0/i);
@@ -416,10 +434,34 @@ try {
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
+
+  await page.getByLabel("RUSA API Key").fill("developer-key");
+  await page.getByRole("button", { name: "Connect to RUSA AI" }).click();
+  await page.locator(".rc-page-head h1").filter({ hasText: "Command Center" }).waitFor({ state: "visible" });
+  assert.equal(await page.getByRole("button", { name: /New AICode Task/ }).count(), 1, "Developers may create tasks");
+  await page.locator(".rc-nav-item").filter({ hasText: "AICode Tasks" }).click();
+  await page.locator(".rc-table-link").filter({ hasText: "Smoke-test task detail" }).click();
+  await page.locator(".rc-task-modal").waitFor({ state: "visible" });
+  assert.equal(await page.locator(".rc-task-modal").getByRole("button", { name: /Retry failed task|Cancel task/ }).count(), 0, "Developers must not receive admin task controls");
+  await page.locator(".rc-task-modal button[aria-label='Close']").click();
+  await page.locator(".rc-nav-item").filter({ hasText: "AI Chat" }).click();
+  assert.equal(await page.locator(".rc-chat-compose textarea").isDisabled(), false, "Developers may use inference");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
+  await page.getByLabel("RUSA API Key").fill("readonly-key");
+  await page.getByRole("button", { name: "Connect to RUSA AI" }).click();
+  await page.locator(".rc-page-head h1").filter({ hasText: "Command Center" }).waitFor({ state: "visible" });
+  assert.equal(await page.getByRole("button", { name: /New AICode Task/ }).count(), 0, "Read-only users must not create tasks");
+  await page.locator(".rc-nav-item").filter({ hasText: "AI Chat" }).click();
+  assert.equal(await page.locator(".rc-chat-compose textarea").isDisabled(), true, "Read-only users must not use inference");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
+
   await browser.close();
   browser = undefined;
 
-  process.stdout.write("RUSA AI web functional smoke: PASS (BFF contracts + browser navigation, agent contracts, DevOps stages, chat, validator, responsive navigation, logout).\\n");
+  process.stdout.write("RUSA AI web functional smoke: PASS (BFF contracts + platform_admin/developer/read_only UI role matrix, failed-only retry, approval safety, navigation, agent contracts, DevOps stages, chat, validator, responsive navigation, logout).\\n");
 } catch (error) {
   process.stderr.write("RUSA AI web functional smoke: FAIL\n");
   process.stderr.write((error instanceof Error ? error.stack : String(error)) + "\n");
