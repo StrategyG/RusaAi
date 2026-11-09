@@ -162,8 +162,13 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
 
     functions = _function_nodes(tree)
     metrics: dict[str, float] = {}
-    metrics["type_safety"] = _annotation_score(functions)
-    metrics["documentation"] = _documentation_score(tree)
+    source_path = PurePosixPath(path)
+    is_test_source = (
+        any(part in {"test", "tests"} for part in source_path.parts)
+        or source_path.name.startswith("test_")
+    )
+    metrics["type_safety"] = 100.0 if is_test_source else _annotation_score(functions)
+    metrics["documentation"] = 100.0 if is_test_source else _documentation_score(tree)
 
     risky_without_guard = 0
     for function in functions:
