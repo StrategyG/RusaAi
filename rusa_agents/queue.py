@@ -807,7 +807,8 @@ class PostgresTaskQueue:
         """Return a tenant-scoped, newest-first page of durable task records."""
         self._require_policy_audit_actor(audit_actor)
         valid_statuses = {
-            "queued", "running", "awaiting_approval", "succeeded", "failed", "blocked", "cancelled",
+            "queued", "running", "cancel_requested", "awaiting_approval",
+            "succeeded", "failed", "blocked", "cancelled",
         }
         if status_filter is not None and status_filter not in valid_statuses:
             raise ValueError("Unsupported task status filter")
