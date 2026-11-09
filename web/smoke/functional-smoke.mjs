@@ -125,17 +125,19 @@ const backend = createServer(async (request, response) => {
   }
 });
 
-async function freePort() {
-  const server = createServer();
-  await new Promise((resolveListen, reject) => {
+async function freePorts(count) {
+  const servers = Array.from({ length: count }, () => createServer());
+  await Promise.all(servers.map((server) => new Promise((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolveListen);
+  })));
+  const ports = servers.map((server) => {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Could not allocate a local port");
+    return address.port;
   });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Could not allocate a local port");
-  const port = address.port;
-  await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
-  return port;
+  await Promise.all(servers.map((server) => new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()))));
+  return ports;
 }
 async function waitForServer(url, child, output) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -149,8 +151,7 @@ async function waitForServer(url, child, output) {
   throw new Error("Next.js server did not become ready.\n" + output());
 }
 
-const backendPort = await freePort();
-const appPort = await freePort();
+const [backendPort, appPort] = await freePorts(2);
 await new Promise((resolveListen, reject) => {
   backend.once("error", reject);
   backend.listen(backendPort, "127.0.0.1", resolveListen);
