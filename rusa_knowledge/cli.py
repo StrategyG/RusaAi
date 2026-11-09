@@ -117,7 +117,7 @@ def _ingest_parquet(args: argparse.Namespace, service: KnowledgeService, options
         first_bucket = pending[0]["bucket_start"]
         last_bucket = pending[-1]["bucket_start"]
         source_rows = sum(item["row_count"] for item in pending)
-        result = service.ingest_text(
+        service.ingest_text(
             tenant_id=args.tenant_id,
             collection=args.collection,
             source_uri=source_uri,
