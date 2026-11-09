@@ -34,9 +34,16 @@ SECRET_VALUE = re.compile(
 SENSITIVE_ASSIGNMENT = re.compile(r"(?:api[_-]?key|secret|password|token|credential)", re.I)
 RISKY_CALLS = {"open", "int", "float", "json.loads", "Path.read_text", "subprocess.run"}
 DANGEROUS_CALLS = {
-    "eval", "exec", "compile", "__import__", "os.system", "os.popen",
-    "pickle.loads", "marshal.loads", "ctypes.CDLL", "ctypes.PyDLL",
-    "multiprocessing.Process", "socket.socket",
+    "eval", "exec", "builtins.eval", "builtins.exec", "compile", "__import__",
+    "importlib.import_module", "runpy.run_module", "runpy.run_path",
+    "os.system", "os.popen", "os.execv", "os.execve", "os.execl",
+    "os.execlp", "os.execle", "os.execvp", "os.execvpe",
+    "os.spawnl", "os.spawnle", "os.spawnlp", "os.spawnlpe",
+    "os.spawnv", "os.spawnve", "os.spawnvp", "os.spawnvpe",
+    "subprocess.Popen", "asyncio.create_subprocess_exec",
+    "asyncio.create_subprocess_shell", "pickle.loads", "marshal.loads",
+    "ctypes.CDLL", "ctypes.PyDLL", "multiprocessing.Process",
+    "socket.socket", "socket.create_connection", "urllib.request.urlopen",
 }
 
 
@@ -255,12 +262,15 @@ def _analyze_one(path: str, source: str) -> tuple[dict[str, float], list[Finding
             continue
         name = _call_name(node.func)
         dangerous = name in DANGEROUS_CALLS
-        shell_true = name.startswith("subprocess.") and any(
-            keyword.arg == "shell" and isinstance(keyword.value, ast.Constant)
-            and keyword.value.value is True
+        shell_enabled = name.startswith("subprocess.") and any(
+            keyword.arg == "shell"
+            and not (
+                isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is False
+            )
             for keyword in node.keywords
         )
-        if dangerous or shell_true:
+        if dangerous or name.startswith("subprocess.") and shell_enabled:
             findings.append(
                 Finding(
                     "error", "security",
