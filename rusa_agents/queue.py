@@ -206,10 +206,15 @@ class PostgresTaskQueue:
                       AND conname='aicode_task_policy_events_action_check'
                       AND contype='c'
                 """).fetchone()
-                if not reconcile_action or "'task.reconcile'" not in reconcile_action[0]:
+                if (
+                    not reconcile_action
+                    or "'task.reconcile'" not in reconcile_action[0]
+                    or "'task.list'" not in reconcile_action[0]
+                ):
                     raise RuntimeError(
-                        "Production cancellation reconciliation audit is not installed; "
-                        "apply migrations/011_aicode_cancellation_reconciliation.sql"
+                        "Production task-list/cancellation audit is not installed; "
+                        "apply migrations/011_aicode_cancellation_reconciliation.sql "
+                        "and migrations/012_aicode_task_list_audit.sql"
                     )
 
                 roles = conn.execute("""
