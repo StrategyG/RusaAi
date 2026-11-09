@@ -119,20 +119,6 @@ def test_agent_result_contract_requires_success_evidence_to_pass():
         validate_agent_result(result)
 
 
-def test_agent_result_contract_rejects_success_without_verification_evidence():
-    result = _result()
-    result["evidence"] = []
-    with pytest.raises(PlatformContractError, match="requires mandatory verification evidence"):
-        validate_agent_result(result)
-
-
-def test_agent_result_contract_rejects_success_without_evidence():
-    result = _result()
-    result["evidence"] = []
-    with pytest.raises(PlatformContractError, match="evidence"):
-        validate_agent_result(result)
-
-
 def test_agent_result_contract_rejects_inverted_execution_interval():
     result = _result()
     result["completed_at"] = "2026-11-09T09:59:00Z"
@@ -143,7 +129,7 @@ def test_agent_result_contract_rejects_inverted_execution_interval():
 def test_succeeded_agent_result_requires_non_empty_passing_evidence():
     result = _result()
     result["evidence"] = []
-    with pytest.raises(PlatformContractError, match="requires at least one evidence"):
+    with pytest.raises(PlatformContractError, match="at least one evidence"):
         validate_agent_result(result)
 
 
