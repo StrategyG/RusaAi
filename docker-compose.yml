@@ -30,7 +30,8 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     environment:
-      RUSA_API_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
+      RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:-postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa}
+      RUSA_DEVOPS_ENABLED: ${RUSA_DEVOPS_ENABLED:-false}
       RUSA_DATABASE_URL: ""
       RUSA_WORKER_DATABASE_URL: ""
     ports:
@@ -85,6 +86,39 @@ services:
         condition: service_healthy
     networks: [rusa-internal, rusa-egress]
 
+  devops-worker:
+    profiles: ["devops"]
+    build:
+      context: .
+      dockerfile: Dockerfile.devops-worker
+    command: ["python", "-m", "rusa_devops.worker_main"]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_limit: 3g
+    cpus: 2.0
+    tmpfs:
+      - /tmp:rw,nosuid,size=128m
+    env_file: .env
+    environment:
+      RUSA_DEVOPS_ENABLED: ${RUSA_DEVOPS_ENABLED:-false}
+      RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:-postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa}
+      RUSA_API_DATABASE_URL: ""
+      RUSA_DATABASE_URL: ""
+      RUSA_DEVOPS_ARTIFACT_ROOT: /var/lib/rusa/devops-artifacts
+      RUSA_DEVOPS_METRICS_BIND: 0.0.0.0
+    volumes:
+      - rusa-devops-artifacts:/var/lib/rusa/devops-artifacts
+    expose:
+      - "9101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [rusa-internal, rusa-egress]
+
   web:
     build:
       context: ./web
@@ -118,6 +152,7 @@ services:
 
 volumes:
   rusa-postgres:
+  rusa-devops-artifacts:
 
 networks:
   rusa-internal:
