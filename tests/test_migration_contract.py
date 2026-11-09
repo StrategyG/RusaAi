@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -74,3 +74,11 @@ def test_blocked_status_migration_is_required_by_production_queue():
     reconciliation = Path("migrations/011_aicode_cancellation_reconciliation.sql").read_text(encoding="utf-8")
     assert "'task.reconcile'" in reconciliation
     assert "011_aicode_cancellation_reconciliation.sql" in queue
+
+
+def test_final_task_audit_migration_preserves_list_and_reconciliation_actions():
+    migration = Path("migrations/012_aicode_task_list_audit.sql").read_text(encoding="utf-8")
+    assert "'task.list'" in migration
+    assert "'task.reconcile'" in migration
+    assert "'task.authenticate'" in migration
+    assert "'task.execute'" in migration
