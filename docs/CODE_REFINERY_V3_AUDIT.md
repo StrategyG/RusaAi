@@ -111,7 +111,7 @@ Angka tersebut adalah temuan package/vulnerability, bukan jumlah CVE unik. Beber
 |---|---|---|
 | HIGH / blocker produksi | Firecracker/MicroVM supervisor belum disediakan atau diuji secara end-to-end | PR hanya menyediakan client, kontrak, routing, dan MockTransport tests. Provision supervisor nyata, readiness, isolation, resource limits, network policy, dan runner image sebelum produksi. |
 | HIGH | Trivy melaporkan 51–56 temuan HIGH per image, 0 CRITICAL | Tinjau paket OS/base image dan catat risk acceptance atau perbaikan saat paket upstream tersedia. |
-| MEDIUM | Adapter MicroVM memakai HTTPS + bearer token; client certificate mTLS belum dikonfigurasi di PR ini | ADR komunikasi yang dilampirkan berstatus **Diusulkan** dan menetapkan mTLS untuk komunikasi internal. Gunakan service mesh yang menerapkan mTLS atau tambahkan dukungan sertifikat sebelum menyatakan kesesuaian penuh ADR. |
+| MEDIUM | mTLS adapter kini didukung, tetapi belum diverifikasi terhadap supervisor yang benar-benar dideploy | Konfigurasi produksi mewajibkan sertifikat dan private key client serta mendukung CA bundle khusus. Deployment tetap harus mengatur trust store supervisor, rotasi sertifikat berumur pendek, pencabutan, dan uji handshake/failure. |
 | MEDIUM | Digest runner diverifikasi terhadap nilai yang dipatok, tetapi respons API bukan hardware-backed attestation | Supervisor tetap harus menjadi layanan tepercaya, melindungi signing/provenance dan runner image, serta diaudit terpisah. |
 | MEDIUM | Enam test utama dan 27 test sandbox di-skip karena dependency/layanan opsional tidak tersedia | Jalankan kembali pada environment dengan PostgreSQL, MCP runtime, parser, PyTorch, dan local-model dependencies bila fitur tersebut masuk acceptance scope. |
 | LOW | Credential scanner hanya mencakup pola berkeyakinan tinggi | Pertahankan secret-scanning khusus di CI/repository; jangan menganggap scanner ini sebagai pengganti secret-management atau DLP. |
@@ -120,6 +120,7 @@ Angka tersebut adalah temuan package/vulnerability, bukan jumlah CVE unik. Beber
 
 - `ADR-RUSA-AI-Komunikasi-Agent` yang dilampirkan berstatus **Diusulkan**. PR ini tidak mengklaim telah mengimplementasikan seluruh topologi gRPC/Protobuf, RabbitMQ, Kafka, transactional outbox, message signing, atau mTLS.
 - `RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE` juga berstatus **Proposed Architecture** dengan delapan tahap/agent DevOps. PR ini memperkuat jalur AICode enam specialist roles yang sudah ada; ini bukan implementasi penuh delapan agent lifecycle.
+- Adapter MicroVM sekarang mendukung client-certificate mTLS dengan CA bundle opsional; mTLS wajib pada konfigurasi produksi dan diuji melalui unit tests konfigurasi/TLS context. Ini belum membuktikan trust configuration atau certificate rotation pada supervisor nyata.
 - Human approval untuk merge branch terlindungi, release/deploy produksi, secret/permission changes, dan aksi destruktif tetap menjadi batas kewenangan. Tidak ada merge atau deployment otomatis yang ditambahkan.
 
 ## 6. Rekomendasi tindak lanjut
