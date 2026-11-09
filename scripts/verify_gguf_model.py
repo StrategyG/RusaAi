@@ -8,24 +8,36 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from rusa_agents.gguf import verify_gguf_file  # noqa: E402
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default=os.getenv("RUSA_GGUF_MODEL_PATH"))
-    parser.add_argument("--sha256", default=os.getenv("RUSA_GGUF_MODEL_SHA256"))
-    args = parser.parse_args()
-    if not args.model:
-        parser.error("provide --model or set RUSA_GGUF_MODEL_PATH")
-    if not args.sha256:
-        parser.error("provide --sha256 or set RUSA_GGUF_MODEL_SHA256")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=ROOT / ".env",
+        help="dotenv file to read (default: repository .env)",
+    )
+    parser.add_argument("--model", help="absolute path to the GGUF file")
+    parser.add_argument("--sha256", help="approved 64-character SHA-256 digest")
+    args = parser.parse_args(argv)
+
+    load_dotenv(dotenv_path=args.env_file, override=False)
+    model_path = args.model or os.getenv("RUSA_GGUF_MODEL_PATH")
+    expected_sha256 = args.sha256 or os.getenv("RUSA_GGUF_MODEL_SHA256")
+    if not model_path:
+        parser.error("provide --model or set RUSA_GGUF_MODEL_PATH in the env file")
+    if not expected_sha256:
+        parser.error("provide --sha256 or set RUSA_GGUF_MODEL_SHA256 in the env file")
 
     try:
-        verified = verify_gguf_file(args.model, args.sha256)
+        verified = verify_gguf_file(model_path, expected_sha256)
     except (OSError, ValueError) as exc:
         print(f"GGUF verification failed: {exc}", file=sys.stderr)
         return 1

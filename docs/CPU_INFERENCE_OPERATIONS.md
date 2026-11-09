@@ -27,7 +27,7 @@ Start with a small instruct model in a CPU-friendly GGUF quantization such as Q4
 sha256sum /srv/rusa/models/model.gguf
 ```
 
-5. Set `RUSA_GGUF_MODEL_PATH` and `RUSA_GGUF_MODEL_SHA256` in `.env`, then run the repository verifier:
+5. Set `RUSA_GGUF_MODEL_PATH` and `RUSA_GGUF_MODEL_SHA256` in `.env`, then run the repository verifier. The script loads `.env` automatically; use `--env-file` to select another dotenv file, or pass `--model` and `--sha256` explicitly:
 
 ```bash
 python scripts/verify_gguf_model.py

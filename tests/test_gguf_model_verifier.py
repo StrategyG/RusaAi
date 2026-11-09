@@ -1,4 +1,6 @@
 import hashlib
+import subprocess
+import sys
 
 import pytest
 
@@ -61,3 +63,27 @@ def test_rejects_invalid_expected_checksum(tmp_path):
 
     with pytest.raises(ValueError, match="64 hexadecimal"):
         verify_gguf_file(model, "not-a-checksum")
+
+
+def test_verifier_cli_loads_model_settings_from_dotenv(tmp_path, monkeypatch):
+    model = tmp_path / "tiny.gguf"
+    model.write_bytes(b"gguf-fixture")
+    digest = hashlib.sha256(model.read_bytes()).hexdigest()
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"RUSA_GGUF_MODEL_PATH={model}\nRUSA_GGUF_MODEL_SHA256={digest}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("RUSA_GGUF_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_GGUF_MODEL_SHA256", raising=False)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "verify_gguf_model.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--env-file", str(env_file)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"sha256={digest}" in result.stdout
