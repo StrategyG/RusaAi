@@ -175,11 +175,16 @@ class MicroVMHTTPBackend:
     def verify_ready(self) -> None:
         timeout = httpx.Timeout(10.0, connect=5.0)
         with httpx.Client(timeout=timeout, follow_redirects=False, transport=self.transport) as client:
-            response = client.get(f"{self.base_url}/health/ready", headers=self._headers())
-            response.raise_for_status()
-            if len(response.content) > 64_000:
-                raise RuntimeError("MicroVM readiness response exceeds 64 KB")
-            payload = response.json()
+            with client.stream(
+                "GET", f"{self.base_url}/health/ready", headers=self._headers()
+            ) as response:
+                response.raise_for_status()
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(body) + len(chunk) > 64_000:
+                        raise RuntimeError("MicroVM readiness response exceeds 64 KB")
+                    body.extend(chunk)
+            payload = json.loads(bytes(body))
         if not isinstance(payload, dict) or payload.get("ready") is not True:
             raise RuntimeError("MicroVM supervisor is not ready")
 
