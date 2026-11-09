@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 
 import httpx
 
-
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
