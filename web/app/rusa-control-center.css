@@ -23,7 +23,7 @@ body { background: var(--rc-bg) !important; color: var(--rc-text); font-family: 
 .rc-brand small { display: block; margin-top: 4px; color: #7891ab; font-size: 8px; letter-spacing: .17em; }
 .rc-tenant { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px; margin: 0 2px 16px; border: 1px solid var(--rc-line); border-radius: 11px; background: rgba(17, 34, 53, .8); color: #c9d9eb; font-size: 11px; }
 .rc-tenant > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.rc-nav { overflow-y: auto; padding-right: 2px; }
+.rc-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px; }
 .rc-nav-group { margin-bottom: 13px; }
 .rc-nav-label { padding: 8px 11px 6px; color: #5f7792; font-size: 9px; font-weight: 700; letter-spacing: .17em; }
 .rc-nav-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 11px; margin: 2px 0; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #9db1c8; text-align: left; font-size: 11px; font-weight: 600; transition: background .16s ease, border .16s ease, color .16s ease; }
