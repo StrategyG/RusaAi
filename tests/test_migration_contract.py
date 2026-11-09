@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -45,6 +45,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "009_aicode_blocked_status.sql",
+        "010_aicode_cooperative_cancellation.sql",
     ]
 
 
@@ -65,3 +66,7 @@ def test_blocked_status_migration_is_required_by_production_queue():
     queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
     assert "'blocked'" in migration
     assert "009_aicode_blocked_status.sql" in queue
+    cancellation = Path("migrations/010_aicode_cooperative_cancellation.sql").read_text(encoding="utf-8")
+    assert "'cancel_requested'" in cancellation
+    assert "cancel_epoch" in cancellation
+    assert "010_aicode_cooperative_cancellation.sql" in queue
