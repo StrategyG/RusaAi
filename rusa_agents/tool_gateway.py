@@ -100,14 +100,14 @@ class DockerSandbox:
 
         def bounded_copy(source: str, destination: str) -> str:
             source_path = Path(source)
-            if contains_high_confidence_secret(source_path):
-                raise ToolDenied(
-                    "Sandbox snapshot contains high-confidence credential material"
-                )
             size = source_path.stat().st_size
             totals[0] += size
             if totals[0] > self.max_snapshot_bytes:
                 raise ToolDenied("Sandbox snapshot exceeds configured size limit")
+            if contains_high_confidence_secret(source_path):
+                raise ToolDenied(
+                    "Sandbox snapshot contains high-confidence credential material"
+                )
             copied = shutil.copy2(source, destination)
             mode = stat.S_IMODE(Path(copied).stat().st_mode)
             os.chmod(copied, (mode | 0o444) & ~0o222)
