@@ -85,6 +85,8 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [reconciliationOutcome, setReconciliationOutcome] = useState<"NONE" | "APPLIED">("NONE");
+  const [reconciliationEvidence, setReconciliationEvidence] = useState("");
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [taskFilter, setTaskFilter] = useState("all");
   const [objective, setObjective] = useState("");
@@ -255,6 +257,41 @@ export default function Home() {
       await openTask(taskId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Retry failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reconcileTask(taskId: string) {
+    const evidence = reconciliationEvidence.trim();
+    if (evidence.length < 10 || evidence.length > 2000) {
+      setError("Evidence rekonsiliasi harus berisi 10–2000 karakter.");
+      return;
+    }
+    if (!window.confirm("Catat hasil pemeriksaan side effect eksternal? Setelah ini retry tetap memerlukan tindakan terpisah.")) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(
+        "/api/tasks/" + encodeURIComponent(taskId) + "/reconcile",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            side_effect: reconciliationOutcome,
+            evidence
+          })
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(errorText(data));
+      setNotice("Rekonsiliasi tercatat. Task tetap menunggu keputusan dan retry eksplisit.");
+      setReconciliationEvidence("");
+      await refreshTasks();
+      await openTask(taskId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Reconciliation failed.");
     } finally {
       setBusy(false);
     }
@@ -433,7 +470,7 @@ export default function Home() {
               <section className="panel">
                 <div className="panel-header"><div><div className="panel-title">AICode task queue</div><div className="panel-subtitle">{taskTotal} task records visible to this tenant</div></div>
                   <select className="search-input max-w-44" value={taskFilter} onChange={(event) => setTaskFilter(event.target.value)}>
-                    <option value="all">All statuses</option><option value="active">Active</option><option value="queued">Queued</option><option value="running">Running</option><option value="awaiting_approval">Awaiting approval</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option>
+                    <option value="all">All statuses</option><option value="active">Active</option><option value="queued">Queued</option><option value="running">Running</option><option value="cancel_requested">Cancel requested</option><option value="awaiting_approval">Awaiting approval</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="blocked">Blocked</option><option value="cancelled">Cancelled</option>
                   </select>
                 </div>
                 <div className="table-wrap">
@@ -453,7 +490,7 @@ export default function Home() {
             {page === "Approvals" && (
               <section className="panel">
                 <div className="panel-header"><div><div className="panel-title">Human review queue</div><div className="panel-subtitle">Only tasks explicitly marked awaiting_approval appear here</div></div><ShieldAlert size={18} className="text-amber-300" /></div>
-                <div className="inline-alert mb-4">RUSA backend saat ini menyediakan state awaiting_approval dan retry, tetapi belum menyediakan endpoint approve/reject. Karena itu UI tidak menampilkan tombol persetujuan palsu. Lakukan review melalui proses otorisasi yang berlaku; retry hanya boleh dilakukan setelah persetujuan manusia benar-benar diberikan.</div>
+                <div className="inline-alert mb-4">RUSA backend tidak menyediakan tombol approve/reject otomatis. Jika hasil task menunjukkan side effect eksternal belum dapat dipastikan, administrator harus merekonsiliasi bukti terlebih dahulu; retry tetap merupakan tindakan terpisah.</div>
                 {tasks.filter((task) => task.status === "awaiting_approval").length === 0
                   ? <div className="empty"><CheckCircle2 size={25} /><div>No pending approvals.</div></div>
                   : tasks.filter((task) => task.status === "awaiting_approval").map((task) => (
@@ -461,7 +498,9 @@ export default function Home() {
                       <div className="list-icon"><ShieldAlert size={16} /></div>
                       <div className="list-main"><button className="task-link" onClick={() => void openTask(task.task_id)}>{taskObjective(task)}</button><div className="list-desc">{task.task_id} · {task.payload?.repository?.full_name || "Repository not provided"}</div></div>
                       <span className={statusClass(task.status)}>Awaiting approval</span>
-                      {canControl && <button className="btn btn-small" onClick={() => void retryTask(task.task_id)}>Retry after review</button>}
+                      {task.result?.cancel_reconciliation_required === true
+                        ? <span className="status status-awaiting_approval">Reconciliation required</span>
+                        : canControl && <button className="btn btn-small" onClick={() => void retryTask(task.task_id)}>Retry after review</button>}
                     </div>
                   ))}
               </section>
@@ -576,11 +615,49 @@ export default function Home() {
               <div className="detail-cell"><div className="detail-label">Created</div><div className="detail-value">{formatDate(selectedTask.created_at)}</div></div>
             </div>
             {selectedTask.last_error && <div className="error-alert mb-3">{selectedTask.last_error}</div>}
+            {canControl && selectedTask.status === "awaiting_approval" && selectedTask.result?.cancel_reconciliation_required === true && (
+              <section className="inline-alert mb-4">
+                <div className="font-semibold mb-1">External side-effect reconciliation required</div>
+                <p className="helper mb-3">Periksa branch, commit, pull request, atau sistem tujuan sebelum menyatakan hasil. Keputusan ini dicatat secara permanen; tindakan retry tetap terpisah.</p>
+                <div className="field">
+                  <label htmlFor="reconciliation-outcome">Confirmed external side effect</label>
+                  <select
+                    id="reconciliation-outcome"
+                    className="search-input"
+                    value={reconciliationOutcome}
+                    onChange={(event) => setReconciliationOutcome(event.target.value as "NONE" | "APPLIED")}
+                    disabled={busy}
+                  >
+                    <option value="NONE">NONE — no external side effect occurred</option>
+                    <option value="APPLIED">APPLIED — external side effect occurred</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="reconciliation-evidence">Evidence (10–2000 characters)</label>
+                  <textarea
+                    id="reconciliation-evidence"
+                    value={reconciliationEvidence}
+                    onChange={(event) => setReconciliationEvidence(event.target.value)}
+                    maxLength={2000}
+                    rows={3}
+                    placeholder="Describe the external checks performed. Do not include credentials or secrets."
+                    disabled={busy}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  disabled={busy || reconciliationEvidence.trim().length < 10}
+                  onClick={() => void reconcileTask(selectedTask.task_id)}
+                >
+                  Record reconciliation
+                </button>
+              </section>
+            )}
             <div className="panel-subtitle mb-2">Task result / execution evidence</div>
             <pre className="json">{JSON.stringify(selectedTask.result || { message: "No result has been recorded yet." }, null, 2)}</pre>
             <div className="flex flex-wrap justify-end gap-2 mt-4">
-              {canControl && ["failed", "blocked", "awaiting_approval"].includes(selectedTask.status) && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
-              {canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && <button className="btn btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}
+              {canControl && ["failed", "blocked", "awaiting_approval"].includes(selectedTask.status) && selectedTask.result?.cancel_reconciliation_required !== true && <button className="btn" disabled={busy} onClick={() => void retryTask(selectedTask.task_id)}><RefreshCw size={14} /> Retry</button>}
+              {canControl && ["queued", "running", "awaiting_approval"].includes(selectedTask.status) && selectedTask.result?.cancel_reconciliation_required !== true && <button className="btn btn-danger" disabled={busy} onClick={() => void cancelTask(selectedTask.task_id)}>Cancel task</button>}
               <button className="btn" onClick={() => setSelectedTask(null)}>Close</button>
             </div>
           </section>
