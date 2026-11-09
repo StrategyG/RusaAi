@@ -34,12 +34,26 @@ class PostgresDevOpsStore:
     def check_ready(self) -> bool:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT to_regclass('public.rusa_devops_telemetry'), "
-                "to_regclass('public.rusa_devops_model_runs'), "
-                "to_regclass('public.rusa_devops_incidents'), "
-                "to_regclass('public.rusa_devops_action_proposals')"
+                """
+                SELECT
+                    to_regclass('public.rusa_devops_telemetry') IS NOT NULL,
+                    to_regclass('public.rusa_devops_model_runs') IS NOT NULL,
+                    to_regclass('public.rusa_devops_incidents') IS NOT NULL,
+                    to_regclass('public.rusa_devops_action_proposals') IS NOT NULL,
+                    (SELECT COUNT(*) = 6 AND bool_and(relrowsecurity AND relforcerowsecurity)
+                     FROM pg_class WHERE oid IN (
+                        to_regclass('public.rusa_devops_jobs'),
+                        to_regclass('public.rusa_devops_telemetry'),
+                        to_regclass('public.rusa_devops_model_runs'),
+                        to_regclass('public.rusa_devops_incidents'),
+                        to_regclass('public.rusa_devops_action_proposals'),
+                        to_regclass('public.rusa_devops_audit_events')
+                     )),
+                    has_table_privilege(current_user, 'public.rusa_devops_telemetry', 'SELECT'),
+                    has_table_privilege(current_user, 'public.rusa_devops_model_runs', 'SELECT')
+                """
             ).fetchone()
-        return bool(row and all(value is not None for value in row))
+        return bool(row and all(row))
 
     def write_telemetry(self, tenant_id: str, samples: list[TelemetrySample]) -> int:
         if not samples or len(samples) > 50_000:
@@ -263,5 +277,13 @@ class PostgresDevOpsStore:
                     (tenant_id, proposal_id, action_type, status, payload, approval_required)
                 VALUES (%s, %s::uuid, %s, 'pending_approval', %s::jsonb, true)
                 """, (tenant_id, proposal_id, proposal["action"], json.dumps(proposal, allow_nan=False)),
+            )
+            conn.execute(
+                """
+                INSERT INTO public.rusa_devops_audit_events
+                    (tenant_id, actor, action, decision, details)
+                VALUES (%s, 'worker:devops', 'action.propose', 'allow', %s::jsonb)
+                """,
+                (tenant_id, json.dumps({"proposal_id": proposal_id, "action": proposal["action"]})),
             )
         return proposal_id
