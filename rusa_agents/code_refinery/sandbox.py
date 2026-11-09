@@ -21,9 +21,9 @@ from urllib.parse import urlparse
 import httpx
 
 from ..metrics import REFINERY_SANDBOX_DURATION, REFINERY_SANDBOX_RUNS
-from .ast_security import dangerous_calls
 from ..secret_scan import contains_high_confidence_secret_stream
 from ..tool_gateway import DockerSandbox, ToolResult
+from .ast_security import dangerous_calls
 
 MICROVM_PROFILES = frozenset({"pytest", "compile", "ruff", "bandit"})
 MAX_FILES = 2_000
