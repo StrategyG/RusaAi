@@ -1,0 +1,5 @@
+CREATE ROLE rusa_rag_runtime
+    LOGIN PASSWORD :'rag_password'
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT;
+
+GRANT CONNECT ON DATABASE rusa_knowledge TO rusa_rag_runtime;
