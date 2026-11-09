@@ -10,6 +10,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "whe
     && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt
 COPY pyproject.toml .
 COPY rusa_agents ./rusa_agents
+COPY rusa_devops ./rusa_devops
 ARG RUSA_INSTALL_LOCAL_MODEL=0
 RUN python -m pip install --no-cache-dir --prefix=/install --no-deps . \
     && if [ "$RUSA_INSTALL_LOCAL_MODEL" = "1" ]; then \
@@ -54,7 +55,7 @@ for package in ("pip", "setuptools", "wheel", "jaraco.context"):
 
 for module in (
     "fastapi", "uvicorn", "pydantic", "jsonschema",
-    "httpx", "psycopg", "prometheus_client", "rusa_agents",
+    "httpx", "psycopg", "prometheus_client", "rusa_agents", "rusa_devops",
 ):
     import_module(module)
 print("API runtime imports verified; build tooling is absent.")
