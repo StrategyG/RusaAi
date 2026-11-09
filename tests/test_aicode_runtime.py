@@ -301,3 +301,18 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_orchestrator_does_not_certify_low_refinery_score(tmp_path):
+    low_quality_workers = workers()
+    low_quality_workers[-1].evidence["check:refinery"]["quality_score"] = 84.9
+    orchestrator = AICodeOrchestrator(
+        low_quality_workers,
+        memory=SQLiteMemory(str(tmp_path / "memory.sqlite3")),
+        audit=AuditLog(str(tmp_path / "audit.jsonl")),
+        max_repair_cycles=0,
+    )
+    record = asyncio.run(orchestrator.run(task()))
+    assert record.state == TaskState.BLOCKED
+    assert any("check:refinery" in error for error in record.errors)
