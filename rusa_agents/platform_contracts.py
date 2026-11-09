@@ -10,16 +10,35 @@ from datetime import datetime
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from sysconfig import get_path
 from typing import Any
 
 import jsonschema
 
-_SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schemas" / "platform"
 _SCHEMA_FILES = {
     "agent_task": "agent-task-v1.schema.json",
     "agent_result": "agent-result-v1.schema.json",
     "run_event": "run-event-v1.schema.json",
 }
+
+
+def _resolve_schema_directory() -> Path:
+    """Find schemas in a source checkout, installed wheel, or application image."""
+    candidates = (
+        Path(__file__).resolve().parents[1] / "schemas" / "platform",
+        Path(get_path("data")) / "share" / "rusa-ai" / "schemas" / "platform",
+        Path("/app/schemas/platform"),
+    )
+    for candidate in candidates:
+        if all((candidate / filename).is_file() for filename in _SCHEMA_FILES.values()):
+            return candidate
+    raise RuntimeError(
+        "RUSA-AI platform schemas are missing; install the wheel data files or "
+        "include schemas/platform in the application image"
+    )
+
+
+_SCHEMA_DIR = _resolve_schema_directory()
 
 
 class PlatformDomain(str, Enum):
