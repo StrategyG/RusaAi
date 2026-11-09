@@ -49,11 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Compile
-        run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
+        run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp rusa_devops llm-project/serve llm-project/train tests
       - name: Lint
-        run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
+        run: ruff check rusa_agents rusa_knowledge rusa_mcp rusa_devops tests llm-project/serve llm-project/train
       - name: Security static analysis
-        run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp --severity-level medium --confidence-level medium
+        run: bandit -q -r rusa_agents rusa_knowledge rusa_mcp rusa_devops --severity-level medium --confidence-level medium
       - name: Validate curated agent SFT dataset
         run: |
           python llm-project/train/validate_dataset.py \
@@ -107,6 +107,8 @@ jobs:
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
+      - name: Build Predictive DevOps worker image
+        run: docker build --pull -f Dockerfile.devops-worker -t rusa-ai-devops-worker:${{ github.sha }} .
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0, immutable commit
         with:
@@ -193,6 +195,8 @@ jobs:
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
+          RUSA_DEVOPS_ENABLED: "true"
+          RUSA_DEVOPS_ARTIFACT_ROOT: /var/lib/rusa/devops-artifacts
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
@@ -247,9 +251,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" -r requirements-rag-mcp.txt
       - name: Compile RAG and MCP packages
-        run: python -m compileall -q rusa_knowledge rusa_mcp
+        run: python -m compileall -q rusa_knowledge rusa_mcp rusa_devops
       - name: Lint RAG and MCP packages
-        run: ruff check rusa_knowledge rusa_mcp tests/test_knowledge_*.py tests/test_mcp_*.py
+        run: ruff check rusa_knowledge rusa_mcp rusa_devops tests/test_knowledge_*.py tests/test_mcp_*.py
       - name: Test RAG and MCP
         run: |
           python -m pytest -q \
