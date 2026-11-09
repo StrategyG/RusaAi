@@ -170,3 +170,48 @@ def test_search_blocks_credentials_before_embedding():
         raise AssertionError("credential-bearing search query was embedded")
     assert embeddings.inputs == []
     assert store.search_args is None
+
+
+def test_search_withholds_legacy_documents_containing_credentials():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    secret = "github_pat_" + ("z" * 40)
+
+    def unsafe_search(**kwargs):
+        return [{"document_id": "legacy-doc", "content": "legacy token: " + secret}]
+
+    store.search = unsafe_search
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.search(
+            tenant_id="tenant-a",
+            collection="agent",
+            query="legacy migration",
+        )
+    except ValueError as exc:
+        assert "GitHub credential" in str(exc)
+    else:
+        raise AssertionError("legacy credential-bearing retrieval was returned")
+    assert secret not in str(exc) if "exc" in locals() else True
+
+
+def test_get_document_withholds_legacy_credentials():
+    store = FakeStore()
+    embeddings = FakeEmbeddings()
+    secret = "ghp_" + ("y" * 36)
+    store.get_document = lambda **kwargs: {
+        "document_id": kwargs["document_id"],
+        "content": "legacy token: " + secret,
+    }
+    service = KnowledgeService(store, embeddings)
+    try:
+        service.get_document(
+            tenant_id="tenant-a",
+            collection="agent",
+            document_id="legacy-doc",
+        )
+    except ValueError as exc:
+        assert "GitHub credential" in str(exc)
+        assert secret not in str(exc)
+    else:
+        raise AssertionError("legacy credential-bearing document was returned")
