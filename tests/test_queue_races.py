@@ -135,8 +135,19 @@ def test_cancel_racing_with_successful_completion_is_linearizable():
 
         current = queue.get(task_id, tenant)
         assert current is not None
-        assert current["status"] in {"cancelled", "succeeded"}
         assert (cancel_result, complete_result) in {(True, False), (False, True)}
+        if cancel_result:
+            assert current["status"] == "cancel_requested"
+            assert queue.heartbeat_state(
+                job.id, tenant, "cancel-race-worker", job.lease_token, 30
+            ) == "cancel_requested"
+            assert queue.finish_cancelled(
+                job.id, tenant, "cancel-race-worker", job.lease_token,
+                side_effect="NONE",
+            )
+            assert queue.get(task_id, tenant)["status"] == "cancelled"
+        else:
+            assert current["status"] == "succeeded"
         assert not queue.owns_lease(job.id, tenant, "cancel-race-worker", job.lease_token)
     finally:
         remove_task(task_id, tenant)
@@ -255,4 +266,82 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
         assert replacement and replacement[0] != lease_token
     finally:
         release_publish.set()
+        remove_task(task_id, tenant)
+
+
+
+def test_running_cancel_requires_worker_acknowledgement_and_preserves_lease():
+    queue = make_queue()
+    tenant = f"queue-cooperative-cancel-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "cooperative cancellation"})
+        job = queue.claim("cooperative-cancel-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancel_requested"
+        assert queue.lease_status(job.id, tenant, "cooperative-cancel-worker", job.lease_token) == "cancel_requested"
+        assert queue.finish_cancelled(
+            job.id, tenant, "cooperative-cancel-worker", job.lease_token,
+            side_effect="NONE",
+        )
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["result"]["side_effect"] == "NONE"
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_cancel_with_unknown_side_effect_requires_reconciliation():
+    queue = make_queue()
+    tenant = f"queue-cancel-reconcile-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "ambiguous side effect"})
+        job = queue.claim("cancel-reconcile-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        assert queue.finish_cancelled(
+            job.id, tenant, "cancel-reconcile-worker", job.lease_token,
+            side_effect="UNKNOWN",
+            result={"operation": "pull_request.create"},
+        )
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "awaiting_approval"
+        assert current["result"]["cancel_reconciliation_required"] is True
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_unacknowledged_cancel_is_quarantined_after_lease_expiry():
+    queue = make_queue()
+    tenant = f"queue-cancel-expired-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "worker crash during cancellation"})
+        job = queue.claim("cancel-expiry-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        expire_lease(job.id, tenant)
+        queue.claim("recovery-worker", lease_seconds=30)
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "awaiting_approval"
+        assert current["result"]["side_effect"] == "UNKNOWN"
+        assert current["result"]["cancel_reconciliation_required"] is True
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_queued_cancel_is_immediate_without_claiming_a_lease():
+    queue = make_queue()
+    tenant = f"queue-cancel-queued-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "cancel before execution"})
+        assert queue.cancel(task_id, tenant)
+        current = queue.get(task_id, tenant)
+        assert current and current["status"] == "cancelled"
+        assert current["attempts"] == 0
+    finally:
         remove_task(task_id, tenant)
