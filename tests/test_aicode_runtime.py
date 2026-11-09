@@ -122,7 +122,7 @@ def test_orchestrator_supplies_previous_attempt_memory_to_workers(tmp_path):
                     "check:bandit": {"exit_code": 0},
                     "check:ruff": {"exit_code": 0},
                     "check:compile": {"exit_code": 0},
-        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
+                    "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                 }
             super().__init__(role, evidence)
             self.seen_prior = []
@@ -211,7 +211,7 @@ def test_quality_managers_dispatch_in_parallel(tmp_path):
                         "check:bandit": {"exit_code": 0},
                         "check:ruff": {"exit_code": 0},
                         "check:compile": {"exit_code": 0},
-        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
+                        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                     },
                 )
             )
@@ -266,7 +266,7 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
                     "check:bandit": {"exit_code": 0},
                     "check:ruff": {"exit_code": 0},
                     "check:compile": {"exit_code": 0},
-        "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
+                    "check:refinery": {"exit_code": 0, "quality_score": 90.0, "report_sha256": "a" * 64, "syntax_valid": True, "blocking_findings": 0},
                 },
             )
             self.calls = 0
