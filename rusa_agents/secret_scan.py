@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import BinaryIO
 
 _SECRET_PATTERNS = (
-    re.compile(rb"sk-[A-Za-z0-9]{20,}"),
+    re.compile(rb"sk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{20,}"),
     re.compile(rb"gh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(rb"github_pat_[A-Za-z0-9_]{20,}"),
     re.compile(rb"AKIA[A-Z0-9]{16}"),
     re.compile(rb"AIza[0-9A-Za-z_-]{35}"),
     re.compile(rb"xox[baprs]-[0-9A-Za-z-]{10,}"),
-    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(rb"-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH|ENCRYPTED) )?PRIVATE KEY-----"),
 )
 
 
