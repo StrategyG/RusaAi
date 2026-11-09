@@ -8,7 +8,7 @@ This document separates the current repository implementation from the broader a
 - `AutonomousCodeWorker` uses a bounded JSON action loop.
 - `WorkspaceToolGateway` is the final enforcement point for named tools, safe paths, and sandboxed validation.
 - `AutonomyPolicy` keeps protected operations and high-risk work outside autonomous authorization.
-- PostgreSQL queue/lease, audit, tenant, and inference artifact controls already exist in the repository.
+- PostgreSQL queue/lease, audit, tenant, inference artifact controls, bounded Code Refinery, alias-aware AST security checks, shared credential scanning, and cooperative cancellation/reconciliation are present on the integration branch.
 - The new SFT pipeline trains only the existing six-role worker response contract. It does not invent runtime support for agents that are not implemented yet.
 
 ## Mapping to the ten-agent specification
@@ -33,10 +33,12 @@ The separate Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agen
 ## Next implementation phases
 
 1. **Agent contract foundation:** add versioned task/result/event schemas for the wider ten-agent and eight-stage lifecycle while retaining current AICode contracts.
-2. **Orchestrator and decomposer:** add durable workflow state, DAG validation, bounded retry/replan budgets, cancellation, and audit evidence.
+2. **Orchestrator and decomposer:** extend the current task queue and deterministic coding DAG into durable cross-domain workflow state, general DAG validation, bounded retry/replan budgets, cancel-aware execution, and event-sourced audit evidence.
 3. **Agent registry:** implement separate capability declarations and per-agent identities; avoid sharing a broad administrator token.
-4. **DevOps workers:** add isolated build/test/release/deploy/operate/monitor workers with explicit human approval gates.
+4. **DevOps workers:** add isolated Build, Release, Deploy, Operate, and Monitor workers with artifact provenance, SLO/incident contracts, and explicit human approval gates; keep Code and Test specialist contracts separate.
 5. **Model expansion:** extend SFT data and evaluation only when the corresponding agent runtime contract and tool permissions exist.
 6. **Production qualification:** add adversarial, tenant-isolation, reliability, load/soak, recovery, and operator sign-off evidence.
+
+The ADR's gRPC/Protobuf, RabbitMQ command queues, Kafka event log, transactional outbox, JWS message signing, and internal mTLS are still target architecture—not current runtime capabilities. The existing PostgreSQL queue is the durable AICode baseline; do not claim broker/event-bus conformance until those components and their recovery tests are deployed.
 
 The fine-tuned model is an implementation detail inside the agent execution layer. It must never become the policy engine, workflow state store, or source of authorization truth.
