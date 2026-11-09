@@ -26,7 +26,7 @@ The Agentic DevOps lifecycle document also describes RUSA Repository as an evide
 | Command Center | Tenant task totals, loaded-page status sample, health/readiness, product pillars | Task list and health APIs |
 | Orchestrator | Actual AICode execution sequence; separate 10-step Supreme Orchestrator workflow; proposed communication topology | `rusa_agents/orchestrator.py`, All Agents document, ADR-COMM-001 |
 | AICode Tasks | Create, tenant-scoped list, pagination, status filter, detail, failed-task retry, cancellation | AICode task API |
-| Approval Center | List `awaiting_approval` records and inspect their evidence | AICode task API |
+| Approval Center | List `awaiting_approval` records and open task details with the result payload currently exposed by the API | AICode task API |
 | Agent Workspace | Seven source-defined runtime components and ten architecture role contracts | Runtime source and All Agents document |
 | Agentic DevOps | Eight lifecycle agent contracts, inputs, outputs, exit criteria, authority boundaries | Agentic DevOps lifecycle document |
 | RUSA AI Chat | Model discovery, inference, stream request with non-stream fallback | `/v1/models`, `/v1/chat/completions` |
