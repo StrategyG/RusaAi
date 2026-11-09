@@ -84,7 +84,7 @@ def test_postgres_rate_limiter_is_tenant_scoped():
 
 
 
-def test_postgres_queue_requires_explicit_retry_after_approval():
+def test_postgres_queue_blocks_retry_while_awaiting_approval():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
     task_id = str(uuid4())
@@ -100,10 +100,10 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
     assert awaiting["status"] == "awaiting_approval"
     assert awaiting["result"] == review_result
     assert queue.retry(task_id, "wrong-tenant") is False
-    assert queue.retry(task_id, "tenant-approval") is True
-    retried = queue.get(task_id, "tenant-approval")
-    assert retried["status"] == "queued"
-    assert retried["result"] is None
+    assert queue.retry(task_id, "tenant-approval") is False
+    still_awaiting = queue.get(task_id, "tenant-approval")
+    assert still_awaiting["status"] == "awaiting_approval"
+    assert still_awaiting["result"] == review_result
 
 
 
