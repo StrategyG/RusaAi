@@ -342,6 +342,8 @@ class WorkspaceToolGateway:
                 )
             source.seek(0)
             content = source.read(self.max_file_bytes + 1)
+            if len(content) > self.max_file_bytes:
+                raise ToolDenied("File exceeds configured read limit")
         try:
             decoded = content.decode("utf-8")
         except UnicodeError:
