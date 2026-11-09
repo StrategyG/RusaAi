@@ -33,6 +33,7 @@ def apply_database_migrations():
             "009_aicode_blocked_status.sql",
             "010_aicode_cooperative_cancellation.sql",
             "011_aicode_cancellation_reconciliation.sql",
+            "012_aicode_task_list_audit.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -372,3 +373,18 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+
+def test_task_policy_audit_constraint_keeps_list_and_reconcile_actions():
+    with connect() as conn:
+        row = conn.execute("""
+            SELECT pg_get_constraintdef(oid)
+            FROM pg_constraint
+            WHERE conrelid = 'public.aicode_task_policy_events'::regclass
+              AND conname = 'aicode_task_policy_events_action_check'
+              AND contype = 'c'
+        """).fetchone()
+    assert row is not None
+    assert "'task.list'" in row[0]
+    assert "'task.reconcile'" in row[0]
