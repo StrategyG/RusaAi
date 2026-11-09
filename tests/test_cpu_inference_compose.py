@@ -13,7 +13,9 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in api
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in worker
     assert "RUSA_MODEL_API_KEY: \"\"" in api
+    assert "RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health" in api
     assert "RUSA_MODEL_API_KEY: \"\"" in worker
+    assert "api:\n        condition: service_healthy" in worker
     assert "${RUSA_MAX_PARALLEL_WORKERS:-1}" in worker
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
     assert "${RUSA_MAX_WAITING_INFERENCES:-4}" in compose

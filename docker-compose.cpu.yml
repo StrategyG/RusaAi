@@ -8,6 +8,7 @@ services:
       RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
       RUSA_MODEL_API_KEY: ""
+      RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health
     depends_on:
       llama-cpp:
         condition: service_started
@@ -23,6 +24,8 @@ services:
     depends_on:
       llama-cpp:
         condition: service_started
+      api:
+        condition: service_healthy
   llama-cpp:
     image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped

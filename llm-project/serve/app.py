@@ -199,6 +199,7 @@ async def lifespan(application: FastAPI):
                     default_model=config.model_name,
                     api_key=os.getenv("RUSA_MODEL_API_KEY"),
                     timeout_seconds=_model_timeout_seconds(),
+                    readiness_url=os.getenv("RUSA_MODEL_HEALTH_URL"),
                 )
             )
         else:

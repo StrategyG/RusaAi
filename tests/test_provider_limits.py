@@ -243,3 +243,32 @@ def test_llama_cpp_openai_compatible_endpoint():
         )
 
     assert asyncio.run(verify()) == "RUSA-AI CPU ready"
+
+def test_inference_provider_uses_explicit_model_health_endpoint():
+    requested_paths = []
+
+    def handler(request):
+        requested_paths.append(request.url.path)
+        return httpx.Response(200, json={"status": "ok"}, request=request)
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="http://llama-cpp:8080/v1",
+        readiness_url="http://llama-cpp:8080/health",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert asyncio.run(provider.check_ready()) is True
+    assert requested_paths == ["/health"]
+
+
+def test_inference_provider_treats_model_loading_as_not_ready():
+    provider = OpenAIChatInferenceProvider(
+        base_url="http://llama-cpp:8080/v1",
+        readiness_url="http://llama-cpp:8080/health",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(503, json={"status": "loading"}, request=request)
+        ),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(provider.check_ready())

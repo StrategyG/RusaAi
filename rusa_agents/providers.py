@@ -189,6 +189,7 @@ class OpenAIChatInferenceProvider:
         timeout_seconds: float = 120.0,
         max_response_bytes: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        readiness_url: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
@@ -196,6 +197,7 @@ class OpenAIChatInferenceProvider:
         self.timeout_seconds = timeout_seconds
         self.max_response_bytes = _response_limit(max_response_bytes)
         self.transport = transport
+        self.readiness_url = readiness_url
         if timeout_seconds <= 0:
             raise ValueError("Provider timeout must be positive")
 
@@ -207,10 +209,11 @@ class OpenAIChatInferenceProvider:
 
     async def check_ready(self) -> bool:
         timeout = httpx.Timeout(10.0, connect=5.0)
+        readiness_url = self.readiness_url or f"{self.base_url}/models"
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
         ) as client:
-            async with client.stream("GET", f"{self.base_url}/models", headers=self._headers()) as response:
+            async with client.stream("GET", readiness_url, headers=self._headers()) as response:
                 response.raise_for_status()
             return True
 
