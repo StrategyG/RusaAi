@@ -56,7 +56,7 @@ const architectureRoles = [
 
 function statusClass(status: string) {
   const normalized = (status || "unknown").toLowerCase();
-  const known = ["queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled", "blocked"];
+  const known = ["queued", "running", "cancel_requested", "awaiting_approval", "succeeded", "failed", "cancelled", "blocked"];
   return "status status-" + (known.includes(normalized) ? normalized : "unknown");
 }
 function formatDate(value?: string) {
@@ -142,7 +142,7 @@ export default function Home() {
   const canUseChat = Boolean(session);
 
   const counts = useMemo(() => ({
-    active: tasks.filter((task) => ["queued", "running"].includes(task.status)).length,
+    active: tasks.filter((task) => ["queued", "running", "cancel_requested"].includes(task.status)).length,
     approvals: tasks.filter((task) => task.status === "awaiting_approval").length,
     succeeded: tasks.filter((task) => task.status === "succeeded").length,
     failed: tasks.filter((task) => ["failed", "blocked"].includes(task.status)).length
@@ -150,7 +150,7 @@ export default function Home() {
 
   const filteredTasks = useMemo(() => {
     if (taskFilter === "all") return tasks;
-    if (taskFilter === "active") return tasks.filter((task) => ["queued", "running"].includes(task.status));
+    if (taskFilter === "active") return tasks.filter((task) => ["queued", "running", "cancel_requested"].includes(task.status));
     return tasks.filter((task) => task.status === taskFilter);
   }, [tasks, taskFilter]);
 
