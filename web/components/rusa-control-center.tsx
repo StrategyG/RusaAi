@@ -371,6 +371,10 @@ export default function RusaControlCenter() {
   const healthRequestSeqRef = useRef(0);
   const modelRequestSeqRef = useRef(0);
   const metricsRequestSeqRef = useRef(0);
+  const taskDetailRequestSeqRef = useRef(0);
+  const chatRequestSeqRef = useRef(0);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
+  const validationRequestSeqRef = useRef(0);
 
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [objective, setObjective] = useState("");
@@ -585,14 +589,20 @@ export default function RusaControlCenter() {
   }
 
   async function logout() {
-    await fetch("/api/session", { method: "DELETE" });
+    // Invalidate outstanding reads before clearing the tenant-scoped view.
     taskRequestSeqRef.current += 1;
     approvalRequestSeqRef.current += 1;
     totalRequestSeqRef.current += 1;
     healthRequestSeqRef.current += 1;
     modelRequestSeqRef.current += 1;
     metricsRequestSeqRef.current += 1;
+    taskDetailRequestSeqRef.current += 1;
+    chatRequestSeqRef.current += 1;
+    validationRequestSeqRef.current += 1;
+    chatAbortControllerRef.current?.abort();
+    chatAbortControllerRef.current = null;
     taskIdempotencyRef.current = null;
+
     setSession(null);
     setTasks([]);
     setApprovalTasks([]);
@@ -602,19 +612,45 @@ export default function RusaControlCenter() {
     setTaskTotal(0);
     setAllTaskTotal(0);
     setSelectedTask(null);
+    setNewTaskOpen(false);
+    setActiveAgent(null);
+    setChatInput("");
+    setChatBusy(false);
     setChatMessages([{ role: "assistant", content: "Sesi berakhir. Hubungkan kembali untuk memulai." }]);
+    setValidation(null);
+    setValidationError("");
+    setValidationBusy(false);
+    setHealth(null);
+    setModels([]);
+    setModelError("");
+    setMetricsText("");
+    setMetricsFetchedAt("");
+    setMetricsError("");
+    setError("");
+    setNotice("");
     setPage("overview");
+
+    // Clear the cookie after the local tenant view has already been discarded.
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+    } catch {
+      // The next request still revalidates the encrypted cookie against the API.
+    }
   }
 
   async function openTask(taskId: string) {
+    const requestSeq = ++taskDetailRequestSeqRef.current;
     setError("");
     try {
       const response = await fetch("/api/tasks/" + encodeURIComponent(taskId), { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== taskDetailRequestSeqRef.current) return;
       setSelectedTask(data as Task);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load task details.");
+      if (requestSeq === taskDetailRequestSeqRef.current) {
+        setError(cause instanceof Error ? cause.message : "Could not load task details.");
+      }
     }
   }
 
@@ -717,6 +753,10 @@ export default function RusaControlCenter() {
     event.preventDefault();
     const prompt = chatInput.trim();
     if (!prompt || chatBusy || !canUseChat) return;
+    const requestSeq = ++chatRequestSeqRef.current;
+    chatAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortControllerRef.current = controller;
     const nextMessages = [...chatMessages, { role: "user" as const, content: prompt }].slice(-32);
     const requestMessages = nextMessages.map((message) => ({ ...message, content: message.content.slice(-6000) }));
     while (requestMessages.length > 1 && new TextEncoder().encode(JSON.stringify(requestMessages)).byteLength > 900 * 1024) {
@@ -727,6 +767,7 @@ export default function RusaControlCenter() {
     setChatBusy(true);
     let placeholderAdded = false;
     const updateAssistant = (content: string) => {
+      if (requestSeq !== chatRequestSeqRef.current) return;
       setChatMessages((current) => {
         const next = [...current];
         const index = next.length - 1;
@@ -746,15 +787,18 @@ export default function RusaControlCenter() {
       let response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
       if (chatStream && response.status === 501) {
         response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...body, stream: false })
+          body: JSON.stringify({ ...body, stream: false }),
+          signal: controller.signal
         });
       }
+      if (requestSeq !== chatRequestSeqRef.current) return;
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(errorText(data));
@@ -762,7 +806,7 @@ export default function RusaControlCenter() {
       const contentType = response.headers.get("content-type") || "";
       if (chatStream && contentType.includes("text/event-stream")) {
         if (!response.body) throw new Error("Streaming response body is unavailable.");
-        setChatMessages((current) => [...current, { role: "assistant", content: "" }].slice(-32));
+        setChatMessages((current) => [...current, { role: "assistant" as const, content: "" }].slice(-32));
         placeholderAdded = true;
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -799,13 +843,22 @@ export default function RusaControlCenter() {
       } else {
         const data = await response.json().catch(() => ({}));
         const answer = (data as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message?.content || "Model returned an empty response.";
-        setChatMessages((current) => [...current, { role: "assistant", content: answer }].slice(-32));
+        if (requestSeq === chatRequestSeqRef.current) {
+          setChatMessages((current) => [...current, { role: "assistant" as const, content: answer }].slice(-32));
+        }
       }
     } catch (cause) {
-      const message = "Request gagal: " + (cause instanceof Error ? cause.message : "Unknown error");
-      if (placeholderAdded) updateAssistant(message);
-      else setChatMessages((current) => [...current, { role: "assistant", content: message }].slice(-32));
-    } finally { setChatBusy(false); }
+      if (requestSeq === chatRequestSeqRef.current) {
+        const message = "Request gagal: " + (cause instanceof Error ? cause.message : "Unknown error");
+        if (placeholderAdded) updateAssistant(message);
+        else setChatMessages((current) => [...current, { role: "assistant" as const, content: message }].slice(-32));
+      }
+    } finally {
+      if (requestSeq === chatRequestSeqRef.current) {
+        setChatBusy(false);
+        if (chatAbortControllerRef.current === controller) chatAbortControllerRef.current = null;
+      }
+    }
   }
 
   async function validateEnvelope(event: FormEvent<HTMLFormElement>) {
@@ -823,6 +876,7 @@ export default function RusaControlCenter() {
       setValidationError("Envelope harus berupa JSON object.");
       return;
     }
+    const requestSeq = ++validationRequestSeqRef.current;
     setValidationBusy(true);
     try {
       const response = await fetch("/api/validate-task", {
@@ -832,10 +886,15 @@ export default function RusaControlCenter() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(errorText(data));
+      if (requestSeq !== validationRequestSeqRef.current) return;
       setValidation(data as { valid: boolean; errors: string[] });
     } catch (cause) {
-      setValidationError(cause instanceof Error ? cause.message : "Validation request failed.");
-    } finally { setValidationBusy(false); }
+      if (requestSeq === validationRequestSeqRef.current) {
+        setValidationError(cause instanceof Error ? cause.message : "Validation request failed.");
+      }
+    } finally {
+      if (requestSeq === validationRequestSeqRef.current) setValidationBusy(false);
+    }
   }
 
   const pageInfo = PAGE_META[page];
@@ -1143,7 +1202,7 @@ export default function RusaControlCenter() {
                 </Panel>
                 <Panel title="A2A task envelope validator" subtitle="POST /v1/validate-task · JSON Schema Draft 2020-12">
                   <form onSubmit={validateEnvelope} className="rc-validator">
-                    <label>Envelope JSON<textarea spellCheck={false} maxLength={262144} value={envelopeText} onChange={(event) => { setEnvelopeText(event.target.value); setValidation(null); }} /></label>
+                    <label>Envelope JSON<textarea spellCheck={false} maxLength={262144} value={envelopeText} onChange={(event) => { validationRequestSeqRef.current += 1; setValidationBusy(false); setEnvelopeText(event.target.value); setValidation(null); setValidationError(""); }} /></label>
                     <div className="rc-toolbar"><button className="rc-btn rc-btn-primary" type="submit" disabled={validationBusy}>{validationBusy ? "Validating…" : "Validate envelope"} <ArrowRight size={14} /></button><span className="rc-note">This endpoint validates only schemas/a2a/task-envelope.schema.json (protocol_version=1.0). It does not validate the All Agents conceptual task contract, the ADR-COMM-001 proposed schema_version=1 envelope, or the AICode create-task request body.</span></div>
                   </form>
                   {validationError && <div className="rc-alert rc-alert-danger">{validationError}</div>}
@@ -1173,9 +1232,9 @@ export default function RusaControlCenter() {
       )}
 
       {selectedTask && (
-        <div className="rc-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedTask(null); }}>
+        <div className="rc-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { taskDetailRequestSeqRef.current += 1; setSelectedTask(null); } }}>
           <section className="rc-modal rc-task-modal" role="dialog" aria-modal="true" aria-labelledby="rc-task-title">
-            <div className="rc-modal-head"><div><div className="rc-eyebrow">TASK DETAIL</div><h2 id="rc-task-title">{taskObjective(selectedTask)}</h2><small className="rc-mono">{selectedTask.task_id}</small></div><button className="rc-icon-btn" onClick={() => setSelectedTask(null)} aria-label="Close"><X size={18} /></button></div>
+            <div className="rc-modal-head"><div><div className="rc-eyebrow">TASK DETAIL</div><h2 id="rc-task-title">{taskObjective(selectedTask)}</h2><small className="rc-mono">{selectedTask.task_id}</small></div><button className="rc-icon-btn" onClick={() => { taskDetailRequestSeqRef.current += 1; setSelectedTask(null); }} aria-label="Close"><X size={18} /></button></div>
             <div className="rc-task-detail-grid"><div><span>Status</span><Badge tone={statusTone(selectedTask.status)}>{statusLabel(selectedTask.status)}</Badge></div><div><span>Repository</span><strong>{selectedTask.payload?.repository?.full_name || "—"}</strong></div><div><span>Attempts</span><strong>{selectedTask.attempts} / {selectedTask.max_attempts}</strong></div><div><span>Tenant</span><strong>{selectedTask.tenant_id}</strong></div><div><span>Created</span><strong>{formatDate(selectedTask.created_at)}</strong></div><div><span>Updated</span><strong>{formatDate(selectedTask.updated_at)}</strong></div></div>
             {selectedTask.payload?.context && <div className="rc-detail-section"><h3>Context</h3><p>{selectedTask.payload.context}</p></div>}
             {selectedTask.payload?.acceptance_criteria && <div className="rc-detail-section"><h3>Acceptance criteria</h3><ul>{selectedTask.payload.acceptance_criteria.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
