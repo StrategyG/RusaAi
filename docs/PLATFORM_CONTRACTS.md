@@ -77,10 +77,13 @@ status and lifecycle stage in audit metadata:
 | Source meaning | Platform representation | Constraint |
 |---|---|---|
 | `PENDING`, `READY`, `queued`, `proposed`, `accepted` | Task/run remains queued or accepted; no result yet | Do not fabricate an agent result before dispatch |
-| `RUNNING`, `in_progress`, `submitted` | Run/agent execution event | Not a terminal result |
+| `RUNNING`, `in_progress` | Run/agent execution state or event | Not a terminal result |
+| `submitted` | Preserve as an A2A envelope state until its dispatch semantics are confirmed | Do not assume it means execution has started |
 | `BLOCKED`, `blocked` | Result status `blocked` or `run.blocked` | Preserve the blocking reason |
-| `NEEDS_APPROVAL`, `needs_approval`, `reviewing` | `awaiting_approval` | Only when a real human/policy gate is pending |
-| `COMPLETED`, `passed`, `approved` | Result status `succeeded` | Requires at least one passing evidence record; approval is not itself proof of execution success |
+| `NEEDS_APPROVAL`, `needs_approval` | `awaiting_approval` | Only when a real human/policy gate is pending |
+| `reviewing` | Preserve as review state/event; use `awaiting_approval` only if an actual approval gate is pending | Do not collapse all review work into approval |
+| `COMPLETED`, `passed` | Result status `succeeded` | Requires at least one passing evidence record |
+| `approved` | Event `human.approval.granted` | Approval is a control-plane decision, not proof that execution succeeded |
 | `FAILED`, `changes_requested` | Result status `failed` or an explicit review event | Include a structured error/findings object; changes requested may instead return work to Code |
 | `CANCELLED`, `cancelled` | Result status `cancelled` or `run.cancelled` | Preserve whether cancellation was acknowledged and whether side effects were reconciled |
 | `REVIEW`, `skipped` | Explicit review/policy event | Do not collapse these into success or cancellation |
