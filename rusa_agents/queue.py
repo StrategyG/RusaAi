@@ -211,7 +211,7 @@ class PostgresTaskQueue:
                     tenant_id TEXT NOT NULL,
                     payload JSONB NOT NULL,
                     status TEXT NOT NULL DEFAULT 'queued'
-                        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled')),
+                        CHECK (status IN ('queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'blocked', 'cancelled')),
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
                     max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
                     priority INTEGER NOT NULL DEFAULT 0,
@@ -535,19 +535,26 @@ class PostgresTaskQueue:
     def fail(
         self, job_id: int, tenant_id: str, worker_id: str,
         lease_token: str, error: str, retry_delay_seconds: int = 30,
+        *, retryable: bool = True,
     ) -> bool:
+        if type(retryable) is not bool:
+            raise ValueError("retryable must be a boolean")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs
-                SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
+                SET status=CASE
+                        WHEN NOT %s THEN 'blocked'
+                        WHEN attempts >= max_attempts THEN 'failed'
+                        ELSE 'queued'
+                    END,
                     available_at=NOW() + (%s * INTERVAL '1 second'),
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (
-                max(0, retry_delay_seconds), error[:4000],
+                retryable, max(0, retry_delay_seconds), error[:4000],
                 job_id, tenant_id, worker_id, lease_token,
             ))
         return cur.rowcount == 1
@@ -623,7 +630,7 @@ class PostgresTaskQueue:
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
+                  AND status IN ('awaiting_approval', 'failed', 'blocked')
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
@@ -661,7 +668,7 @@ class PostgresTaskQueue:
         """Return a tenant-scoped, newest-first page of durable task records."""
         self._require_policy_audit_actor(audit_actor)
         valid_statuses = {
-            "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled",
+            "queued", "running", "awaiting_approval", "succeeded", "failed", "blocked", "cancelled",
         }
         if status_filter is not None and status_filter not in valid_statuses:
             raise ValueError("Unsupported task status filter")
