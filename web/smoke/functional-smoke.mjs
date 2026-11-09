@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { cpSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { chromium } from "@playwright/test";
 
 const webDir = resolve(import.meta.dirname, "..");
 const standaloneDir = resolve(webDir, ".next", "standalone");
@@ -175,6 +176,7 @@ const app = spawn(process.execPath, [standaloneServer], {
 app.stdout.on("data", (chunk) => { appOutput += chunk.toString(); });
 app.stderr.on("data", (chunk) => { appOutput += chunk.toString(); });
 const base = `http://127.0.0.1:${appPort}`;
+let browser;
 
 try {
   await waitForServer(base, app, () => appOutput);
@@ -321,13 +323,79 @@ try {
     assert.ok(seen.some((item) => item.path.startsWith(path)), `Expected backend integration call: ${path}`);
   }
 
-  process.stdout.write("RUSA AI web functional smoke: PASS (session, CSRF, task CRUD actions, approvals read, chat SSE/JSON, models, health, metrics RBAC, A2A validation).\n");
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  await page.goto(base, { waitUntil: "domcontentloaded" });
+  await page.getByLabel("RUSA API Key").fill("platform-key");
+  await page.getByRole("button", { name: "Connect to RUSA AI" }).click();
+  await page.locator(".rc-page-head h1").waitFor({ state: "visible" });
+  assert.equal((await page.locator(".rc-page-head h1").innerText()).trim(), "Command Center");
+
+  const navigation = [
+    ["Orchestrator", "Orchestrator"],
+    ["AICode Tasks", "AICode Tasks"],
+    ["Approvals", "Approval Center"],
+    ["Agent Workspace", "Agent Workspace"],
+    ["Agentic DevOps", "Agentic DevOps"],
+    ["AI Chat", "RUSA AI Chat"],
+    ["Memory & Knowledge", "Memory & Knowledge"],
+    ["Repository & Artifacts", "Repository & Artifacts"],
+    ["Evaluation & Reports", "Evaluation & Reporting"],
+    ["Governance", "Governance & Policy"],
+    ["Observability", "Observability"],
+    ["Product Pillars", "RUSA AI Product Pillars"],
+    ["Developer Tools", "Developer Tools"],
+    ["Command Center", "Command Center"]
+  ];
+  for (const [label, title] of navigation) {
+    await page.locator(".rc-nav-item").filter({ hasText: label }).click();
+    await page.locator(".rc-page-head h1").filter({ hasText: title }).waitFor({ state: "visible" });
+    assert.equal((await page.locator(".rc-page-head h1").innerText()).trim(), title, `Navigation must open ${title}`);
+  }
+
+  await page.locator(".rc-nav-item").filter({ hasText: "Agent Workspace" }).click();
+  await page.locator(".rc-agent-button").filter({ hasText: "Supreme Orchestrator" }).click();
+  await page.locator(".rc-agent-modal").waitFor({ state: "visible" });
+  await page.locator(".rc-agent-modal button[aria-label='Close']").click();
+
+  await page.locator(".rc-nav-item").filter({ hasText: "Agentic DevOps" }).click();
+  await page.locator(".rc-stage-item").filter({ hasText: "Code" }).click();
+  assert.equal((await page.locator(".rc-stage-detail h2").innerText()).trim(), "Code Agent");
+
+  await page.locator(".rc-nav-item").filter({ hasText: "Approvals" }).click();
+  assert.equal(await page.getByRole("button", { name: /Approve|Reject/i }).count(), 0, "Approval page must not fabricate decision actions");
+
+  await page.locator(".rc-nav-item").filter({ hasText: "AI Chat" }).click();
+  await page.locator(".rc-chat-compose textarea").fill("Hello from browser smoke");
+  await page.locator(".rc-chat-compose button[type='submit']").click();
+  await page.locator(".rc-chat-line.assistant").last().locator("p").filter({ hasText: "RUSA smoke response" }).waitFor({ state: "visible" });
+
+  await page.locator(".rc-nav-item").filter({ hasText: "Developer Tools" }).click();
+  await page.getByRole("button", { name: /Validate envelope/ }).click();
+  await page.locator(".rc-validation-result.valid").waitFor({ state: "visible" });
+
+  await page.locator(".rc-nav-item").filter({ hasText: "Observability" }).click();
+  await page.locator(".rc-metrics-meta").filter({ hasText: "Fetched" }).waitFor({ state: "visible" });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
+  assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), true);
+  await page.locator(".rc-nav-item").filter({ hasText: "Command Center" }).click();
+  assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), false);
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
+  await browser.close();
+  browser = undefined;
+
+  process.stdout.write("RUSA AI web functional smoke: PASS (BFF contracts + browser navigation, agent contracts, DevOps stages, chat, validator, responsive navigation, logout).\\n");
 } catch (error) {
   process.stderr.write("RUSA AI web functional smoke: FAIL\n");
   process.stderr.write((error instanceof Error ? error.stack : String(error)) + "\n");
   process.stderr.write(appOutput + "\n");
   process.exitCode = 1;
 } finally {
+  if (browser) await browser.close().catch(() => {});
   app.kill("SIGTERM");
   await new Promise((resolveClose) => backend.close(resolveClose));
 }
