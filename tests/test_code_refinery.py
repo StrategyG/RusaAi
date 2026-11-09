@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from rusa_agents.agent_tools import ROLE_CHECK_PROFILES
+from rusa_agents.code_refinery import analysis as analysis_module
 from rusa_agents.code_refinery.analysis import analyze_sources, analyze_workspace
 from rusa_agents.code_refinery.providers import HybridCodeProvider
 from rusa_agents.code_refinery.sandbox import (
@@ -333,3 +334,10 @@ def test_primary_provider_uses_default_api_key_when_not_overridden(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "primary-provider-secret")
     primary = OpenAICompatibleProvider(base_url="https://model.example/v1")
     assert primary.api_key == "primary-provider-secret"
+
+
+
+def test_ast_analysis_enforces_aggregate_source_limit(monkeypatch):
+    monkeypatch.setattr(analysis_module, "MAX_TOTAL_SOURCE_BYTES", 4)
+    with pytest.raises(ValueError, match="Total source inventory"):
+        analyze_sources({"one.py": "12345"})
