@@ -15,7 +15,8 @@ from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.security import APIKeyHeader
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -217,6 +218,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.inference_admission = InferenceAdmissionController(8, 32, 10.0)
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_request_validation_error(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Do not reflect raw request values (which may contain credentials) in 422 responses."""
+    safe_errors = [
+        {
+            key: error[key]
+            for key in ("loc", "msg", "type")
+            if key in error
+        }
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": safe_errors})
+
 
 
 def _request_body_limit() -> int:
