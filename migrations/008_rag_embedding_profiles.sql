@@ -47,6 +47,15 @@ BEGIN
         GRANT USAGE ON SCHEMA public TO rusa_api_runtime;
         GRANT SELECT ON public.rusa_knowledge_collection_profiles TO rusa_api_runtime;
     END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rusa_rag_runtime') THEN
+        ALTER ROLE rusa_rag_runtime
+            NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+        GRANT rusa_knowledge_worker TO rusa_rag_runtime WITH INHERIT FALSE;
+        EXECUTE format(
+            'GRANT CONNECT ON DATABASE %I TO rusa_rag_runtime',
+            current_database()
+        );
+    END IF;
 END;
 $rusa$;
 
