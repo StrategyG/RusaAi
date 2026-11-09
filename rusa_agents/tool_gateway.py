@@ -19,7 +19,11 @@ from uuid import uuid4
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
-from .secret_scan import contains_high_confidence_secret_stream
+from .secret_scan import (
+    contains_high_confidence_secret,
+    contains_high_confidence_secret_stream,
+    contains_high_confidence_secret_text,
+)
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -323,6 +327,12 @@ class WorkspaceToolGateway:
             return ToolResult(False, f"File not found: {raw_path}")
         if target.stat().st_size > self.max_file_bytes:
             raise ToolDenied("File exceeds configured read limit")
+        if contains_high_confidence_secret(target):
+            return ToolResult(
+                False,
+                "File read blocked because high-confidence credential material was detected.",
+                {"path": raw_path, "secret_scan": "blocked"},
+            )
         return ToolResult(True, target.read_text(encoding="utf-8"), {"path": raw_path})
 
     def write_file(self, raw_path: str, content: str, role: WorkerRole) -> ToolResult:
@@ -330,6 +340,8 @@ class WorkspaceToolGateway:
             raise ToolDenied("Only the developer worker may modify workspace files")
         if not isinstance(content, str) or len(content.encode("utf-8")) > self.max_file_bytes:
             raise ToolDenied("File content is invalid or exceeds configured write limit")
+        if contains_high_confidence_secret_text(content):
+            raise ToolDenied("Writing high-confidence credential material is prohibited")
         target = self._resolve(raw_path)
         relative = target.relative_to(self.workspace).as_posix()
         if (
@@ -487,6 +499,12 @@ class WorkspaceToolGateway:
         )
         if completed.returncode != 0:
             return ToolResult(False, completed.stderr[-8000:])
+        if contains_high_confidence_secret_text(completed.stdout):
+            return ToolResult(
+                False,
+                "Git diff withheld because high-confidence credential material was detected.",
+                {"exit_code": completed.returncode, "secret_scan": "blocked"},
+            )
         return ToolResult(True, completed.stdout[-20000:], {"exit_code": completed.returncode})
 
     def _knowledge_context(self) -> tuple[Any, str]:
