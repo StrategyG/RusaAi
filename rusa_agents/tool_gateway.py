@@ -20,7 +20,6 @@ from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
 from .secret_scan import (
-    contains_high_confidence_secret,
     contains_high_confidence_secret_stream,
     contains_high_confidence_secret_text,
 )
@@ -325,15 +324,33 @@ class WorkspaceToolGateway:
         target = self._resolve(raw_path)
         if not target.is_file():
             return ToolResult(False, f"File not found: {raw_path}")
-        if target.stat().st_size > self.max_file_bytes:
-            raise ToolDenied("File exceeds configured read limit")
-        if contains_high_confidence_secret(target):
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as source:
+            metadata = os.fstat(source.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ToolDenied("Only regular workspace files can be read")
+            if metadata.st_size > self.max_file_bytes:
+                raise ToolDenied("File exceeds configured read limit")
+            if contains_high_confidence_secret_stream(source):
+                return ToolResult(
+                    False,
+                    "File read blocked because high-confidence credential material was detected.",
+                    {"path": raw_path, "secret_scan": "blocked"},
+                )
+            source.seek(0)
+            content = source.read(self.max_file_bytes + 1)
+        try:
+            decoded = content.decode("utf-8")
+        except UnicodeError:
             return ToolResult(
                 False,
-                "File read blocked because high-confidence credential material was detected.",
-                {"path": raw_path, "secret_scan": "blocked"},
+                "File read blocked because the content is not valid UTF-8 text.",
+                {"path": raw_path, "encoding": "invalid"},
             )
-        return ToolResult(True, target.read_text(encoding="utf-8"), {"path": raw_path})
+        return ToolResult(True, decoded, {"path": raw_path})
 
     def write_file(self, raw_path: str, content: str, role: WorkerRole) -> ToolResult:
         if role != WorkerRole.DEVELOPER:
