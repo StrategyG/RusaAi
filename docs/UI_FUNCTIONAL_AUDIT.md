@@ -43,10 +43,11 @@ Run from web/ after installing dependencies and building the standalone Next.js 
 The smoke command starts the built standalone web server and a deterministic mock API. It checks:
 
 - Encrypted HttpOnly session cookie, identity revalidation, and no raw API-key return to browser code.
-- Missing-session rejection, same-origin mutation protection, and read-only role denials.
-- Tenant task list, approval list, task detail, task creation, failed-task retry, approval-paused retry denial (HTTP 409), and cancellation proxy routes.
+- Missing-session rejection, same-origin mutation protection, and platform_admin/developer/read_only role denials for privileged task mutations and inference.
+- Tenant-scoped task list and detail behavior across two tenant identities, including cross-tenant detail hiding (HTTP 404) and a browser tenant-switch assertion.
+- Approval list, task creation, failed-task retry, approval-paused retry denial (HTTP 409), and cancellation proxy routes.
 - Model discovery, liveness/readiness, platform-admin metrics authorization and server-side metrics key, chat SSE and JSON responses, and A2A validation.
-- Chromium login/logout for platform_admin, developer, and read_only roles; all fourteen workspace navigation destinations; task creation/detail/retry; developer-versus-admin task controls; read-only inference denial; architecture-role detail; DevOps stage selection; approval-page safety and no-retry detail state; chat streaming; A2A validation; metrics display; and mobile navigation drawer.
+- Chromium login/logout for platform_admin, developer, tenant_admin, and read_only roles; all fourteen workspace navigation destinations; task creation/detail/retry; developer-versus-admin task controls; read-only inference denial; tenant switching without prior-tenant task leakage; architecture-role detail; DevOps stage selection; approval-page safety and no-retry detail state; chat streaming; A2A validation; metrics display; and mobile navigation drawer.
 
 The browser and BFF tests use a mock API that follows the web adapter contracts. They verify the web application and its server-side BFF behavior; they do **not** prove that the production API, database, worker, model provider, or optional RAG/MCP deployment is reachable.
 
