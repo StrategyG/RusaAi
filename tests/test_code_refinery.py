@@ -511,7 +511,8 @@ def test_shared_secret_scanner_detects_token_across_chunk_boundary(tmp_path):
 
 
 def test_analyzer_marks_invalid_unicode_as_blocking_input():
-    report = analyze_sources({"src/invalid.py": "value = '\udcff'\n"})
+    invalid_text = "value = '" + chr(0xDCFF) + "'\n"
+    report = analyze_sources({"src/invalid.py": invalid_text})
     assert not report.passed
     assert not report.syntax_valid
     assert not report.not_applicable
