@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import ssl
 import stat
 import tarfile
 import time
@@ -108,6 +109,10 @@ class MicroVMHTTPBackend:
         *,
         timeout_seconds: int = 900,
         expected_runner_image_digest: str | None = None,
+        client_cert_path: str | None = None,
+        client_key_path: str | None = None,
+        ca_bundle_path: str | None = None,
+        require_mtls: bool = False,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         parsed = urlparse(base_url)
@@ -135,11 +140,64 @@ class MicroVMHTTPBackend:
             r"sha256:[0-9a-f]{64}", expected_runner_image_digest
         ):
             raise ValueError("Expected MicroVM runner image must be a pinned SHA-256 digest")
+        if not isinstance(require_mtls, bool):
+            raise ValueError("require_mtls must be a Boolean")
+        if (client_cert_path is None) != (client_key_path is None):
+            raise ValueError("MicroVM mTLS requires both client certificate and private key")
+        self.client_cert_path = self._validate_tls_file(
+            client_cert_path, "RUSA_MICROVM_CLIENT_CERT"
+        )
+        self.client_key_path = self._validate_tls_file(
+            client_key_path, "RUSA_MICROVM_CLIENT_KEY"
+        )
+        self.ca_bundle_path = self._validate_tls_file(
+            ca_bundle_path, "RUSA_MICROVM_CA_BUNDLE"
+        )
+        if require_mtls and self.client_cert_path is None:
+            raise ValueError(
+                "MicroVM mTLS requires RUSA_MICROVM_CLIENT_CERT and RUSA_MICROVM_CLIENT_KEY"
+            )
+        if (
+            parsed.scheme != "https"
+            and any((self.client_cert_path, self.client_key_path, self.ca_bundle_path))
+        ):
+            raise ValueError("MicroVM custom TLS material requires an HTTPS endpoint")
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.expected_runner_image_digest = expected_runner_image_digest
+        self.require_mtls = require_mtls
         self.transport = transport
+
+    @staticmethod
+    def _validate_tls_file(value: str | None, setting: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{setting} must reference a non-empty file path")
+        try:
+            path = Path(value).expanduser().resolve(strict=True)
+            if not path.is_file() or path.stat().st_size == 0:
+                raise ValueError
+        except (OSError, RuntimeError, ValueError):
+            raise ValueError(f"{setting} must reference an existing non-empty regular file") from None
+        return str(path)
+
+    def _tls_context(self) -> bool | ssl.SSLContext:
+        if not any((self.ca_bundle_path, self.client_cert_path, self.client_key_path)):
+            return True
+        try:
+            context = ssl.create_default_context(cafile=self.ca_bundle_path)
+            if self.client_cert_path is not None and self.client_key_path is not None:
+                context.load_cert_chain(
+                    certfile=self.client_cert_path,
+                    keyfile=self.client_key_path,
+                )
+            return context
+        except (OSError, ssl.SSLError):
+            raise RuntimeError(
+                "Configured MicroVM TLS trust or client certificate could not be loaded"
+            ) from None
 
     @classmethod
     def from_env(cls) -> MicroVMHTTPBackend | None:
@@ -155,11 +213,34 @@ class MicroVMHTTPBackend:
             raise ValueError(
                 "Production MicroVM requires RUSA_MICROVM_RUNNER_IMAGE_DIGEST"
             )
+        raw_mtls_required = os.getenv("RUSA_MICROVM_MTLS_REQUIRED")
+        truthy = {"1", "true", "yes", "on"}
+        falsy = {"0", "false", "no", "off"}
+        if raw_mtls_required is not None and raw_mtls_required.strip().lower() not in truthy | falsy:
+            raise ValueError("RUSA_MICROVM_MTLS_REQUIRED must be a Boolean value")
+        require_mtls = (
+            production
+            if raw_mtls_required is None
+            else raw_mtls_required.strip().lower() in truthy
+        )
+        if production and not require_mtls:
+            raise ValueError("RUSA_MICROVM_MTLS_REQUIRED cannot disable mTLS in production")
+        client_cert_path = os.getenv("RUSA_MICROVM_CLIENT_CERT", "").strip() or None
+        client_key_path = os.getenv("RUSA_MICROVM_CLIENT_KEY", "").strip() or None
+        ca_bundle_path = os.getenv("RUSA_MICROVM_CA_BUNDLE", "").strip() or None
+        if require_mtls and (client_cert_path is None or client_key_path is None):
+            raise ValueError(
+                "Production MicroVM requires RUSA_MICROVM_CLIENT_CERT and RUSA_MICROVM_CLIENT_KEY"
+            )
         return cls(
             base_url,
             api_key,
             timeout_seconds=int(os.getenv("RUSA_MICROVM_TIMEOUT_SECONDS", "900")),
             expected_runner_image_digest=expected_digest,
+            client_cert_path=client_cert_path,
+            client_key_path=client_key_path,
+            ca_bundle_path=ca_bundle_path,
+            require_mtls=require_mtls,
         )
 
     def _headers(self) -> dict[str, str]:
@@ -171,7 +252,11 @@ class MicroVMHTTPBackend:
     def verify_ready(self) -> None:
         timeout = httpx.Timeout(10.0, connect=5.0)
         with httpx.Client(
-            timeout=timeout, follow_redirects=False, trust_env=False, transport=self.transport
+            timeout=timeout,
+            verify=self._tls_context(),
+            follow_redirects=False,
+            trust_env=False,
+            transport=self.transport,
         ) as client:
             with client.stream(
                 "GET", f"{self.base_url}/health/ready", headers=self._headers()
@@ -272,7 +357,11 @@ class MicroVMHTTPBackend:
             }
             files = {"snapshot": ("workspace.tar.gz", snapshot, "application/gzip")}
             with httpx.Client(
-                timeout=timeout, follow_redirects=False, trust_env=False, transport=self.transport
+                timeout=timeout,
+                verify=self._tls_context(),
+                follow_redirects=False,
+                trust_env=False,
+                transport=self.transport,
             ) as client:
                 with client.stream(
                     "POST",
