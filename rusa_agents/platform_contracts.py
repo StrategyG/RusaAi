@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,37 @@ _SCHEMA_FILES = {
     "agent_result": "agent-result-v1.schema.json",
     "run_event": "run-event-v1.schema.json",
 }
+
+
+class PlatformDomain(str, Enum):
+    RUSA_INTELLIGENCE = "rusa_intelligence"
+    AUTONOMOUS_SOFTWARE_ENGINEERING = "autonomous_software_engineering"
+    RUSA_BUSINESS = "rusa_business"
+    RUSA_ECOSYSTEM = "rusa_ecosystem"
+
+
+class CoreAgentRole(str, Enum):
+    SUPREME_ORCHESTRATOR = "supreme_orchestrator"
+    SYSTEM_ARCHITECT = "system_architect"
+    PLANNER = "planner"
+    TASK_DECOMPOSER = "task_decomposer"
+    SOFTWARE_ENGINEER = "software_engineer"
+    DEVOPS = "devops"
+    QA_TESTING = "qa_testing"
+    SECURITY_POLICY = "security_policy"
+    MEMORY_KNOWLEDGE = "memory_knowledge"
+    EVALUATION_REPORTING = "evaluation_reporting"
+
+
+class DevOpsStage(str, Enum):
+    PLAN = "plan"
+    CODE = "code"
+    BUILD = "build"
+    TEST = "test"
+    RELEASE = "release"
+    DEPLOY = "deploy"
+    OPERATE = "operate"
+    MONITOR = "monitor"
 
 
 class PlatformContractError(ValueError):
@@ -89,6 +121,10 @@ def validate_agent_result(payload: Any) -> None:
     if completed < started:
         raise PlatformContractError("completed_at cannot be earlier than started_at")
     if payload["status"] == "succeeded":
+        if not payload["evidence"]:
+            raise PlatformContractError(
+                "a succeeded result requires mandatory verification evidence"
+            )
         failures = [
             item for item in payload["evidence"] if item["status"] != "pass"
         ]
