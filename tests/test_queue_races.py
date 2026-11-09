@@ -310,6 +310,7 @@ def test_cancel_with_unknown_side_effect_requires_reconciliation():
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "awaiting_approval"
         assert current["result"]["cancel_reconciliation_required"] is True
+        assert queue.cancel(task_id, tenant) is False
         assert queue.retry(task_id, tenant) is False
         assert queue.reconcile_cancellation(
             task_id,
