@@ -430,7 +430,7 @@ try {
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), true);
   await page.locator(".rc-nav-item").filter({ hasText: "Command Center" }).click();
   assert.equal(await page.locator(".rc-sidebar").evaluate((element) => element.classList.contains("rc-sidebar-open")), false);
-  await page.getByRole("button", { name: "Toggle navigation" }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });

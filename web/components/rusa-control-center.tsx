@@ -640,6 +640,7 @@ export default function RusaControlCenter() {
     setMetricsError("");
     setError("");
     setNotice("");
+    setMobileOpen(false);
     setPage("overview");
 
     // Prevent a new login from racing the in-flight cookie deletion.
