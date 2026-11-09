@@ -129,7 +129,7 @@ def test_agent_result_contract_rejects_inverted_execution_interval():
 def test_succeeded_agent_result_requires_non_empty_passing_evidence():
     result = _result()
     result["evidence"] = []
-    with pytest.raises(PlatformContractError, match="at least one evidence"):
+    with pytest.raises(PlatformContractError, match="mandatory verification evidence"):
         validate_agent_result(result)
 
 
