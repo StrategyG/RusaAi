@@ -11,8 +11,7 @@ services:
       - rusa-rag-data:/var/lib/postgresql/data
       - ./scripts/rag-db-init.sh:/docker-entrypoint-initdb.d/001-rag-db-init.sh:ro
       - ./scripts/rag-db-bootstrap.sql:/opt/rusa/rag-db-bootstrap.sql:ro
-      - ./migrations/007_rag_knowledge_pgvector.sql:/opt/rusa/migrations/007_rag_knowledge_pgvector.sql:ro
-      - ./migrations/008_rag_embedding_profiles.sql:/opt/rusa/migrations/008_rag_embedding_profiles.sql:ro
+      - ./migrations:/opt/rusa/migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rusa_admin -d rusa_knowledge"]
       interval: 10s
