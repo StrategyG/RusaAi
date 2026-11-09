@@ -84,7 +84,7 @@ class AICodeRuntime:
             local_provider = OpenAICompatibleProvider(
                 base_url=local_model_url,
                 model=os.getenv("RUSA_LOCAL_MODEL_NAME", "rusa-local"),
-                api_key=os.getenv("RUSA_LOCAL_MODEL_API_KEY"),
+                api_key=os.getenv("RUSA_LOCAL_MODEL_API_KEY", ""),
             )
         self.provider = HybridCodeProvider(
             primary=primary_provider,
