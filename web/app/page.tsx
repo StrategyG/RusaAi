@@ -18,11 +18,12 @@ type Task = {
 type TaskPage = { items: Task[]; total: number; limit: number; offset: number };
 type Health = { liveness: { ok: boolean; status: number; data?: Record<string, unknown> | null }; readiness: { ok: boolean; status: number; data?: Record<string, unknown> | null } };
 type ChatLine = { role: "user" | "assistant"; content: string };
+type DevOpsOverview = { enabled: boolean; autonomy_mode: string; active_jobs: number; queue: Record<string, number>; latest_models?: any[]; recent_incidents?: any[]; pending_actions?: any[] };
 
 const navigation = [
   { label: "WORKSPACE", items: [{ id: "Overview", icon: LayoutDashboard }, { id: "Tasks", icon: Terminal }, { id: "Approvals", icon: ShieldCheck }] },
   { label: "INTELLIGENCE", items: [{ id: "Agents", icon: Bot }, { id: "Chat", icon: MessageSquare }, { id: "Artifacts", icon: Archive }] },
-  { label: "PLATFORM", items: [{ id: "System", icon: Activity }] }
+  { label: "PLATFORM", items: [{ id: "DevOps", icon: Activity }, { id: "System", icon: Activity }] }
 ];
 
 const runtimeAgents = [
@@ -94,6 +95,10 @@ export default function Home() {
   const [criteria, setCriteria] = useState("Implement the requested change\nAdd or update relevant tests\nPreserve tenant isolation and policy controls");
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [devopsOverview, setDevopsOverview] = useState<DevOpsOverview | null>(null);
+  const [devopsJobs, setDevopsJobs] = useState<any[]>([]);
+  const [devopsActions, setDevopsActions] = useState<any[]>([]);
+  const [devopsBusy, setDevopsBusy] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatLine[]>([
     { role: "assistant", content: "RUSA AI siap menerima pertanyaan. Gunakan chat ini untuk inference; task coding dijalankan melalui AICode Tasks." }
   ]);
@@ -116,30 +121,49 @@ export default function Home() {
     if (response.ok) setHealth(await response.json());
   }, []);
 
+  const refreshDevOps = useCallback(async () => {
+    const [overviewResponse, jobsResponse, actionsResponse] = await Promise.all([
+      fetch("/api/devops/overview", { cache: "no-store" }),
+      fetch("/api/devops/jobs?limit=10", { cache: "no-store" }),
+      fetch("/api/devops/actions", { cache: "no-store" })
+    ]);
+    if (overviewResponse.ok) setDevopsOverview(await overviewResponse.json());
+    else setDevopsOverview(null);
+    if (jobsResponse.ok) {
+      const data = await jobsResponse.json();
+      setDevopsJobs(data.items || []);
+    } else setDevopsJobs([]);
+    if (actionsResponse.ok) {
+      const data = await actionsResponse.json();
+      setDevopsActions(data.items || []);
+    } else setDevopsActions([]);
+  }, []);
+
   const loadSession = useCallback(async () => {
     try {
       const response = await fetch("/api/session", { cache: "no-store" });
       if (response.ok) {
         setSession(await response.json());
-        await Promise.all([refreshTasks(), refreshHealth()]);
+        await Promise.all([refreshTasks(), refreshHealth(), refreshDevOps()]);
       }
     } catch {
       setLoginError("RUSA API belum dapat dijangkau.");
     } finally {
       setBooting(false);
     }
-  }, [refreshTasks, refreshHealth]);
+  }, [refreshTasks, refreshHealth, refreshDevOps]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
   useEffect(() => {
     if (!session) return;
-    const timer = window.setInterval(() => { void refreshTasks(); void refreshHealth(); }, 10000);
+    const timer = window.setInterval(() => { void refreshTasks(); void refreshHealth(); void refreshDevOps(); }, 10000);
     return () => window.clearInterval(timer);
-  }, [session, refreshTasks, refreshHealth]);
+  }, [session, refreshTasks, refreshHealth, refreshDevOps]);
 
   const canCreate = session?.roles.some((role) => ["platform_admin", "tenant_admin", "developer"].includes(role)) ?? false;
   const canControl = session?.roles.some((role) => ["platform_admin", "tenant_admin"].includes(role)) ?? false;
   const canUseChat = Boolean(session);
+  const canUseDevOps = canCreate;
 
   const counts = useMemo(() => ({
     active: tasks.filter((task) => ["queued", "running"].includes(task.status)).length,
@@ -167,7 +191,7 @@ export default function Home() {
       if (!response.ok) throw new Error(errorText(data));
       setSession(data);
       setApiKey("");
-      await Promise.all([refreshTasks(), refreshHealth()]);
+      await Promise.all([refreshTasks(), refreshHealth(), refreshDevOps()]);
     } catch (cause) {
       setLoginError(cause instanceof Error ? cause.message : "Login failed.");
     } finally {
@@ -325,6 +349,7 @@ export default function Home() {
     Agents: "Pisahkan worker yang ada di runtime saat ini dari target lifecycle arsitektur.",
     Chat: "Inference melalui OpenAI-compatible RUSA chat endpoint.",
     Artifacts: "Referensi output dan evidence yang dikembalikan bersama task.",
+    DevOps: "Forecasting, telemetry, anomaly detection, capacity recommendations, dan model evaluation dengan policy controlled autonomy.",
     System: "Liveness dan readiness dari RUSA API."
   };
 
@@ -379,7 +404,7 @@ export default function Home() {
                 <div className="subtitle">{pageSubtitle[page]}</div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button className="btn" onClick={() => { void refreshTasks(); void refreshHealth(); }}><RefreshCw size={14} /> Refresh</button>
+                <button className="btn" onClick={() => { void refreshTasks(); void refreshHealth(); void refreshDevOps(); }}><RefreshCw size={14} /> Refresh</button>
                 {canCreate && <button className="btn btn-primary" onClick={() => setNewTaskOpen(true)}><Plus size={15} /> New AICode Task</button>}
               </div>
             </div>
@@ -523,6 +548,114 @@ export default function Home() {
                   return (Array.isArray(result.artifacts) && result.artifacts.length > 0) || (result.evidence && typeof result.evidence === "object" && Object.keys(result.evidence as object).length > 0);
                 }) && <div className="empty"><Archive size={25} /><div>No artifact references in the loaded task page.</div></div>}
               </section>
+            )}
+
+            {page === "DevOps" && (
+              <div className="stack">
+                <section className="panel">
+                  <div className="panel-header">
+                    <div><div className="panel-title">Predictive DevOps Intelligence</div><div className="panel-subtitle">Telemetry, forecasting, anomaly detection, and controlled capacity recommendations</div></div>
+                    <span className={devopsOverview?.enabled ? "status status-succeeded" : "status status-unknown"}>{devopsOverview?.enabled ? "Enabled" : "Unavailable / disabled"}</span>
+                  </div>
+                  {!devopsOverview && <div className="inline-alert mb-4">PDIE belum aktif atau database migration 009 belum diterapkan. Aktifkan RUSA_DEVOPS_ENABLED setelah migration dan worker siap.</div>}
+                  <div className="stat-grid">
+                    <div className="stat-card"><div className="stat-top"><span>Active jobs</span><div className="stat-icon"><Activity size={16} /></div></div><div className="stat-value">{devopsOverview?.active_jobs ?? "—"}</div><div className="stat-foot">Queued + running</div></div>
+                    <div className="stat-card"><div className="stat-top"><span>Queued</span><div className="stat-icon"><Terminal size={16} /></div></div><div className="stat-value">{devopsOverview?.queue?.queued ?? "—"}</div><div className="stat-foot">Waiting for worker</div></div>
+                    <div className="stat-card"><div className="stat-top"><span>Model runs</span><div className="stat-icon"><BrainCircuit size={16} /></div></div><div className="stat-value">{devopsOverview?.latest_models?.length ?? 0}</div><div className="stat-foot">Latest registered models</div></div>
+                    <div className="stat-card"><div className="stat-top"><span>Incidents</span><div className="stat-icon"><AlertTriangle size={16} /></div></div><div className="stat-value">{devopsOverview?.recent_incidents?.length ?? 0}</div><div className="stat-foot">Recent anomaly records</div></div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn" disabled={!devopsOverview?.enabled || !canUseDevOps || devopsBusy} onClick={async () => {
+                      setDevopsBusy(true); setError(""); setNotice("");
+                      try {
+                        const response = await fetch("/api/devops/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_type: "synthetic_ingest", payload: { rows: 1440, metric_name: "cpu_utilization", resource_id: "demo-local" } }) });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) throw new Error(errorText(data));
+                        setNotice("Synthetic telemetry job queued: " + data.task_id);
+                        await refreshDevOps();
+                      } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not queue telemetry job."); }
+                      finally { setDevopsBusy(false); }
+                    }}>Generate demo telemetry</button>
+                    <button className="btn" disabled={!devopsOverview?.enabled || !canUseDevOps || devopsBusy} onClick={async () => {
+                      setDevopsBusy(true); setError(""); setNotice("");
+                      try {
+                        const response = await fetch("/api/devops/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_type: "anomaly_scan", payload: { metric_name: "cpu_utilization", resource_id: "demo-local" } }) });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) throw new Error(errorText(data));
+                        setNotice("Anomaly scan queued: " + data.task_id);
+                        await refreshDevOps();
+                      } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not queue anomaly scan."); }
+                      finally { setDevopsBusy(false); }
+                    }}>Run anomaly scan</button>
+                    {canControl && <button className="btn btn-primary" disabled={!devopsOverview?.enabled || devopsBusy} onClick={async () => {
+                      setDevopsBusy(true); setError(""); setNotice("");
+                      try {
+                        const response = await fetch("/api/devops/training-runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ metric_name: "cpu_utilization", resource_id: "demo-local", validation_horizon: 120, test_horizon: 120, max_train_rows: 20000 }) });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) throw new Error(errorText(data));
+                        setNotice("Forecast training queued: " + data.task_id);
+                        await refreshDevOps();
+                      } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not queue model training."); }
+                      finally { setDevopsBusy(false); }
+                    }}>Train forecasting model</button>}
+                  </div>
+                  <div className="helper mt-3">Autonomy: {devopsOverview?.autonomy_mode || "controlled"} · Infrastructure execution is disabled. Capacity changes remain recommendations and require a separate approved execution adapter.</div>
+                </section>
+                <div className="grid-two">
+                  <section className="panel">
+                    <div className="panel-header"><div><div className="panel-title">DevOps job queue</div><div className="panel-subtitle">Tenant-scoped jobs from the separate PDIE queue</div></div><button className="btn btn-small" onClick={() => void refreshDevOps()}><RefreshCw size={13} /> Refresh</button></div>
+                    {devopsJobs.length === 0 ? <div className="empty">No DevOps jobs in this tenant.</div> : devopsJobs.map((job) => (
+                      <div className="list-row" key={job.task_id}>
+                        <div className="list-icon"><Activity size={15} /></div>
+                        <div className="list-main"><div className="list-title">{job.job_type}</div><div className="list-desc mono">{job.task_id} · {formatDate(job.updated_at)}</div></div>
+                        <span className={statusClass(job.status)}>{job.status}</span>
+                      </div>
+                    ))}
+                  </section>
+                  <section className="panel">
+                    <div className="panel-header"><div><div className="panel-title">Latest model runs</div><div className="panel-subtitle">Evaluation results from held-out chronological test data</div></div><BrainCircuit size={18} className="text-sky-300" /></div>
+                    {(devopsOverview?.latest_models || []).length === 0 ? <div className="empty">No model runs registered.</div> : (devopsOverview?.latest_models || []).map((model: any) => (
+                      <div className="list-row" key={model.run_id}>
+                        <div className="list-icon"><Gauge size={15} /></div>
+                        <div className="list-main"><div className="list-title">{model.metric_name} · {model.resource_id}</div><div className="list-desc mono">{model.run_id}</div><div className="list-desc">Hybrid MAE: {model.metrics?.prophet_arima_hybrid?.mae?.toFixed?.(3) ?? "—"} · RMSE: {model.metrics?.prophet_arima_hybrid?.rmse?.toFixed?.(3) ?? "—"}</div></div>
+                        <span className={statusClass(model.status)}>{model.status}</span>
+                      </div>
+                    ))}
+                  </section>
+                </div>
+                <section className="panel">
+                  <div className="panel-header"><div><div className="panel-title">Recent anomaly incidents</div><div className="panel-subtitle">Bayesian robust-baseline detector · evidence only</div></div><ShieldAlert size={18} className="text-amber-300" /></div>
+                  {(devopsOverview?.recent_incidents || []).length === 0 ? <div className="empty">No recent anomaly incidents.</div> : (devopsOverview?.recent_incidents || []).map((incident: any) => (
+                    <div className="list-row" key={incident.incident_id}>
+                      <div className="list-icon"><AlertTriangle size={15} /></div>
+                      <div className="list-main"><div className="list-title">{incident.metric_name} · {incident.resource_id}</div><div className="list-desc">{formatDate(incident.observed_at)} · posterior {Number(incident.anomaly_probability).toFixed(3)}</div></div>
+                      <span className={incident.severity === "high" ? "status status-failed" : "status status-queued"}>{incident.severity}</span>
+                    </div>
+                  ))}
+                </section>
+                <section className="panel">
+                  <div className="panel-header"><div><div className="panel-title">Capacity action proposals</div><div className="panel-subtitle">Human review only · approval never triggers infrastructure mutation</div></div><ShieldCheck size={18} className="text-amber-300" /></div>
+                  {devopsActions.length === 0 ? <div className="empty">No capacity proposals awaiting review.</div> : devopsActions.map((proposal) => (
+                    <div className="list-row" key={proposal.proposal_id}>
+                      <div className="list-icon"><ShieldAlert size={15} /></div>
+                      <div className="list-main"><div className="list-title">{proposal.action_type}</div><div className="list-desc mono">{proposal.proposal_id}</div><div className="list-desc">Current: {proposal.payload?.current_capacity ?? "—"} · Recommended: {proposal.payload?.recommended_capacity ?? "—"} · {formatDate(proposal.proposed_at)}</div></div>
+                      <span className={statusClass(proposal.status === "pending_approval" ? "awaiting_approval" : proposal.status)}>{proposal.status.replaceAll("_", " ")}</span>
+                      {canControl && proposal.status === "pending_approval" && <div className="flex gap-1"><button className="btn btn-small" onClick={async () => {
+                        const response = await fetch("/api/devops/actions/" + encodeURIComponent(proposal.proposal_id) + "/approve", { method: "POST" });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) setError(errorText(data)); else setNotice("Proposal approved. No infrastructure action was executed.");
+                        await refreshDevOps();
+                      }}>Approve</button><button className="btn btn-small" onClick={async () => {
+                        const response = await fetch("/api/devops/actions/" + encodeURIComponent(proposal.proposal_id) + "/reject", { method: "POST" });
+                        const data = await response.json().catch(() => ({}));
+                        if (!response.ok) setError(errorText(data)); else setNotice("Proposal rejected.");
+                        await refreshDevOps();
+                      }}>Reject</button></div>}
+                    </div>
+                  ))}
+                </section>
+                <div className="inline-alert">Approval records a human decision only. Infrastructure execution is disabled; the worker has no Docker socket or Kubernetes write credentials.</div>
+              </div>
             )}
 
             {page === "System" && (
