@@ -531,17 +531,23 @@ class AICodeRuntime:
                         outcome = (
                             "awaiting_approval" if side_effect == "UNKNOWN" else "cancelled"
                         )
-                        await asyncio.to_thread(
-                            self.audit.record,
-                            "task.cancelled",
-                            job.task_id,
-                            self.worker_id,
-                            {
-                                "side_effect": side_effect,
-                                "reconciliation_required": side_effect == "UNKNOWN",
-                            },
-                            tenant_id=job.tenant_id,
-                        )
+                        try:
+                            await asyncio.to_thread(
+                                self.audit.record,
+                                "task.cancelled",
+                                job.task_id,
+                                self.worker_id,
+                                {
+                                    "side_effect": side_effect,
+                                    "reconciliation_required": side_effect == "UNKNOWN",
+                                },
+                                tenant_id=job.tenant_id,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Cancellation state persisted but HMAC audit event failed for task %s",
+                                job.task_id,
+                            )
                     else:
                         outcome = "lease_lost"
                 except Exception:
