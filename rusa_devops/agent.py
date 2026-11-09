@@ -1,8 +1,10 @@
 """Validated DevOps reasoning adapter; the tool gateway remains the authorization boundary."""
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
+from uuid import uuid4
 
 from .learning import validate_record
 
@@ -65,3 +67,58 @@ class DevOpsReasoningAgent:
             "blockers": response.get("blockers", []),
             "infrastructure_mutations_executed": False,
         }
+
+
+class LocalDevOpsToolGateway:
+    """Maps the model's small action contract to tenant-scoped read tools and a proposal queue."""
+
+    def __init__(self, store, queue, knowledge_search: Callable | None = None):
+        self.store = store
+        self.queue = queue
+        self.knowledge_search = knowledge_search
+
+    async def call(self, name: str, arguments: dict[str, Any], *, tenant_id: str) -> dict[str, Any]:
+        if name == "devops_get_telemetry":
+            rows = await asyncio.to_thread(
+                self.store.read_telemetry, tenant_id, arguments["metric_name"],
+                arguments["resource_id"], limit=arguments.get("limit", 120),
+            )
+            for row in rows:
+                row["ds"] = row["ds"].isoformat()
+            return {"rows": rows}
+        if name == "devops_get_model_run":
+            result = await asyncio.to_thread(self.store.get_model_run, tenant_id, arguments["run_id"])
+            if result is not None:
+                result.pop("artifact_uri", None)
+            return {"found": result is not None, "model_run": result}
+        if name == "devops_list_incidents":
+            items = await asyncio.to_thread(
+                self.store.list_incidents, tenant_id, limit=arguments.get("limit", 50)
+            )
+            return {"items": items}
+        if name == "search_knowledge":
+            if self.knowledge_search is None:
+                raise DevOpsAgentError("tenant-scoped knowledge search is not configured")
+            result = self.knowledge_search(
+                tenant_id, arguments["query"], arguments.get("collection", "devops"),
+                arguments.get("limit", 5),
+            )
+            if hasattr(result, "__await__"):
+                result = await result
+            return result
+        if name == "propose_capacity_recommendation":
+            task_id, created, status = await asyncio.to_thread(
+                self.queue.enqueue,
+                str(uuid4()), tenant_id, "capacity_recommendation",
+                {
+                    "predicted_values": arguments["predicted_values"],
+                    "current_capacity": arguments["current_capacity"],
+                },
+                max_attempts=3, audit_actor="api:devops-agent",
+            )
+            return {
+                "task_id": task_id, "created": created, "status": status,
+                "execution_enabled": False,
+                "message": "A capacity recommendation job was queued; no infrastructure action was executed.",
+            }
+        raise DevOpsAgentError(f"tool {name!r} is not in the DevOps gateway allowlist")
