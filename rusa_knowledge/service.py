@@ -117,7 +117,7 @@ class KnowledgeService:
                 service.close()
                 raise RuntimeError(
                     "knowledge database or local embedding model is not ready; "
-                    "apply migrations/007_rag_knowledge_pgvector.sql and verify the embedding service"
+                    "apply migrations/007_rag_knowledge_pgvector.sql and migrations/008_rag_embedding_profiles.sql, then verify the embedding service"
                 )
         return service
 
