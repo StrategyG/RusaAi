@@ -166,7 +166,11 @@ def validate_agent_task(payload: Any) -> None:
         agent = payload["agent"]
         if agent.get("agent_type") == AgentType.DEVOPS_STAGE_AGENT.value:
             stage_agent_id = agent.get("stage_agent_id")
-            expected_stage = _STAGE_AGENT_STAGE.get(stage_agent_id)
+            expected_stage = (
+                _STAGE_AGENT_STAGE.get(stage_agent_id)
+                if isinstance(stage_agent_id, str)
+                else None
+            )
             if (
                 isinstance(stage_agent_id, str)
                 and agent.get("agent_id") != stage_agent_id
