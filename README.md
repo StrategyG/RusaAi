@@ -217,3 +217,12 @@ The web interface does not add approve/reject actions because the current backen
 
 ## License
 No `LICENSE` file is currently present in this repository. Licensing is therefore unresolved; confirm the intended terms with the repository owner and commit the corresponding license file before redistribution.
+
+
+---
+
+## HYBRIDA AI — Android Local Edition
+
+The repository now includes an Android-first local assistant under mobile-local/. It runs a small Qwen3 0.6B GGUF model through llama.cpp, stores chat history and documents in local SQLite, provides local hybrid RAG (FTS5 plus TF-IDF sparse-vector retrieval), and exposes a bounded local MCP tool server. The chat interface is an installable mobile PWA hosted by a loopback-only Termux service; it is not yet a signed native APK.
+
+For the no-root Android/Termux setup, model download, service startup, local API routes, and device limitations, see docs/HYBRIDA_ANDROID.md. The existing tenant-scoped PostgreSQL RAG/MCP and production AICode services remain separate and unchanged.
