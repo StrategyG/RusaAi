@@ -22,7 +22,15 @@ The `domain` field is one of:
 - `rusa_business`
 - `rusa_ecosystem`
 
-The `agent.role` field identifies one of the ten core-agent roles:
+The `agent.agent_type` field keeps two source-defined identity sets separate:
+
+- `core_agent`: identifies one of the ten core-agent roles through
+  `agent.core_role`.
+- `devops_stage_agent`: identifies one of the eight lifecycle specialists
+  through `agent.stage_agent_id` (`rusa_plan_agent` through
+  `rusa_monitor_agent`). Its task `stage` must match that specialist.
+
+The ten core-agent roles are:
 
 - `supreme_orchestrator`
 - `system_architect`
@@ -39,8 +47,11 @@ The optional `stage` field is a separate lifecycle axis:
 
 `plan`, `code`, `build`, `test`, `release`, `deploy`, `operate`, `monitor`.
 
-A core-agent role and a lifecycle stage must not be conflated. The existing six
-AICode worker roles remain unchanged and are not renamed by this contract layer.
+The eight lifecycle specialists and the ten core agents are separate source
+lists. The supplied documents do not define a one-to-one identity mapping
+between the DevOps Orchestrator/Security Guard and the ten core agents, so the
+contract does not invent one. The existing six AICode worker roles remain
+unchanged and are not renamed by this contract layer.
 
 ## Compatibility with existing task contracts
 
