@@ -425,10 +425,24 @@ class WorkspaceToolGateway:
                 "blocking_findings": report.blocking_findings,
                 "critical_security_findings": report.critical_security_findings,
                 "not_applicable": report.not_applicable,
+                "metrics": report.metrics,
+                "findings": payload["findings"][:20],
+            }
+            output = {
+                "report_sha256": payload["report_sha256"],
+                "overall_score": report.overall_score,
+                "metrics": report.metrics,
+                "files_analyzed": report.files_analyzed,
+                "syntax_valid": report.syntax_valid,
+                "blocking_findings": report.blocking_findings,
+                "critical_security_findings": report.critical_security_findings,
+                "passed": report.passed,
+                "not_applicable": report.not_applicable,
+                "findings": payload["findings"][:20],
             }
             return ToolResult(
                 report.passed,
-                json.dumps(payload, sort_keys=True, ensure_ascii=False)[:20_000],
+                json.dumps(output, sort_keys=True, ensure_ascii=False),
                 evidence,
             )
         except (OSError, UnicodeDecodeError, ValueError, ToolDenied) as exc:
