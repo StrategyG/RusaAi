@@ -16,14 +16,20 @@ def knowledge_store():
     from psycopg import sql
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-    migration = open("migrations/007_rag_knowledge_pgvector.sql", encoding="utf-8").read()
+    from pathlib import Path
+
+    migration_paths = (
+        "migrations/007_rag_knowledge_pgvector.sql",
+        "migrations/008_rag_embedding_profiles.sql",
+    )
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
     with psycopg.connect(DSN, autocommit=True) as admin:
         # The test database is dedicated to CI. The migration is idempotent and must
         # never drop existing application tables or data.
-        admin.execute(migration)
+        for migration_path in migration_paths:
+            admin.execute(Path(migration_path).read_text(encoding="utf-8"))
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
                 sql.Identifier(role_name),
@@ -36,7 +42,8 @@ def knowledge_store():
         admin.execute(
             sql.SQL(
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON "
-                "public.rusa_knowledge_documents, public.rusa_knowledge_chunks TO {}"
+                "public.rusa_knowledge_documents, public.rusa_knowledge_chunks, "
+                "public.rusa_knowledge_collection_profiles TO {}"
             ).format(sql.Identifier(role_name))
         )
 
@@ -135,6 +142,55 @@ def test_pgvector_hybrid_retrieval_and_tenant_rls(knowledge_store):
         ).fetchall()
     assert visible == [("tenant-a",)]
 
+
+
+
+def test_embedding_profile_prevents_mixed_models_and_is_tenant_scoped(knowledge_store):
+    import psycopg
+
+    store, restricted_dsn = knowledge_store
+    profile = {
+        "provider": "local-test",
+        "model": "model-v1",
+        "native_dimensions": 1536,
+        "output_dimensions": 1536,
+    }
+    document_id = store.ingest_document(
+        tenant_id="tenant-profile-a",
+        collection="profiled",
+        source_uri="kb://tenant-profile-a/guide",
+        title="Profiled Guide",
+        content_hash="c" * 64,
+        metadata={"embedding_profile": profile},
+        chunks=["profile-bound knowledge"],
+        embeddings=[_unit_vector(0)],
+    )
+    with pytest.raises(ValueError, match="query embedding profile"):
+        store.search(
+            tenant_id="tenant-profile-a",
+            collection="profiled",
+            query="profile",
+            query_embedding=_unit_vector(0),
+            embedding_profile={**profile, "model": "model-v2"},
+        )
+    results = store.search(
+        tenant_id="tenant-profile-a",
+        collection="profiled",
+        query="profile",
+        query_embedding=_unit_vector(0),
+        embedding_profile=profile,
+    )
+    assert results[0]["document_id"] == document_id
+
+    with psycopg.connect(restricted_dsn) as connection:
+        connection.execute(
+            "SELECT set_config('rusa.tenant_id', %s, true)",
+            ("tenant-profile-a",),
+        )
+        visible = connection.execute(
+            "SELECT tenant_id FROM public.rusa_knowledge_collection_profiles"
+        ).fetchall()
+    assert visible == [("tenant-profile-a",)]
 
 
 def test_knowledge_store_readiness_rejects_bypassrls_database_identity():
