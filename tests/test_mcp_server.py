@@ -129,6 +129,7 @@ def test_mcp_rate_limit_is_tenant_scoped_and_returns_retry_after():
     assert _invoke_middleware(middleware, headers)[0]["status"] == 200
     limited = _invoke_middleware(middleware, headers)
     assert limited[0]["status"] == 429
-    assert (b"retry-after", b"30") in limited[0]["headers"] or any(
-        key == b"retry-after" for key, _ in limited[0]["headers"]
+    assert any(
+        key == b"retry-after" and value == b"30"
+        for key, value in limited[0]["headers"]
     )
