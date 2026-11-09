@@ -113,6 +113,7 @@ class DockerSandbox:
         }
         sensitive_names = {
             ".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
+            "id_dsa", "id_ecdsa", "private_key", "privatekey",
             "authorized_keys", "known_hosts", "credentials.json",
             "service-account.json", "secrets.json", "token.json",
         }
