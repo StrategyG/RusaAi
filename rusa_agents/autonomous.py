@@ -7,6 +7,7 @@ from typing import Any
 
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import CodingTask, WorkerResult, WorkerRole
+from .secret_scan import contains_high_confidence_secret_text
 from .tool_gateway import ToolDenied, WorkspaceToolGateway
 
 
@@ -26,6 +27,10 @@ class AutonomousCodeWorker:
     ) -> None:
         if max_steps < 1 or max_steps > 30:
             raise ValueError("max_steps must be between 1 and 30")
+        if not 1 <= max_actions_per_step <= 32:
+            raise ValueError("max_actions_per_step must be between 1 and 32")
+        if not 1000 <= max_output_chars <= 50000:
+            raise ValueError("max_output_chars must be between 1000 and 50000")
         self.role = role
         self.provider = provider
         self.gateway = gateway
@@ -62,6 +67,16 @@ class AutonomousCodeWorker:
         history = "\n".join(
             f"{item.role.value}: {item.summary[:1500]}" for item in prior_results
         ) or "No previous worker reports."
+        task_material = "\n".join(
+            [task.objective, task.context, *task.acceptance_criteria]
+        )
+        if contains_high_confidence_secret_text(task_material) or contains_high_confidence_secret_text(history):
+            return WorkerResult(
+                role=self.role,
+                summary="Agent context withheld because high-confidence credential material was detected.",
+                success=False,
+                blockers=["Remove credential material and use the approved secret manager."],
+            )
         transcript: list[str] = []
         artifacts: list[str] = []
         evidence: dict[str, Any] = {}
@@ -96,6 +111,15 @@ class AutonomousCodeWorker:
                     blockers=["Provider did not return the required JSON action envelope."],
                 )
             last_message = response["message"]
+            if contains_high_confidence_secret_text(last_message):
+                return WorkerResult(
+                    role=self.role,
+                    summary="Provider message withheld because high-confidence credential material was detected.",
+                    success=False,
+                    artifacts=artifacts,
+                    evidence=evidence,
+                    blockers=["Provider output contained credential-like material."],
+                )
             actions = response.get("actions", [])
             if response.get("blocked", False):
                 return WorkerResult(
