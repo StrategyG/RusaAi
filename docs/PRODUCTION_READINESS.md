@@ -31,12 +31,13 @@ for the exact commit and checks that ran; it is not a production approval.
 ## Verification boundary
 
 The complete RUSA-AI CI and Web CI workflows passed on code commit
-`aec4fae0bc0c0b809d8f0f7a3d55d473ef1cbfe2` (RUSA-AI run
-`42585941181`; Web run `42585941315`). The main test job reported
-**270 passed, 6 skipped**; compile, lint, Bandit, SFT dataset validation,
-RAG/MCP integration, production image builds, Trivy vulnerability gates,
-Compose validation, web type-check, and Next.js build all passed. The six
-skips were optional-dependency or optional-database tests, not failures.
+`df915f2f7cb8b05040f1f6eab98970ac5781f427` (RUSA-AI run
+`42588833644`; Web run `42588833642`). The main test job reported
+**300 passed, 6 skipped**; compile, lint, Bandit, SFT dataset validation,
+RAG/MCP integration, API/sandbox/worker/MCP image builds, Trivy vulnerability
+gates, Compose validation, web type-check, and Next.js/container build all
+passed. The six skips were optional-dependency or optional-database tests,
+not failures.
 
 This evidence applies to that exact code commit. Every later commit must be
 judged by the latest workflow runs on the exact PR head; a previous green run
@@ -51,12 +52,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green, including Docker/Trivy and RAG/MCP | Passed on code commit `aec4fae0bc0c0b809d8f0f7a3d55d473ef1cbfe2`; rerun required for later commits |
+| Integration CI | All jobs green, including Docker/Trivy and RAG/MCP | Passed on code commit `df915f2f7cb8b05040f1f6eab98970ac5781f427`; rerun required for later commits |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency, cancellation acknowledgement and ambiguous-side-effect reconciliation | Passed in the 270-test main suite on code commit `aec4fae0bc0c0b809d8f0f7a3d55d473ef1cbfe2` |
+| Queue operations | PostgreSQL race, crash recovery, idempotency, cancellation acknowledgement and ambiguous-side-effect reconciliation | Passed in the 300-test main suite on code commit `df915f2f7cb8b05040f1f6eab98970ac5781f427` |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity and control center | Browser control-center UI exists; integrated enterprise JWT/SSO, user administration and full end-to-end identity tests | Partially implemented; enterprise identity not verified |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
