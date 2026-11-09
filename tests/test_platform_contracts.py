@@ -134,6 +134,14 @@ def test_agent_task_contract_rejects_unknown_domain_and_policy_decision():
         validate_agent_task(task)
 
 
+def test_agent_task_contract_rejects_action_that_requires_human_approval():
+    task = _task()
+    task["action"] = "deploy"
+    task["policy"]["approval_actions"] = ["deploy"]
+    with pytest.raises(PlatformContractError, match="requires human approval"):
+        validate_agent_task(task)
+
+
 def test_agent_task_contract_rejects_deadline_without_forward_time():
     task = _task()
     task["deadline_at"] = task["created_at"]
