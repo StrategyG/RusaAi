@@ -21,7 +21,17 @@ The ten-agent document and eight-stage DevOps lifecycle are **target specificati
 
 Transport-neutral v1.0 task, result, and run-event schemas plus Python validators already cover the four domains, ten core-agent roles, and eight lifecycle stages. They are a contract foundation only: they do not instantiate those agents, provide a durable cross-domain workflow engine, or deploy the broker/event infrastructure proposed by the ADR.
 
-## 2. Alignment to the four architecture domains
+## 2. Source terminology that still needs product-owner confirmation
+
+The supplied architecture references do not use one fully consistent domain vocabulary:
+
+- `RUSA_AI_Architecture.md` defines four product domains: AI Autonomous Software Engineering & DevOps, RUSA Intelligence, RUSA Business, and RUSA Ecosystem.
+- `RUSA_AI_AGENTIC_DEVOPS_LIFECYCLE.md` describes integration with three pillars named RUSA Intelligence, RUSA Repository, and RUSA Social. Its Repository section is an evidence/artifact layer; its Social section is an optional publishing layer.
+- The lifecycle document also names `rusa_devops_orchestrator` and `rusa_security_guard_agent` outside the eight stage specialists. The ten-agent specification separately names Supreme Orchestrator and Security & Policy.
+
+The documents do not explicitly define whether Repository and Social are legacy product pillars, subdomains, or services inside the four-domain architecture. They also do not explicitly approve a one-to-one identity mapping between the DevOps Orchestrator/Security Guard and the ten core agents. Do not silently equate RUSA Repository with the software-engineering domain or RUSA Social with Business/Ecosystem. Keep the v1.0 contract domain enum aligned to the four-domain architecture and record the Repository/Social and orchestrator/guard mappings as product-owner decisions before adding aliases or new enum values.
+
+## 3. Alignment to the four architecture domains
 
 | Architecture domain | Repository evidence | Current status | Main gaps |
 |---|---|---|---|
@@ -32,7 +42,7 @@ Transport-neutral v1.0 task, result, and run-event schemas plus Python validator
 
 Notebook and training assets are not treated as production business services unless they are connected to versioned APIs, runtime permissions, durable state, audit, and operational monitoring.
 
-## 3. Alignment to the ten core agents
+## 4. Alignment to the ten core agents
 
 The coding runtime currently defines six executable `WorkerRole` values: `analyst`, `architect`, `developer`, `debugger`, `tester`, and `security`. Separately, `schemas/platform/agent-task-v1.schema.json` declares the ten core-agent role values and eight DevOps stages as transport-neutral task metadata; those declarations are not ten independently running agent services.
 
@@ -49,7 +59,7 @@ The coding runtime currently defines six executable `WorkerRole` values: `analys
 | Memory & Knowledge | SQLite/PostgreSQL task memory and optional RAG knowledge service | Infrastructure exists; dedicated agent behavior is partial |
 | Evaluation & Reporting | Metrics, audit records, quality evidence | Infrastructure exists; dedicated evaluation/reporting agent is not implemented |
 
-## 4. Alignment to the eight-stage DevOps lifecycle
+## 5. Alignment to the eight-stage DevOps lifecycle
 
 | Lifecycle stage | Existing capability | Assessment |
 |---|---|---|
@@ -64,7 +74,7 @@ The coding runtime currently defines six executable `WorkerRole` values: `analys
 
 The Security Guard is a cross-stage control. It must not be modelled as a replacement for the eight specialist lifecycle agents. Human approval remains required for protected branch merge, release/deployment promotion, permission or secret changes, destructive operations, and other policy-defined high-impact actions.
 
-## 5. Inter-agent communication ADR: target versus current runtime
+## 6. Inter-agent communication ADR: target versus current runtime
 
 The supplied communication ADR is marked **Diusulkan**. The DevOps lifecycle document is marked **Proposed Architecture**. The following is the accurate implementation boundary.
 
@@ -82,7 +92,7 @@ The supplied communication ADR is marked **Diusulkan**. The DevOps lifecycle doc
 
 Do not describe the current PostgreSQL queue as RabbitMQ/Kafka, do not claim an outbox exists, and do not claim signed events or mTLS are deployed. The model is never the authority for tenant identity, policy, lease ownership, or approval.
 
-## 6. Engineering and safety corrections on this branch
+## 7. Engineering and safety corrections on this branch
 
 The integration branch includes the following concrete refinements:
 
@@ -98,7 +108,7 @@ The integration branch includes the following concrete refinements:
 
 Migrations 010 and 011 are forward-only database changes. Apply them with the database migration owner before deploying code that requires cooperative cancellation and audited reconciliation. The reconciliation endpoint is restricted to `tenant_admin` and `platform_admin`; unresolved side effects cannot be cancelled again or retried until reconciled. Never run an older worker that does not understand the new state concurrently with the upgraded cancellation workflow.
 
-## 7. Production qualification boundary
+## 8. Production qualification boundary
 
 The following are still deployment or architecture gates, not code-completion claims:
 
@@ -112,7 +122,7 @@ The following are still deployment or architecture gates, not code-completion cl
 - Provision production dashboards, alert rules, distributed tracing, off-host immutable audit retention, and SLO ownership.
 - Keep merge, release, production deployment, database migration execution, secret rotation, and permission changes under explicit human approval.
 
-## 8. Recommended implementation sequence
+## 9. Recommended implementation sequence
 
 ### Phase A — Contract and control-plane foundation
 - **Implemented on this branch:** transport-neutral v1.0 task/result/run-event JSON Schemas and Python validators for the four domains, ten core-agent roles, eight lifecycle stages, deadline and authorization references, artifact/evidence digests, and ordered event batches. Existing A2A and AICode contracts remain separate.
@@ -136,7 +146,7 @@ The following are still deployment or architecture gates, not code-completion cl
 - Qualify model quality and hardware capacity against a versioned dataset and approved model artifact.
 - Publish an implementation matrix and release evidence for each domain; never mark a proposed capability as deployed.
 
-## 9. Non-negotiable operating rules
+## 10. Non-negotiable operating rules
 
 - Policy Engine and Tool Gateway—not the LLM—decide whether an action is authorized.
 - The Supreme Orchestrator coordinates; specialist agents execute within their own capabilities.
