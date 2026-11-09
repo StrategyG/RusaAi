@@ -103,6 +103,14 @@ class PostgresTaskPolicyAudit:
                            WHERE tgrelid='public.aicode_task_policy_events'::regclass
                              AND NOT tgisinternal
                              AND tgname='trg_aicode_task_policy_events_no_truncate'
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM pg_constraint
+                           WHERE conrelid='public.aicode_task_policy_events'::regclass
+                             AND conname='aicode_task_policy_events_action_check'
+                             AND pg_get_constraintdef(oid) LIKE '%task.list%'
+                             AND pg_get_constraintdef(oid) LIKE '%task.approve%'
+                             AND pg_get_constraintdef(oid) LIKE '%task.reject%'
                        )
                 FROM pg_roles AS db_role
                 CROSS JOIN pg_class AS table_info
@@ -130,9 +138,10 @@ class PostgresTaskPolicyAudit:
             or not row[12]
             or not row[13]
             or not row[14]
+            or not row[15]
         ):
             raise RuntimeError(
-                "Task policy audit table, RLS, append-only triggers, or runtime privileges are not ready"
+                "Task policy audit table, action contract, RLS, append-only triggers, or runtime privileges are not ready"
             )
 
     def ping(self) -> bool:
