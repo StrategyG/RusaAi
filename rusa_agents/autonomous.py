@@ -102,6 +102,15 @@ class AutonomousCodeWorker:
                 f"Iteration: {step + 1}/{self.max_steps}. Choose bounded actions or finish."
             )
             raw = await self.provider.complete(system_prompt=system_prompt, user_prompt=user_prompt)
+            if contains_high_confidence_secret_text(raw):
+                return WorkerResult(
+                    role=self.role,
+                    summary="Provider response withheld because high-confidence credential material was detected.",
+                    success=False,
+                    artifacts=artifacts,
+                    evidence=evidence,
+                    blockers=["Provider action envelope contained credential-like material."],
+                )
             try:
                 response = self._parse_response(raw)
             except (ValueError, json.JSONDecodeError) as exc:
