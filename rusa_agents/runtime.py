@@ -6,16 +6,16 @@ import logging
 import os
 import socket
 import time
-from urllib.parse import urlparse
 from collections.abc import Coroutine
 from typing import Any
+from urllib.parse import urlparse
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
-from .contracts import CodingTask, RepositoryTarget, TaskState
 from .code_refinery.providers import HybridCodeProvider, MockCodeProvider
 from .code_refinery.sandbox import HybridSandbox, MicroVMHTTPBackend
+from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
