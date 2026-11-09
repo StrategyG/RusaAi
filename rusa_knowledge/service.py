@@ -40,6 +40,12 @@ class KnowledgeService:
         self.vector_weight = vector_weight / weight_total
         self.lexical_weight = lexical_weight / weight_total
         self.hnsw_ef_search = hnsw_ef_search
+        self.embedding_profile = {
+            "provider": getattr(embeddings, "provider_name", "openai-compatible"),
+            "model": getattr(embeddings, "model", "configured-model"),
+            "native_dimensions": getattr(embeddings, "native_dimensions", 1536),
+            "output_dimensions": 1536,
+        }
 
     @classmethod
     def from_env(
@@ -175,6 +181,7 @@ class KnowledgeService:
                 "embedding_model": getattr(self.embeddings, "model", "configured-model"),
                 "embedding_dimensions": 1536,
                 "embedding_native_dimensions": getattr(self.embeddings, "native_dimensions", 1536),
+                "embedding_profile": self.embedding_profile,
             },
             chunks=chunks,
             embeddings=vectors,
@@ -208,6 +215,7 @@ class KnowledgeService:
             vector_weight=self.vector_weight,
             lexical_weight=self.lexical_weight,
             hnsw_ef_search=self.hnsw_ef_search,
+            embedding_profile=self.embedding_profile,
         )
         # Older records may predate ingestion-time credential checks. Re-scan
         # retrieved material before it enters an agent or MCP context.
@@ -241,6 +249,8 @@ class KnowledgeService:
 
     def close(self) -> None:
         close_embeddings = getattr(self.embeddings, "close", None)
-        if callable(close_embeddings):
-            close_embeddings()
-        self.store.close()
+        try:
+            if callable(close_embeddings):
+                close_embeddings()
+        finally:
+            self.store.close()
