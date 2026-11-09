@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -44,6 +44,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
+        "009_aicode_blocked_status.sql",
     ]
 
 
@@ -56,3 +57,11 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+
+def test_blocked_status_migration_is_required_by_production_queue():
+    migration = Path("migrations/009_aicode_blocked_status.sql").read_text(encoding="utf-8")
+    queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
+    assert "'blocked'" in migration
+    assert "009_aicode_blocked_status.sql" in queue
