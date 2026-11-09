@@ -428,7 +428,7 @@ export default function Home() {
               <>
                 <div className="stat-grid">
                   <div className="stat-card"><div className="stat-top"><span>Total tasks</span><div className="stat-icon"><Terminal size={16} /></div></div><div className="stat-value">{taskTotal}</div><div className="stat-foot">Tenant-scoped records</div></div>
-                  <div className="stat-card"><div className="stat-top"><span>Active</span><div className="stat-icon"><Activity size={16} /></div></div><div className="stat-value">{counts.active}</div><div className="stat-foot">Queued or running in loaded page</div></div>
+                  <div className="stat-card"><div className="stat-top"><span>Active</span><div className="stat-icon"><Activity size={16} /></div></div><div className="stat-value">{counts.active}</div><div className="stat-foot">Queued, running, or cancelling in loaded page</div></div>
                   <div className="stat-card"><div className="stat-top"><span>Awaiting approval</span><div className="stat-icon"><ShieldAlert size={16} /></div></div><div className="stat-value">{counts.approvals}</div><div className="stat-foot">Human review required</div></div>
                   <div className="stat-card"><div className="stat-top"><span>Failed / blocked</span><div className="stat-icon"><AlertTriangle size={16} /></div></div><div className="stat-value">{counts.failed}</div><div className="stat-foot">Requires investigation</div></div>
                 </div>
