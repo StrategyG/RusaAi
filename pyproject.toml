@@ -23,6 +23,10 @@ dependencies = [
 rusa-knowledge = "rusa_knowledge.cli:main"
 
 [project.optional-dependencies]
+devops = [
+  "numpy>=1.24,<3", "pandas>=2,<3", "scipy>=1.10,<2",
+  "statsmodels>=0.14,<1", "prophet>=1.1.6,<2", "scikit-learn>=1.3,<2",
+]
 dev = [
   "pytest>=7.3,<10",
   "pytest-asyncio>=0.21,<2",
@@ -39,7 +43,7 @@ vllm = ["vllm>=0.32,<0.33"]
 training = ["torch>=2.4,<3", "transformers>=5.10.0,<6", "accelerate>=1.0,<2", "safetensors>=0.4.5,<1", "peft>=0.18,<1", "bitsandbytes>=0.46,<1"]
 
 [tool.setuptools.packages.find]
-include = ["rusa_agents*", "rusa_knowledge*", "rusa_training*"]
+include = ["rusa_agents*", "rusa_knowledge*", "rusa_training*", "rusa_devops*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
