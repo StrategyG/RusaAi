@@ -214,5 +214,26 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "succeeded"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
 }
