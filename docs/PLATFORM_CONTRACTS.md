@@ -42,6 +42,48 @@ The optional `stage` field is a separate lifecycle axis:
 A core-agent role and a lifecycle stage must not be conflated. The existing six
 AICode worker roles remain unchanged and are not renamed by this contract layer.
 
+## Compatibility with existing task contracts
+
+The platform v1.0 contracts are not wire-compatible replacements for the
+existing A2A task-envelope v1.0 or the six-role AICode runtime contracts.
+Keep explicit adapters at integration boundaries; do not rename fields or
+reinterpret statuses implicitly.
+
+The source specifications use different status vocabularies:
+
+- The ten-agent communication contract uses `PENDING`, `READY`, `RUNNING`,
+  `BLOCKED`, `NEEDS_APPROVAL`, `REVIEW`, `COMPLETED`, `FAILED`, and
+  `CANCELLED`.
+- The DevOps lifecycle uses `queued`, `running`, `passed`, `failed`,
+  `blocked`, `needs_approval`, `cancelled`, and `skipped`.
+- The A2A envelope has its own optional status values, including
+  `proposed`, `accepted`, `in_progress`, `submitted`, `reviewing`,
+  `approved`, and `changes_requested`.
+
+A future adapter may use this semantic crosswalk, while preserving the original
+status and lifecycle stage in audit metadata:
+
+| Source meaning | Platform representation | Constraint |
+|---|---|---|
+| `PENDING`, `READY`, `queued`, `proposed`, `accepted` | Task/run remains queued or accepted; no result yet | Do not fabricate an agent result before dispatch |
+| `RUNNING`, `in_progress`, `submitted` | Run/agent execution event | Not a terminal result |
+| `BLOCKED`, `blocked` | Result status `blocked` or `run.blocked` | Preserve the blocking reason |
+| `NEEDS_APPROVAL`, `needs_approval`, `reviewing` | `awaiting_approval` | Only when a real human/policy gate is pending |
+| `COMPLETED`, `passed`, `approved` | Result status `succeeded` | Requires at least one passing evidence record; approval is not itself proof of execution success |
+| `FAILED`, `changes_requested` | Result status `failed` or an explicit review event | Include a structured error/findings object; changes requested may instead return work to Code |
+| `CANCELLED`, `cancelled` | Result status `cancelled` or `run.cancelled` | Preserve whether cancellation was acknowledged and whether side effects were reconciled |
+| `REVIEW`, `skipped` | Explicit review/policy event | Do not collapse these into success or cancellation |
+
+The A2A message types (`task.create`, `task.accepted`, `task.status`,
+`task.result`, `task.blocked`, `task.review`, and `task.cancel`) are
+message operations, not synonyms for platform run-event types. The platform
+run-event schema now includes the lifecycle vocabulary
+`plan.completed`, `code.completed`, `build.completed`,
+`test.completed`, `release.approved`, `deploy.completed`,
+`operate.incident_detected`, `operate.recovered`,
+`monitor.alert_triggered`, `monitor.feedback_created`,
+`workflow.blocked`, and `workflow.completed`.
+
 ## Contract files
 
 | Contract | Purpose |
