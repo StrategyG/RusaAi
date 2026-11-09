@@ -220,14 +220,30 @@ class PostgresKnowledgeStore:
         query: str,
         query_embedding: list[float],
         limit: int = 5,
+        vector_weight: float = 0.7,
+        lexical_weight: float = 0.3,
+        hnsw_ef_search: int = 80,
     ) -> list[dict[str, Any]]:
         self._validate_scope(tenant_id, collection)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         if not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20")
+        if (
+            not math.isfinite(vector_weight)
+            or not math.isfinite(lexical_weight)
+            or vector_weight < 0
+            or lexical_weight < 0
+            or vector_weight + lexical_weight <= 0
+        ):
+            raise ValueError("retrieval weights must be finite, non-negative, and not both zero")
+        if isinstance(hnsw_ef_search, bool) or not 1 <= hnsw_ef_search <= 1000:
+            raise ValueError("HNSW ef_search must be between 1 and 1000")
+        weight_total = vector_weight + lexical_weight
+        vector_weight /= weight_total
+        lexical_weight /= weight_total
         vector = _vector_literal(query_embedding, self.dimensions)
-        candidate_limit = min(max(limit * 4, 20), 100)
+        candidate_limit = min(max(limit * 8, 40), 200)
 
         sql = """
             WITH vector_candidates AS (
@@ -251,8 +267,8 @@ class PostgresKnowledgeStore:
             ),
             combined AS (
                 SELECT COALESCE(v.chunk_id, l.chunk_id) AS chunk_id,
-                       0.7 * COALESCE(1.0 / (60 + v.vector_rank), 0.0)
-                     + 0.3 * COALESCE(1.0 / (60 + l.lexical_rank), 0.0) AS rrf_score
+                       %s * COALESCE(1.0 / (60 + v.vector_rank), 0.0)
+                     + %s * COALESCE(1.0 / (60 + l.lexical_rank), 0.0) AS rrf_score
                 FROM vector_candidates v
                 FULL OUTER JOIN lexical_candidates l ON v.chunk_id = l.chunk_id
             )
@@ -270,10 +286,14 @@ class PostgresKnowledgeStore:
         params = (
             vector, tenant_id, collection, vector, candidate_limit,
             query, tenant_id, collection, query, query, candidate_limit,
-            vector, tenant_id, limit,
+            vector_weight, lexical_weight, vector, tenant_id, limit,
         )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
+            connection.execute(
+                "SELECT set_config('hnsw.ef_search', %s, true)",
+                (str(hnsw_ef_search),),
+            )
             rows = connection.execute(sql, params).fetchall()
         return [
             {

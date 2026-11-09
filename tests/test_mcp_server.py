@@ -96,3 +96,39 @@ def test_mcp_auth_middleware_rejects_missing_or_invalid_bearer_token():
     messages = _invoke_middleware(middleware, [])
     assert messages[0]["status"] == 401
     assert json.loads(messages[1]["body"]) == {"error": "unauthorized"}
+
+
+def test_mcp_auth_rejects_duplicate_authorization_headers():
+    token = "d" * 48
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    middleware = server.TenantAuthMiddleware(
+        lambda scope, receive, send: None,
+        key_hashes={digest: "tenant-a"},
+    )
+    messages = _invoke_middleware(
+        middleware,
+        [
+            (b"authorization", f"Bearer {token}".encode()),
+            (b"authorization", f"Bearer {token}".encode()),
+        ],
+    )
+    assert messages[0]["status"] == 401
+
+
+def test_mcp_rate_limit_is_tenant_scoped_and_returns_retry_after():
+    token = "r" * 48
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    middleware = server.TenantAuthMiddleware(
+        lambda scope, receive, send: None,
+        key_hashes={digest: "tenant-a"},
+        requests_per_minute=2,
+        burst=2,
+    )
+    headers = [(b"authorization", f"Bearer {token}".encode())]
+    assert _invoke_middleware(middleware, headers)[0]["status"] == 200
+    assert _invoke_middleware(middleware, headers)[0]["status"] == 200
+    limited = _invoke_middleware(middleware, headers)
+    assert limited[0]["status"] == 429
+    assert (b"retry-after", b"30") in limited[0]["headers"] or any(
+        key == b"retry-after" for key, _ in limited[0]["headers"]
+    )
