@@ -1,0 +1,25 @@
+ARG OLLAMA_BASE_IMAGE=ollama/ollama:latest
+FROM ${OLLAMA_BASE_IMAGE}
+
+ENV OLLAMA_KEEP_ALIVE=10m \
+    OLLAMA_NUM_PARALLEL=1 \
+    OLLAMA_MAX_LOADED_MODELS=1
+
+# Bake the approved embedding model into an immutable image. Runtime containers
+# can stay on an internal-only network and do not need registry/model egress.
+RUN set -eu; \
+    ollama serve >/tmp/ollama-model-build.log 2>&1 & server_pid=$!; \
+    ready=0; \
+    for attempt in $(seq 1 120); do \
+      if ollama list >/dev/null 2>&1; then ready=1; break; fi; \
+      sleep 1; \
+    done; \
+    if [ "$ready" -ne 1 ]; then \
+      cat /tmp/ollama-model-build.log; \
+      kill "$server_pid" 2>/dev/null || true; \
+      exit 1; \
+    fi; \
+    ollama pull bge-m3; \
+    kill "$server_pid"; \
+    wait "$server_pid" || true; \
+    rm -f /tmp/ollama-model-build.log
