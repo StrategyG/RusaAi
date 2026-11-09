@@ -17,10 +17,10 @@ def register_devops_mcp_tools(mcp, require_tenant: Callable[[], str]) -> None:
     def devops_get_telemetry(metric_name: str, resource_id: str, limit: int = 120) -> dict:
         """Read tenant-scoped telemetry samples. This tool never writes infrastructure."""
         tenant_id = require_tenant()
-        return {
-            "metric_name": metric_name, "resource_id": resource_id,
-            "rows": _store().read_telemetry(tenant_id, metric_name, resource_id, limit=limit),
-        }
+        rows = _store().read_telemetry(tenant_id, metric_name, resource_id, limit=limit)
+        for row in rows:
+            row["ds"] = row["ds"].isoformat()
+        return {"metric_name": metric_name, "resource_id": resource_id, "rows": rows}
 
     @mcp.tool()
     def devops_get_model_run(run_id: str) -> dict:
