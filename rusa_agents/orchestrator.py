@@ -265,7 +265,7 @@ class AICodeOrchestrator:
         )
         if tester is None or security is None:
             record.errors.append("Tester or security worker did not produce a result.")
-            return None
+            return False
         required = [
             (tester, key) for key in self.REQUIRED_TEST_EVIDENCE
         ] + [
@@ -279,7 +279,7 @@ class AICodeOrchestrator:
             record.errors.append(
                 "Missing mandatory verification evidence: " + ", ".join(missing)
             )
-            return None
+            return False
         failed = [
             key for worker_result, key in required
             if not self._check_passed(worker_result, key)
@@ -312,7 +312,9 @@ class AICodeOrchestrator:
             decision = self.policy.evaluate(action)
             if not decision.allowed:
                 record.errors.append(decision.reason)
-                record.transition(TaskState.BLOCKED)
+                record.transition(
+                    TaskState.AWAITING_APPROVAL if decision.requires_approval else TaskState.BLOCKED
+                )
                 return
             result = await self._execute(
                 role,
