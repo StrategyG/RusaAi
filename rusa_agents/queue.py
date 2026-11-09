@@ -399,9 +399,19 @@ class PostgresTaskQueue:
             )
             return str(existing[0]), False, str(existing[2])
 
-    def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
-        if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
-            raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
+    def claim(
+        self,
+        worker_id: str,
+        lease_seconds: int = 180,
+        *,
+        tenant_id: str | None = None,
+    ) -> Job | None:
+        if (
+            not worker_id or len(worker_id) > 128
+            or type(lease_seconds) is not int or lease_seconds < 15 or lease_seconds > 3600
+            or tenant_id is not None and (not isinstance(tenant_id, str) or not tenant_id.strip())
+        ):
+            raise ValueError("worker_id, optional tenant_id, and lease_seconds must be valid")
         lease_token = str(uuid4())
         with self._connect() as conn:
             conn.execute("""
@@ -427,6 +437,7 @@ class PostgresTaskQueue:
                 WITH candidate AS (
                     SELECT id FROM aicode_jobs
                     WHERE attempts < max_attempts
+                      AND (%s::text IS NULL OR tenant_id=%s)
                       AND ((status='queued' AND available_at <= NOW())
                         OR (status='running' AND lease_until < NOW()))
                     ORDER BY priority DESC, created_at ASC
@@ -441,7 +452,7 @@ class PostgresTaskQueue:
                 WHERE job.id=candidate.id
                 RETURNING job.id, job.task_id::text, job.tenant_id, job.payload,
                           job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text
-            """, (worker_id, lease_token, lease_seconds)).fetchone()
+            """, (tenant_id, tenant_id, worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = row[3] if isinstance(row[3], dict) else json.loads(row[3])
