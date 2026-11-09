@@ -13,8 +13,9 @@ for the exact commit and checks that ran; it is not a production approval.
   requires an externally pinned manifest digest.
 - Bounded generation/streaming adapters, API admission control, and backend shutdown.
 - Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
-  fencing of stale acknowledgements, cancellation/completion race protection,
-  and retry limits.
+  fencing of stale acknowledgements, cooperative cancellation with a monotonic
+  cancel epoch, bounded heartbeat/lease renewal, ambiguous-side-effect
+  reconciliation, and retry limits.
 - Optional tenant-scoped idempotency keys for task creation. Replays with identical
   request payloads return the original task; payload changes under the same key
   return HTTP 409.
@@ -45,9 +46,9 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency, cancellation acknowledgement and ambiguous-side-effect reconciliation | Automated tests added; latest run pending |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
-| Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
+| Identity and control center | Browser control-center UI exists; integrated enterprise JWT/SSO, user administration and full end-to-end identity tests | Partially implemented; enterprise identity not verified |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
 | Reliability operations | Backup/restore drill, rollback rehearsal, alerting and incident runbook | Not completed |
 | Production rollout | Staging soak, canary, SLO approval and owner sign-off | Not performed |
@@ -60,10 +61,11 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Apply migrations `001` through `006` in order using the database owner before
-  enabling production task intake. The API runtime must not have schema-owner or
-  superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
+- Apply core migrations `001` through `006`, then `008` through `010` in
+  order using the database owner before enabling production task intake. The API
+  runtime must not have schema-owner or superuser privileges. Migration `010`
+  is required for cooperative cancellation and its reconciliation state.
+- Apply `migrations/007_rag_knowledge_pgvector.sql` on a pgvector-enabled
   knowledge database and configure the restricted `rusa_knowledge_worker` role.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
