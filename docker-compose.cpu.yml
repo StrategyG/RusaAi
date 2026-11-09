@@ -8,6 +8,7 @@ services:
       RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
       RUSA_MODEL_API_KEY: ""
+      RUSA_MODEL_ALLOW_INTERNAL_HTTP: "true"
     depends_on:
       llama-cpp:
         condition: service_started

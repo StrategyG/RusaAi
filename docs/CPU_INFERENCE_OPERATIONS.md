@@ -69,7 +69,7 @@ docker compose --profile worker -f docker-compose.yml -f docker-compose.cpu.yml 
 
 The worker profile requires the dedicated rootless Docker socket, workspace and Git mirror paths from `.env.example`, plus the agent sandbox image built on that same rootless Docker daemon. For example, after loading the `.env` values in your shell, build the sandbox with `DOCKER_HOST="unix://${RUSA_DOCKER_SOCKET}" docker build -f Dockerfile.agent-sandbox -t "${RUSA_SANDBOX_IMAGE}" .`. Do not expose or mount the host's rootful Docker socket into the worker.
 
-The CPU override configures both API Gateway and Worker to use `http://llama-cpp:8080/v1`, clears any inherited remote model API key, and sets worker parallelism to one by default. The llama.cpp service has no published host port, is reachable only on the internal Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU. Without `--profile worker`, the API and model are available but autonomous background task execution is not started.
+The CPU override configures both API Gateway and Worker to use `http://llama-cpp:8080/v1`, clears any inherited remote model API key, and sets worker parallelism to one by default. Production URL validation normally requires credential-free HTTPS; the override explicitly opts into HTTP only for the exact `llama-cpp:8080/v1` service endpoint. This exception cannot be used for arbitrary HTTP hosts. The llama.cpp service has no published host port, is attached only to the private Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU. Without `--profile worker`, the API and model are available but autonomous background task execution is not started.
 
 ## 4. Initial CPU tuning
 
