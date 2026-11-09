@@ -317,6 +317,7 @@ def test_cancel_with_unknown_side_effect_requires_reconciliation():
             tenant,
             side_effect="APPLIED",
             evidence="Verified the remote branch and draft PR state in GitHub.",
+            audit_actor="api:human-reviewer",
         )
         reconciled = queue.get(task_id, tenant)
         assert reconciled["status"] == "awaiting_approval"
