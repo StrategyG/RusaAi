@@ -616,13 +616,6 @@ def test_development_task_authentication_binds_a_local_principal(monkeypatch):
 
 
 def test_cancellation_reconciliation_endpoint_is_tenant_admin_gated(monkeypatch):
-    import hashlib
-    import uuid
-
-    from fastapi.testclient import TestClient
-
-    from app import app
-
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("RUSA_API_KEYS", raising=False)
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
@@ -666,9 +659,6 @@ def test_cancellation_reconciliation_endpoint_is_tenant_admin_gated(monkeypatch)
 
 
 def test_cancellation_reconciliation_endpoint_rejects_developer_role(monkeypatch):
-    import hashlib
-    import uuid
-
     raw_key = "developer-reconcile-test-key-000000000000"
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("RUSA_API_KEYS", raising=False)
