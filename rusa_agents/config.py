@@ -186,34 +186,14 @@ class RuntimeConfig:
             errors.append("RUSA_MODEL_BASE_URL is required")
         else:
             model_url = urlparse(self.model_base_url)
-            allow_internal_http = os.getenv(
-                "RUSA_MODEL_ALLOW_INTERNAL_HTTP", "false"
-            ).strip().lower()
-            if allow_internal_http not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
-                errors.append("RUSA_MODEL_ALLOW_INTERNAL_HTTP must be a boolean value")
-            internal_cpu_endpoint = (
-                allow_internal_http in {"1", "true", "yes", "on"}
-                and model_url.scheme == "http"
-                and model_url.hostname == "llama-cpp"
-                and model_url.port == 8080
-                and model_url.path == "/v1"
-                and not model_url.username
-                and not model_url.password
-                and not model_url.query
-                and not model_url.fragment
-            )
-            credential_free_https = (
-                model_url.scheme == "https"
-                and bool(model_url.hostname)
-                and not model_url.username
-                and not model_url.password
-            )
-            if not credential_free_https and not internal_cpu_endpoint:
-                errors.append(
-                    "RUSA_MODEL_BASE_URL must use credential-free HTTPS or the explicitly "
-                    "enabled private llama.cpp CPU endpoint"
-                )
-            if self._looks_placeholder(model_url.hostname) and not internal_cpu_endpoint:
+            if (
+                model_url.scheme != "https"
+                or not model_url.hostname
+                or model_url.username
+                or model_url.password
+            ):
+                errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
+            if self._looks_placeholder(model_url.hostname):
                 errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
         return errors
 
