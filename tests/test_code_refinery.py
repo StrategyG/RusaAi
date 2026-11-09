@@ -16,6 +16,7 @@ from rusa_agents.code_refinery.sandbox import (
     SandboxRiskClassifier,
 )
 from rusa_agents.contracts import WorkerRole
+from rusa_agents.providers import OpenAICompatibleProvider
 from rusa_agents.tool_gateway import ToolResult, WorkspaceToolGateway
 
 
@@ -316,3 +317,19 @@ def test_microvm_snapshot_is_deterministic_and_excludes_secrets(tmp_path):
         assert "app.py" in names
         assert ".env" not in names
         assert "secrets/token.txt" not in names
+
+
+
+def test_local_provider_does_not_inherit_primary_api_key(monkeypatch):
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "primary-provider-secret")
+    local = OpenAICompatibleProvider(
+        base_url="http://localhost:9000/v1",
+        api_key="",
+    )
+    assert local.api_key == ""
+
+
+def test_primary_provider_uses_default_api_key_when_not_overridden(monkeypatch):
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "primary-provider-secret")
+    primary = OpenAICompatibleProvider(base_url="https://model.example/v1")
+    assert primary.api_key == "primary-provider-secret"
