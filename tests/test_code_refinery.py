@@ -352,3 +352,136 @@ def test_test_modules_are_not_penalized_for_optional_annotations_or_docstrings()
     assert report.passed
     assert report.metrics["type_safety"] == 100
     assert report.metrics["documentation"] == 100
+
+
+
+def test_analyzer_blocks_dynamic_import_and_shell_subprocess():
+    dynamic_import = '''"""Dynamic import sample."""
+
+import importlib
+
+def load_module(name: str):
+    return importlib.import_module(name)
+'''
+    shell_subprocess = '''"""Shell subprocess sample."""
+
+import subprocess
+
+def run(command: str, shell_mode: bool):
+    return subprocess.run(command, shell=shell_mode)
+'''
+    dynamic_report = analyze_sources(
+        {"src/dynamic_import.py": dynamic_import},
+        test_files_present=True,
+    )
+    shell_report = analyze_sources(
+        {"src/shell_command.py": shell_subprocess},
+        test_files_present=True,
+    )
+    assert not dynamic_report.passed
+    assert dynamic_report.blocking_findings == 1
+    assert not shell_report.passed
+    assert shell_report.blocking_findings == 1
+
+
+def test_classifier_routes_dynamic_import_and_unknown_shell_to_microvm(tmp_path):
+    dynamic = tmp_path / "test_dynamic.py"
+    dynamic.write_text(
+        "import importlib\ndef test_dynamic():\n    importlib.import_module('plugin')\n",
+        encoding="utf-8",
+    )
+    risk, reasons = SandboxRiskClassifier().classify(tmp_path, "pytest")
+    assert risk == "high"
+    assert any("importlib.import_module" in reason for reason in reasons)
+
+    dynamic.unlink()
+    shell = tmp_path / "test_shell.py"
+    shell.write_text(
+        "import subprocess\ndef test_shell(mode):\n    subprocess.run('echo x', shell=mode)\n",
+        encoding="utf-8",
+    )
+    risk, reasons = SandboxRiskClassifier().classify(tmp_path, "pytest")
+    assert risk == "high"
+    assert any("subprocess.run" in reason for reason in reasons)
+
+
+def test_microvm_snapshot_rejects_embedded_high_confidence_credentials(tmp_path):
+    token = "ghp_" + "A" * 36
+    (tmp_path / "module.py").write_text(
+        f"TOKEN = '{token}'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="high-confidence credential material"):
+        MicroVMHTTPBackend._archive_workspace(tmp_path)
+
+
+def test_microvm_from_env_requires_pinned_image_digest_in_production(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MICROVM_BASE_URL", "https://microvm.internal")
+    monkeypatch.setenv("RUSA_MICROVM_API_KEY", "k" * 32)
+    monkeypatch.delenv("RUSA_MICROVM_RUNNER_IMAGE_DIGEST", raising=False)
+    with pytest.raises(ValueError, match="RUSA_MICROVM_RUNNER_IMAGE_DIGEST"):
+        MicroVMHTTPBackend.from_env()
+
+
+def test_microvm_readiness_rejects_runner_digest_mismatch():
+    expected = "sha256:" + "a" * 64
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={"ready": True, "runner_image_digest": "sha256:" + "b" * 64},
+        )
+
+    backend = MicroVMHTTPBackend(
+        "https://microvm.internal",
+        "k" * 32,
+        expected_runner_image_digest=expected,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RuntimeError, match="does not match the pinned image"):
+        backend.verify_ready()
+
+
+def test_microvm_execution_rejects_runner_digest_mismatch(tmp_path):
+    (tmp_path / "sample.py").write_text(GOOD_SOURCE, encoding="utf-8")
+    _, digest = MicroVMHTTPBackend._archive_workspace(tmp_path)
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "run_id": "run-123",
+                "exit_code": 0,
+                "snapshot_sha256": digest,
+                "runner_image_digest": "sha256:" + "b" * 64,
+                "stdout": "tests passed",
+                "stderr": "",
+            },
+        )
+
+    backend = MicroVMHTTPBackend(
+        "https://microvm.internal",
+        "k" * 32,
+        expected_runner_image_digest="sha256:" + "a" * 64,
+        transport=httpx.MockTransport(handler),
+    )
+    result = backend.run(tmp_path, "pytest")
+    assert not result.ok
+    assert result.evidence["blocked"] is True
+
+
+def test_microvm_invalid_utf8_response_fails_closed(tmp_path):
+    (tmp_path / "sample.py").write_text(GOOD_SOURCE, encoding="utf-8")
+
+    def handler(request):
+        return httpx.Response(200, content=b"\\xff")
+
+    backend = MicroVMHTTPBackend(
+        "https://microvm.internal",
+        "k" * 32,
+        transport=httpx.MockTransport(handler),
+    )
+    result = backend.run(tmp_path, "pytest")
+    assert not result.ok
+    assert result.evidence["blocked"] is True
