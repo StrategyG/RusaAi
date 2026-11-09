@@ -6,21 +6,21 @@ from rusa_knowledge.parquet import iter_telemetry_aggregates
 
 
 def test_parquet_telemetry_aggregation_is_grouped_and_batched(tmp_path: Path):
-    duckdb = pytest.importorskip("duckdb")
+    pytest.importorskip("duckdb")
     parquet = tmp_path / "telemetry.parquet"
     connection = duckdb.connect()
     try:
+        target = str(parquet).replace("'", "''")
         connection.execute(
-            """
+            f"""
             COPY (
                 SELECT * FROM (VALUES
                     (TIMESTAMP '2026-11-09 10:00:00', 'api', 80.0, 50.0),
                     (TIMESTAMP '2026-11-09 10:05:00', 'api', 90.0, 60.0),
                     (TIMESTAMP '2026-11-09 10:10:00', 'worker', 40.0, 30.0)
                 ) AS t(ts, service, cpu_percent, memory_percent)
-            ) TO ? (FORMAT PARQUET)
-            """,
-            [str(parquet)],
+            ) TO '{target}' (FORMAT PARQUET)
+            """
         )
     finally:
         connection.close()
@@ -48,7 +48,8 @@ def test_parquet_telemetry_rejects_unsafe_identifiers_and_limits(tmp_path: Path)
 
     connection = duckdb.connect()
     try:
-        connection.execute("COPY (SELECT 1 AS id) TO ? (FORMAT PARQUET)", [str(parquet)])
+        target = str(parquet).replace("'", "''")
+        connection.execute(f"COPY (SELECT 1 AS id) TO '{target}' (FORMAT PARQUET)")
     finally:
         connection.close()
 
