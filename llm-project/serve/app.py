@@ -394,6 +394,20 @@ class AICodeTaskRequest(BaseModel):
         return value
 
 
+class AICodeTaskReconciliationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    side_effect: Literal["NONE", "APPLIED"]
+    evidence: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str) -> str:
+        if not value.strip() or contains_high_confidence_secret_text(value):
+            raise ValueError("Reconciliation evidence must be non-empty and must not contain credential-like material")
+        return value.strip()
+
+
 class AICodeTaskResponse(BaseModel):
     task_id: str
     status: str
@@ -496,8 +510,12 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
 
 
 TASK_ROLE_PERMISSIONS = {
-    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
-    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "platform_admin": frozenset({
+        "task:create", "task:read", "task:retry", "task:cancel", "task:reconcile",
+    }),
+    "tenant_admin": frozenset({
+        "task:create", "task:read", "task:retry", "task:cancel", "task:reconcile",
+    }),
     "developer": frozenset({"task:create", "task:read"}),
     "read_only": frozenset({"task:read"}),
 }
@@ -1006,6 +1024,51 @@ def get_aicode_task(
         raise HTTPException(status_code=404, detail="Task not found")
     return result
 
+
+
+@app.post("/v1/aicode/tasks/{task_id}/reconcile", status_code=200)
+def reconcile_aicode_task(
+    task_id: UUID,
+    body: AICodeTaskReconciliationRequest,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:reconcile")),
+):
+    """Require an authorized human determination before an ambiguous cancellation can be retried."""
+    queue = getattr(app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    actor = _api_task_actor(http_request)
+    try:
+        reconciled = queue.reconcile_cancellation(
+            str(task_id),
+            tenant_id,
+            side_effect=body.side_effect,
+            evidence=body.evidence,
+            audit_actor=actor,
+        )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Could not reconcile AICode task cancellation")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.reconcile", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.reconcile", reconciled, persist=False
+    )
+    if not reconciled:
+        raise HTTPException(
+            status_code=409,
+            detail="Task has no unresolved cancellation side effect to reconcile",
+        )
+    return {
+        "task_id": str(task_id),
+        "status": "awaiting_approval",
+        "reconciled": True,
+        "side_effect": body.side_effect,
+        "retry_requires_explicit_action": True,
+    }
 
 
 @app.post("/v1/aicode/tasks/{task_id}/retry", status_code=202)
