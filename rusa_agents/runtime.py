@@ -394,6 +394,7 @@ class AICodeRuntime:
                 return True
 
             await self._assert_lease(job, lost_lease, cancel_requested)
+            side_effect = "UNKNOWN"
             commit_sha = await asyncio.to_thread(
                 self.queue.publish_if_lease_owned,
                 job.id,
