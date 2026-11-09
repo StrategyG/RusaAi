@@ -19,6 +19,7 @@ from uuid import uuid4
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
+from .secret_scan import contains_high_confidence_secret
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -98,7 +99,12 @@ class DockerSandbox:
         totals = [0]
 
         def bounded_copy(source: str, destination: str) -> str:
-            size = Path(source).stat().st_size
+            source_path = Path(source)
+            if contains_high_confidence_secret(source_path):
+                raise ToolDenied(
+                    "Sandbox snapshot contains high-confidence credential material"
+                )
+            size = source_path.stat().st_size
             totals[0] += size
             if totals[0] > self.max_snapshot_bytes:
                 raise ToolDenied("Sandbox snapshot exceeds configured size limit")
