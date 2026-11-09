@@ -31,3 +31,25 @@ TOOL_EXECUTIONS = Counter(
     "Registered tool executions",
     ("tool", "outcome"),
 )
+
+
+DEVOPS_JOBS = Counter(
+    "rusa_devops_jobs_total",
+    "DevOps jobs by job type and outcome",
+    ("job_type", "outcome"),
+)
+DEVOPS_JOB_DURATION = Histogram(
+    "rusa_devops_job_duration_seconds",
+    "DevOps job execution duration in seconds",
+    ("job_type",),
+)
+DEVOPS_FORECAST_RUNS = Counter(
+    "rusa_devops_forecast_runs_total",
+    "DevOps forecasting training runs",
+    ("outcome",),
+)
+DEVOPS_ANOMALIES = Counter(
+    "rusa_devops_anomalies_total",
+    "DevOps anomaly assessments by severity",
+    ("severity",),
+)
