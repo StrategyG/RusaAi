@@ -72,8 +72,12 @@ Production startup requires the MicroVM backend by default. Environment:
 - `RUSA_MICROVM_BASE_URL`: internal HTTPS URL of the trusted MicroVM supervisor.
 - `RUSA_MICROVM_API_KEY`: bearer credential, at least 24 UTF-8 bytes.
 - `RUSA_MICROVM_RUNNER_IMAGE_DIGEST`: pinned `sha256:<64 lowercase hex>` runner image digest; mandatory in production and checked at readiness and execution.
-- `RUSA_MICROVM_REQUIRED`: Optional Boolean for non-production. Production always requires MicroVM and rejects an explicit false value.
+- `RUSA_MICROVM_MTLS_REQUIRED`: Boolean; optional in development, mandatory in production. Production rejects an explicit false value.
+- `RUSA_MICROVM_CLIENT_CERT` and `RUSA_MICROVM_CLIENT_KEY`: filesystem paths to the workload's client certificate and private key. Both are required when mTLS is enabled; mount them read-only from the secret manager and rotate them using the workload identity process.
+- `RUSA_MICROVM_CA_BUNDLE`: optional path to a private CA bundle. If omitted, the system trust store is used.
 - `RUSA_MICROVM_TIMEOUT_SECONDS`: 30–3600 seconds, default 900.
+
+The adapter creates a verified TLS context for both readiness and execution, loads the client identity for mutual TLS, and keeps bearer-token authorization as an additional control. Certificate/key paths must point to existing non-empty regular files. Production startup fails closed if mTLS is disabled or either half of the client identity is missing.
 
 The HTTP adapter contract is:
 
@@ -114,7 +118,7 @@ Expected JSON response:
 }
 ```
 
-The client verifies the echoed snapshot digest and immutable runner image digest. It does not accept an arbitrary command from the model. The supervisor must independently enforce a Firecracker/MicroVM boundary, no host credentials, bounded CPU/memory/PIDs/disk/time, restricted network, disposable filesystem, and signed/pinned runner image.
+The client verifies the echoed snapshot digest and immutable runner image digest. It does not accept an arbitrary command from the model. The supervisor must independently enforce a Firecracker/MicroVM boundary, no host credentials, bounded CPU/memory/PIDs/disk/time, restricted network, disposable filesystem, and signed/pinned runner image. The supervisor must validate the client certificate chain and workload identity, enforce certificate expiry/revocation policy, and reject clients outside the approved trust domain.
 
 **Important:** this PR implements the client, contract, routing, and mocked protocol tests. It does not deploy or certify the Firecracker supervisor. Until a real supervisor is provisioned and independently tested, production readiness remains blocked.
 
