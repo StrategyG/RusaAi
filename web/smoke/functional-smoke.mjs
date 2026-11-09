@@ -37,6 +37,12 @@ const seededTask = {
   result: { branch: "feature/smoke", commit_sha: "0123456789abcdef0123456789abcdef01234567" }
 };
 const approvalTask = { ...seededTask, task_id: "00000000-0000-4000-8000-000000000002", status: "awaiting_approval" };
+const otherTenantTask = {
+  ...seededTask,
+  task_id: "00000000-0000-4000-8000-000000000004",
+  tenant_id: "tenant-other",
+  payload: { ...seededTask.payload, objective: "Other tenant smoke task" }
+};
 const seen = [];
 
 function json(response, status, body) {
@@ -53,6 +59,7 @@ function identityFor(key) {
   if (key === "platform-key") return { subject: "smoke-admin", tenant_id: "tenant-smoke", roles: ["platform_admin"] };
   if (key === "developer-key") return { subject: "smoke-developer", tenant_id: "tenant-smoke", roles: ["developer"] };
   if (key === "readonly-key") return { subject: "smoke-reader", tenant_id: "tenant-smoke", roles: ["read_only"] };
+  if (key === "other-tenant-key") return { subject: "other-tenant-admin", tenant_id: "tenant-other", roles: ["tenant_admin"] };
   return null;
 }
 
@@ -82,8 +89,12 @@ const backend = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/v1/aicode/tasks" && request.method === "GET") {
-      const items = url.searchParams.get("status") === "awaiting_approval" ? [approvalTask] : [seededTask];
-      return json(response, 200, { items, total: 1, limit: Number(url.searchParams.get("limit") || 25), offset: Number(url.searchParams.get("offset") || 0) });
+      const identity = identityFor(apiKey);
+      if (!identity) return json(response, 401, { detail: "Invalid API key" });
+      const items = identity.tenant_id === "tenant-other"
+        ? [otherTenantTask]
+        : url.searchParams.get("status") === "awaiting_approval" ? [approvalTask] : [seededTask];
+      return json(response, 200, { items, total: items.length, limit: Number(url.searchParams.get("limit") || 25), offset: Number(url.searchParams.get("offset") || 0) });
     }
     if (url.pathname === "/v1/aicode/tasks" && request.method === "POST") {
       if (!identityFor(apiKey) || apiKey === "readonly-key") return json(response, 403, { detail: "task:create permission required" });
@@ -94,18 +105,33 @@ const backend = createServer(async (request, response) => {
       return json(response, 202, { task_id: "00000000-0000-4000-8000-000000000003", tenant_id: "tenant-smoke", status: "queued" });
     }
     const taskMatch = url.pathname.match(/^\/v1\/aicode\/tasks\/([0-9a-f-]+)$/i);
+    const taskForId = (taskId) => [seededTask, approvalTask, otherTenantTask].find((task) => task.task_id === taskId);
     if (taskMatch && request.method === "GET") {
-      const task = taskMatch[1] === approvalTask.task_id ? approvalTask : seededTask;
-      return json(response, 200, { ...task, task_id: taskMatch[1] });
+      const identity = identityFor(apiKey);
+      const task = taskForId(taskMatch[1]);
+      if (!identity || !task || task.tenant_id !== identity.tenant_id) {
+        return json(response, 404, { detail: "Task not found" });
+      }
+      return json(response, 200, task);
     }
     if (taskMatch && request.method === "DELETE") {
-      if (apiKey === "readonly-key") return json(response, 403, { detail: "task:cancel permission required" });
+      const identity = identityFor(apiKey);
+      if (!identity || !identity.roles.some((role) => ["platform_admin", "tenant_admin"].includes(role))) {
+        return json(response, 403, { detail: "task:cancel permission required" });
+      }
+      const task = taskForId(taskMatch[1]);
+      if (!task || task.tenant_id !== identity.tenant_id) return json(response, 404, { detail: "Task not found" });
       return json(response, 202, { task_id: taskMatch[1], status: "cancelled" });
     }
     const retryMatch = url.pathname.match(/^\/v1\/aicode\/tasks\/([0-9a-f-]+)\/retry$/i);
     if (retryMatch && request.method === "POST") {
-      if (apiKey === "readonly-key") return json(response, 403, { detail: "task:retry permission required" });
-      if (retryMatch[1] === approvalTask.task_id) {
+      const identity = identityFor(apiKey);
+      if (!identity || !identity.roles.some((role) => ["platform_admin", "tenant_admin"].includes(role))) {
+        return json(response, 403, { detail: "task:retry permission required" });
+      }
+      const task = taskForId(retryMatch[1]);
+      if (!task || task.tenant_id !== identity.tenant_id) return json(response, 404, { detail: "Task not found" });
+      if (task.status !== "failed") {
         return json(response, 409, { detail: "Task is unavailable or not in a retryable state" });
       }
       return json(response, 202, { task_id: retryMatch[1], status: "queued" });
@@ -299,6 +325,40 @@ try {
   });
   assert.equal(crossOrigin.status, 403, "Mutating BFF routes must reject cross-origin requests");
 
+  const developerLogin = await fetch(base + "/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ apiKey: "developer-key" })
+  });
+  assert.equal(developerLogin.status, 200);
+  const developerCookie = (developerLogin.headers.get("set-cookie") || "").split(";")[0];
+  const deniedDeveloperRetry = await fetch(base + "/api/tasks/" + seededTask.task_id + "/retry", {
+    method: "POST", headers: { Origin: base, Cookie: developerCookie }
+  });
+  assert.equal(deniedDeveloperRetry.status, 403, "Developers must not retry tasks through the BFF");
+  const deniedDeveloperCancel = await fetch(base + "/api/tasks/" + seededTask.task_id, {
+    method: "DELETE", headers: { Origin: base, Cookie: developerCookie }
+  });
+  assert.equal(deniedDeveloperCancel.status, 403, "Developers must not cancel tasks through the BFF");
+
+  const otherTenantLogin = await fetch(base + "/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: base },
+    body: JSON.stringify({ apiKey: "other-tenant-key" })
+  });
+  assert.equal(otherTenantLogin.status, 200);
+  const otherTenantCookie = (otherTenantLogin.headers.get("set-cookie") || "").split(";")[0];
+  const otherTenantList = await fetch(base + "/api/tasks", { headers: { Cookie: otherTenantCookie } });
+  assert.equal(otherTenantList.status, 200);
+  const otherTenantItems = (await otherTenantList.json()).items;
+  assert.equal(otherTenantItems.length, 1);
+  assert.equal(otherTenantItems[0].tenant_id, "tenant-other");
+  assert.equal(otherTenantItems[0].payload.objective, "Other tenant smoke task");
+  const crossTenantDetail = await fetch(base + "/api/tasks/" + seededTask.task_id, {
+    headers: { Cookie: otherTenantCookie }
+  });
+  assert.equal(crossTenantDetail.status, 404, "Backend tenant scope must hide another tenant's task detail");
+
   const readOnlyLogin = await fetch(base + "/api/session", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: base },
@@ -464,10 +524,19 @@ try {
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
 
+  await page.getByLabel("RUSA API Key").fill("other-tenant-key");
+  await page.getByRole("button", { name: "Connect to RUSA AI" }).click();
+  await page.locator(".rc-page-head h1").filter({ hasText: "Command Center" }).waitFor({ state: "visible" });
+  await page.locator(".rc-nav-item").filter({ hasText: "AICode Tasks" }).click();
+  await page.getByText("Other tenant smoke task", { exact: true }).waitFor({ state: "visible" });
+  assert.equal(await page.getByText("Smoke-test task detail", { exact: true }).count(), 0, "A tenant switch must not retain the previous tenant task data");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("heading", { name: "Masuk ke RUSA AI" }).waitFor({ state: "visible" });
+
   await browser.close();
   browser = undefined;
 
-  process.stdout.write("RUSA AI web functional smoke: PASS (BFF contracts + platform_admin/developer/read_only UI role matrix, failed-only retry, approval safety, navigation, agent contracts, DevOps stages, chat, validator, responsive navigation, logout).\\n");
+  process.stdout.write("RUSA AI web functional smoke: PASS (BFF contracts + platform_admin/developer/tenant_admin/read_only role matrix, tenant-scoped task detail and tenant switch, failed-only retry, approval safety, navigation, agent contracts, DevOps stages, chat, validator, responsive navigation, logout).\\n");
 } catch (error) {
   process.stderr.write("RUSA AI web functional smoke: FAIL\n");
   process.stderr.write((error instanceof Error ? error.stack : String(error)) + "\n");
