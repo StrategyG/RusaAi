@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -190,3 +191,55 @@ def test_inference_provider_rejects_stream_without_terminal_reason():
     with pytest.raises(RuntimeError, match="without a finish reason"):
         asyncio.run(collect())
 
+
+
+def test_worker_provider_uses_cpu_generation_timeout_environment(monkeypatch):
+    monkeypatch.setenv("RUSA_GENERATION_TIMEOUT_SECONDS", "300")
+    monkeypatch.delenv("RUSA_MODEL_TIMEOUT_SECONDS", raising=False)
+    provider = OpenAICompatibleProvider(
+        base_url="http://llama-cpp:8080/v1",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+    )
+    assert provider.timeout_seconds == 300
+
+
+def test_worker_provider_timeout_override_is_validated(monkeypatch):
+    monkeypatch.setenv("RUSA_MODEL_TIMEOUT_SECONDS", "240")
+    monkeypatch.setenv("RUSA_GENERATION_TIMEOUT_SECONDS", "300")
+    provider = OpenAICompatibleProvider(base_url="http://llama-cpp:8080/v1")
+    assert provider.timeout_seconds == 240
+
+    monkeypatch.setenv("RUSA_MODEL_TIMEOUT_SECONDS", "invalid")
+    with pytest.raises(ValueError, match="must be numeric"):
+        OpenAICompatibleProvider(base_url="http://llama-cpp:8080/v1")
+
+
+def test_llama_cpp_openai_compatible_endpoint():
+    def handler(request):
+        if request.method == "GET":
+            assert request.url.path == "/v1/models"
+            return httpx.Response(200, json={"data": [{"id": "rusa-cpu"}]}, request=request)
+        assert request.url.path == "/v1/chat/completions"
+        payload = json.loads(request.content)
+        assert payload["model"] == "rusa-cpu"
+        assert payload["stream"] is False
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "RUSA-AI CPU ready"}}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="http://llama-cpp:8080/v1",
+        default_model="rusa-cpu",
+        transport=httpx.MockTransport(handler),
+    )
+
+    async def verify():
+        assert await provider.check_ready() is True
+        return await provider.complete(
+            [{"role": "user", "content": "health check"}],
+            max_tokens=16,
+        )
+
+    assert asyncio.run(verify()) == "RUSA-AI CPU ready"

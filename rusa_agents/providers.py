@@ -51,6 +51,22 @@ async def _read_limited_json(
     return payload
 
 
+def _provider_timeout(value: float | None) -> float:
+    if value is None:
+        raw_value = os.getenv("RUSA_MODEL_TIMEOUT_SECONDS") or os.getenv(
+            "RUSA_GENERATION_TIMEOUT_SECONDS"
+        )
+        if raw_value is None:
+            value = 120.0
+        else:
+            try:
+                value = float(raw_value)
+            except ValueError as exc:
+                raise ValueError("Model provider timeout must be numeric") from exc
+    if not 0 < value <= 3600:
+        raise ValueError("Model provider timeout must be greater than 0 and at most 3600 seconds")
+    return value
+
 def _response_limit(value: int | None) -> int:
     if value is None:
         try:
@@ -68,7 +84,7 @@ class OpenAICompatibleProvider:
         base_url: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
-        timeout_seconds: float = 120.0,
+        timeout_seconds: float | None = None,
         max_retries: int = 2,
         max_response_bytes: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -76,11 +92,11 @@ class OpenAICompatibleProvider:
         self.base_url = (base_url or os.getenv("RUSA_MODEL_BASE_URL", "")).rstrip("/")
         self.model = model or os.getenv("RUSA_MODEL_NAME", "rusa-ai")
         self.api_key = api_key or os.getenv("RUSA_MODEL_API_KEY")
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = _provider_timeout(timeout_seconds)
         self.max_retries = max_retries
         self.max_response_bytes = _response_limit(max_response_bytes)
         self.transport = transport
-        if timeout_seconds <= 0 or max_retries < 0:
+        if max_retries < 0:
             raise ValueError("Provider timeout must be positive and max_retries cannot be negative")
         if not self.base_url:
             raise ValueError("RUSA_MODEL_BASE_URL must point to an OpenAI-compatible chat endpoint")
