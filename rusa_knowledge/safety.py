@@ -8,6 +8,10 @@ from urllib.parse import urlsplit
 
 _PATTERNS = (
     (
+        re.compile(r"-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH|ENCRYPTED) )?PRIVATE KEY-----"),
+        "private-key material",
+    ),
+    (
         re.compile(
             r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{20,}?-----END [A-Z0-9 ]*PRIVATE KEY-----"
         ),
