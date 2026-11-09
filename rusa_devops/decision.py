@@ -46,8 +46,10 @@ def recommend_capacity(
     overprovision_cost: float = 1.0, scale_buffer: float = 1.15,
     min_capacity: float = 1.0, max_capacity: float = 1_000_000.0,
 ) -> CapacityRecommendation:
-    if len(predicted_values) == 0 or current_capacity <= 0:
-        raise ValueError("forecast values and positive current capacity are required")
+    if len(predicted_values) == 0 or not math.isfinite(float(current_capacity)) or current_capacity <= 0:
+        raise ValueError("forecast values and positive finite current capacity are required")
+    if any(not math.isfinite(float(value)) for value in predicted_values):
+        raise ValueError("forecast values must all be finite")
     if not 1.0 <= scale_buffer <= 3.0 or min_capacity <= 0 or max_capacity < min_capacity:
         raise ValueError("capacity bounds or scale buffer are invalid")
     peak = max(float(value) for value in predicted_values)
