@@ -29,14 +29,27 @@ class AutonomyPolicy:
     }
 
     def __init__(self, allowed_actions: set[str] | None = None):
-        self.allowed_actions = allowed_actions or {
+        defaults = {
             "repo_read", "branch_create", "workspace_write",
             "test_run", "commit_feature_branch", "pull_request_create", "audit_read",
         }
+        if allowed_actions is not None and (
+            not isinstance(allowed_actions, set)
+            or any(not isinstance(item, str) or not item.strip() for item in allowed_actions)
+        ):
+            raise ValueError("allowed_actions must be a set of non-empty action names")
+        self.allowed_actions = frozenset(defaults if allowed_actions is None else allowed_actions)
 
     def evaluate(
         self, action: str, risk: RiskLevel = RiskLevel.LOW
     ) -> PolicyDecision:
+        if not isinstance(action, str) or not action.strip():
+            return PolicyDecision(False, False, "Action name is invalid")
+        if not isinstance(risk, RiskLevel):
+            try:
+                risk = RiskLevel(risk)
+            except (TypeError, ValueError):
+                return PolicyDecision(False, False, "Risk level is invalid")
         if action in self.DENIED_ACTIONS:
             return PolicyDecision(False, False, f"Action '{action}' is prohibited")
         if action in self.PROTECTED_ACTIONS:
