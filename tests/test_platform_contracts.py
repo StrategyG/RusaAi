@@ -126,6 +126,13 @@ def test_agent_result_contract_rejects_success_without_verification_evidence():
         validate_agent_result(result)
 
 
+def test_agent_result_contract_rejects_success_without_evidence():
+    result = _result()
+    result["evidence"] = []
+    with pytest.raises(PlatformContractError, match="evidence"):
+        validate_agent_result(result)
+
+
 def test_agent_result_contract_rejects_inverted_execution_interval():
     result = _result()
     result["completed_at"] = "2026-11-09T09:59:00Z"
