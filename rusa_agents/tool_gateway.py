@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
-from .metrics import TOOL_EXECUTIONS
+from .metrics import REFINERY_QUALITY_REPORTS, REFINERY_QUALITY_SCORE, TOOL_EXECUTIONS
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -407,6 +407,13 @@ class WorkspaceToolGateway:
             )
             payload = report.to_dict()
             exit_code = 0 if report.passed else 1
+            REFINERY_QUALITY_SCORE.observe(report.overall_score)
+            outcome = (
+                "not_applicable"
+                if report.not_applicable and report.passed
+                else "pass" if report.passed else "fail"
+            )
+            REFINERY_QUALITY_REPORTS.labels(outcome).inc()
             evidence = {
                 "profile": "refinery",
                 "exit_code": exit_code,
@@ -425,6 +432,7 @@ class WorkspaceToolGateway:
                 evidence,
             )
         except (OSError, UnicodeDecodeError, ValueError, ToolDenied) as exc:
+            REFINERY_QUALITY_REPORTS.labels("error").inc()
             return ToolResult(
                 False,
                 f"Refinery quality gate failed closed: {type(exc).__name__}: {str(exc)[:500]}",
