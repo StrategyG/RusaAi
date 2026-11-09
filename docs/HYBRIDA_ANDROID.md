@@ -96,3 +96,6 @@ Override the model endpoint only with another HTTP loopback endpoint. The app re
 This is a first runnable Android-local slice, not a production-certified Android APK. The UI is an installable PWA hosted by the local Termux service; a signed native APK/Capacitor wrapper is a later packaging step. RAG uses local sparse TF-IDF vectors plus FTS5; a separate dense embedding model is intentionally deferred to conserve RAM. The existing tenant-scoped PostgreSQL RAG/MCP service and the production AICode stack remain unchanged.
 
 Before wider release, run on-device smoke tests for the target phone, check the llama.cpp build against its CPU features, profile memory/thermal throttling, test large PDF/DOCX parsing, and verify the MCP transport with the intended MCP client.
+
+
+DOCX ingestion uses the Python standard library (zipfile and ElementTree), so the Android install does not need python-docx/lxml. PDF ingestion uses the optional pure-Python pypdf package.
