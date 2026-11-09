@@ -75,7 +75,7 @@ def iter_telemetry_aggregates(
         raise ValueError("max_aggregates must be between 1 and 10000000")
 
     resolved = path.resolve(strict=True)
-    path_literal = "'" + str(resolved).replace("'", "''") + "'"
+    parquet_source = str(resolved)
     connection = duckdb.connect(database=":memory:")
     try:
         connection.execute(f"SET memory_limit = '{memory_limit.upper()}'")
@@ -92,7 +92,8 @@ def iter_telemetry_aggregates(
             connection.execute(f"SET temp_directory = {temp_literal}")
 
         schema = connection.execute(
-            f"DESCRIBE SELECT * FROM read_parquet({path_literal}, union_by_name=true)"
+            "DESCRIBE SELECT * FROM read_parquet(?, union_by_name=true)",
+            [parquet_source],
         ).fetchall()
         column_types = {row[0]: str(row[1]).upper() for row in schema}
         if timestamp_column not in column_types or group_column not in column_types:
@@ -122,13 +123,13 @@ def iter_telemetry_aggregates(
                     TRY_CAST({timestamp_sql} AS TIMESTAMP)) AS bucket_start,
                 COUNT(*)::BIGINT AS row_count,
                 {", ".join(expressions)}
-            FROM read_parquet({path_literal}, union_by_name=true)
+            FROM read_parquet(?, union_by_name=true)
             WHERE TRY_CAST({timestamp_sql} AS TIMESTAMP) IS NOT NULL
             GROUP BY 1, 2
             ORDER BY 2, 1
             LIMIT {max_aggregates + 1}
         """
-        cursor = connection.execute(query)
+        cursor = connection.execute(query, [parquet_source])
         while True:
             rows = cursor.fetchmany(batch_size)
             if not rows:
