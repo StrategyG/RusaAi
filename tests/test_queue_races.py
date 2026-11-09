@@ -310,6 +310,21 @@ def test_cancel_with_unknown_side_effect_requires_reconciliation():
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "awaiting_approval"
         assert current["result"]["cancel_reconciliation_required"] is True
+        assert queue.retry(task_id, tenant) is False
+        assert queue.reconcile_cancellation(
+            task_id,
+            tenant,
+            side_effect="APPLIED",
+            evidence="Verified the remote branch and draft PR state in GitHub.",
+        )
+        reconciled = queue.get(task_id, tenant)
+        assert reconciled["status"] == "awaiting_approval"
+        assert reconciled["result"]["cancel_reconciliation_required"] is False
+        assert reconciled["result"]["reconciliation"]["outcome"] == "APPLIED"
+        assert queue.retry(task_id, tenant) is True
+        retried = queue.get(task_id, tenant)
+        assert retried["status"] == "queued"
+        assert retried["result"]["reconciliation"]["evidence"].startswith("Verified the remote")
     finally:
         remove_task(task_id, tenant)
 
@@ -343,5 +358,30 @@ def test_queued_cancel_is_immediate_without_claiming_a_lease():
         current = queue.get(task_id, tenant)
         assert current and current["status"] == "cancelled"
         assert current["attempts"] == 0
+    finally:
+        remove_task(task_id, tenant)
+
+
+
+def test_cancellation_reconciliation_rejects_credential_bearing_evidence():
+    queue = make_queue()
+    tenant = f"queue-cancel-reconcile-secret-{uuid4().hex}"
+    task_id = str(uuid4())
+    token = "ghp_" + "Z" * 36
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "secret in reconciliation evidence"})
+        job = queue.claim("cancel-reconcile-secret-worker", lease_seconds=30, tenant_id=tenant)
+        assert job and job.task_id == task_id
+        assert queue.cancel(task_id, tenant)
+        assert queue.finish_cancelled(
+            job.id, tenant, "cancel-reconcile-secret-worker", job.lease_token,
+            side_effect="UNKNOWN",
+        )
+        with pytest.raises(ValueError, match="Reconciliation evidence"):
+            queue.reconcile_cancellation(
+                task_id, tenant, side_effect="NONE",
+                evidence="Credential " + token,
+            )
+        assert queue.retry(task_id, tenant) is False
     finally:
         remove_task(task_id, tenant)
