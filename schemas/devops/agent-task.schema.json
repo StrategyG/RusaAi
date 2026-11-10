@@ -28,7 +28,8 @@
         "string",
         "null"
       ],
-      "maxLength": 128
+      "maxLength": 128,
+      "minLength": 1
     },
     "source_agent": {
       "type": "string",
@@ -111,7 +112,8 @@
         "string",
         "null"
       ],
-      "maxLength": 128
+      "maxLength": 128,
+      "minLength": 1
     },
     "traceparent": {
       "type": "string",
