@@ -46,7 +46,7 @@ Generated stubs and a live gRPC server are intentionally deferred to Phase 3D. J
 
 ## Deployment and migration
 
-Apply migrations in numeric order after 010_platform_governance_registry.sql. Migration 007 does not alter aicode_jobs. It creates the rusa_relay_runtime NOLOGIN group; production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
+Apply migrations in numeric order after 010_platform_governance_registry.sql. Migration 011 does not alter aicode_jobs. It creates the DevOps API/worker/relay runtime groups; Migration 012 adds fenced task leases and cancellation epochs; production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
 
 ## Exit criteria for Phase 3A
 
