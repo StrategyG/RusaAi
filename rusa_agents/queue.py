@@ -680,9 +680,11 @@ class PostgresTaskQueue:
         return bool(row and row[0])
 
     def retry(
-        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+        self, task_id: str, tenant_id: str, *, queue_name: str = "aicode",
+        audit_actor: str | None = None,
     ) -> bool:
         """Explicitly requeue a failed or approval-paused task for a tenant."""
+        self._validate_queue_name(queue_name)
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
@@ -692,10 +694,10 @@ class PostgresTaskQueue:
                 UPDATE aicode_jobs
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s
+                WHERE task_id=%s AND tenant_id=%s AND queue_name=%s
                   AND status IN ('awaiting_approval', 'failed')
                 RETURNING id
-            """, (task_id, tenant_id)).fetchone()
+            """, (task_id, tenant_id, queue_name)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.retry",
                 "allow" if row is not None else "deny",
@@ -703,16 +705,19 @@ class PostgresTaskQueue:
         return row is not None
 
     def cancel(
-        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+        self, task_id: str, tenant_id: str, *, queue_name: str = "aicode",
+        audit_actor: str | None = None,
     ) -> bool:
+        self._validate_queue_name(queue_name)
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
                 UPDATE aicode_jobs SET status='cancelled', lease_owner=NULL,
                     lease_until=NULL, lease_token=NULL, updated_at=NOW()
-                WHERE task_id=%s AND tenant_id=%s AND status IN ('queued', 'running', 'awaiting_approval')
-            """, (task_id, tenant_id))
+                WHERE task_id=%s AND tenant_id=%s AND queue_name=%s
+                  AND status IN ('queued', 'running', 'awaiting_approval')
+            """, (task_id, tenant_id, queue_name))
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.cancel",
                 "allow" if cur.rowcount == 1 else "deny",
@@ -726,9 +731,11 @@ class PostgresTaskQueue:
         status_filter: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        queue_name: str = "aicode",
         audit_actor: str | None = None,
     ) -> dict[str, Any]:
         """Return a tenant-scoped, newest-first page of durable task records."""
+        self._validate_queue_name(queue_name)
         self._require_policy_audit_actor(audit_actor)
         valid_statuses = {
             "queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled",
@@ -742,35 +749,35 @@ class PostgresTaskQueue:
             self._set_tenant(conn, tenant_id)
             if status_filter is None:
                 total = conn.execute(
-                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s",
-                    (tenant_id,),
+                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s AND queue_name=%s",
+                    (tenant_id, queue_name),
                 ).fetchone()[0]
                 rows = conn.execute(
                     """
                     SELECT task_id::text, tenant_id, payload, result, status, attempts,
                            max_attempts, last_error, created_at, updated_at
                     FROM aicode_jobs
-                    WHERE tenant_id=%s
+                    WHERE tenant_id=%s AND queue_name=%s
                     ORDER BY created_at DESC, id DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (tenant_id, limit, offset),
+                    (tenant_id, queue_name, limit, offset),
                 ).fetchall()
             else:
                 total = conn.execute(
-                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s AND status=%s",
-                    (tenant_id, status_filter),
+                    "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s AND status=%s AND queue_name=%s",
+                    (tenant_id, status_filter, queue_name),
                 ).fetchone()[0]
                 rows = conn.execute(
                     """
                     SELECT task_id::text, tenant_id, payload, result, status, attempts,
                            max_attempts, last_error, created_at, updated_at
                     FROM aicode_jobs
-                    WHERE tenant_id=%s AND status=%s
+                    WHERE tenant_id=%s AND status=%s AND queue_name=%s
                     ORDER BY created_at DESC, id DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (tenant_id, status_filter, limit, offset),
+                    (tenant_id, status_filter, queue_name, limit, offset),
                 ).fetchall()
             self._record_policy_event(
                 conn, tenant_id, "*", audit_actor, "task.list", "allow",
@@ -791,16 +798,18 @@ class PostgresTaskQueue:
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     def get(
-        self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
+        self, task_id: str, tenant_id: str, *, queue_name: str = "aicode",
+        audit_actor: str | None = None,
     ) -> dict[str, Any] | None:
+        self._validate_queue_name(queue_name)
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
                 SELECT task_id::text, tenant_id, payload, result, status, attempts,
                        max_attempts, last_error, created_at, updated_at
-                FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s
-            """, (task_id, tenant_id)).fetchone()
+                FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s AND queue_name=%s
+            """, (task_id, tenant_id, queue_name)).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.read",
                 "allow" if row is not None else "deny",
