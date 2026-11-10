@@ -71,3 +71,31 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
   evaluation datasets.
 - Do not describe the complete product as production-ready until every applicable
   release gate has objective evidence and human approval.
+
+
+## Production hardening candidate — PR #106
+
+The current hardening candidate adds the following code-level controls:
+
+- Production API and worker PostgreSQL DSNs require `sslmode=verify-full`.
+- Production Compose no longer bulk-injects `.env` into API and worker containers; each service receives an explicit environment allowlist.
+- `python -m rusa_agents.production_preflight` validates runtime configuration, the web session secret, and exact repository-owned GHCR image references pinned by SHA-256 digest.
+- Web CI audits production dependencies and scans the final web container for CRITICAL/HIGH vulnerabilities.
+- Regression tests cover TLS identity verification, service-secret separation, and immutable image references.
+
+The preflight validates configuration and digest syntax only. It does not verify Cosign signatures, SLSA provenance, SBOM contents, deployment state, or external infrastructure.
+
+## Additional production gates observed on 2026-11-11
+
+| Gate | Current evidence | Required action |
+|---|---|---|
+| Main branch governance | `main` reports `protected=false`; no repository rulesets were returned | Configure required reviews/status checks and block force-push/deletion |
+| Signed release pipeline | PR #53 remains open; its described release images cover API, worker, and sandbox | Complete the release workflow and bind the web image to the same signed manifest/provenance policy |
+| Certification CLI | PR #72 remains open; PR #71 contract layer is merged | Review and integrate the CLI and its exact-manifest evaluation path |
+| Web dependency reproducibility | CI resolves a lockfile artifact; no committed `web/package-lock.json` exists | Commit the lockfile and use `npm ci` in CI and Docker builds |
+| Vulnerability disposition | Current blocking Trivy gate ignores unfixed findings | Fix or formally approve every remaining CRITICAL/HIGH finding against the exact image digest |
+| Agentic DevOps lifecycle | PRs #99 and #100 remain drafts | Complete review, integration, live worker-pool and staging evidence |
+| RusaModels integration | PR #103 remains draft and describes a v0.1.0-draft contract | Finalize and implement the model-plane contract before relying on it in production |
+| Operational certification | No live tenant-isolation, sandbox adversarial, backup/restore, load/soak, or model-quality evidence was supplied | Run the required staging exercises and obtain operator sign-off |
+
+Do not describe the full RUSA AI product as production-ready until the applicable gates above have objective evidence and human approval.
