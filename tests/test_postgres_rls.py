@@ -35,6 +35,8 @@ def apply_database_migrations():
             "008_aicode_task_list_audit.sql",
             "009_platform_workflow_core.sql",
             "010_platform_governance_registry.sql",
+            "011_devops_durable_communication.sql",
+            "012_devops_task_leases_and_cancellation.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
