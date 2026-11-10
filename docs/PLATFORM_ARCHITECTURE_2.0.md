@@ -376,6 +376,10 @@ Shared/core identities should be implemented once and exposed through capability
 | ADR-PLATFORM-005 — Model service boundary | Keep RusaModels independent; RusaAi consumes its authenticated APIs only. |
 | ADR-PLATFORM-006 — Human approvals | Centralize approval records and decisions; do not infer approval from agent output or expose an approval action until a backend contract exists. |
 
+## 12.1 Accepted naming and communication baseline
+
+The canonical hierarchy and communication evolution are recorded in [ADR-PLATFORM-001/002](ADR-PLATFORM-001-002.md). The maintained [Agent Capability Status Matrix](AGENT_CAPABILITY_MATRIX.md) is the source of truth for UI and operational capability labels. The current PostgreSQL queue remains the durable task mechanism; outbox/inbox is the first reliability evolution; RabbitMQ, Kafka, gRPC, and WebSocket are deferred until justified by measured requirements.
+
 ## 13. Delivery sequence
 
 1. **Platform Core contract foundation:** naming, schemas, compatibility adapters, contract tests, and architecture ADRs.
