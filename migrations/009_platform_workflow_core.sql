@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_tasks (
     evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb
         CHECK (jsonb_typeof(evidence_refs) = 'array'),
     side_effect_status TEXT NOT NULL DEFAULT 'NONE',
+    approval_id TEXT,
     lease_owner TEXT,
     lease_epoch BIGINT NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
     lease_until TIMESTAMPTZ,
