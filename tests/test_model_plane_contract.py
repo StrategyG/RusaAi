@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+import jsonschema
 import pytest
 import yaml
 
@@ -13,10 +13,10 @@ def load_schema(name: str) -> dict:
     return json.loads((ROOT / name).read_text(encoding="utf-8"))
 
 
-def validator(name: str) -> Draft202012Validator:
+def validator(name: str) -> jsonschema.Draft202012Validator:
     schema = load_schema(name)
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    jsonschema.Draft202012Validator.check_schema(schema)
+    return jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
 
 
 def valid_request() -> dict:
@@ -81,7 +81,7 @@ def test_model_plane_json_schemas_are_valid() -> None:
         "inference-response.schema.json",
         "inference-error.schema.json",
     ):
-        Draft202012Validator.check_schema(load_schema(name))
+        jsonschema.Draft202012Validator.check_schema(load_schema(name))
 
 
 def test_openapi_document_references_existing_contract_schemas() -> None:
@@ -104,7 +104,7 @@ def test_valid_chat_request_matches_contract() -> None:
 def test_request_rejects_untrusted_tenant_override() -> None:
     payload = valid_request()
     payload["tenant_id"] = "attacker-selected-tenant"
-    with pytest.raises(ValidationError):
+    with pytest.raises(jsonschema.ValidationError):
         validator("inference-request.schema.json").validate(payload)
 
 
