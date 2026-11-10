@@ -21,6 +21,8 @@ This module establishes a versioned contract boundary for the eight lifecycle sp
 
 The contract also supports non-stage identities such as `rusa_devops_orchestrator` and `rusa_security_guard_agent`. This change defines identity models; it does not claim that all ten agents are implemented or registered as executable workers.
 
+The separate Complete Agent Documentation lists a ten-role cross-functional catalog: Supreme Orchestrator, System Architect, Planner, Task Decomposer, Software Engineer, DevOps, QA & Testing, Security & Policy, Memory & Knowledge, and Evaluation & Reporting. This phase does not collapse that catalog into the eight lifecycle stages or invent one-to-one mappings. The registry, ownership boundaries, and per-agent tool scopes must be explicitly reviewed before those identities become executable workers.
+
 ## Contract artifacts
 
 - `rusa_agents/devops/contracts.py` — Pydantic v2 models and validation rules.
