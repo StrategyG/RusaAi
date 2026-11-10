@@ -1,6 +1,5 @@
 """RUSA AI Agentic DevOps contract foundation."""
 
-from .workflow import DummyWorkflowRunner, WorkflowExecution
 from .contracts import (
     AgentConstraints,
     AgentIdentity,
@@ -15,6 +14,7 @@ from .contracts import (
     WorkflowEvent,
     map_aicode_task_state,
 )
+from .workflow import DummyWorkflowRunner, WorkflowExecution
 
 __all__ = [
     "DummyWorkflowRunner",
