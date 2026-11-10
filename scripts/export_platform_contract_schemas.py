@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 from pathlib import Path
 
@@ -22,7 +23,18 @@ def export_schemas(output_dir: Path, *, check: bool = False) -> list[Path]:
             sort_keys=True,
         ) + "\n"
         if check:
-            if not path.is_file() or path.read_text(encoding="utf-8") != rendered:
+            if not path.is_file():
+                raise SystemExit(f"platform contract schema is missing: {path}")
+            actual = path.read_text(encoding="utf-8")
+            if actual != rendered:
+                diff = difflib.unified_diff(
+                    actual.splitlines(),
+                    rendered.splitlines(),
+                    fromfile=str(path),
+                    tofile="generated",
+                    lineterm="",
+                )
+                print("\n".join(list(diff)[:120]))
                 raise SystemExit(f"platform contract schema is stale: {path}")
         else:
             path.write_text(rendered, encoding="utf-8")
