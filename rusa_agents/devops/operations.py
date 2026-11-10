@@ -150,7 +150,7 @@ class RunbookAction:
             raise ValueError("approval scope cannot be set for an action that needs no approval")
         schema = dict(self.parameter_schema)
         jsonschema.Draft202012Validator.check_schema(schema)
-        object.__setattr__(self, "parameter_schema", MappingProxyType(schema))
+        object.__setattr__(self, "parameter_schema", schema)
 
 
 @dataclass(frozen=True)
@@ -457,28 +457,12 @@ class OperateAgentExecutor:
             report_ref = self.artifact_store.put_json(
                 task["tenant_id"], report, namespace="artifact"
             )
-            evidence_ref = self.artifact_store.put_json(
-                task["tenant_id"],
-                {
-                    "schema_version": 1,
-                    "tenant_id": task["tenant_id"],
-                    "workflow_id": task["workflow_id"],
-                    "task_id": task["task_id"],
-                    "agent_id": OPERATE_AGENT,
-                    "artifact_ref": report_ref,
-                    "runbook_ref": runbook_ref,
-                    "action_id": action_id,
-                    "side_effect": execution.side_effect,
-                    "created_at": _timestamp(),
-                },
-                namespace="evidence",
-            )
             result = _result(
                 task,
                 status=execution.status,
                 summary=execution.summary,
                 artifact_refs=[report_ref],
-                evidence_refs=[evidence_ref],
+                evidence_refs=[report_ref],
                 findings=[
                     {
                         "severity": row["severity"],
