@@ -28,8 +28,8 @@ from .build_test import (
     _signed_evidence,
     _validate_oci_reference,
     _validate_registry_hosts,
-    _verified_evidence,
     _validate_time_window,
+    _verified_evidence,
 )
 from .release import ApprovalDecision, ApprovalVerifier
 from .specialists import (
@@ -625,7 +625,7 @@ class DeployAgentExecutor:
             )
 
         try:
-            release_evidence, manifest = _verify_release_candidate(
+            _, manifest = _verify_release_candidate(
                 self.artifact_store,
                 task["tenant_id"],
                 task["workflow_id"],

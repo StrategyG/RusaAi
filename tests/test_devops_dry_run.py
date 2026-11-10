@@ -109,21 +109,21 @@ def test_security_guard_block_stops_downstream_execution():
     assert any(event["type"] == "workflow.blocked" for event in report.events)
 
 
-def test_production_deploy_requires_approval_before_deploy_task_is_created():
+def test_dry_run_blocks_production_deploy_in_staging_only_phase4e():
     orchestrator = DevOpsDryRunOrchestrator(
         environment="production",
         approval_refs={"release": "approval://dry-run/release-approved"},
     )
     report = _run(orchestrator)
 
-    assert report.status == "needs_approval"
+    assert report.status == "blocked"
     assert not any(
         task["stage"] == "deploy" and task["agent_id"] == AGENT_BY_STAGE["deploy"]
         for task in report.tasks
     )
     blocked = [event for event in report.events if event["type"] == "workflow.blocked"]
     assert blocked[-1]["payload"]["stage"] == "deploy"
-    assert blocked[-1]["payload"]["reason_code"] == "approval_required"
+    assert blocked[-1]["payload"]["reason_code"] == "staging_only"
 
 
 def test_monitor_feedback_creates_a_causally_linked_new_plan_request():

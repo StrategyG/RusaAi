@@ -161,21 +161,53 @@ SBOM, and independent Test evidence before preparing an immutable candidate.
 The Release Agent does not invoke a deployment adapter. Staging deployment,
 health checks, smoke tests, and rollback remain the next increment.
 
-## Explicitly not completed by Phase 4D
+## Phase 4E — staging-only Deploy Agent
 
-- Staging-only Deploy Agent with target allowlists, health checks, smoke tests,
-  and rollback rehearsal.
-- Operate, Monitor, and Security Guard service integrations.
-- Production BuildKit/test service provisioning, worker-pool provisioning,
-  heartbeat loops, and live child-task orchestration.
+The Deploy Agent is a separate workload identity. It does not publish an
+official release and it rejects production targets in this increment.
 
-## Next increments
+- Verifies the detached-signed Release attestation and immutable release
+  candidate manifest against tenant, workflow, exact source commit, artifact
+  digest, release version, and approved OCI registry host.
+- Accepts only a host-configured staging target ID and a service in that
+  target's service allowlist. Task input contains no endpoint, shell command,
+  credential, or arbitrary network destination.
+- Requires a host approval verifier when the task or host policy requires
+  staging approval. Approval is bound to tenant, workflow, deploy stage,
+  source commit, artifact digest, expiry, and a human approver identity.
+- Loads a content-addressed rollback plan and smoke-test plan. Both schemas
+  allow only named checks and a previous immutable digest; no user-supplied
+  commands or URLs are accepted.
+- Inspects the active staging digest and requires it to match the rollback
+  plan before deployment. A host adapter rehearses rollback to that exact
+  digest before applying the candidate.
+- Requires the deployment adapter to confirm the exact target, service,
+  candidate digest, and previous digest. Health and smoke results must observe
+  the candidate digest and return exactly the requested named checks.
+- Stores an immutable deployment record and a detached-signed Deploy
+  attestation. A passing result hands off to Operate Agent.
+- Automatic rollback after failed verification is disabled by default.
+  Enabling it is a host policy decision; the executor verifies the restored
+  digest after rollback and records ambiguous outcomes as UNKNOWN.
 
-- **4E — Staging deployment:** verify the signed release candidate, enforce
-  staging target allowlists and deployment approvals, run health/smoke checks,
-  and rehearse rollback.
+### Execution adapter boundary
+
+The deployment adapter is injected by the host and owns network access,
+environment credentials, serialization, and secret-manager integration.
+The agent model cannot invoke shell commands or inspect raw secrets. Tests
+use deterministic fakes; they do not claim a live staging deployment.
+
+## Explicitly not completed by Phase 4E
+
+- Operate, Monitor, and Security Guard live service/telemetry integrations.
+- Production BuildKit/test/deployment services, workload key provisioning,
+  worker-pool provisioning, heartbeat loops, and live child-task orchestration.
+
+## Next increment
+
 - **4F — Operations and governance:** integrate Operate, Monitor, and Security
-  Guard with allowlisted services, telemetry, and policy-engine decisions.
+  Guard with allowlisted services, telemetry, incident records, and
+  policy-engine decisions.
 
 The Phase 4 exit criterion remains a staging workflow that produces a signed
 release candidate whose tests and provenance match the exact source revision.

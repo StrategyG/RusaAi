@@ -131,21 +131,33 @@ def test_security_guard_is_cross_cutting_and_read_only():
     validate_agent_task(payload)
 
 
-def test_deploy_task_requires_approval_and_deploy_scope():
+def test_deploy_task_requires_signed_release_and_staging_rollback_inputs():
     payload = _task()
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
-        "environment": "production",
+        "release_evidence_ref": "evidence://release/attestation",
+        "environment": "staging",
+        "target_id": "staging-blue",
+        "service": "rusa-api",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "rollback_plan_ref": "artifact://deploy/rollback",
+        "smoke_test_plan_ref": "artifact://deploy/smoke",
     }
     payload["constraints"].update(
-        allowed_tools=["artifact.read", "release.read", "deployment.execute"],
-        approval_required=False,
-        approval_scope=[],
+        allowed_tools=[
+            "artifact.read", "release.read", "deployment.execute",
+            "health.read", "runbook.read", "evidence.write",
+        ],
+        write_scope=["deployments/", "evidence/"],
+        approval_required=True,
+        approval_scope=["deploy"],
+        approval_ref="approval://human/deploy-1",
     )
-    with pytest.raises(ContractValidationError, match="approval_required"):
+    validate_agent_task(payload)
+    payload["input"]["environment"] = "production"
+    with pytest.raises(ContractValidationError, match="environment"):
         validate_agent_task(payload)
 
 

@@ -335,6 +335,7 @@ class DevOpsDryRunOrchestrator:
         build_evidence_ref: str | None,
         test_evidence_ref: str | None,
         release_manifest_ref: str | None,
+        release_evidence_ref: str | None,
         environment: str,
     ) -> dict[str, Any]:
         if stage == "plan":
@@ -377,9 +378,14 @@ class DevOpsDryRunOrchestrator:
         if stage == "deploy":
             return {
                 "release_manifest_ref": release_manifest_ref or f"artifact://dry-run/release/{workflow_id}",
+                "release_evidence_ref": release_evidence_ref or f"evidence://dry-run/release/{workflow_id}",
                 "environment": environment,
+                "target_id": "staging-default",
+                "service": service,
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
+                "rollback_plan_ref": f"artifact://dry-run/rollback-plan/{workflow_id}",
+                "smoke_test_plan_ref": f"artifact://dry-run/smoke-plan/{workflow_id}",
             }
         if stage == "operate":
             return {
@@ -417,22 +423,19 @@ class DevOpsDryRunOrchestrator:
         plan_ref: str | None = None
         test_evidence_ref: str | None = None
         release_manifest_ref: str | None = None
+        release_evidence_ref: str | None = None
         monitor_event: dict[str, Any] | None = None
 
         for stage in STAGES:
-            if (
-                stage == "deploy"
-                and self.environment == "production"
-                and not self.approval_refs.get("deploy")
-            ):
-                report.status = "needs_approval"
-                report.blockers.append("Production deployment requires an approval reference.")
+            if stage == "deploy" and self.environment != "staging":
+                report.status = "blocked"
+                report.blockers.append("Phase 4E supports staging deployment only.")
                 report.events.append(self._blocked_event(
                     workflow_id=workflow_id,
                     correlation_id=correlation_id,
                     traceparent=traceparent,
                     stage=stage,
-                    reason_code="approval_required",
+                    reason_code="staging_only",
                     state_version=len(report.events) + 1,
                 ))
                 return report
@@ -462,6 +465,7 @@ class DevOpsDryRunOrchestrator:
                 ),
                 test_evidence_ref=test_evidence_ref,
                 release_manifest_ref=release_manifest_ref,
+                release_evidence_ref=release_evidence_ref,
                 environment=self.environment,
             )
             approval_required = stage in {"release", "deploy"}
@@ -636,6 +640,7 @@ class DevOpsDryRunOrchestrator:
                 test_evidence_ref = result["output"]["evidence_refs"][0]
             if stage == "release":
                 release_manifest_ref = result["output"]["artifact_refs"][0]
+                release_evidence_ref = result["output"]["evidence_refs"][0]
 
             security_input = dict(task_input)
             security_input["evidence_refs"] = list(result["output"]["evidence_refs"])
