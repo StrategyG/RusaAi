@@ -340,6 +340,477 @@ class PostgresWorkflowStore:
                 )
             return len(rows)
 
+    def expire_exhausted_tasks(self, *, producer_version: str = "2.0.0") -> int:
+        """Fail tasks that have exhausted attempts after their last lease is no longer live."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks
+                SET status='failed', phase='failed',
+                    last_error='Maximum task attempts exhausted',
+                    lease_epoch=lease_epoch+1, lease_owner=NULL, lease_until=NULL,
+                    state_version=state_version+1, updated_at=clock_timestamp()
+                WHERE attempt >= max_attempts
+                  AND (
+                    status='queued'
+                    OR (status='running' AND lease_until < clock_timestamp())
+                  )
+                RETURNING tenant_id, workflow_id, run_id, task_id,
+                          attempt, lease_epoch, state_version
+                """
+            ).fetchall()
+            for row in rows:
+                self._set_tenant(conn, row[0])
+                self._append_event(
+                    conn,
+                    _event(
+                        tenant_id=row[0],
+                        workflow_id=row[1],
+                        run_id=row[2],
+                        task_id=row[3],
+                        attempt=row[4],
+                        event_type="task.failed",
+                        producer_id="rusa.workflow_scheduler",
+                        producer_version=producer_version,
+                        payload={
+                            "lease_epoch": max(1, row[5]),
+                            "state_version": row[6],
+                            "code": "attempts_exhausted",
+                            "category": "PERMANENT",
+                            "side_effect": "UNKNOWN",
+                            "diagnostic_ref": None,
+                        },
+                        sequence=row[6],
+                    ),
+                )
+            return len(rows)
+
+    def expire_due_tasks(self, *, producer_version: str = "2.0.0") -> int:
+        """Expire overdue tasks and runs, fencing any worker that still holds a lease."""
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks t
+                SET status='expired', phase='failed',
+                    last_error='Task or workflow deadline expired',
+                    lease_epoch=t.lease_epoch+1, lease_owner=NULL, lease_until=NULL,
+                    state_version=t.state_version+1, updated_at=clock_timestamp()
+                WHERE t.status IN ('queued', 'running')
+                  AND (
+                    t.deadline_at <= %s
+                    OR EXISTS (
+                        SELECT 1 FROM public.rusa_workflow_runs r
+                        WHERE r.tenant_id=t.tenant_id AND r.run_id=t.run_id
+                          AND r.deadline_at <= %s
+                    )
+                  )
+                RETURNING t.tenant_id, t.workflow_id, t.run_id, t.task_id,
+                          t.attempt, t.state_version
+                """,
+                (now, now),
+            ).fetchall()
+            for row in rows:
+                self._set_tenant(conn, row[0])
+                self._append_event(
+                    conn,
+                    _event(
+                        tenant_id=row[0],
+                        workflow_id=row[1],
+                        run_id=row[2],
+                        task_id=row[3],
+                        attempt=max(1, row[4]),
+                        event_type="workflow.task.expired",
+                        producer_id="rusa.workflow_scheduler",
+                        producer_version=producer_version,
+                        payload={"reason_code": "deadline_expired", "state_version": row[5]},
+                        sequence=row[5],
+                    ),
+                )
+
+            expired_runs = conn.execute(
+                """
+                UPDATE public.rusa_workflow_runs
+                SET state='expired', state_version=state_version+1,
+                    updated_at=clock_timestamp()
+                WHERE state IN ('queued', 'planning', 'running', 'validating', 'awaiting_approval')
+                  AND deadline_at <= %s
+                RETURNING tenant_id, workflow_id, run_id, state_version
+                """,
+                (now,),
+            ).fetchall()
+            for row in expired_runs:
+                self._set_tenant(conn, row[0])
+                self._append_event(
+                    conn,
+                    _event(
+                        tenant_id=row[0],
+                        workflow_id=row[1],
+                        run_id=row[2],
+                        event_type="workflow.expired",
+                        producer_id="rusa.workflow_scheduler",
+                        producer_version=producer_version,
+                        payload={"state": "expired", "state_version": row[3]},
+                        sequence=row[3],
+                    ),
+                )
+            return len(rows) + len(expired_runs)
+
+    def consume_budget(
+        self,
+        tenant_id: str,
+        run_id: str,
+        metric: str,
+        amount: int | float,
+        *,
+        producer_version: str = "2.0.0",
+    ) -> dict[str, float]:
+        """Atomically consume a bounded run budget outside the model."""
+        import math
+
+        limits = {
+            "tool_calls": ("max_tool_calls", 100.0),
+            "tokens": ("max_tokens", None),
+            "cost_usd": ("max_cost_usd", None),
+            "repair_cycles": ("max_repair_cycles", 2.0),
+            "retries": ("max_retries", 3.0),
+        }
+        if metric not in limits or type(amount) not in {int, float} or not math.isfinite(float(amount)) or amount <= 0:
+            raise ValueError("budget metric or positive finite amount is invalid")
+        limit_key, default_limit = limits[metric]
+        default_sql = "NULL" if default_limit is None else str(default_limit)
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                f"""
+                UPDATE public.rusa_workflow_runs
+                SET budget_consumed=jsonb_set(
+                        budget_consumed,
+                        ARRAY[%s],
+                        to_jsonb(COALESCE((budget_consumed->>%s)::numeric, 0) + %s::numeric),
+                        true
+                    ),
+                    state_version=state_version+1,
+                    updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND run_id=%s
+                  AND state IN ('running', 'planning', 'validating')
+                  AND (
+                    {default_sql} IS NULL
+                    OR COALESCE((budget->>%s)::numeric, {default_sql})
+                       >= COALESCE((budget_consumed->>%s)::numeric, 0) + %s::numeric
+                  )
+                RETURNING workflow_id, budget_consumed->>%s, state_version,
+                          COALESCE((budget->>%s)::numeric, {default_sql})
+                """,
+                (
+                    metric, metric, amount, tenant_id, run_id,
+                    limit_key, metric, amount, metric, limit_key,
+                ),
+            ).fetchone()
+            if row is None:
+                raise WorkflowConflictError("workflow is missing, terminal, or has exhausted its execution budget")
+            consumed = float(row[1])
+            limit = float(row[3]) if row[3] is not None else float("inf")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=run_id,
+                    event_type="workflow.budget.consumed",
+                    producer_id="rusa.workflow_store",
+                    producer_version=producer_version,
+                    payload={
+                        "metric": metric,
+                        "amount": float(amount),
+                        "consumed": consumed,
+                        "limit": None if math.isinf(limit) else limit,
+                        "state_version": row[2],
+                    },
+                    sequence=row[2],
+                ),
+            )
+            return {"consumed": consumed, "limit": limit}
+
+    def await_approval_task(
+        self,
+        tenant_id: str,
+        task_id: str,
+        worker_id: str,
+        lease_epoch: int,
+        expected_state_version: int,
+        *,
+        approval_id: str,
+        reason: str,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        if not approval_id or not reason:
+            raise ValueError("approval_id and reason are required")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks
+                SET status='awaiting_approval', phase='awaiting_approval',
+                    last_error=%s, state_version=state_version+1,
+                    lease_owner=NULL, lease_until=NULL, updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND task_id=%s AND status='running'
+                  AND lease_owner=%s AND lease_epoch=%s
+                  AND state_version=%s AND lease_until > clock_timestamp()
+                RETURNING workflow_id, run_id, attempt, state_version
+                """,
+                (
+                    reason[:4000], tenant_id, task_id, worker_id,
+                    lease_epoch, expected_state_version,
+                ),
+            ).fetchone()
+            if row is None:
+                raise WorkflowLeaseLostError("approval pause rejected: lease or state version is stale")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=task_id,
+                    attempt=row[2],
+                    event_type="workflow.task.awaiting_approval",
+                    producer_id="rusa.workflow_worker",
+                    producer_version=producer_version,
+                    payload={
+                        "approval_id": approval_id,
+                        "reason": reason[:2000],
+                        "state_version": row[3],
+                    },
+                    sequence=row[3],
+                ),
+            )
+            return int(row[3])
+
+    def resume_approved_task(
+        self,
+        tenant_id: str,
+        task_id: str,
+        approval_id: str,
+        *,
+        expected_state_version: int,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            approval = conn.execute(
+                """
+                SELECT a.workflow_id, a.run_id, a.status, a.expires_at, c.approval_id
+                FROM public.rusa_human_approvals a
+                LEFT JOIN public.rusa_approval_consumptions c
+                  ON c.tenant_id=a.tenant_id AND c.approval_id=a.approval_id
+                WHERE a.tenant_id=%s AND a.approval_id=%s AND a.task_id=%s
+                """,
+                (tenant_id, approval_id, task_id),
+            ).fetchone()
+            if (
+                approval is None or approval[2] != "approved"
+                or approval[3] <= datetime.now(timezone.utc) or approval[4] is None
+            ):
+                raise WorkflowConflictError("task cannot resume without a live, consumed approval bound to it")
+            row = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks
+                SET status='queued', phase='received', available_at=clock_timestamp(),
+                    last_error=NULL, state_version=state_version+1,
+                    updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND task_id=%s AND run_id=%s
+                  AND status='awaiting_approval' AND state_version=%s
+                RETURNING workflow_id, run_id, attempt, state_version
+                """,
+                (tenant_id, task_id, approval[1], expected_state_version),
+            ).fetchone()
+            if row is None:
+                raise WorkflowConflictError("task state is stale or no longer awaiting approval")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=task_id,
+                    attempt=row[2] + 1,
+                    event_type="workflow.task.approval_resumed",
+                    producer_id="rusa.workflow_store",
+                    producer_version=producer_version,
+                    payload={"approval_id": approval_id, "state_version": row[3]},
+                    sequence=row[3],
+                ),
+            )
+            return int(row[3])
+
+    def finish_cancel(
+        self,
+        tenant_id: str,
+        run_id: str,
+        *,
+        expected_state_version: int,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                UPDATE public.rusa_workflow_runs r
+                SET state='cancelled', state_version=state_version+1,
+                    updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND run_id=%s
+                  AND state='cancel_requested' AND state_version=%s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_tasks t
+                      WHERE t.tenant_id=r.tenant_id AND t.run_id=r.run_id
+                        AND t.status='running'
+                  )
+                RETURNING workflow_id, state_version
+                """,
+                (tenant_id, run_id, expected_state_version),
+            ).fetchone()
+            if row is None:
+                raise WorkflowConflictError("workflow cancellation is stale or active tasks remain")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=run_id,
+                    event_type="workflow.cancelled",
+                    producer_id="rusa.workflow_store",
+                    producer_version=producer_version,
+                    payload={"state": "cancelled", "state_version": row[1]},
+                    sequence=row[1],
+                ),
+            )
+            return int(row[1])
+
+    def complete_run(
+        self,
+        tenant_id: str,
+        run_id: str,
+        *,
+        expected_state_version: int,
+        final_report_ref: str,
+        expected_digest: str,
+        verdict,
+        expected_commit: str | None = None,
+        max_evidence_age_seconds: int = 86_400,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        """Complete only when every task succeeded and independent QA proves the exact artifact."""
+        import re
+
+        from .evidence import PostgresEvidenceStore
+        from .platform_contracts import ValidationVerdictPayloadV2
+
+        if not final_report_ref or not re.fullmatch(r"(?:sha256:)?[a-f0-9]{64}", expected_digest):
+            raise ValueError("final report reference and artifact SHA-256 digest are required")
+        if not isinstance(verdict, ValidationVerdictPayloadV2):
+            raise TypeError("complete_run requires a typed ValidationVerdictPayloadV2")
+        now = datetime.now(timezone.utc)
+        evidence_store = PostgresEvidenceStore(self.dsn)
+
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            run = conn.execute(
+                """
+                SELECT workflow_id, state, state_version
+                FROM public.rusa_workflow_runs
+                WHERE tenant_id=%s AND run_id=%s
+                FOR UPDATE
+                """,
+                (tenant_id, run_id),
+            ).fetchone()
+            if run is None or run[1] not in {"running", "validating"} or run[2] != expected_state_version:
+                raise WorkflowConflictError("workflow state is stale or not ready for QA completion")
+
+            unfinished = conn.execute(
+                """
+                SELECT COUNT(*) FROM public.rusa_workflow_tasks
+                WHERE tenant_id=%s AND run_id=%s AND status <> 'succeeded'
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+            if unfinished:
+                raise WorkflowConflictError("workflow cannot complete while tasks are unfinished or failed")
+
+            unresolved_approvals = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM public.rusa_human_approvals a
+                LEFT JOIN public.rusa_approval_consumptions c
+                  ON c.tenant_id=a.tenant_id AND c.approval_id=a.approval_id
+                WHERE a.tenant_id=%s AND a.run_id=%s
+                  AND (
+                    a.status IN ('pending', 'rejected', 'expired', 'cancelled')
+                    OR (a.status='approved' AND c.approval_id IS NULL)
+                  )
+                """,
+                (tenant_id, run_id),
+            ).fetchone()[0]
+            if unresolved_approvals:
+                raise WorkflowConflictError("workflow has unresolved or unconsumed human approvals")
+
+            evidence_ids = evidence_store._verify_on_connection(
+                conn, tenant_id, verdict,
+                expected_digest=expected_digest,
+                expected_commit=expected_commit,
+                max_age_seconds=max_evidence_age_seconds,
+                now=now,
+            )
+            updated = conn.execute(
+                """
+                UPDATE public.rusa_workflow_runs
+                SET state='succeeded', final_report_ref=%s, final_artifact_digest=%s,
+                    state_version=state_version+1, updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND run_id=%s AND state_version=%s
+                RETURNING state_version
+                """,
+                (
+                    final_report_ref, expected_digest, tenant_id, run_id,
+                    expected_state_version,
+                ),
+            ).fetchone()
+            if updated is None:
+                raise WorkflowConflictError("workflow state changed during finalization")
+
+            verdict_event = WorkflowEventV2(
+                tenant_id=tenant_id,
+                workflow_id=run[0],
+                run_id=run_id,
+                correlation_id=run[0],
+                event_type="validation.verdict",
+                producer_id=verdict.producer_id,
+                producer_version=verdict.producer_version,
+                occurred_at=verdict.evaluated_at,
+                payload=verdict.model_dump(mode="json"),
+                sequence=updated[0] - 1,
+            )
+            self._append_event(conn, verdict_event)
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=run[0],
+                    run_id=run_id,
+                    event_type="workflow.completed",
+                    producer_id="rusa.workflow_store",
+                    producer_version=producer_version,
+                    payload={
+                        "state": "succeeded",
+                        "state_version": updated[0],
+                        "final_report_ref": final_report_ref,
+                        "artifact_digest": expected_digest,
+                        "evidence_ids": evidence_ids,
+                    },
+                    sequence=updated[0],
+                ),
+            )
+            return int(updated[0])
+
     def claim_ready_tasks(
         self,
         worker_id: str,
@@ -352,8 +823,10 @@ class PostgresWorkflowStore:
             raise ValueError("worker_id and a claim limit between 1 and 100 are required")
         if not 15 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be between 15 and 3600")
+        self.expire_due_tasks(producer_version=producer_version)
+        self.expire_exhausted_tasks(producer_version=producer_version)
         self.block_failed_dependencies(producer_version=producer_version)
-        claimed: list[dict[str, Any]] = []
+        claimed: list[dict[str, Any]] =
         with self._connect() as conn:
             # Lock each eligible run row first. Concurrent schedulers skip a locked run,
             # which makes the per-run max_parallel_tasks check serializable.
