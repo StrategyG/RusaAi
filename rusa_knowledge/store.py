@@ -293,6 +293,85 @@ class PostgresKnowledgeStore:
             for row in rows
         ]
 
+    def fetch_chunks_for_reembedding(
+        self,
+        *,
+        tenant_id: str,
+        collection: str | None = None,
+        after_chunk_id: str | None = None,
+        limit: int = 64,
+    ) -> list[dict[str, str]]:
+        """Read legacy 1536d chunks missing their 384d replacement, in bounded batches."""
+        if self.dimensions != 384:
+            raise ValueError("re-embedding requires a 384-dimensional knowledge store")
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        if collection is not None and (
+            not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection)
+        ):
+            raise ValueError("collection is invalid")
+        if not 1 <= limit <= 64:
+            raise ValueError("re-embedding batch size must be between 1 and 64")
+        if after_chunk_id is not None:
+            try:
+                UUID(after_chunk_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("after_chunk_id must be a UUID") from exc
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            rows = connection.execute(
+                """
+                SELECT chunk_id::text, content
+                FROM rusa_knowledge_chunks
+                WHERE tenant_id=%s
+                  AND embedding_384 IS NULL
+                  AND embedding IS NOT NULL
+                  AND (%s IS NULL OR collection=%s)
+                  AND (%s IS NULL OR chunk_id > %s::uuid)
+                ORDER BY chunk_id
+                LIMIT %s
+                """,
+                (tenant_id, collection, collection, after_chunk_id, after_chunk_id, limit),
+            ).fetchall()
+        return [{"chunk_id": str(row[0]), "content": row[1]} for row in rows]
+
+    def update_reembedded_embeddings(
+        self,
+        *,
+        tenant_id: str,
+        vectors: list[tuple[str, list[float]]],
+    ) -> int:
+        """Set 384d vectors only where the legacy vector still exists and no replacement exists."""
+        if self.dimensions != 384:
+            raise ValueError("re-embedding requires a 384-dimensional knowledge store")
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        if not vectors or len(vectors) > 64:
+            raise ValueError("re-embedding update batch must contain between 1 and 64 vectors")
+        rows = []
+        for chunk_id, vector in vectors:
+            try:
+                UUID(chunk_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("chunk_id must be a UUID") from exc
+            rows.append(( _vector_literal(vector, 384), tenant_id, chunk_id))
+        updated = 0
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            with connection.cursor() as cursor:
+                for vector, scoped_tenant, chunk_id in rows:
+                    cursor.execute(
+                        """
+                        UPDATE rusa_knowledge_chunks
+                        SET embedding_384=%s::vector
+                        WHERE tenant_id=%s AND chunk_id=%s::uuid
+                          AND embedding_384 IS NULL AND embedding IS NOT NULL
+                        """,
+                        (vector, scoped_tenant, chunk_id),
+                    )
+                    updated += cursor.rowcount
+        return updated
+
     def get_document(
         self,
         *,
