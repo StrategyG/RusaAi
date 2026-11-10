@@ -332,6 +332,7 @@ class DevOpsDryRunOrchestrator:
         commit_sha: str,
         artifact_digest: str,
         plan_ref: str | None,
+        build_evidence_ref: str | None,
         test_evidence_ref: str | None,
         release_manifest_ref: str | None,
         environment: str,
@@ -356,6 +357,8 @@ class DevOpsDryRunOrchestrator:
             return {
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
+                "build_evidence_ref": build_evidence_ref
+                or f"evidence://dry-run/build/{workflow_id}",
                 "test_plan_ref": f"artifact://dry-run/test-plan/{workflow_id}",
                 "acceptance_criteria_ref": f"artifact://dry-run/criteria/{workflow_id}",
             }
@@ -440,6 +443,18 @@ class DevOpsDryRunOrchestrator:
                 commit_sha=commit_sha,
                 artifact_digest=artifact_digest,
                 plan_ref=plan_ref,
+                build_evidence_ref=(
+                    next(
+                        (
+                            item["output"]["evidence_refs"][-1]
+                            for item in reversed(report.results)
+                            if item["stage"] == "build"
+                            and item["status"] == "passed"
+                            and item["output"]["evidence_refs"]
+                        ),
+                        None,
+                    )
+                ),
                 test_evidence_ref=test_evidence_ref,
                 release_manifest_ref=release_manifest_ref,
                 environment=self.environment,

@@ -150,14 +150,21 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - Source commit, changed-file hashes, branch and PR are recorded as immutable
   evidence. Ambiguous publication outcomes are not silently retried.
 
+**Phase 4C (this increment) implements Build and independent QA adapters:**
+
+- Build Agent accepts only an immutable source commit and a content-addressed build profile. The injected builder must perform two clean builds and return matching OCI digests.
+- Build Agent validates the OCI registry host against a host-side allowlist, validates SPDX or CycloneDX SBOM JSON, and emits detached-signed build and SBOM attestations.
+- Test Agent requires the signed Build evidence reference, verifies both Build and SBOM signatures, and checks tenant, workflow, source commit, artifact digest, registry, and SBOM digest before running tests.
+- Test Agent accepts only named test suites from an offline test plan. Required suites must pass; required skipped suites and any failed suite block release.
+- Test reports and attestations are immutable, tenant-scoped, and signed by the independent Test Agent identity. A passing result is bound to the exact source commit and artifact digest.
+
 **Remaining Phase 4 work:**
 
-- Build Agent reproducible build execution and SBOM generation.
-- Independent Test Agent execution and exact commit/digest-bound QA evidence.
-- Signed build, SBOM, test and release evidence.
-- Release-candidate verification and staging-only deployment.
-- Deploy, Operate, Monitor and Security Guard service integrations.
-- Production worker-pool provisioning and live child-task orchestration.
+- Provision and harden the actual BuildKit and isolated test-runner adapters; CI currently validates the adapters with deterministic fakes.
+- Verify signed build, SBOM, and test evidence in a Release Agent and produce an immutable release candidate.
+- Add staging-only Deploy integration and rollback rehearsal.
+- Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
+- Provision production worker pools, heartbeat loops, and live child-task orchestration.
 
 The detailed boundaries and follow-on increments are documented in
 [PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).

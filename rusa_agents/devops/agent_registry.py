@@ -213,9 +213,10 @@ _POLICIES = {
                 "build.execute",
                 "artifact.write",
                 "sbom.write",
+                "evidence.write",
             }
         ),
-        write_scope_prefixes=("build/", "artifacts/", "manifests/", "sbom/"),
+        write_scope_prefixes=("build/", "artifacts/", "manifests/", "sbom/", "evidence/"),
     ),
     TEST_AGENT: AgentPolicy(
         agent_id=TEST_AGENT,

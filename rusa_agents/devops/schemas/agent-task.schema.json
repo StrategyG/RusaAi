@@ -112,6 +112,10 @@
           "type": "string",
           "format": "uri"
         },
+        "build_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
         "test_evidence_ref": {
           "type": "string",
           "format": "uri"
@@ -533,6 +537,31 @@
     {
       "if": {
         "properties": {
+          "agent_id": {
+            "const": "rusa_test_agent"
+          },
+          "stage": {
+            "const": "test"
+          }
+        },
+        "required": [
+          "agent_id",
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "build_evidence_ref"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "stage": {
             "const": "release"
           }
@@ -769,7 +798,8 @@
                     "artifact.read",
                     "build.execute",
                     "artifact.write",
-                    "sbom.write"
+                    "sbom.write",
+                    "evidence.write"
                   ]
                 }
               }

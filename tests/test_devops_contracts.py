@@ -292,6 +292,7 @@ def _matching_test_task_and_result() -> tuple[dict, dict]:
     task["input"] = {
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "build_evidence_ref": "evidence://build/evidence",
         "test_plan_ref": "artifact://test/plan",
         "acceptance_criteria_ref": "artifact://test/criteria",
     }
