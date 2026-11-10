@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rusa_agents.platform_contracts import (
     PLATFORM_SCHEMA_MODELS,
+    normalize_contract_schema,
     platform_contract_schema,
 )
 
@@ -26,10 +27,15 @@ def export_schemas(output_dir: Path, *, check: bool = False) -> list[Path]:
             if not path.is_file():
                 raise SystemExit(f"platform contract schema is missing: {path}")
             actual = path.read_text(encoding="utf-8")
-            if actual != rendered:
+            try:
+                actual_schema = json.loads(actual)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid platform contract schema JSON: {path}") from exc
+            expected_schema = platform_contract_schema(model, schema_id)
+            if normalize_contract_schema(actual_schema) != normalize_contract_schema(expected_schema):
                 diff = difflib.unified_diff(
-                    actual.splitlines(),
-                    rendered.splitlines(),
+                    json.dumps(actual_schema, indent=2, sort_keys=True).splitlines(),
+                    json.dumps(expected_schema, indent=2, sort_keys=True).splitlines(),
                     fromfile=str(path),
                     tofile="generated",
                     lineterm="",
