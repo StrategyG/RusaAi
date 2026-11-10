@@ -15,6 +15,7 @@ from rusa_agents.devops.agent_registry import (
     OPERATE_AGENT,
     SECURITY_GUARD_AGENT,
     AgentAuthorizationError,
+    authorize_agent_task,
 )
 from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
 from rusa_agents.devops.deploy import DeploymentTarget
@@ -22,7 +23,6 @@ from rusa_agents.devops.operate_monitor import (
     DependencyStatus,
     MonitorAgentExecutor,
     MonitorPolicy,
-    MonitoringRecordWriter,
     OperateActionPolicy,
     OperateAgentExecutor,
     OperatePolicy,
@@ -33,7 +33,6 @@ from rusa_agents.devops.operate_monitor import (
     SecurityGuardExecutor,
     TelemetrySnapshot,
 )
-from rusa_agents.devops.release import ApprovalDecision
 from rusa_agents.devops.specialists import ExecutionLease
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 
@@ -600,10 +599,6 @@ def test_monitor_and_security_guard_cannot_receive_write_scopes():
     )
 
     with pytest.raises(AgentAuthorizationError):
-        from rusa_agents.devops.agent_registry import authorize_agent_task
-
         authorize_agent_task(monitor_task, authenticated_principal=MONITOR_AGENT)
     with pytest.raises(AgentAuthorizationError):
-        from rusa_agents.devops.agent_registry import authorize_agent_task
-
         authorize_agent_task(security_task, authenticated_principal=SECURITY_GUARD_AGENT)
