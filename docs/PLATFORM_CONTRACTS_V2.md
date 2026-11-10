@@ -38,6 +38,8 @@ The Workflow Event schema includes typed payload definitions and conditional val
 
 The Task Envelope is the \`task.request\` contract. Completion and failure event payloads carry result references and state/lease versions; a full Agent Result is separately addressable.
 
+The DevOps lifecycle event vocabulary remains accepted as generic workflow events while domain-specific stage payloads are versioned separately: `plan.completed`, `code.completed`, `build.completed`, `test.completed`, `release.approved`, `deploy.completed`, `operate.incident_detected`, `operate.recovered`, `monitor.alert_triggered`, `monitor.feedback_created`, `workflow.blocked`, and `workflow.completed`.
+
 All schemas use JSON Schema Draft 2020-12 and are generated from Pydantic models. Regenerate and verify them with:
 
 \`\`\`bash
