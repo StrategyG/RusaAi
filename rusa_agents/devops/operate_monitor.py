@@ -736,11 +736,11 @@ class OperateAgentExecutor:
                 source_commit=deployment["source_commit"],
                 artifact_digest=deployment["artifact_digest"],
             )
-        except Exception:
+        except Exception as exc:
             return _failure(
                 task,
                 started_at=started,
-                code="operate.execution_failed",
+                code=f"operate.execution_failed.{type(exc).__name__.lower()}",
                 message="Operate Agent could not verify the operational result or persist its report.",
                 failure_category="AMBIGUOUS" if action_started else "PERMANENT",
                 side_effect="UNKNOWN" if action_started else "NONE",
@@ -1141,11 +1141,11 @@ class MonitorAgentExecutor:
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
-        except Exception:
+        except Exception as exc:
             return _failure(
                 task,
                 started_at=started,
-                code="monitor.collection_invalid",
+                code=f"monitor.collection_invalid.{type(exc).__name__.lower()}",
                 message="Monitor Agent received invalid telemetry or could not persist the monitoring record.",
                 failure_category="PERMANENT",
                 side_effect="NONE",
