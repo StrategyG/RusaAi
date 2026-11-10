@@ -111,7 +111,7 @@ def test_request_rejects_untrusted_tenant_override() -> None:
 def test_request_rejects_unsupported_capability() -> None:
     payload = valid_request()
     payload["capability"] = "tool_execution"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         validator("inference-request.schema.json").validate(payload)
 
 
