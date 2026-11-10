@@ -132,8 +132,8 @@ def worker_result_to_agent_result(
     agent_version: str = "1.0.0",
 ) -> AgentResultV2:
     """Adapt a WorkerResult while clearly labelling legacy evidence as unverified."""
-    started = started_at or utc_now()
-    completed = completed_at or utc_now()
+    started = started_at or completed_at or utc_now()
+    completed = completed_at or max(utc_now(), started)
     if result.success and not result.blockers:
         status = TaskOutcome.SUCCEEDED
     elif result.blockers:
