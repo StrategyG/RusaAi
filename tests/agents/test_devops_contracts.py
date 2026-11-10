@@ -177,6 +177,7 @@ def test_terminal_result_requires_completed_at_and_monotonic_timestamps():
         "agent_id": "rusa_code_agent",
         "stage": "code",
         "status": "failed",
+        "attempt": 1,
         "summary": "Implementation was blocked.",
     }
     with pytest.raises(ValidationError, match="completed_at"):
