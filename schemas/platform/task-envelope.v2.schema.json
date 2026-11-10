@@ -11,63 +11,9 @@
       "title": "AgentDomain",
       "type": "string"
     },
-    "ArtifactReference": {
-      "additionalProperties": false,
-      "properties": {
-        "label": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Label"
-        },
-        "media_type": {
-          "anyOf": [
-            {
-              "maxLength": 255,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Media Type"
-        },
-        "sha256": {
-          "anyOf": [
-            {
-              "pattern": "^sha256:[a-f0-9]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sha256"
-        },
-        "uri": {
-          "maxLength": 2048,
-          "minLength": 1,
-          "title": "Uri",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uri"
-      ],
-      "title": "ArtifactReference",
-      "type": "object"
-    },
     "ExecutionBudget": {
       "additionalProperties": false,
+      "description": "Per-task hard limits; defaults provide a bounded legacy migration envelope.",
       "properties": {
         "max_cost_usd": {
           "anyOf": [
@@ -114,11 +60,61 @@
       },
       "title": "ExecutionBudget",
       "type": "object"
+    },
+    "ImmutableArtifactReference": {
+      "additionalProperties": false,
+      "description": "Tenant-authorized immutable artifact reference bound to a SHA-256 digest.",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "sha256": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri",
+        "sha256"
+      ],
+      "title": "ImmutableArtifactReference",
+      "type": "object"
     }
   },
   "$id": "https://schemas.rusa.ai/platform/task-envelope.v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "Canonical internal task envelope for platform workflow execution.",
   "properties": {
     "agent_id": {
       "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
@@ -143,6 +139,11 @@
       ],
       "default": null,
       "title": "Approval Ref"
+    },
+    "approval_required": {
+      "default": false,
+      "title": "Approval Required",
+      "type": "boolean"
     },
     "attempt": {
       "default": 1,
@@ -213,7 +214,7 @@
     },
     "input_refs": {
       "items": {
-        "$ref": "#/$defs/ArtifactReference"
+        "$ref": "#/$defs/ImmutableArtifactReference"
       },
       "maxItems": 256,
       "title": "Input Refs",
@@ -266,7 +267,7 @@
     "traceparent": {
       "anyOf": [
         {
-          "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+          "pattern": "^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$",
           "type": "string"
         },
         {
