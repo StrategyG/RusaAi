@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Protocol
-from urllib.parse import urlsplit
 
 import jsonschema
 
@@ -32,7 +31,6 @@ from .specialists import (
     _now,
     _result,
     _timeout_seconds,
-    _timestamp,
 )
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_.-]{1,127}$")
@@ -77,7 +75,7 @@ def _safe_payload(value: Any, *, path: str = "payload", max_bytes: int = 64_000)
         raise ValueError(f"non-finite number is not allowed at {path}")
     elif value is not None and not isinstance(value, (str, int, float, bool)):
         raise ValueError(f"non-JSON adapter value is not allowed at {path}")
-    if len(json.dumps(value, ensure_ascii=False, allow_nan=False, default=str).encode("utf-8")) > max_bytes:
+    if len(json.dumps(value, ensure_ascii=False, allow_nan=False, default=str).encode()) > max_bytes:
         raise ValueError(f"adapter output exceeds {max_bytes} bytes")
 
 
