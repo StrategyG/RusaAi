@@ -133,6 +133,26 @@ class PostgresTaskQueue:
                         "Production idempotency index is missing; "
                         "apply migrations/006_aicode_idempotency.sql"
                     )
+                queue_name_column = conn.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema='public' AND table_name='aicode_jobs'
+                          AND column_name='queue_name'
+                    )
+                """).fetchone()
+                if not queue_name_column or not queue_name_column[0]:
+                    raise RuntimeError(
+                        "Production queue partition is not installed; "
+                        "apply migrations/009_aicode_queue_partitions.sql"
+                    )
+                queue_claim_index = conn.execute(
+                    "SELECT to_regclass('public.idx_aicode_jobs_queue_claim')"
+                ).fetchone()
+                if not queue_claim_index or queue_claim_index[0] is None:
+                    raise RuntimeError(
+                        "Production queue partition index is missing; "
+                        "apply migrations/009_aicode_queue_partitions.sql"
+                    )
                 result_column = conn.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.columns
