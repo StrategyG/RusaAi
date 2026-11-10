@@ -80,11 +80,13 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_tasks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, task_id),
     UNIQUE (tenant_id, workflow_id, run_id, task_id),
-    FOREIGN KEY (tenant_id, run_id)
-        REFERENCES public.rusa_workflow_runs(tenant_id, run_id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, workflow_id, run_id)
+        REFERENCES public.rusa_workflow_runs(tenant_id, workflow_id, run_id) ON DELETE RESTRICT,
     CHECK (deadline_at > created_at),
-    CHECK ((lease_owner IS NULL) = (lease_until IS NULL)),
-    CHECK ((status = 'running') OR lease_owner IS NULL)
+    CHECK (
+        (status = 'running' AND lease_owner IS NOT NULL AND lease_until IS NOT NULL)
+        OR (status <> 'running' AND lease_owner IS NULL AND lease_until IS NULL)
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_tasks_idempotency
@@ -137,8 +139,8 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, event_id),
     UNIQUE (tenant_id, message_id),
-    FOREIGN KEY (tenant_id, run_id)
-        REFERENCES public.rusa_workflow_runs(tenant_id, run_id) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, workflow_id, run_id)
+        REFERENCES public.rusa_workflow_runs(tenant_id, workflow_id, run_id) ON DELETE RESTRICT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_events_sequence
     ON public.rusa_workflow_events(tenant_id, run_id, sequence)
