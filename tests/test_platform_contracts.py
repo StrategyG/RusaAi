@@ -129,7 +129,13 @@ def _event_payload() -> dict:
         "producer_id": "aicode.worker.tester",
         "producer_version": "1.0.0",
         "occurred_at": NOW.isoformat(),
-        "payload": {"worker_id": "worker-1", "lease_epoch": 1, "state_version": 1},
+        "payload": {
+            "worker_id": "worker-1",
+            "lease_epoch": 1,
+            "state_version": 1,
+            "future_optional_field": "same-major compatible",
+        },
+        "future_optional_field": "same-major compatible",
     }
 
 
@@ -365,6 +371,18 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
             format_checker=jsonschema.FormatChecker(),
         )
         validator.validate(sample_payloads[filename])
+
+        invalid_payload = json.loads(json.dumps(sample_payloads[filename]))
+        required_field = {
+            "agent-manifest.v1.schema.json": "agent_id",
+            "task-envelope.v2.schema.json": "tenant_id",
+            "agent-result.v2.schema.json": "summary",
+            "workflow-event.v2.schema.json": "event_type",
+            "task-record.v2.schema.json": "state",
+        }[filename]
+        invalid_payload.pop(required_field)
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(invalid_payload)
 
 
 def test_artifact_reference_rejects_malformed_sha256() -> None:
