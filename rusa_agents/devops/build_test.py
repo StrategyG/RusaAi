@@ -440,9 +440,9 @@ class BuildAgentExecutor:
             principal=authenticated_principal,
             stage="build",
             required_tools=frozenset(
-                {"repository.read", "artifact.read", "build.execute", "artifact.write", "sbom.write"}
+                {"repository.read", "artifact.read", "build.execute", "artifact.write", "sbom.write", "evidence.write"}
             ),
-            required_write_scopes=frozenset({"build/", "artifacts/", "sbom/"}),
+            required_write_scopes=frozenset({"build/", "artifacts/", "sbom/", "evidence/"}),
         )
         lease.validate(task, authenticated_principal)
         _checkpoint(checkpoint)

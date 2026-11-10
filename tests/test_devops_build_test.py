@@ -161,7 +161,7 @@ def _task(stage: str, *, tenant_id: str = "tenant-build-qa") -> dict:
             "commit_sha": SOURCE_COMMIT,
             "build_config_ref": "artifact://sha256/" + "0" * 64,
         }
-        write_scope = ["build/", "artifacts/", "sbom/"]
+        write_scope = ["build/", "artifacts/", "sbom/", "evidence/"]
     elif stage == "test":
         agent_id = TEST_AGENT
         inputs = {

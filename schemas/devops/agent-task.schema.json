@@ -798,7 +798,8 @@
                     "artifact.read",
                     "build.execute",
                     "artifact.write",
-                    "sbom.write"
+                    "sbom.write",
+                    "evidence.write"
                   ]
                 }
               }
