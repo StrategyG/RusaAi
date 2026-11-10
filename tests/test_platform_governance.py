@@ -74,7 +74,7 @@ def policy_decision(**overrides):
         "policy_version": "1",
         "outcome": "allow",
         "reason_code": "policy_allowlist_match",
-        "input_sha256": "a" * 64,
+        "input_sha256": "sha256:" + "a" * 64,
         "evaluated_at": NOW,
         "task_id": "task-1",
     }
@@ -131,7 +131,7 @@ def test_policy_engine_allows_only_explicit_low_risk_allowlist_actions():
     decision = engine.evaluate(request)
     assert decision.outcome == "allow"
     assert decision.reason_code == "policy_allowlist_match"
-    assert len(decision.input_sha256) == 64
+    assert decision.input_sha256.startswith("sha256:") and len(decision.input_sha256) == 71
 
 
 @pytest.mark.parametrize(
