@@ -126,6 +126,8 @@ class PostgresAgentRegistry:
             raise ValueError("registry actor must be a non-empty identity of at most 128 characters")
         if manifest.status != AgentStatus.DRAFT:
             raise AgentRegistryError("new agent registrations must begin in draft status")
+        if tenant_id == "platform" and manifest.tenant_scope.mode == "tenant":
+            raise AgentRegistryError("platform registrations must use system or explicit allowlist tenant scope")
         if manifest.tenant_scope.mode == "system" and tenant_id != "platform":
             raise AgentRegistryError("system-scoped agents must be registered by the platform tenant")
         if manifest.tenant_scope.mode == "allowlist" and tenant_id not in manifest.tenant_scope.tenant_ids:
@@ -357,6 +359,8 @@ class PostgresAgentRegistry:
             raise AgentRegistryError(f"agent version is not active: {manifest.status.value}")
         if capability not in manifest.capabilities:
             raise AgentRegistryError("agent version does not declare the requested capability")
+        if manifest.health.status != AgentHealthStatus.HEALTHY:
+            raise AgentRegistryError("agent runtime health is not healthy")
         if not _tenant_allowed(manifest, tenant_id, "platform" if manifest.tenant_scope.mode == "system" else tenant_id):
             raise AgentRegistryError("agent tenant scope does not authorize this tenant")
         self._validate_bindings(manifest)
@@ -385,6 +389,8 @@ class PostgresAgentRegistry:
             data = raw if isinstance(raw, dict) else json.loads(raw)
             manifest = AgentManifestV1.model_validate(data)
             if capability not in manifest.capabilities:
+                continue
+            if manifest.health.status != AgentHealthStatus.HEALTHY:
                 continue
             if _tenant_allowed(manifest, tenant_id, registry_tenant):
                 self._validate_bindings(manifest)
