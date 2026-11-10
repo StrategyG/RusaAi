@@ -5,14 +5,12 @@ from pydantic import ValidationError
 
 from rusa_agents.contracts import TaskState
 from rusa_agents.devops.contracts import (
-    AgentConstraints,
     AgentIdentity,
     AgentKind,
     AgentResult,
     AgentStage,
     AgentTask,
     AgentTaskStatus,
-    ArtifactReference,
     EventType,
     WorkflowEvent,
     map_aicode_task_state,
