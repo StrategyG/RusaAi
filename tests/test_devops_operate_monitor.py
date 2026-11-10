@@ -491,7 +491,7 @@ async def test_monitor_rejects_telemetry_for_a_different_deployment_digest(tmp_p
     )
 
     assert outcome.result["status"] == "failed"
-    assert outcome.result["output"]["findings"][0]["code"] == "monitor.collection_invalid"
+    assert outcome.result["output"]["findings"][0]["code"].startswith("monitor.collection_invalid.")
     assert writer.records == []
 
 
