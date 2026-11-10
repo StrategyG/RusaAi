@@ -316,7 +316,7 @@ CREATE POLICY rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox
 -- Events, dependency edges, and inbox receipts are immutable facts.
 -- Delivery state alone is mutable in the outbox table.
 CREATE OR REPLACE FUNCTION public.rusa_workflow_event_immutable()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END;
