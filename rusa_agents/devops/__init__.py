@@ -12,7 +12,6 @@ from .artifacts import (
     ArtifactNotFoundError,
     ContentAddressedArtifactStore,
 )
-
 from .build_test import (
     BuildAgentExecutor,
     BuildExecutionResult,
