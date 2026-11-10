@@ -30,6 +30,7 @@ def sample_event():
         workflow_id="workflow-1",
         run_id="run-1",
         correlation_id="workflow-1",
+        traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         event_type="workflow.created",
         producer_id="rusa.workflow_store",
         producer_version="2.0.0",
