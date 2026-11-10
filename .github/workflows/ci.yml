@@ -214,7 +214,16 @@ jobs:
           RUSA_MAX_PARALLEL_WORKERS: "4"
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
+          # Placeholder PEM paths are used only for Compose interpolation validation.
+          # Runtime certificates are provisioned by the deployment secret manager.
+          RUSA_GRPC_SERVER_CERT_FILE: /tmp/rusa-ci/server.crt
+          RUSA_GRPC_SERVER_KEY_FILE: /tmp/rusa-ci/server.key
+          RUSA_GRPC_CLIENT_CA_FILE: /tmp/rusa-ci/client-ca.crt
         run: |
+          mkdir -p /tmp/rusa-ci
+          : > /tmp/rusa-ci/server.crt
+          : > /tmp/rusa-ci/server.key
+          : > /tmp/rusa-ci/client-ca.crt
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
       - name: Validate CPU-only Compose configuration
