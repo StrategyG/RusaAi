@@ -96,7 +96,7 @@ def _require_timezone(value: datetime.datetime, field_name: str) -> datetime.dat
 
 
 class ArtifactReference(ContractModel):
-    """Immutable, tenant-authorized artifact pointer with content digest."""
+    """Immutable artifact pointer with a content digest; authorization is checked by the consumer."""
 
     uri: str = Field(min_length=1, max_length=2048)
     sha256: str = Field(pattern=SHA256_PATTERN)
@@ -173,7 +173,7 @@ class AgentTask(ContractModel):
     priority: Priority = Priority.P2
     acceptance_criteria: list[str] = Field(min_length=1, max_length=100)
     deadline_at: datetime.datetime
-    attempt: int = Field(default=1, ge=1, le=100)
+    attempt: int = Field(ge=1, le=100)
     idempotency_key: str = Field(pattern=IDEMPOTENCY_PATTERN)
     correlation_id: str = Field(min_length=1, max_length=128)
     causation_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -203,6 +203,7 @@ class AgentResult(ContractModel):
     agent_id: str = Field(pattern=AGENT_ID_PATTERN)
     stage: AgentStage
     status: AgentTaskStatus
+    attempt: int = Field(ge=1, le=100)
     summary: str = Field(min_length=1, max_length=8000)
     artifacts: list[ArtifactReference] = Field(default_factory=list, max_length=100)
     evidence: list[ArtifactReference] = Field(default_factory=list, max_length=100)
