@@ -1,4 +1,4 @@
--- Apply after 011_devops_durable_communication.sql.
+-- Apply after 012_devops_durable_communication.sql.
 -- Task lease ownership and idempotent workflow cancellation for Phase 3D.
 -- Adds fenced task execution, P0 cancellation, and replay-safe control RPC receipts.
 -- This migration does not alter the existing AICode queue.

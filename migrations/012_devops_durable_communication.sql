@@ -1,5 +1,5 @@
 -- Durable DevOps workflow state and transactional message delivery.
--- Apply after 010_platform_governance_registry.sql. Keep AICode's existing task queue intact.
+-- Apply after 011_platform_governance_registry.sql. Keep AICode's existing task queue intact.
 BEGIN;
 
 DO $$

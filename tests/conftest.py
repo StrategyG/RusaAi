@@ -52,6 +52,7 @@ def apply_postgres_migrations_for_integration_suite():
     import psycopg
 
     migration_dir = ROOT / "migrations"
+    # Skip optional pgvector migrations 007 and 009 in the plain PostgreSQL CI service.
     expected = [
         "001_aicode_core.sql",
         "002_aicode_lease_fencing.sql",
@@ -60,10 +61,10 @@ def apply_postgres_migrations_for_integration_suite():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "008_aicode_task_list_audit.sql",
-        "009_platform_workflow_core.sql",
-        "010_platform_governance_registry.sql",
-        "011_devops_durable_communication.sql",
-        "012_devops_task_leases_and_cancellation.sql",
+        "010_platform_workflow_core.sql",
+        "011_platform_governance_registry.sql",
+        "012_devops_durable_communication.sql",
+        "013_devops_task_leases_and_cancellation.sql",
     ]
     migrations = [migration_dir / name for name in expected]
     if any(not path.is_file() for path in migrations):

@@ -17,6 +17,7 @@ def knowledge_store():
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
     migration = open("migrations/007_rag_knowledge_pgvector.sql", encoding="utf-8").read()
+    embedding_migration = open("migrations/009_knowledge_embedding_384.sql", encoding="utf-8").read()
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
@@ -24,6 +25,7 @@ def knowledge_store():
         # The test database is dedicated to CI. The migration is idempotent and must
         # never drop existing application tables or data.
         admin.execute(migration)
+        admin.execute(embedding_migration)
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
                 sql.Identifier(role_name),
@@ -147,3 +149,75 @@ def test_knowledge_store_readiness_rejects_bypassrls_database_identity():
         assert store.check_ready() is False
     finally:
         store.close()
+
+
+
+def _unit_vector_384(index: int) -> list[float]:
+    vector = [0.0] * 384
+    vector[index] = 1.0
+    return vector
+
+
+def test_pgvector_384d_backfill_preserves_legacy_vectors(knowledge_store):
+    from rusa_knowledge.store import PostgresKnowledgeStore
+
+    legacy_store, restricted_dsn = knowledge_store
+    tenant_id = "tenant-reembed"
+    document_id = legacy_store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://tenant-reembed/legacy",
+        title="Legacy guide",
+        content_hash="c" * 64,
+        metadata={"owner": tenant_id},
+        chunks=["RUSA legacy knowledge needs new E5 embeddings"],
+        embeddings=[_unit_vector(0)],
+    )
+
+    e5_store = PostgresKnowledgeStore(
+        restricted_dsn,
+        dimensions=384,
+        min_pool_size=1,
+        max_pool_size=2,
+        db_role=legacy_store.db_role,
+    )
+    try:
+        assert e5_store.check_ready() is True
+        batch = e5_store.fetch_chunks_for_reembedding(
+            tenant_id=tenant_id,
+            collection="agent",
+            limit=16,
+        )
+        assert len(batch) == 1
+        assert batch[0]["content"] == "RUSA legacy knowledge needs new E5 embeddings"
+        lexical_results = e5_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="legacy knowledge",
+            query_embedding=_unit_vector_384(7),
+            limit=5,
+        )
+        assert lexical_results
+        assert lexical_results[0]["document_id"] == document_id
+        assert lexical_results[0]["vector_similarity"] == 0.0
+        updated = e5_store.update_reembedded_embeddings(
+            tenant_id=tenant_id,
+            vectors=[(batch[0]["chunk_id"], _unit_vector_384(7))],
+        )
+        assert updated == 1
+        assert e5_store.fetch_chunks_for_reembedding(
+            tenant_id=tenant_id,
+            collection="agent",
+            limit=16,
+        ) == []
+        results = e5_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="RUSA legacy knowledge",
+            query_embedding=_unit_vector_384(7),
+            limit=5,
+        )
+        assert results
+        assert results[0]["document_id"] == document_id
+    finally:
+        e5_store.close()

@@ -1,5 +1,5 @@
 -- Platform Core 2.0 agent registry, policy decisions, approvals, and evidence.
--- Apply after 009_platform_workflow_core.sql.
+-- Apply after 010_platform_workflow_core.sql.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.rusa_agent_registry (
