@@ -42,7 +42,8 @@
         "string",
         "null"
       ],
-      "maxLength": 128
+      "maxLength": 128,
+      "minLength": 1
     },
     "attempt": {
       "type": [
@@ -62,7 +63,8 @@
         "string",
         "null"
       ],
-      "maxLength": 128
+      "maxLength": 128,
+      "minLength": 1
     },
     "traceparent": {
       "type": "string",
