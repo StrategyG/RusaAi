@@ -11,6 +11,55 @@
       "title": "AgentDomain",
       "type": "string"
     },
+    "AgentHealthSnapshot": {
+      "additionalProperties": false,
+      "description": "Runtime health observation; not part of an agent's immutable executable version.",
+      "properties": {
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked At"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentHealthStatus",
+          "default": "unknown"
+        }
+      },
+      "title": "AgentHealthSnapshot",
+      "type": "object"
+    },
+    "AgentHealthStatus": {
+      "enum": [
+        "unknown",
+        "healthy",
+        "degraded",
+        "unhealthy",
+        "maintenance"
+      ],
+      "title": "AgentHealthStatus",
+      "type": "string"
+    },
     "AgentStatus": {
       "enum": [
         "draft",
@@ -229,6 +278,7 @@
   "$id": "https://schemas.rusa.ai/platform/agent-manifest.v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "Immutable, versioned description of an agent capability and its grants.",
   "properties": {
     "agent_id": {
       "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
@@ -271,6 +321,9 @@
       "minLength": 1,
       "title": "Evaluation Profile",
       "type": "string"
+    },
+    "health": {
+      "$ref": "#/$defs/AgentHealthSnapshot"
     },
     "input_schema_ref": {
       "maxLength": 2048,
@@ -347,6 +400,7 @@
     "runtime_binding",
     "policy_profile",
     "evaluation_profile",
+    "health",
     "owner"
   ],
   "title": "AgentManifestV1",
