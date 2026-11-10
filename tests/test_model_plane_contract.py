@@ -1,4 +1,5 @@
 import json
+# ruff: noqa: I001  # Keep the contract test's mixed third-party import block stable.
 from pathlib import Path
 
 import jsonschema
@@ -111,7 +112,7 @@ def test_request_rejects_untrusted_tenant_override() -> None:
 def test_request_rejects_unsupported_capability() -> None:
     payload = valid_request()
     payload["capability"] = "tool_execution"
-    with pytest.raises(ValidationError):
+    with pytest.raises(jsonschema.ValidationError):
         validator("inference-request.schema.json").validate(payload)
 
 
