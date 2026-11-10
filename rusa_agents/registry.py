@@ -5,7 +5,6 @@ import hashlib
 import json
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
 from uuid import uuid4
 
 from .platform_contracts import (
