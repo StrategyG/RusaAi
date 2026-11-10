@@ -12,12 +12,12 @@ from rusa_agents.devops.agent_registry import DEPLOY_AGENT, OPERATE_AGENT
 from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
 from rusa_agents.devops.deploy import (
     DeployAgentExecutor,
-    DeployPolicy,
     DeploymentCheckResult,
     DeploymentExecutionResult,
     DeploymentSnapshot,
     DeploymentTarget,
     DeploymentVerificationResult,
+    DeployPolicy,
     RollbackExecutionResult,
     RollbackRehearsalResult,
 )
