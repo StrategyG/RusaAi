@@ -21,6 +21,14 @@ from typing import Any, Protocol
 import jsonschema
 
 from .agent_registry import MONITOR_AGENT, OPERATE_AGENT, PLAN_AGENT, authorize_agent_task
+from .closed_loop import (
+    ExecutionBudgetExceeded,
+    KillSwitchActiveError,
+    PostgresClosedLoopStore,
+    SLOAlert,
+    WorkflowExecutionGuard,
+    alert_fingerprint,
+)
 from .artifacts import ContentAddressedArtifactStore
 from .specialists import (
     ExecutionLease,
@@ -275,6 +283,8 @@ class OperateAgentExecutor:
         runner: RunbookRunner,
         policy_authorizer: OperatePolicyAuthorizer,
         approval_verifier: OperateApprovalVerifier | None = None,
+        incident_store: PostgresClosedLoopStore | None = None,
+        execution_guard: WorkflowExecutionGuard | None = None,
     ) -> None:
         registry = dict(runbooks)
         if not registry or any(key != value.runbook_id for key, value in registry.items()):
@@ -287,7 +297,18 @@ class OperateAgentExecutor:
         self.runbooks = MappingProxyType(registry)
         self.runner = runner
         self.policy_authorizer = policy_authorizer
+        if incident_store is not None and not all(
+            callable(getattr(incident_store, name, None))
+            for name in ("get_incident_by_ref", "transition_incident")
+        ):
+            raise TypeError("Operate Agent incident_store must support incident lookup and lifecycle transitions")
+        if execution_guard is not None and not callable(
+            getattr(execution_guard, "authorize_action", None)
+        ):
+            raise TypeError("Operate Agent execution_guard must authorize bounded actions")
         self.approval_verifier = approval_verifier
+        self.incident_store = incident_store
+        self.execution_guard = execution_guard
 
     @staticmethod
     def _validate_task(task: dict[str, Any], principal: str) -> None:
@@ -350,6 +371,31 @@ class OperateAgentExecutor:
                 message="Runbook reference, service, action, or parameters failed host policy validation.",
             )
 
+        incident = None
+        incident_ref = task_input.get("incident_ref")
+        if isinstance(incident_ref, str) and incident_ref.startswith("incident://"):
+            if self.incident_store is None:
+                return _blocked(
+                    task, started_at=started, code="operate.incident_store_unavailable",
+                    message="A durable incident reference requires the host incident lifecycle store.",
+                )
+            try:
+                incident = self.incident_store.get_incident_by_ref(task["tenant_id"], incident_ref)
+            except Exception:
+                incident = None
+            if incident is None or incident.get("status") in {"resolved", "closed"}:
+                return _blocked(
+                    task, started_at=started, code="operate.incident_reference_invalid",
+                    message="The tenant-bound incident is missing or no longer actionable.",
+                )
+        elif incident_ref is not None and not _content_addressed_reference(
+            incident_ref, namespace="artifact"
+        ):
+            return _blocked(
+                task, started_at=started, code="operate.incident_reference_invalid",
+                message="Incident reference must be a tenant-bound incident URI or immutable artifact URI.",
+            )
+
         risk = "high" if action.destructive or action.approval_required else "low"
         try:
             authorized = self.policy_authorizer.authorize_operation(
@@ -408,6 +454,26 @@ class OperateAgentExecutor:
                 message="Operate task supplied approval context without requiring approval.",
             )
 
+        if self.execution_guard is not None:
+            try:
+                self.execution_guard.authorize_action(
+                    tenant_id=task["tenant_id"],
+                    run_id=lease.run_id,
+                    action="operate",
+                    budget_metric="tool_calls",
+                    amount=1,
+                )
+            except KillSwitchActiveError:
+                return _blocked(
+                    task, started_at=started, code="operate.kill_switch_active",
+                    message="Host kill-switch policy blocked operations execution.",
+                )
+            except ExecutionBudgetExceeded:
+                return _blocked(
+                    task, started_at=started, code="operate.budget_exhausted",
+                    message="Workflow budget did not authorize the runbook action.",
+                )
+
         _checkpoint(checkpoint)
         timeout = min(_timeout_seconds(task), float(definition.max_execution_seconds))
         side_effect = "UNKNOWN"
@@ -457,6 +523,25 @@ class OperateAgentExecutor:
             report_ref = self.artifact_store.put_json(
                 task["tenant_id"], report, namespace="artifact"
             )
+            if incident is not None:
+                try:
+                    self.incident_store.transition_incident(
+                        tenant_id=task["tenant_id"],
+                        incident_id=incident["incident_id"],
+                        target_status=(
+                            "resolved" if execution.status == "passed" else "investigating"
+                        ),
+                        expected_state_version=incident["state_version"],
+                        actor=OPERATE_AGENT,
+                        message_id=f"operate:{task['task_id']}:{task['attempt']}",
+                        evidence_ref=report_ref,
+                    )
+                except Exception:
+                    return _failure(
+                        task, started_at=started, code="operate.incident_resolution_unconfirmed",
+                        message="Runbook evidence was persisted but the durable incident transition could not be confirmed; reconciliation is required.",
+                        failure_category="AMBIGUOUS", side_effect=side_effect,
+                    )
             result = _result(
                 task,
                 status=execution.status,
@@ -610,6 +695,9 @@ class MonitorAgentExecutor:
         rules_by_service: Mapping[str, tuple[SLORule, ...] | list[SLORule]],
         allowed_windows: frozenset[str] = frozenset({"5m", "15m", "1h", "6h", "24h"}),
         allowed_environments: frozenset[str] = frozenset({"development", "eval", "staging", "production"}),
+        incident_store: PostgresClosedLoopStore | None = None,
+        execution_guard: WorkflowExecutionGuard | None = None,
+        require_durable_incidents: bool = False,
     ) -> None:
         rules = {service: tuple(rows) for service, rows in rules_by_service.items()}
         if not rules or any(
@@ -631,7 +719,22 @@ class MonitorAgentExecutor:
         self.telemetry_reader = telemetry_reader
         self.rules_by_service = MappingProxyType(rules)
         self.allowed_windows = frozenset(allowed_windows)
+        if type(require_durable_incidents) is not bool:
+            raise TypeError("require_durable_incidents must be a boolean")
+        if require_durable_incidents and incident_store is None:
+            raise ValueError("production Monitor Agent requires a durable incident store")
+        if incident_store is not None and not callable(
+            getattr(incident_store, "record_slo_alerts", None)
+        ):
+            raise TypeError("Monitor Agent incident_store must support durable SLO alert persistence")
+        if execution_guard is not None and not callable(
+            getattr(execution_guard, "authorize_action", None)
+        ):
+            raise TypeError("Monitor Agent execution_guard must authorize bounded actions")
         self.allowed_environments = frozenset(allowed_environments)
+        self.incident_store = incident_store
+        self.execution_guard = execution_guard
+        self.require_durable_incidents = require_durable_incidents
 
     @staticmethod
     def _validate_task(task: dict[str, Any], principal: str) -> None:
@@ -683,6 +786,25 @@ class MonitorAgentExecutor:
                 message="Monitor service, environment, or telemetry window is outside host policy.",
             )
         timeout = _timeout_seconds(task)
+        if self.execution_guard is not None:
+            try:
+                self.execution_guard.authorize_action(
+                    tenant_id=task["tenant_id"],
+                    run_id=lease.run_id,
+                    action="monitor",
+                    budget_metric="tool_calls",
+                    amount=1,
+                )
+            except KillSwitchActiveError:
+                return _blocked(
+                    task, started_at=started, code="monitor.kill_switch_active",
+                    message="Host kill-switch policy blocked monitoring execution.",
+                )
+            except ExecutionBudgetExceeded:
+                return _blocked(
+                    task, started_at=started, code="monitor.budget_exhausted",
+                    message="Workflow budget did not authorize the monitoring operation.",
+                )
         try:
             snapshot = await asyncio.wait_for(
                 self.telemetry_reader.collect(
@@ -712,7 +834,10 @@ class MonitorAgentExecutor:
                     message="Telemetry snapshot has no immutable evidence reference and cannot support an auditable finding.",
                 )
             findings: list[dict[str, str]] = []
+            alert_findings: list[dict[str, str]] = []
+            alerts: list[SLOAlert] = []
             alert_count = 0
+            observed_at = _aware_timestamp(snapshot.observed_at)
             for rule in rules:
                 actual = snapshot.metrics.get(rule.metric_name)
                 if actual is None:
@@ -721,7 +846,8 @@ class MonitorAgentExecutor:
                         f"Recommendation: {rule.recommendation}"
                     )
                     severity = "medium"
-                    code = "monitor.metric_missing." + rule.rule_id
+                    observed_value = None
+                    alert_type = "metric_missing"
                 else:
                     violated = actual > rule.threshold if rule.operator == "lte" else actual < rule.threshold
                     if not violated:
@@ -732,20 +858,69 @@ class MonitorAgentExecutor:
                         f"Recommendation: {rule.recommendation}"
                     )
                     severity = rule.severity
-                    fingerprint = hashlib.sha256(
-                        f"{task['tenant_id']}|{service}|{rule.rule_id}|{window}|"
-                        f"{_aware_timestamp(snapshot.observed_at)}".encode()
-                    ).hexdigest()[:24]
-                    code = f"monitor.slo_breach.{fingerprint}"
-                alert_count += 1
-                findings.append(
-                    {
-                        "severity": severity,
-                        "code": code,
-                        "message": message[:1000],
-                        "evidence_ref": evidence_refs[0],
-                    }
+                    observed_value = float(actual)
+                    alert_type = "slo_breach"
+                fingerprint = alert_fingerprint(
+                    task["tenant_id"], service, environment, rule.rule_id
                 )
+                code = f"monitor.{alert_type}.{fingerprint[:24]}"
+                message_id = "monitor:" + hashlib.sha256(
+                    f"{task['task_id']}|{task['attempt']}|{rule.rule_id}|{observed_at}".encode()
+                ).hexdigest()[:64]
+                alert = SLOAlert(
+                    tenant_id=task["tenant_id"],
+                    message_id=message_id,
+                    service_id=service,
+                    environment=environment,
+                    rule_id=rule.rule_id,
+                    severity=severity,
+                    summary=message[:1000],
+                    evidence_ref=evidence_refs[0],
+                    observed_at=snapshot.observed_at,
+                    correlation_id=task["workflow_id"],
+                    workflow_id=task["workflow_id"],
+                    metric_name=rule.metric_name,
+                    operator=rule.operator,
+                    threshold=float(rule.threshold),
+                    observed_value=observed_value,
+                )
+                finding = {
+                    "severity": severity,
+                    "code": code,
+                    "message": message[:1000],
+                    "evidence_ref": evidence_refs[0],
+                }
+                alerts.append(alert)
+                alert_findings.append(finding)
+                findings.append(finding)
+                alert_count += 1
+            if alerts and self.incident_store is not None:
+                try:
+                    incidents = await asyncio.wait_for(
+                        asyncio.to_thread(self.incident_store.record_slo_alerts, alerts),
+                        timeout=timeout,
+                    )
+                    if len(incidents) != len(alerts):
+                        raise ValueError("incident store returned an incomplete alert batch")
+                    for finding, incident_row in zip(alert_findings, incidents):
+                        incident_ref = incident_row.get("incident_ref")
+                        if not isinstance(incident_ref, str) or not incident_ref.startswith(
+                            f"incident://{task['tenant_id']}/"
+                        ):
+                            raise ValueError("incident store returned a non-tenant-bound incident reference")
+                        finding["incident_ref"] = incident_ref
+                except Exception:
+                    return _failure(
+                        task, started_at=started, code="monitor.incident_persistence_failed",
+                        message="SLO alerts were detected but durable incident persistence could not be confirmed.",
+                        failure_category="TRANSIENT",
+                    )
+            elif alerts and self.require_durable_incidents:
+                return _blocked(
+                    task, started_at=started, code="monitor.incident_store_unavailable",
+                    message="Durable incident persistence is required by host policy.",
+                )
+
             for feedback in snapshot.feedback:
                 findings.append(
                     {
