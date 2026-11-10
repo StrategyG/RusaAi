@@ -14,10 +14,10 @@ from rusa_agents.devops.agent_registry import (
     MONITOR_AGENT,
     OPERATE_AGENT,
     SECURITY_GUARD_AGENT,
-    AgentAuthorizationError,
     authorize_agent_task,
 )
 from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
+from rusa_agents.devops.contracts import ContractValidationError
 from rusa_agents.devops.deploy import DeploymentTarget
 from rusa_agents.devops.operate_monitor import (
     DependencyStatus,
@@ -506,6 +506,8 @@ async def test_security_guard_emits_signed_findings_without_write_capabilities(t
             "evidence_refs": [evidence_ref],
             "commit_sha": SOURCE_COMMIT,
             "artifact_digest": ARTIFACT_DIGEST,
+            "test_plan_ref": "artifact://test-plans/security-review",
+            "acceptance_criteria_ref": "artifact://acceptance/security-review",
         },
         write_scope=[],
     )
@@ -594,11 +596,17 @@ def test_monitor_and_security_guard_cannot_receive_write_scopes():
     security_task = _task(
         SECURITY_GUARD_AGENT,
         "test",
-        {"evidence_refs": ["evidence://sha256/" + "a" * 64]},
+        {
+            "evidence_refs": ["evidence://sha256/" + "a" * 64],
+            "commit_sha": SOURCE_COMMIT,
+            "artifact_digest": ARTIFACT_DIGEST,
+            "test_plan_ref": "artifact://test-plans/security-review",
+            "acceptance_criteria_ref": "artifact://acceptance/security-review",
+        },
         write_scope=["evidence/"],
     )
 
-    with pytest.raises(AgentAuthorizationError):
+    with pytest.raises(ContractValidationError):
         authorize_agent_task(monitor_task, authenticated_principal=MONITOR_AGENT)
-    with pytest.raises(AgentAuthorizationError):
+    with pytest.raises(ContractValidationError):
         authorize_agent_task(security_task, authenticated_principal=SECURITY_GUARD_AGENT)
