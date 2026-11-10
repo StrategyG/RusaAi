@@ -23,6 +23,8 @@ class PolicyRequest:
     policy_version: str
     risk: RiskLevel = RiskLevel.LOW
     requires_approval: bool = False
+    approval_consumed: bool = False
+    approval_id: str | None = None
     workflow_id: str | None = None
     run_id: str | None = None
     task_id: str | None = None
@@ -89,6 +91,10 @@ class DeterministicPolicyEngine:
         if not isinstance(request.context, Mapping):
             raise ValueError("policy context must be an object")
         _reject_secret_fields(request.context)
+        if request.approval_id is not None and not request.approval_consumed:
+            raise ValueError("an approval ID may be supplied only after trusted one-time consumption")
+        if request.approval_consumed and not request.approval_id:
+            raise ValueError("consumed approval must include its approval ID")
 
         evaluated_at = datetime.now(timezone.utc)
         canonical_input = {
@@ -101,6 +107,8 @@ class DeterministicPolicyEngine:
             "policy_version": request.policy_version,
             "risk": request.risk.value,
             "requires_approval": request.requires_approval,
+            "approval_consumed": request.approval_consumed,
+            "approval_id": request.approval_id,
             "workflow_id": request.workflow_id,
             "run_id": request.run_id,
             "task_id": request.task_id,
@@ -112,14 +120,17 @@ class DeterministicPolicyEngine:
             outcome, reason = "deny", "tenant_mismatch"
         elif request.action in self.DENIED_ACTIONS:
             outcome, reason = "deny", "action_prohibited"
+        elif request.action not in self.allowed_actions:
+            outcome, reason = "deny", "action_not_allowlisted"
         elif (
             request.requires_approval
             or request.action in self.APPROVAL_ACTIONS
             or request.risk in {RiskLevel.HIGH, RiskLevel.CRITICAL}
         ):
-            outcome, reason = "require_approval", "human_approval_required"
-        elif request.action not in self.allowed_actions:
-            outcome, reason = "deny", "action_not_allowlisted"
+            if request.approval_consumed and request.approval_id:
+                outcome, reason = "allow", "approved_action_authorized"
+            else:
+                outcome, reason = "require_approval", "human_approval_required"
         else:
             outcome, reason = "allow", "policy_allowlist_match"
 
@@ -138,6 +149,7 @@ class DeterministicPolicyEngine:
             workflow_id=request.workflow_id,
             run_id=request.run_id,
             task_id=request.task_id,
+            approval_id=request.approval_id,
         )
 
 
