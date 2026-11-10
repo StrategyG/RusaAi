@@ -25,7 +25,6 @@ from .build_test import (
     TEST_AGENT,
     EvidenceSigner,
     EvidenceVerifier,
-    _canonical_json,
     _load_json_artifact,
     _signed_evidence,
     _validate_oci_reference,
@@ -75,7 +74,7 @@ class DeploymentRunner(Protocol):
         artifact_digest: str,
         timeout_seconds: float,
         checkpoint: Callable[[], bool] | None,
-    ) -> "DeploymentExecutionResult": ...
+    ) -> DeploymentExecutionResult: ...
 
     async def health_check(
         self,
@@ -86,7 +85,7 @@ class DeploymentRunner(Protocol):
         artifact_digest: str,
         timeout_seconds: float,
         checkpoint: Callable[[], bool] | None,
-    ) -> "HealthCheckResult": ...
+    ) -> HealthCheckResult: ...
 
     async def rehearse_rollback(
         self,
@@ -97,7 +96,7 @@ class DeploymentRunner(Protocol):
         rollback_plan_ref: str,
         timeout_seconds: float,
         checkpoint: Callable[[], bool] | None,
-    ) -> "RollbackRehearsalResult": ...
+    ) -> RollbackRehearsalResult: ...
 
 
 @dataclass(frozen=True)
