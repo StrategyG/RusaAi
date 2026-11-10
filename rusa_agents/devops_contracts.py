@@ -365,7 +365,7 @@ def validate_workflow_handoff(
         "deploy": {"deploy.completed"},
         "operate": {"operate.incident_detected", "operate.recovered"},
         "monitor": {"monitor.alert_triggered", "monitor.feedback_created"},
-        "security": {"policy.violation", "workflow.blocked"},
+        "security": {"task.completed"},
     }
     allowed_events = (
         expected_events[task["stage"]]
@@ -386,6 +386,12 @@ def validate_workflow_handoff(
             raise ContractValidationError("Workflow event result_ref is not bound to a result artifact")
         if not set(payload.get("evidence_refs", [])).issubset(evidence_refs):
             raise ContractValidationError("Workflow event evidence refs are not bound to result evidence")
+    elif event["type"] == "task.completed":
+        expected_digests = {digest.removeprefix("sha256:") for digest in artifact_digests}
+        if payload.get("result_ref") not in artifact_refs:
+            raise ContractValidationError("Security completion does not reference a result artifact")
+        if payload.get("sha256") not in expected_digests:
+            raise ContractValidationError("Security completion digest does not match a result artifact")
     elif event["type"] == "release.approved":
         if payload.get("release_ref") not in artifact_refs:
             raise ContractValidationError("Release event does not reference a result artifact")
