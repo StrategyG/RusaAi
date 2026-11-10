@@ -527,9 +527,33 @@
             "required": [
               "commit_sha",
               "test_plan_ref",
-              "build_evidence_ref",
               "acceptance_criteria_ref",
               "artifact_digest"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_test_agent"
+          },
+          "stage": {
+            "const": "test"
+          }
+        },
+        "required": [
+          "agent_id",
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "build_evidence_ref"
             ]
           }
         }

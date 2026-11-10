@@ -54,6 +54,7 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "test": {
             "commit_sha": "a" * 40,
             "artifact_digest": "sha256:" + "b" * 64,
+            "build_evidence_ref": "evidence://build/build-evidence-1",
             "test_plan_ref": "artifact://tests/plan-1",
             "acceptance_criteria_ref": "artifact://acceptance/criteria-1",
         },
