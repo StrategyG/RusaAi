@@ -29,13 +29,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Install web dependencies
         working-directory: web
         run: npm install --no-audit --no-fund
+      - name: Audit production web dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
       - name: Type check
         working-directory: web
         run: npm run typecheck
@@ -47,3 +50,12 @@ jobs:
         run: npm run build
       - name: Build web container
         run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0
+        with:
+          version: v0.70.0
+          cache: true
+      - name: Report CRITICAL and HIGH web image vulnerabilities
+        run: trivy image --scanners vuln --severity CRITICAL,HIGH --pkg-types os,library "rusa-ai-web:${{ github.sha }}"
+      - name: Block fixable CRITICAL and HIGH web image vulnerabilities
+        run: trivy image --scanners vuln --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH --pkg-types os,library "rusa-ai-web:${{ github.sha }}"
