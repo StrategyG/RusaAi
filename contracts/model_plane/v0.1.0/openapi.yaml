@@ -112,6 +112,12 @@ paths:
             application/json:
               schema:
                 $ref: ./inference-error.schema.json
+        "500":
+          description: Internal inference service error
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
         "504":
           description: Request deadline exceeded
           content:
