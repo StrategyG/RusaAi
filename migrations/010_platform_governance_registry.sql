@@ -109,6 +109,29 @@ CREATE INDEX IF NOT EXISTS idx_rusa_human_approvals_pending
 CREATE INDEX IF NOT EXISTS idx_rusa_human_approvals_task
     ON public.rusa_human_approvals(tenant_id, task_id, created_at DESC);
 
+-- Persist the exact approval reference on a paused task; never resume it with
+-- another approval for the same task.
+ALTER TABLE public.rusa_workflow_tasks
+    ADD COLUMN IF NOT EXISTS approval_id TEXT;
+DO $rusa$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='public.rusa_workflow_tasks'::regclass
+          AND conname='rusa_workflow_tasks_approval_fk'
+    ) THEN
+        ALTER TABLE public.rusa_workflow_tasks
+            ADD CONSTRAINT rusa_workflow_tasks_approval_fk
+            FOREIGN KEY (tenant_id, approval_id)
+            REFERENCES public.rusa_human_approvals(tenant_id, approval_id)
+            ON DELETE RESTRICT;
+    END IF;
+END;
+$rusa$;
+CREATE INDEX IF NOT EXISTS idx_rusa_workflow_tasks_approval
+    ON public.rusa_workflow_tasks(tenant_id, approval_id)
+    WHERE approval_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS public.rusa_approval_consumptions (
     tenant_id TEXT NOT NULL,
     approval_id TEXT NOT NULL,
