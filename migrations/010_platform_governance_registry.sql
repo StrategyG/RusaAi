@@ -123,19 +123,23 @@ GRANT SELECT, INSERT, UPDATE ON public.rusa_human_approvals TO rusa_api_runtime;
 GRANT SELECT ON public.rusa_human_approvals TO rusa_worker_runtime;
 GRANT SELECT, INSERT ON public.rusa_evidence_records TO rusa_api_runtime, rusa_worker_runtime;
 
+DROP POLICY IF EXISTS rusa_agent_registry_api_read ON public.rusa_agent_registry;
 CREATE POLICY rusa_agent_registry_api_read ON public.rusa_agent_registry
     FOR SELECT TO rusa_api_runtime
     USING (
         tenant_id = NULLIF(current_setting('rusa.tenant_id', true), '')
         OR tenant_id = 'platform'
     );
+DROP POLICY IF EXISTS rusa_agent_registry_api_write ON public.rusa_agent_registry;
 CREATE POLICY rusa_agent_registry_api_write ON public.rusa_agent_registry
     FOR INSERT TO rusa_api_runtime
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_agent_registry_api_update ON public.rusa_agent_registry;
 CREATE POLICY rusa_agent_registry_api_update ON public.rusa_agent_registry
     FOR UPDATE TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_agent_registry_worker_read ON public.rusa_agent_registry;
 CREATE POLICY rusa_agent_registry_worker_read ON public.rusa_agent_registry
     FOR SELECT TO rusa_worker_runtime
     USING (
@@ -143,27 +147,33 @@ CREATE POLICY rusa_agent_registry_worker_read ON public.rusa_agent_registry
         OR tenant_id = 'platform'
     );
 
+DROP POLICY IF EXISTS rusa_policy_decisions_api_tenant ON public.rusa_policy_decisions;
 CREATE POLICY rusa_policy_decisions_api_tenant ON public.rusa_policy_decisions
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_policy_decisions_worker_tenant ON public.rusa_policy_decisions;
 CREATE POLICY rusa_policy_decisions_worker_tenant ON public.rusa_policy_decisions
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+DROP POLICY IF EXISTS rusa_human_approvals_api_tenant ON public.rusa_human_approvals;
 CREATE POLICY rusa_human_approvals_api_tenant ON public.rusa_human_approvals
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_human_approvals_worker_read ON public.rusa_human_approvals;
 CREATE POLICY rusa_human_approvals_worker_read ON public.rusa_human_approvals
     FOR SELECT TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+DROP POLICY IF EXISTS rusa_evidence_records_api_tenant ON public.rusa_evidence_records;
 CREATE POLICY rusa_evidence_records_api_tenant ON public.rusa_evidence_records
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_evidence_records_worker_tenant ON public.rusa_evidence_records;
 CREATE POLICY rusa_evidence_records_worker_tenant ON public.rusa_evidence_records
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
@@ -206,6 +216,7 @@ BEGIN
 END;
 $;
 REVOKE ALL ON FUNCTION public.rusa_agent_registry_guard() FROM PUBLIC;
+DROP TRIGGER IF EXISTS trg_rusa_agent_registry_guard ON public.rusa_agent_registry;
 CREATE TRIGGER trg_rusa_agent_registry_guard
     BEFORE UPDATE ON public.rusa_agent_registry
     FOR EACH ROW EXECUTE FUNCTION public.rusa_agent_registry_guard();
@@ -239,6 +250,7 @@ BEGIN
 END;
 $;
 REVOKE ALL ON FUNCTION public.rusa_human_approval_guard() FROM PUBLIC;
+DROP TRIGGER IF EXISTS trg_rusa_human_approval_guard ON public.rusa_human_approvals;
 CREATE TRIGGER trg_rusa_human_approval_guard
     BEFORE UPDATE ON public.rusa_human_approvals
     FOR EACH ROW EXECUTE FUNCTION public.rusa_human_approval_guard();
@@ -252,15 +264,19 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION public.rusa_platform_append_only() FROM PUBLIC;
+DROP TRIGGER IF EXISTS trg_rusa_policy_decisions_immutable ON public.rusa_policy_decisions;
 CREATE TRIGGER trg_rusa_policy_decisions_immutable
     BEFORE UPDATE OR DELETE ON public.rusa_policy_decisions
     FOR EACH ROW EXECUTE FUNCTION public.rusa_platform_append_only();
+DROP TRIGGER IF EXISTS trg_rusa_policy_decisions_no_truncate ON public.rusa_policy_decisions;
 CREATE TRIGGER trg_rusa_policy_decisions_no_truncate
     BEFORE TRUNCATE ON public.rusa_policy_decisions
     FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_platform_append_only();
+DROP TRIGGER IF EXISTS trg_rusa_evidence_records_immutable ON public.rusa_evidence_records;
 CREATE TRIGGER trg_rusa_evidence_records_immutable
     BEFORE UPDATE OR DELETE ON public.rusa_evidence_records
     FOR EACH ROW EXECUTE FUNCTION public.rusa_platform_append_only();
+DROP TRIGGER IF EXISTS trg_rusa_evidence_records_no_truncate ON public.rusa_evidence_records;
 CREATE TRIGGER trg_rusa_evidence_records_no_truncate
     BEFORE TRUNCATE ON public.rusa_evidence_records
     FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_platform_append_only();
