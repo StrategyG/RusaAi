@@ -288,6 +288,57 @@ class PostgresWorkflowStore:
             )
             return int(row[1])
 
+    def block_failed_dependencies(
+        self,
+        *,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        """Block queued tasks whose upstream dependency reached a terminal failure."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks t
+                SET status='blocked', phase='blocked',
+                    last_error='A required dependency did not succeed',
+                    state_version=t.state_version+1, updated_at=clock_timestamp()
+                WHERE t.status='queued'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM public.rusa_workflow_dependencies d
+                      JOIN public.rusa_workflow_tasks dependency
+                        ON dependency.tenant_id=d.tenant_id
+                       AND dependency.run_id=d.run_id
+                       AND dependency.task_id=d.depends_on_task_id
+                      WHERE d.tenant_id=t.tenant_id AND d.run_id=t.run_id
+                        AND d.task_id=t.task_id
+                        AND dependency.status IN ('failed', 'blocked', 'cancelled', 'skipped', 'expired')
+                  )
+                RETURNING t.tenant_id, t.workflow_id, t.run_id, t.task_id,
+                          t.attempt, t.state_version
+                """
+            ).fetchall()
+            for tenant_id, workflow_id, run_id, task_id, attempt, state_version in rows:
+                self._set_tenant(conn, tenant_id)
+                self._append_event(
+                    conn,
+                    _event(
+                        tenant_id=tenant_id,
+                        workflow_id=workflow_id,
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=max(1, attempt),
+                        event_type="workflow.task.blocked",
+                        producer_id="rusa.workflow_scheduler",
+                        producer_version=producer_version,
+                        payload={
+                            "reason_code": "dependency_failed",
+                            "state_version": state_version,
+                        },
+                        sequence=state_version,
+                    ),
+                )
+            return len(rows)
+
     def claim_ready_tasks(
         self,
         worker_id: str,
@@ -300,6 +351,7 @@ class PostgresWorkflowStore:
             raise ValueError("worker_id and a claim limit between 1 and 100 are required")
         if not 15 <= lease_seconds <= 3600:
             raise ValueError("lease_seconds must be between 15 and 3600")
+        self.block_failed_dependencies(producer_version=producer_version)
         claimed: list[dict[str, Any]] = []
         with self._connect() as conn:
             # Lock each eligible run row first. Concurrent schedulers skip a locked run,
@@ -396,7 +448,7 @@ class PostgresWorkflowStore:
                         task_id=item["task_id"],
                         attempt=item["attempt"],
                         event_type="task.accepted",
-                        producer_id=f"rusa.worker.{worker_id}",
+                        producer_id="rusa.workflow_worker",
                         producer_version=producer_version,
                         payload={
                             "worker_id": worker_id,
