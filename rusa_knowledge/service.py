@@ -57,7 +57,10 @@ class KnowledgeService:
             raise RuntimeError("RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for 384-dimensional embeddings")
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=base_url,
-            api_key=os.getenv("RUSA_EMBEDDING_API_KEY") or os.getenv("RUSA_MODEL_API_KEY", ""),
+            api_key=(
+                os.getenv("RUSA_EMBEDDING_API_KEY")
+                or (os.getenv("RUSA_MODEL_API_KEY", "") if dimensions == 384 else "")
+            ),
             model=os.getenv(
                 "RUSA_EMBEDDING_MODEL",
                 "rusa-embedding-small" if dimensions == 384 else "text-embedding-3-small",
