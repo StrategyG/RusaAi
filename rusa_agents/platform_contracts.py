@@ -17,7 +17,7 @@ _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 _SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"
 _AGENT_ID_PATTERN = r"^[a-z][a-z0-9_.-]{1,127}$"
 _CAPABILITY_PATTERN = r"^[a-z][a-z0-9_.-]{1,127}$"
-_TRACEPARENT_PATTERN = r"^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+_TRACEPARENT_PATTERN = r"^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$"
 _SHA256_PATTERN = r"^sha256:[a-f0-9]{64}$"
 _SENSITIVE_KEYS = frozenset(
     {
@@ -45,6 +45,15 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must include a timezone")
     return value.astimezone(timezone.utc)
+
+
+def _validate_traceparent(value: str | None) -> str | None:
+    if value is None:
+        return None
+    parts = value.split("-")
+    if len(parts) != 4 or parts[1] == "0" * 32 or parts[2] == "0" * 16:
+        raise ValueError("traceparent must contain non-zero trace and parent span IDs")
+    return value
 
 
 def _reject_secret_fields(value: Any, path: str = "payload") -> None:
@@ -288,6 +297,11 @@ class TaskEnvelopeV2(ContractModel):
     @classmethod
     def timestamps_are_aware(cls, value: datetime) -> datetime:
         return _aware_utc(value)
+
+    @field_validator("traceparent")
+    @classmethod
+    def trace_context_has_nonzero_ids(cls, value: str | None) -> str | None:
+        return _validate_traceparent(value)
 
     @field_validator("input", "policy_context", mode="before")
     @classmethod
@@ -547,6 +561,11 @@ class WorkflowEventV2(EventContractModel):
     @classmethod
     def timestamp_is_aware(cls, value: datetime) -> datetime:
         return _aware_utc(value)
+
+    @field_validator("traceparent")
+    @classmethod
+    def trace_context_has_nonzero_ids(cls, value: str | None) -> str | None:
+        return _validate_traceparent(value)
 
     @field_validator("payload", mode="before")
     @classmethod
