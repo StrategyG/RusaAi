@@ -13,7 +13,6 @@ import typing
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 TRACEPARENT_PATTERN = (
     r"^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$"
 )
