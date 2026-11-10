@@ -5,6 +5,7 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 """
 from __future__ import annotations  # noqa: I001
 
+import hashlib
 import json
 import os
 import shutil
@@ -18,6 +19,7 @@ from uuid import uuid4
 
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
+from .evidence import EvidenceAttestor
 from .metrics import TOOL_EXECUTIONS
 
 DOCKER_BIN = shutil.which("docker")
@@ -52,12 +54,14 @@ class DockerSandbox:
         memory_limit: str = "2g",
         cpu_limit: str = "2",
         max_snapshot_bytes: int = 100_000_000,
+        attestation_key: str | bytes | None = None,
     ) -> None:
         self.image = image or os.getenv("RUSA_SANDBOX_IMAGE", "rusa-ai-agent-sandbox:py312")
         self.timeout_seconds = timeout_seconds
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.max_snapshot_bytes = max_snapshot_bytes
+        self.attestor = EvidenceAttestor(attestation_key) if attestation_key else None
 
     def verify_ready(self, require_rootless: bool = False, require_image: bool = False) -> None:
         """Fail startup if the Docker CLI/daemon or required sandbox image is unavailable."""
@@ -86,7 +90,15 @@ class DockerSandbox:
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
 
-    def run(self, workspace: Path, profile: str) -> ToolResult:
+    def run(
+        self,
+        workspace: Path,
+        profile: str,
+        *,
+        task_id: str | None = None,
+        tenant_id: str | None = None,
+        worker_role: str | None = None,
+    ) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:
@@ -152,7 +164,8 @@ class DockerSandbox:
                         if not path.is_symlink():
                             mode = stat.S_IMODE(path.stat().st_mode)
                             os.chmod(path, (mode | 0o444) & ~0o222)
-            except (OSError, ToolDenied) as exc:
+                snapshot_digest = self._snapshot_digest(snapshot)
+            except (OSError, ToolDenied, ValueError) as exc:
                 return ToolResult(False, f"Could not create bounded sandbox snapshot: {exc}")
 
             container_name = f"rusa-sandbox-{uuid4().hex}"
@@ -204,12 +217,42 @@ class DockerSandbox:
                     pass
                 return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
             output = (completed.stdout + "\n" + completed.stderr)[-20000:]
-            return ToolResult(
-                completed.returncode == 0,
-                output,
-                {"profile": profile, "exit_code": completed.returncode, "image": self.image,
-                 "snapshot_bytes": totals[0]},
-            )
+            evidence = {
+                "profile": profile,
+                "exit_code": completed.returncode,
+                "image": self.image,
+                "snapshot_sha256": snapshot_digest,
+            }
+            if self.attestor and task_id and tenant_id and worker_role:
+                evidence = self.attestor.attest(
+                    profile=profile,
+                    exit_code=completed.returncode,
+                    image=self.image,
+                    snapshot_sha256=snapshot_digest,
+                    task_id=task_id,
+                    tenant_id=tenant_id,
+                    worker_role=worker_role,
+                )
+            return ToolResult(completed.returncode == 0, output, evidence)
+
+    @staticmethod
+    def _snapshot_digest(snapshot: Path) -> str:
+        """Hash sorted relative paths and file contents from the immutable test snapshot."""
+        digest = hashlib.sha256()
+        for path in sorted(snapshot.rglob("*")):
+            if path.is_symlink():
+                raise ToolDenied("Sandbox snapshot unexpectedly contains a symbolic link")
+            if not path.is_file():
+                continue
+            relative = path.relative_to(snapshot).as_posix().encode("utf-8")
+            size = path.stat().st_size
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(size.to_bytes(8, "big"))
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        return digest.hexdigest()
 
 
 class WorkspaceToolGateway:
@@ -251,6 +294,8 @@ class WorkspaceToolGateway:
         knowledge_service: Any | None = None,
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
+        task_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -265,6 +310,10 @@ class WorkspaceToolGateway:
         self.knowledge_service = knowledge_service
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
+        if (task_id is None) != (tenant_id is None):
+            raise ValueError("QA evidence requires both task and tenant identities")
+        self.task_id = task_id
+        self.tenant_id = tenant_id
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -373,7 +422,13 @@ class WorkspaceToolGateway:
         allowed_profiles = ROLE_CHECK_PROFILES
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
-        return self.sandbox.run(self.workspace, profile)
+        return self.sandbox.run(
+            self.workspace,
+            profile,
+            task_id=self.task_id,
+            tenant_id=self.tenant_id,
+            worker_role=role.value,
+        )
 
     def git_diff(self) -> ToolResult:
         if not GIT_BIN:

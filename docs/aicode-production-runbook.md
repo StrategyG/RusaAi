@@ -299,6 +299,40 @@ Runtime controls:
 
 These controls limit in-process concurrency and repair attempts; they do not autoscale Kubernetes worker replicas.
 
+
+### Sandbox QA evidence provenance
+
+The worker runtime derives a domain-separated QA attestation key from
+`RUSA_AUDIT_HMAC_KEY`; the raw key is never returned to a model or included in
+tool output. Each sandbox validation attestation binds:
+
+- validation profile and actual sandbox exit code;
+- immutable workspace snapshot SHA-256 digest;
+- configured sandbox image reference;
+- task ID, authenticated tenant ID, and QA worker role;
+- unique sandbox run ID, UTC issue time, and HMAC signature.
+
+The orchestrator verifies the signature, scope, image, freshness, unique run
+IDs, and that pytest, Bandit, Ruff, and compile all ran against the same
+snapshot. Missing evidence or a missing verifier moves the task to
+`awaiting_approval`; invalid, mismatched, or failed evidence blocks success.
+The model action envelope does not accept model-authored evidence fields.
+
+**Trust boundary limitation:** this attestation establishes provenance within
+the trusted worker host. The signer and verifier are currently wired into the
+same worker runtime and derive their key from the worker-only audit secret.
+This is not yet a separately deployed QA service or Evaluation Service, and
+does not protect against compromise of the worker host or its process. Full
+architectural independence still requires a separate QA/Evaluation service
+identity, a separate key unavailable to coding workers, restricted holdout
+data, and independently retained evaluation evidence. Do not describe this
+increment as completion of independent QA certification.
+
+Keep `RUSA_AUDIT_HMAC_KEY` restricted to the worker service. Rotate it only
+through a coordinated procedure that invalidates outstanding attestations and
+preserves audit verification continuity.
+
+
 ### Remaining production certification blockers
 
 The current code still requires independent verification before it can be certified production-ready:

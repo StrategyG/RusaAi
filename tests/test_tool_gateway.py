@@ -4,7 +4,10 @@ from pathlib import Path
 import pytest
 
 from rusa_agents.contracts import WorkerRole
+from rusa_agents.evidence import EvidenceAttestor
 from rusa_agents.tool_gateway import DockerSandbox, ToolDenied, WorkspaceToolGateway
+
+TEST_EVIDENCE_KEY = "qa-tool-test-attestation-key-" + "x" * 32
 
 
 def test_gateway_rejects_path_traversal(tmp_path):
@@ -77,9 +80,25 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
 
     monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
     monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
-    result = DockerSandbox(image="sandbox:test").run(workspace, "pytest")
+    sandbox = DockerSandbox(image="sandbox:test", attestation_key=TEST_EVIDENCE_KEY)
+    result = sandbox.run(
+        workspace,
+        "pytest",
+        task_id="task-sandbox-test",
+        tenant_id="tenant-sandbox-test",
+        worker_role=WorkerRole.TESTER.value,
+    )
     assert result.ok
     assert result.evidence["profile"] == "pytest"
+    assert result.evidence["snapshot_sha256"]
+    assert EvidenceAttestor(TEST_EVIDENCE_KEY).verify(
+        result.evidence,
+        expected_profile="pytest",
+        expected_worker_role=WorkerRole.TESTER.value,
+        expected_task_id="task-sandbox-test",
+        expected_tenant_id="tenant-sandbox-test",
+        expected_image="sandbox:test",
+    )
     assert "PYTHONPYCACHEPREFIX=/run/rusa-tmp/pycache" in captured_command
 
 
@@ -108,6 +127,16 @@ def test_gateway_rejects_unknown_tool_arguments(tmp_path):
             {"name": "list_files", "arguments": {"path": ".", "shell": "id"}},
             WorkerRole.ANALYST,
         )
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["merge", "deploy", "release", "production_write", "secret_change", "force_push_main"],
+)
+def test_gateway_does_not_expose_protected_external_actions(tmp_path, action):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied):
+        gateway.execute({"name": action, "arguments": {}}, WorkerRole.DEVELOPER)
 
 
 def test_gateway_atomic_write_creates_expected_content(tmp_path):
