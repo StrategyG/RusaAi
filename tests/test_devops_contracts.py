@@ -310,3 +310,31 @@ def test_deployment_result_cannot_claim_pass_when_health_is_unhealthy():
     }
     with pytest.raises(ContractValidationError, match="healthy"):
         validate_workflow_handoff(task, result, event)
+
+
+def test_security_guard_completion_uses_adr_task_completed_digest_binding():
+    task = make_task(
+        agent_id="rusa_security_guard_agent",
+        stage="security",
+        constraints={
+            "allowed_tools": ["security.scan", "audit.read", "workflow.block"],
+            "network_access": False,
+            "write_scope": ["security-findings/"],
+            "approval_required": False,
+            "requested_actions": ["security.scan", "audit.read"],
+        },
+    )
+    result = make_result(task)
+    event = make_event(task, result)
+    event["type"] = "task.completed"
+    event["payload"] = {
+        "lease_epoch": 1,
+        "state_version": 1,
+        "result_ref": result["artifacts"][0]["ref"],
+        "sha256": result["artifacts"][0]["digest"].removeprefix("sha256:"),
+    }
+    validate_workflow_handoff(task, result, event)
+
+    event["payload"]["sha256"] = "0" * 64
+    with pytest.raises(ContractValidationError, match="digest"):
+        validate_workflow_handoff(task, result, event)
