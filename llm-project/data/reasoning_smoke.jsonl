@@ -1,0 +1,12 @@
+{"id":"arith-001","category":"arithmetic","prompt":"Hitung 17 + 25. Berikan hanya hasil akhirnya.","accepted_answers":["42"]}
+{"id":"arith-002","category":"arithmetic","prompt":"Sebuah toko memiliki 3 kotak. Setiap kotak berisi 4 apel, lalu ditambahkan 2 apel. Berapa jumlah apel seluruhnya? Jawab hanya dengan angka.","accepted_answers":["14"]}
+{"id":"arith-003","category":"arithmetic","prompt":"Sebuah koin adil dilempar dua kali. Berapa probabilitas muncul kepala pada kedua lemparan? Jawab sebagai pecahan paling sederhana.","accepted_answers":["1/4"]}
+{"id":"logic-001","category":"logic","prompt":"Semua peneliti adalah pembaca. Semua pembaca adalah pembelajar. Apakah semua peneliti adalah pembelajar? Jawab hanya: ya atau tidak.","accepted_answers":["ya"]}
+{"id":"logic-002","category":"logic","prompt":"Jika server mati, alarm menyala. Server terbukti mati. Apakah alarm harus menyala menurut aturan tersebut? Jawab hanya: ya atau tidak.","accepted_answers":["ya"]}
+{"id":"logic-003","category":"logic","prompt":"Urutan tugas: A harus selesai sebelum B, dan B sebelum C. Tugas mana yang harus paling awal? Jawab hanya dengan huruf.","accepted_answers":["A"]}
+{"id":"sequence-001","category":"pattern_recognition","prompt":"Lanjutkan pola 2, 4, 8, 16. Berikan satu angka berikutnya saja.","accepted_answers":["32"]}
+{"id":"sequence-002","category":"pattern_recognition","prompt":"Lanjutkan pola 3, 6, 9, 12. Berikan satu angka berikutnya saja.","accepted_answers":["15"]}
+{"id":"instruction-001","category":"instruction_following","prompt":"Ikuti instruksi dengan tepat: keluarkan kata 'SELESAI' saja, tanpa tanda baca atau penjelasan.","accepted_answers":["SELESAI"]}
+{"id":"instruction-002","category":"instruction_following","prompt":"Jawab dengan satu kata saja: apakah 10 lebih besar dari 7? Gunakan 'benar' atau 'salah'.","accepted_answers":["benar"]}
+{"id":"evidence-001","category":"evidence_based_decision","prompt":"Kebijakan menyatakan hanya reviewer yang disetujui boleh melakukan merge. Rina bukan reviewer yang disetujui. Berdasarkan informasi ini, bolehkah Rina melakukan merge? Jawab hanya: boleh atau tidak boleh.","accepted_answers":["tidak boleh"]}
+{"id":"evidence-002","category":"evidence_based_decision","prompt":"Catatan menyatakan build A lulus semua tes dan build B gagal satu tes. Build mana yang memiliki bukti lulus semua tes? Jawab hanya A atau B.","accepted_answers":["A"]}
