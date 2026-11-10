@@ -232,7 +232,8 @@ and do not claim a live staging integration.
 - Accepts a bounded metrics-window set, validates sample freshness, time
   windows, counts, and finite metric ranges, then evaluates a content-addressed
   SLO profile for availability, error rate, latency, queue depth, and capacity.
-- Emits deterministic correlation keys and a monitoring record. An SLO breach
+- Emits deterministic correlation keys, a monitoring record, and a
+  content-addressed evidence manifest bound to the record digest. An SLO breach
   hands off to Operate; the agent itself cannot mutate the observed service.
 
 ### Cross-cutting Security Guard
