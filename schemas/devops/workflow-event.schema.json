@@ -419,7 +419,10 @@
           ]
         },
         "diagnostic_ref": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 1,
           "maxLength": 2048
         }
@@ -541,12 +544,17 @@
           "maxLength": 2048
         },
         "policy_version": {
-          "type": "string",
-          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 128
         },
         "state_version": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         }
       },
