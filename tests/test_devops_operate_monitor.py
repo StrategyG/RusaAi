@@ -80,6 +80,10 @@ def _canonical(payload: dict) -> bytes:
     ).encode("utf-8")
 
 
+def _content_digest(payload: dict) -> str:
+    return hashlib.sha256(_canonical(payload)).hexdigest()
+
+
 def _signed(store, tenant_id: str, payload: dict, signer: FakeSigner) -> str:
     return store.put_json(
         tenant_id,
@@ -337,8 +341,12 @@ async def test_operate_executes_only_allowlisted_runbook_action_and_hands_off_to
     }
     assert runner.inspect_calls == 2
     assert runner.action_calls == 1
+    assert outcome.side_effect == "APPLIED"
     assert writer.records[0]["record"]["artifact_digest"] == ARTIFACT_DIGEST
     assert writer.records[0]["record"]["action"]["action_id"] == "restart_service"
+    evidence = store.get_json(TENANT, outcome.result["output"]["evidence_refs"][0])
+    assert evidence["type"] == "rusa.devops.operate.evidence"
+    assert evidence["operational_record_digest"] == _content_digest(writer.records[0]["record"])
 
 
 @pytest.mark.asyncio
@@ -442,6 +450,10 @@ async def test_monitor_is_read_only_and_routes_slo_breach_to_operate(tmp_path):
     }
     assert outcome.result["output"]["findings"][0]["code"] == "monitor.slo_latency_breach"
     assert writer.records[0]["record"]["status"] == "alert"
+    assert outcome.side_effect == "APPLIED"
+    evidence = store.get_json(TENANT, outcome.result["output"]["evidence_refs"][0])
+    assert evidence["type"] == "rusa.devops.monitor.evidence"
+    assert evidence["monitoring_record_digest"] == _content_digest(writer.records[0]["record"])
     assert runner.calls == 1
 
 
