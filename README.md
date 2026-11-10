@@ -224,6 +224,10 @@ Production deployment requires managed PostgreSQL, tenant repository allowlists,
 
 ---
 
+## Agentic DevOps Contract Foundation
+
+The versioned task, result, agent identity and workflow event contracts for the eight-stage Agentic DevOps lifecycle are documented in [Agent Contract Foundation](docs/architecture/AGENT-CONTRACT-FOUNDATION.md). This is the contract layer only; the existing PostgreSQL queue remains in place and the specialist runtime rollout is staged separately.
+
 ## Web Control Center
 
 A tenant-scoped Next.js Control Center is available in the `web/` directory. It connects to the FastAPI application through server-side route handlers, keeps tenant API keys in encrypted HttpOnly sessions, and provides task intake/history, task review visibility, chat inference, agent capability views, artifact references, and service health.
