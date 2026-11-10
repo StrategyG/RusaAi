@@ -1,6 +1,6 @@
 -- Platform Core 2.0 durable workflow state, task DAG, event log, outbox, and inbox.
--- Apply after 009_knowledge_embedding_384.sql on pgvector-enabled deployments.
--- Plain PostgreSQL test databases may skip optional pgvector migrations 007 and 009.
+-- Apply after 008_aicode_task_list_audit.sql on the platform database.
+-- Knowledge migrations 007 and 009 target the separate pgvector-enabled knowledge database.
 -- Existing aicode_jobs remains unchanged.
 BEGIN;
 
