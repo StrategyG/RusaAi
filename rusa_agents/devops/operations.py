@@ -635,22 +635,28 @@ class MonitorAgentExecutor:
 
     @staticmethod
     def _validate_task(task: dict[str, Any], principal: str) -> None:
+        constraints = task.get("constraints", {}) if isinstance(task, dict) else {}
+        if not isinstance(constraints, dict):
+            raise OperationsPolicyError("Monitor task constraints must be an object")
+        # Report authority escalation as a permission failure before schema
+        # validation rejects the same payload as a generic contract error.
+        if (
+            constraints.get("network_access")
+            or constraints.get("allowed_network_destinations")
+            or constraints.get("write_scope")
+            or constraints.get("approval_required")
+            or constraints.get("approval_scope")
+            or constraints.get("approval_ref")
+        ):
+            raise OperationsPolicyError(
+                "Monitor Agent is read-only and cannot receive write, network, or approval authority"
+            )
         policy = authorize_agent_task(task, authenticated_principal=principal)
         if policy.agent_id != MONITOR_AGENT or policy.read_only is not True:
             raise OperationsPolicyError("Monitor Agent requires its registered read-only identity")
         required = {"metrics.read", "logs.read", "traces.read", "alerts.read"}
-        constraints = task["constraints"]
-        if not required.issubset(set(constraints["allowed_tools"])):
+        if not required.issubset(set(constraints.get("allowed_tools", []))):
             raise OperationsPolicyError("Monitor task is missing a required telemetry read capability")
-        if (
-            constraints["network_access"]
-            or constraints.get("allowed_network_destinations")
-            or constraints["write_scope"]
-            or constraints["approval_required"]
-            or constraints.get("approval_scope")
-            or constraints.get("approval_ref")
-        ):
-            raise OperationsPolicyError("Monitor Agent is read-only and cannot receive write, network, or approval authority")
 
     async def execute(
         self,
