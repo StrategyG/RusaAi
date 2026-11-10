@@ -200,5 +200,31 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "not": {
+        "properties": {
+          "traceparent": {
+            "pattern": "^00-0{32}-"
+          }
+        },
+        "required": [
+          "traceparent"
+        ]
+      }
+    },
+    {
+      "not": {
+        "properties": {
+          "traceparent": {
+            "pattern": "^00-[a-f0-9]{32}-0{16}-"
+          }
+        },
+        "required": [
+          "traceparent"
+        ]
+      }
+    }
+  ]
 }
