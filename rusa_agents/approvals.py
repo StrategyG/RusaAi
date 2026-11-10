@@ -51,11 +51,20 @@ def _binding_digest(
 class PostgresHumanApprovalService:
     """Backend-only approval contract. No browser/UI approval endpoint is introduced here."""
 
-    def __init__(self, dsn: str, *, approver_authorizer: ApproverAuthorizer):
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        approver_authorizer: ApproverAuthorizer,
+        consumer_authorizer: ApproverAuthorizer | None = None,
+    ):
         if not dsn or not callable(approver_authorizer):
             raise ValueError("PostgreSQL DSN and fail-closed approver authorizer are required")
+        if consumer_authorizer is not None and not callable(consumer_authorizer):
+            raise ValueError("approval consumer authorizer must be callable")
         self.dsn = dsn
         self.approver_authorizer = approver_authorizer
+        self.consumer_authorizer = consumer_authorizer
 
     def _connect(self):
         try:
@@ -350,6 +359,12 @@ class PostgresHumanApprovalService:
         artifact_digest: str | None = None,
     ) -> bool:
         """Consume an approved decision once and only for the exact original action/resource."""
+        if not actor or len(actor) > 128:
+            raise ValueError("approval consumer identity is invalid")
+        if self.consumer_authorizer is None:
+            raise PermissionError("approval consumption requires a configured task-execution authorizer")
+        if not all((tenant_id, approval_id, action, resource_ref, workflow_id, run_id, task_id)):
+            raise ValueError("approval consumption must include exact tenant, task, action, and resource identity")
         now = datetime.now(timezone.utc)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
@@ -399,6 +414,8 @@ class PostgresHumanApprovalService:
             )
             if expected != row[6] or requested != row[6]:
                 raise ApprovalError("approval cannot be replayed for a different action, task, resource, or artifact")
+            if not self.consumer_authorizer(actor, tenant_id, action, resource_ref):
+                raise PermissionError("actor is not authorized to consume this approval for execution")
             inserted = conn.execute(
                 """
                 INSERT INTO public.rusa_approval_consumptions(
