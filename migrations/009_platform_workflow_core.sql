@@ -213,10 +213,10 @@ CREATE POLICY rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 DROP POLICY IF EXISTS rusa_workflow_runs_worker_tenant ON public.rusa_workflow_runs;
-CREATE POLICY rusa_workflow_runs_worker_tenant ON public.rusa_workflow_runs
+CREATE POLICY rusa_workflow_runs_worker_queue ON public.rusa_workflow_runs
     FOR ALL TO rusa_worker_runtime
-    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
-    WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks;
 CREATE POLICY rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks
@@ -235,10 +235,10 @@ CREATE POLICY rusa_workflow_dependencies_api_tenant ON public.rusa_workflow_depe
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 DROP POLICY IF EXISTS rusa_workflow_dependencies_worker_tenant ON public.rusa_workflow_dependencies;
-CREATE POLICY rusa_workflow_dependencies_worker_tenant ON public.rusa_workflow_dependencies
+CREATE POLICY rusa_workflow_dependencies_worker_queue ON public.rusa_workflow_dependencies
     FOR ALL TO rusa_worker_runtime
-    USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
-    WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_events_api_tenant ON public.rusa_workflow_events;
 CREATE POLICY rusa_workflow_events_api_tenant ON public.rusa_workflow_events
