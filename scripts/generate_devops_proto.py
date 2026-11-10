@@ -10,7 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROTO_DIR = ROOT / "contracts" / "proto" / "rusa" / "devops" / "v1"
 PROTO_FILE = PROTO_DIR / "workflow.proto"
-OUTPUT_DIR = Path(os.getenv("RUSA_DEVOPS_PROTO_OUTPUT_DIR", ROOT / "rusa_agents" / "devops" / "generated"))
+OUTPUT_DIR = Path(
+    os.getenv(
+        "RUSA_DEVOPS_PROTO_OUTPUT_DIR",
+        ROOT / "rusa_agents" / "devops" / "generated",
+    )
+)
 
 
 def main() -> None:
@@ -53,7 +58,14 @@ def main() -> None:
     if any(line == "import workflow_pb2 as workflow__pb2" for line in lines):
         raise SystemExit("failed to make generated gRPC stub package-relative")
     grpc_stub.write_text(source, encoding="utf-8")
-    print(f"Generated WorkflowControl stubs in {OUTPUT_DIR.relative_to(ROOT)}")
+
+    # Test sandboxes intentionally direct generated output to a temporary
+    # directory outside the checkout. Reporting must not fail after generation.
+    try:
+        output_label = OUTPUT_DIR.relative_to(ROOT)
+    except ValueError:
+        output_label = OUTPUT_DIR
+    print(f"Generated WorkflowControl stubs in {output_label}")
 
 
 if __name__ == "__main__":
