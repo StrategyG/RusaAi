@@ -195,11 +195,12 @@ whose tests and provenance match the exact source revision.
 
 ## Phase 5 — production operations and feedback
 
-- Implement Operate and Monitor against approved telemetry and runbooks.
-- Add SLO dashboards, alert routing, incident records, budget controls,
-  kill-switch and policy enforcement.
+- Connect the Phase 4F Operate, Monitor, and Security Guard host adapters to
+  approved live services, telemetry, runbooks, alert routing, and scanners.
+- Add production SLO dashboards, incident response, budget controls, kill-switch
+  and policy enforcement.
 - Test rollback, backup/restore, tenant isolation and disaster recovery.
-- Feed monitor findings back to Plan through an audited workflow event.
+- Feed Monitor findings back to Plan through an audited workflow event.
 
 **Exit criteria:** controlled closed-loop operation passes security, SRE,
 and product-owner sign-off.
