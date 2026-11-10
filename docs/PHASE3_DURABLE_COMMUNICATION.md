@@ -46,7 +46,7 @@ Generated stubs and a live gRPC server are intentionally deferred to Phase 3D. J
 
 ## Deployment and migration
 
-Apply migrations in numeric order after 011_platform_governance_registry.sql. Migration 011 does not alter aicode_jobs. It creates the DevOps API/worker/relay runtime groups; Migration 012 adds fenced task leases and cancellation epochs; production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
+Apply the platform database migrations in this order: `010_platform_workflow_core.sql`, `011_platform_governance_registry.sql`, `012_devops_durable_communication.sql`, and `013_devops_task_leases_and_cancellation.sql`. These migrations belong to the platform database. Knowledge migrations `007_rag_knowledge_pgvector.sql` and `009_knowledge_embedding_384.sql` belong to the separate pgvector-enabled knowledge database and are applied there independently. Migration 012 does not alter aicode_jobs; it creates the DevOps API/worker/relay runtime groups. Migration 013 adds fenced task leases and cancellation epochs. Production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
 
 ## Exit criteria for Phase 3A
 
