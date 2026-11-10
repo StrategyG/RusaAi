@@ -72,7 +72,7 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build the API, worker, web, and isolated sandbox images from the reviewed commit. Use the image names defined by the production certification contract:
+Build the API, worker, web, and isolated sandbox images from the reviewed commit. API, worker, and sandbox image names follow the production certification contract; the web image is an additional deployment artifact:
 
 ```bash
 docker build -t ghcr.io/strategyg/rusa-ai-api:RELEASE .
@@ -85,13 +85,13 @@ docker push ghcr.io/strategyg/rusa-ai-web:RELEASE
 docker push ghcr.io/strategyg/rusa-ai-sandbox:RELEASE
 ```
 
-Resolve each image digest from the registry. Use the lowercase owner namespace `ghcr.io/strategyg` required by the certification contract. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
+Resolve each image digest from the registry. Use the lowercase owner namespace `ghcr.io/strategyg`; the API, worker, and sandbox references must match the certification contract. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
 
 ```text
 ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
 ```
 
-The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
+The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon. The current certification manifest covers API, worker, and sandbox images; the web image still needs equivalent signature/provenance coverage before it can be treated as a certified production artifact.
 
 The CI workflows build the API, worker, web, and sandbox images but do not publish them to a registry automatically; publishing remains a controlled release operation. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
 
@@ -211,7 +211,7 @@ docker compose -f docker-compose.production.yml ps
 docker compose -f docker-compose.production.yml logs --tail=200 api worker
 ```
 
-The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, uses explicit environment allowlists so the API, worker, and web containers do not inherit unrelated secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
+The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, uses explicit environment allowlists so the API, worker, and web containers do not inherit unrelated secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing. The Python preflight checks image repository paths and digest syntax; it is not a substitute for the release workflow's Cosign and provenance verification.
 
 API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 

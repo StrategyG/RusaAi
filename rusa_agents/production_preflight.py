@@ -1,8 +1,8 @@
 """Fail-closed preflight for the production Compose deployment.
 
 This validates the production runtime configuration and binds every deployable
-image to the repository-owned GHCR path by immutable SHA-256 digest. It does
-not deploy or certify external infrastructure.
+image to the repository-owned GHCR path by immutable SHA-256 digest. It does not
+verify Cosign signatures or provenance, deploy services, or certify infrastructure.
 """
 from __future__ import annotations
 
