@@ -695,7 +695,11 @@
           "payload": {
             "$ref": "#/$defs/TaskAcceptedPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -711,7 +715,11 @@
           "payload": {
             "$ref": "#/$defs/TaskProgressPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -727,7 +735,11 @@
           "payload": {
             "$ref": "#/$defs/ToolInvocationPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -743,7 +755,11 @@
           "payload": {
             "$ref": "#/$defs/TaskCompletedPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -759,7 +775,11 @@
           "payload": {
             "$ref": "#/$defs/TaskFailedPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -807,7 +827,11 @@
           "payload": {
             "$ref": "#/$defs/TaskCancellationRequestedPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -823,7 +847,11 @@
           "payload": {
             "$ref": "#/$defs/TaskCancelledPayloadV2"
           }
-        }
+        },
+        "required": [
+          "task_id",
+          "attempt"
+        ]
       }
     },
     {
@@ -1012,17 +1040,9 @@
       "type": "string"
     },
     "traceparent": {
-      "anyOf": [
-        {
-          "pattern": "^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Traceparent"
+      "pattern": "^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$",
+      "title": "Traceparent",
+      "type": "string"
     },
     "workflow_id": {
       "maxLength": 128,
@@ -1036,6 +1056,7 @@
     "workflow_id",
     "run_id",
     "correlation_id",
+    "traceparent",
     "event_type",
     "producer_id",
     "producer_version"
