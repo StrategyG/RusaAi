@@ -22,7 +22,7 @@ Set both base URLs to the RusaModels Model Server HTTPS URL, including the `/ope
 
 The chat provider uses the existing `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME` and `RUSA_MODEL_API_KEY` settings. No agent runtime or tool authorization code is moved to RusaModels.
 
-The embedding provider uses `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_MODEL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_DIMENSIONS` and `RUSA_EMBEDDING_INPUT_TYPE_ENABLED`. The embedding API key falls back to `RUSA_MODEL_API_KEY` when a separate key is not supplied.
+The embedding provider uses `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_MODEL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_DIMENSIONS` and `RUSA_EMBEDDING_INPUT_TYPE_ENABLED`. For the 384d RusaModels profile, the embedding API key falls back to `RUSA_MODEL_API_KEY` when a separate key is not supplied. The legacy 1536d external embedding provider continues to use only `RUSA_EMBEDDING_API_KEY`.
 
 For multilingual-e5-small:
 - Model ID: `rusa-embedding-small`.
