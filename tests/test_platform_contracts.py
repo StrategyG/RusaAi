@@ -28,8 +28,6 @@ from rusa_agents.contracts import (
 )
 from rusa_agents.platform_contracts import (
     PLATFORM_SCHEMA_MODELS,
-    AICodeQueueStatusV1,
-    AICodeTaskStateV1,
     AgentDomain,
     AgentHealthStatus,
     AgentManifestV1,
@@ -201,6 +199,12 @@ def test_task_envelope_rejects_credentials_in_durable_payloads() -> None:
     with pytest.raises(ValidationError, match="credential field is not allowed"):
         TaskEnvelopeV2.model_validate(payload)
 
+def test_task_input_references_require_immutable_sha256_digests() -> None:
+    payload = _task_payload()
+    payload["input_refs"] = [{"uri": "artifact://runs/run-1/input.json"}]
+    with pytest.raises(ValidationError):
+        TaskEnvelopeV2.model_validate(payload)
+
 
 def test_task_envelope_validates_trace_context_and_budget() -> None:
     payload = _task_payload()
@@ -242,6 +246,17 @@ def test_workflow_event_requires_versioned_identity_and_safe_payload() -> None:
     payload["payload"] = {"credentials": {"password": "never-store"}}
     with pytest.raises(ValidationError, match="credential field is not allowed"):
         WorkflowEventV2.model_validate(payload)
+
+
+def test_coding_task_adapter_rejects_non_string_tenant_metadata() -> None:
+    task = CodingTask(
+        objective="Validate tenant identity",
+        repository=RepositoryTarget("StrategyG/RusaAi"),
+        acceptance_criteria=["Tenant is a string"],
+        metadata={"tenant_id": None},
+    )
+    with pytest.raises(ValueError, match="tenant_id must be a non-empty string"):
+        coding_task_to_envelope(task)
 
 
 def test_coding_task_adapter_round_trips_without_copying_arbitrary_metadata() -> None:
