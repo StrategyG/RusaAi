@@ -580,10 +580,16 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
         policy_resolver=lambda *_: True,
     )
     registry.register(tenant_id, manifest, actor="test:admin")
-    assert registry.validate(tenant_id, manifest.agent_id, manifest.version, actor="test:admin").status == AgentStatus.VALIDATED
+    validated = registry.validate(
+        tenant_id, manifest.agent_id, manifest.version, actor="test:admin"
+    )
+    assert validated.status == AgentStatus.VALIDATED
     active = registry.activate(tenant_id, manifest.agent_id, manifest.version, actor="test:admin")
     assert active.status == AgentStatus.ACTIVE
-    assert registry.assert_runnable(tenant_id, manifest.agent_id, manifest.version, "repo.read").status == AgentStatus.ACTIVE
+    runnable = registry.assert_runnable(
+        tenant_id, manifest.agent_id, manifest.version, "repo.read"
+    )
+    assert runnable.status == AgentStatus.ACTIVE
     assert registry.select(tenant_id, "repo.read").agent_id == manifest.agent_id
     with pytest.raises(AgentRegistryError, match="different immutable content"):
         registry.register(
@@ -750,6 +756,9 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
             (tenant_id,),
         ).fetchone()[0] == 1
         assert conn.execute(
-            "SELECT count(*) FROM public.rusa_workflow_events WHERE tenant_id=%s AND event_type='validation.verdict'",
+            """
+            SELECT count(*) FROM public.rusa_workflow_events
+            WHERE tenant_id=%s AND event_type='validation.verdict'
+            """,
             (tenant_id,),
         ).fetchone()[0] == 1
