@@ -108,20 +108,22 @@ class PostgresEvidenceStore:
                 return str(inserted[0])
             existing = conn.execute(
                 """
-                SELECT evidence_id, producer_id, producer_version,
-                       subject_digest, subject_commit, test_profile, occurred_at
+                SELECT evidence_id, kind, producer_id, producer_version,
+                       subject_digest, subject_commit, test_profile, occurred_at, metadata
                 FROM public.rusa_evidence_records
                 WHERE tenant_id=%s AND uri=%s AND sha256=%s
                 """,
                 (tenant_id, reference.uri, reference.sha256),
             ).fetchone()
             if existing is None or (
-                existing[1] != reference.producer_id
-                or existing[2] != reference.producer_version
-                or existing[3] != reference.subject_digest
-                or existing[4] != subject_commit
-                or existing[5] != test_profile
-                or existing[6] != occurred_at
+                existing[1] != reference.kind
+                or existing[2] != reference.producer_id
+                or existing[3] != reference.producer_version
+                or existing[4] != reference.subject_digest
+                or existing[5] != subject_commit
+                or existing[6] != test_profile
+                or existing[7] != occurred_at
+                or existing[8] != details
             ):
                 raise EvidenceValidationError("evidence URI/digest already exists with different provenance")
             return str(existing[0])
