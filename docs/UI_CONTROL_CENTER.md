@@ -63,3 +63,9 @@ Open http://localhost:3000. Configure a tenant API key with the appropriate task
 ## Production
 
 Build and publish an immutable web image, set RUSA_WEB_IMAGE to its digest, and set RUSA_WEB_SESSION_SECRET using a secret manager. The production Compose web service binds to loopback and joins only the internal RUSA network. Place an authenticated TLS reverse proxy in front of it before exposing the UI to users. The repository README continues to state that RUSA-AI is not production-certified; adding this UI does not change that certification status.
+
+## Capability status source
+
+The maintained [Agent Capability Status Matrix](AGENT_CAPABILITY_MATRIX.md) is the source of truth for current runtime roles, partially represented shared agents, and planned DevOps/domain capabilities. UI labels must use that distinction. Only a versioned, validated, active registry entry with passing execution and health evidence may be labelled as an active platform agent. The current six AICode worker roles remain labelled as AICode runtime roles.
+
+Canonical orchestrator names and communication choices are defined in [ADR-PLATFORM-001/002](ADR-PLATFORM-001-002.md). Supreme Orchestrator is a target global coordinator; AICodeOrchestrator remains the current coding implementation; DevOps Orchestrator is a target domain coordinator. PostgreSQL remains the current durable queue. RabbitMQ, Kafka, gRPC, and WebSocket remain deferred options.

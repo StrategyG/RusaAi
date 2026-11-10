@@ -442,6 +442,83 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge"},
         )
 
+    def _authorization_resource_ref(self, action: dict[str, Any]) -> str:
+        """Resolve the exact resource target from the arguments the tool will execute."""
+        name = action.get("name")
+        args = action.get("arguments", {})
+        if not isinstance(args, dict):
+            raise ToolDenied("Tool arguments must be an object")
+
+        if name in {"list_files", "read_file", "write_file"}:
+            raw_path = args.get("path", "." if name == "list_files" else "")
+            if name == "list_files" and raw_path == ".":
+                return "workspace://root"
+            self._resolve(raw_path)
+            normalized = PurePosixPath(raw_path).as_posix()
+            return "workspace://" + normalized
+
+        if name == "run_check":
+            profile = args.get("profile")
+            if not isinstance(profile, str) or not profile.strip():
+                raise ToolDenied("Validation profile is required for resource authorization")
+            return f"workspace://root/checks/{profile}"
+
+        if name == "git_diff":
+            return "workspace://root"
+
+        if name == "search_knowledge":
+            collection = args.get("collection", self.knowledge_collection)
+            if not isinstance(collection, str) or not collection.strip():
+                raise ToolDenied("Knowledge collection is invalid")
+            return f"knowledge://collections/{collection}"
+
+        if name == "get_document":
+            collection = args.get("collection", self.knowledge_collection)
+            document_id = args.get("document_id")
+            if (
+                not isinstance(collection, str) or not collection.strip()
+                or not isinstance(document_id, str) or not document_id.strip()
+            ):
+                raise ToolDenied("Knowledge document resource is invalid")
+            return f"knowledge://collections/{collection}/documents/{document_id}"
+
+        if name == "list_collections":
+            if not self.knowledge_tenant_id:
+                raise ToolDenied("Tenant-scoped knowledge retrieval is not enabled for this worker")
+            return f"knowledge://tenants/{self.knowledge_tenant_id}/collections"
+
+        raise ToolDenied(f"Tool '{name}' has no registered resource resolver")
+
+    def execute_authorized(
+        self,
+        action: dict[str, Any],
+        role: WorkerRole,
+        manifest,
+        authorization_context,
+    ) -> ToolResult:
+        """Final enforcement: bind the policy resource to the exact tool arguments."""
+        from .capability_auth import (
+            ToolAuthorizationContext,
+            authorize_tool_invocation,
+        )
+
+        name = action.get("name", "unknown") if isinstance(action, dict) else "unknown"
+        try:
+            if not isinstance(action, dict) or not isinstance(authorization_context, ToolAuthorizationContext):
+                raise ToolDenied("Tool action and authorization context are required")
+            if action.get("name") != authorization_context.tool_name:
+                raise ToolDenied("Tool action does not match its authorization context")
+            if role != authorization_context.worker_role:
+                raise ToolDenied("Tool role does not match the authorized worker identity")
+            actual_resource = self._authorization_resource_ref(action)
+            if actual_resource != authorization_context.resource_ref:
+                raise ToolDenied("Tool arguments target a different resource than the policy decision")
+            authorize_tool_invocation(manifest, authorization_context)
+        except (PermissionError, ToolDenied) as exc:
+            TOOL_EXECUTIONS.labels(str(name)[:64], "denied").inc()
+            raise ToolDenied(str(exc)) from exc
+        return self.execute(action, role)
+
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
         if not isinstance(action, dict):
             raise ToolDenied("Tool action must be an object")
