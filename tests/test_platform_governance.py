@@ -422,6 +422,7 @@ def test_tool_gateway_binds_actual_arguments_to_authorized_resource(tmp_path):
 
     gateway = WorkspaceToolGateway(tmp_path)
     registered = manifest(resource_scope={"include_patterns": ["workspace://*"]})
+    now = datetime.now(timezone.utc)
     grant = TaskScopedGrant(
         tenant_id="tenant-a",
         task_id="task-1",
@@ -429,13 +430,14 @@ def test_tool_gateway_binds_actual_arguments_to_authorized_resource(tmp_path):
         agent_version="1.0.0",
         capability="repo.read",
         allowed_tools=frozenset({"list_files"}),
-        expires_at=NOW + timedelta(minutes=2),
+        expires_at=now + timedelta(minutes=2),
         grant_id="grant-workspace",
         resource_patterns=("workspace://src",),
     )
     context = authorization_context(
         resource_ref="workspace://src",
         grant=grant,
+        task_deadline_at=now + timedelta(minutes=5),
         policy_decision=policy_decision(
             resource_ref="workspace://src",
             action="tool.invoke:list_files",
