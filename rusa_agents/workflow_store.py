@@ -481,11 +481,10 @@ class PostgresWorkflowStore:
         if metric not in limits or type(amount) not in {int, float} or not math.isfinite(float(amount)) or amount <= 0:
             raise ValueError("budget metric or positive finite amount is invalid")
         limit_key, default_limit = limits[metric]
-        default_sql = "NULL" if default_limit is None else str(default_limit)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute(
-                f"""
+                """
                 UPDATE public.rusa_workflow_runs
                 SET budget_consumed=jsonb_set(
                         budget_consumed,
@@ -498,16 +497,17 @@ class PostgresWorkflowStore:
                 WHERE tenant_id=%s AND run_id=%s
                   AND state IN ('running', 'planning', 'validating')
                   AND (
-                    {default_sql} IS NULL
-                    OR COALESCE((budget->>%s)::numeric, {default_sql})
+                    %s::numeric IS NULL
+                    OR COALESCE((budget->>%s)::numeric, %s::numeric)
                        >= COALESCE((budget_consumed->>%s)::numeric, 0) + %s::numeric
                   )
                 RETURNING workflow_id, budget_consumed->>%s, state_version,
-                          COALESCE((budget->>%s)::numeric, {default_sql})
+                          COALESCE((budget->>%s)::numeric, %s::numeric)
                 """,
                 (
                     metric, metric, amount, tenant_id, run_id,
-                    limit_key, metric, amount, metric, limit_key,
+                    default_limit, limit_key, default_limit,
+                    metric, amount, metric, limit_key, default_limit,
                 ),
             ).fetchone()
             if row is None:
