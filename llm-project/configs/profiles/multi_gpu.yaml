@@ -1,0 +1,26 @@
+profile: multi_gpu
+status: proposed
+purpose: Example distributed research profile for a compatible pretrained checkpoint; hardware topology and scaling efficiency require validation.
+hardware:
+  device: cuda
+  gpu_count: 8
+  distributed_backend: nccl
+model:
+  source: pretrained_checkpoint
+  max_context_tokens: 32768
+  context_mode: extended
+training:
+  enabled: true
+  strategy: fsdp
+  precision: bf16
+  micro_batch_size: 1
+  gradient_accumulation_steps: 8
+inference:
+  enabled: true
+  backend: vllm
+  quantization: none
+  max_batch_size: 8
+notes:
+  - Eight GPUs are an example topology, not a confirmed available resource.
+  - Validate interconnect bandwidth, GPU memory, storage throughput, and fault recovery before scheduling runs.
+  - This profile does not establish that the 96-layer, one-million-token target is feasible.
