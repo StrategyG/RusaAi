@@ -6,7 +6,6 @@ to use the existing PostgreSQL task queue until a later architecture phase.
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import PurePosixPath
@@ -159,7 +158,7 @@ class AgentIdentity(ContractModel):
 class AgentTask(ContractModel):
     """A durable delegation request for one specialist agent."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1]
     task_id: str = Field(min_length=1, max_length=128)
     workflow_id: str = Field(min_length=1, max_length=128)
     tenant_id: str = Field(min_length=1, max_length=128)
