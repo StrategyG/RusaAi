@@ -158,13 +158,18 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - Test Agent accepts only named test suites from an offline test plan. Required suites must pass; required skipped suites and any failed suite block release.
 - Test reports and attestations are immutable, tenant-scoped, and signed by the independent Test Agent identity. A passing result is bound to the exact source commit and artifact digest.
 
+**Phase 4D (this increment) implements Release candidate preparation:**
+
+- Release Agent verifies detached-signed Build, SBOM, and independent Test evidence.
+- It checks tenant/workflow identity, exact source commit and artifact digest, SBOM checksum, required test suites, changelog, migration notes, and optional signed Security Guard evidence.
+- A host-injected approval verifier enforces a release approval when the task policy requires it.
+- It creates an immutable signed release-candidate manifest and readiness report. It does not publish an official release or deploy an environment.
+
 **Remaining Phase 4 work:**
 
-- Provision and harden the actual BuildKit and isolated test-runner adapters; CI currently validates the adapters with deterministic fakes.
-- Verify signed build, SBOM, and test evidence in a Release Agent and produce an immutable release candidate.
-- Add staging-only Deploy integration and rollback rehearsal.
+- Implement a staging-only Deploy Agent with target allowlists, approval verification, health checks, smoke tests, and rollback rehearsal.
 - Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
-- Provision production worker pools, heartbeat loops, and live child-task orchestration.
+- Provision production BuildKit/test services, worker pools, heartbeat loops, and live child-task orchestration.
 
 The detailed boundaries and follow-on increments are documented in
 [PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).

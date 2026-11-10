@@ -138,20 +138,44 @@ commit/digest binding, and QA independence. A production rollout still needs
 the actual isolated builder/test services, workload key provisioning and
 rotation, durable worker heartbeat integration, and Release Agent verification.
 
-## Explicitly not completed by Phase 4C
+## Phase 4D — Release candidate preparation
 
-- Release Agent verification of signed Build, SBOM, and Test evidence.
-- Signed release-candidate publication and staging-only deployment.
-- Deploy, Operate, Monitor, and Security Guard stage handlers.
-- Production BuildKit/test service provisioning, worker-pool provisioning, and live child-task orchestration.
+The Release Agent is a separate workload identity and cannot publish an
+official release or deploy an environment. It verifies detached-signed Build,
+SBOM, and independent Test evidence before preparing an immutable candidate.
+
+- Verifies Build and SBOM signatures against trusted Build Agent keys.
+- Verifies Test Agent signature and requires a passing test report for the
+  exact source commit and OCI artifact digest.
+- Confirms tenant/workflow identity, SBOM checksum, reproducible-build
+  attestation, and host-configured required test suites.
+- Requires a host-injected approval verifier whenever the task policy marks
+  release approval as mandatory.
+- Checks changelog and migration notes, and can optionally verify signed
+  Security Guard findings against host-configured severity thresholds.
+- Writes a content-addressed release-candidate manifest, a readiness report,
+  and a detached-signed release attestation.
+- Emits a Release-to-Deploy handoff only after all gates pass. Official release
+  publication remains a separately approved repository action.
+
+The Release Agent does not invoke a deployment adapter. Staging deployment,
+health checks, smoke tests, and rollback remain the next increment.
+
+## Explicitly not completed by Phase 4D
+
+- Staging-only Deploy Agent with target allowlists, health checks, smoke tests,
+  and rollback rehearsal.
+- Operate, Monitor, and Security Guard service integrations.
+- Production BuildKit/test service provisioning, worker-pool provisioning,
+  heartbeat loops, and live child-task orchestration.
 
 ## Next increments
 
-- **4D — Release and staging:** verify signed Build, SBOM, and independent QA
-  evidence; produce an immutable signed release candidate; and deploy only to
-  an approved staging target with health checks and rollback rehearsal.
-- **4E — remaining specialists:** integrate Deploy, Operate, Monitor, and
-  Security Guard against allowlisted services and telemetry.
+- **4E — Staging deployment:** verify the signed release candidate, enforce
+  staging target allowlists and deployment approvals, run health/smoke checks,
+  and rehearse rollback.
+- **4F — Operations and governance:** integrate Operate, Monitor, and Security
+  Guard with allowlisted services, telemetry, and policy-engine decisions.
 
 The Phase 4 exit criterion remains a staging workflow that produces a signed
 release candidate whose tests and provenance match the exact source revision.

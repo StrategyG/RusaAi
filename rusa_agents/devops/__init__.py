@@ -27,6 +27,12 @@ from .contracts import (
     validate_workflow_event,
 )
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
+from .release import (
+    ApprovalDecision,
+    ApprovalVerifier,
+    ReleaseAgentExecutor,
+    ReleasePolicy,
+)
 from .specialists import (
     CodeAgentExecutor,
     ExecutionLease,
@@ -47,6 +53,8 @@ from .store import (
 __all__ = [
     "AGENT_POLICIES",
     "AgentAuthorizationError",
+    "ApprovalDecision",
+    "ApprovalVerifier",
     "AgentPolicy",
     "ArtifactIntegrityError",
     "ArtifactNotFoundError",
@@ -61,6 +69,8 @@ __all__ = [
     "ExecutionLeaseError",
     "OutboxLeaseLostError",
     "PlanAgentExecutor",
+    "ReleaseAgentExecutor",
+    "ReleasePolicy",
     "PostgresInbox",
     "PostgresOutboxRelay",
     "PostgresWorkflowStore",
