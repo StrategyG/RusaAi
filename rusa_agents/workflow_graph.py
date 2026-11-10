@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import math
 from typing import Any, Mapping, Sequence
 
 
@@ -32,8 +33,8 @@ class WorkflowTaskSpec:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise WorkflowGraphError(f"{name} must be a non-empty string")
-        if self.deadline_at.tzinfo is None or self.deadline_at.utcoffset() is None:
-            raise WorkflowGraphError("task deadline_at must be timezone-aware")
+        if not isinstance(self.deadline_at, datetime) or self.deadline_at.tzinfo is None or self.deadline_at.utcoffset() is None:
+            raise WorkflowGraphError("task deadline_at must be a timezone-aware datetime")
         if not 0 <= self.priority <= 9:
             raise WorkflowGraphError("task priority must be between 0 and 9")
         if not 1 <= self.max_attempts <= 100:
@@ -63,10 +64,29 @@ class WorkflowRunSpec:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise WorkflowGraphError(f"{name} must be a non-empty string")
-        if self.deadline_at.tzinfo is None or self.deadline_at.utcoffset() is None:
-            raise WorkflowGraphError("workflow deadline_at must be timezone-aware")
+        if not isinstance(self.deadline_at, datetime) or self.deadline_at.tzinfo is None or self.deadline_at.utcoffset() is None:
+            raise WorkflowGraphError("workflow deadline_at must be a timezone-aware datetime")
         if not isinstance(self.budget, Mapping):
             raise WorkflowGraphError("workflow budget must be an object")
+        integer_limits = {
+            "max_parallel_tasks": (1, 100),
+            "max_execution_seconds": (1, 86_400),
+            "max_tool_calls": (1, 100_000),
+            "max_tokens": (1, 1_000_000_000),
+            "max_repair_cycles": (0, 10),
+            "max_retries": (0, 100),
+        }
+        for key, (minimum, maximum) in integer_limits.items():
+            if key in self.budget:
+                value = self.budget[key]
+                if type(value) is not int or not minimum <= value <= maximum:
+                    raise WorkflowGraphError(
+                        f"workflow budget {key} must be an integer between {minimum} and {maximum}"
+                    )
+        if "max_cost_usd" in self.budget:
+            value = self.budget["max_cost_usd"]
+            if type(value) not in {int, float} or not math.isfinite(float(value)) or value <= 0:
+                raise WorkflowGraphError("workflow budget max_cost_usd must be a positive finite number")
 
 
 @dataclass(frozen=True)
