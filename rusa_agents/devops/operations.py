@@ -149,6 +149,8 @@ class RunbookAction:
         if not self.approval_required and self.approval_scope is not None:
             raise ValueError("approval scope cannot be set for an action that needs no approval")
         schema = dict(self.parameter_schema)
+        if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+            raise ValueError("runbook parameter schemas must be strict objects")
         jsonschema.Draft202012Validator.check_schema(schema)
         object.__setattr__(self, "parameter_schema", schema)
 
@@ -173,7 +175,7 @@ class RunbookDefinition:
             raise ValueError("runbook must allow at least one valid service ID")
         actions = dict(self.actions)
         if not actions or any(
-            key != action.action_id or not isinstance(action, RunbookAction)
+            not isinstance(action, RunbookAction) or key != action.action_id
             for key, action in actions.items()
         ):
             raise ValueError("runbook action registry is invalid")
@@ -524,7 +526,10 @@ class SLORule:
             raise ValueError("SLO threshold must be finite")
         if self.severity not in {"info", "low", "medium", "high", "critical"}:
             raise ValueError("SLO severity is invalid")
-        if not 1 <= len(self.description) <= 1000 or not 1 <= len(self.recommendation) <= 1000:
+        if (
+            not isinstance(self.description, str) or not 1 <= len(self.description) <= 1000
+            or not isinstance(self.recommendation, str) or not 1 <= len(self.recommendation) <= 1000
+        ):
             raise ValueError("SLO description or recommendation is invalid")
 
 
@@ -542,7 +547,10 @@ class TelemetryFeedback:
             raise ValueError("telemetry feedback code is invalid")
         if self.severity not in {"info", "low", "medium", "high", "critical"}:
             raise ValueError("telemetry feedback severity is invalid")
-        if not 1 <= len(self.message) <= 1000 or not 1 <= len(self.recommendation) <= 1000:
+        if (
+            not isinstance(self.message, str) or not 1 <= len(self.message) <= 1000
+            or not isinstance(self.recommendation, str) or not 1 <= len(self.recommendation) <= 1000
+        ):
             raise ValueError("telemetry feedback text is invalid")
 
 
@@ -608,6 +616,7 @@ class MonitorAgentExecutor:
         rules = {service: tuple(rows) for service, rows in rules_by_service.items()}
         if not rules or any(
             not _ID_RE.fullmatch(service) or not rows
+            or len(rows) > 200
             or any(not isinstance(row, SLORule) for row in rows)
             or len({row.rule_id for row in rows}) != len(rows)
             for service, rows in rules.items()
@@ -684,9 +693,15 @@ class MonitorAgentExecutor:
             if not isinstance(snapshot, TelemetrySnapshot):
                 raise TypeError("telemetry adapter did not return a typed snapshot")
             _checkpoint(checkpoint)
-            evidence_refs = list(dict.fromkeys(
-                list(task_input.get("evidence_refs", [])) + list(snapshot.evidence_refs)
-            ))
+            task_evidence_refs = task_input.get("evidence_refs", [])
+            if (
+                not isinstance(task_evidence_refs, list)
+                or any(not _content_addressed_reference(ref) for ref in task_evidence_refs)
+            ):
+                raise ValueError("task telemetry evidence references are not immutable content-addressed URIs")
+            evidence_refs = list(dict.fromkeys(task_evidence_refs + list(snapshot.evidence_refs)))
+            if len(evidence_refs) > 200:
+                raise ValueError("telemetry evidence reference count exceeds the result contract")
             if not evidence_refs:
                 return _blocked(
                     task, started_at=started, code="monitor.telemetry_evidence_missing",
@@ -697,7 +712,10 @@ class MonitorAgentExecutor:
             for rule in rules:
                 actual = snapshot.metrics.get(rule.metric_name)
                 if actual is None:
-                    message = f"{rule.description} Required metric {rule.metric_name} was not observed."
+                    message = (
+                        f"{rule.description} Required metric {rule.metric_name} was not observed. "
+                        f"Recommendation: {rule.recommendation}"
+                    )
                     severity = "medium"
                     code = "monitor.metric_missing." + rule.rule_id
                 else:
