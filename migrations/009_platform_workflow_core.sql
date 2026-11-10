@@ -179,9 +179,12 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_events (
     FOREIGN KEY (tenant_id, workflow_id, run_id)
         REFERENCES public.rusa_workflow_runs(tenant_id, workflow_id, run_id) ON DELETE RESTRICT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_events_sequence
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_events_run_sequence
     ON public.rusa_workflow_events(tenant_id, run_id, sequence)
-    WHERE sequence IS NOT NULL;
+    WHERE sequence IS NOT NULL AND task_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_events_task_sequence
+    ON public.rusa_workflow_events(tenant_id, run_id, task_id, sequence)
+    WHERE sequence IS NOT NULL AND task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_rusa_workflow_events_run_time
     ON public.rusa_workflow_events(tenant_id, run_id, occurred_at, event_id);
 CREATE INDEX IF NOT EXISTS idx_rusa_workflow_events_type_time
