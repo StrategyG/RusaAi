@@ -21,11 +21,11 @@ from rusa_agents.platform_contracts import (
     AgentManifestV1,
     AgentResultV2,
     AgentStatus,
-    normalize_contract_schema,
     ArtifactReference,
     TaskEnvelopeV2,
     TaskOutcome,
     WorkflowEventV2,
+    normalize_contract_schema,
     platform_contract_schema,
 )
 
