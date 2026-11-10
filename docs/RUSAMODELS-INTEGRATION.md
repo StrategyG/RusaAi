@@ -2,7 +2,7 @@
 
 ## Status and dependency
 
-This change prepares RUSA AI to consume the authenticated OpenAI-compatible API provided by RusaModels. The RusaModels implementation is proposed in [StrategyG/RusaModels PR #7](https://github.com/StrategyG/RusaModels/pull/7). Merge and deploy that change before enabling the 384-dimensional embedding profile.
+This integration consumes the authenticated OpenAI-compatible API provided by RusaModels. The model-development and CPU-inference migration was merged through [RusaModels PR #7](https://github.com/StrategyG/RusaModels/pull/7), and the least-privilege inference identity was merged through [RusaModels PR #9](https://github.com/StrategyG/RusaModels/pull/9). These code merges do not establish that either service is deployed or production-ready. Deploy and verify the Model Server and embedding runtime before enabling the 384-dimensional embedding profile.
 
 The integration is opt-in. Existing 1536-dimensional embedding deployments continue to work until operators apply migration 009 and explicitly switch configuration.
 
@@ -20,9 +20,9 @@ Set both base URLs to the RusaModels Model Server HTTPS URL, including the `/ope
 - Embeddings: `POST /openai/v1/embeddings`, model `rusa-embedding-small`.
 - Model list: `GET /openai/v1/models`.
 
-The chat provider uses the existing `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME` and `RUSA_MODEL_API_KEY` settings. No agent runtime or tool authorization code is moved to RusaModels.
+The chat provider uses the existing `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME` and `RUSA_MODEL_API_KEY` settings. The bearer token must map to a RusaModels API principal with role `inference`; do not use a `manager` or `administrator` token for RusaAi service-to-service calls. The `inference` role can invoke OpenAI-compatible inference routes but cannot manage models, start quantization jobs, or read administrative audit records. No agent runtime or tool authorization code is moved to RusaModels.
 
-The embedding provider uses `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_MODEL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_DIMENSIONS` and `RUSA_EMBEDDING_INPUT_TYPE_ENABLED`. For the 384d RusaModels profile, the embedding API key falls back to `RUSA_MODEL_API_KEY` when a separate key is not supplied. The legacy 1536d external embedding provider continues to use only `RUSA_EMBEDDING_API_KEY`.
+The embedding provider uses `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_MODEL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_DIMENSIONS` and `RUSA_EMBEDDING_INPUT_TYPE_ENABLED`. For the 384d RusaModels profile, the embedding API key falls back to `RUSA_MODEL_API_KEY` when a separate key is not supplied. Any token used for this path must also be a RusaModels `inference` principal. The legacy 1536d external embedding provider continues to use only `RUSA_EMBEDDING_API_KEY`.
 
 For multilingual-e5-small:
 - Model ID: `rusa-embedding-small`.
@@ -42,10 +42,10 @@ Migration 009 does not delete or overwrite the existing 1536-dimensional vectors
 
 ### Rollout sequence
 
-1. Merge and deploy RusaModels PR #7. Verify both chat and embedding endpoints through the Model Server gateway.
+1. Confirm RusaModels PRs #7 and #9 are merged. Deploy the Model Server and embedding runtime using production secrets, TLS, resource limits and monitoring. Verify chat and embedding endpoints through the authenticated Model Server gateway using an `inference`-role service token. A successful GitHub merge or CI run alone is not deployment evidence.
 2. Back up the RUSA AI knowledge database and confirm migration 007 is already applied.
 3. Apply `migrations/009_knowledge_embedding_384.sql` using the database migration operator. Do not run schema migrations from the application worker.
-4. Configure a dedicated RusaModels API token in the RUSA AI secret manager. Set:
+4. Create a dedicated RusaModels API token, register only its SHA-256 digest in `RUSAMODELS_API_PRINCIPALS` with subject `rusa-ai-inference` and role `inference`, and store the plaintext token only in the RUSA AI secret manager. Set:
    - `RUSA_MODEL_BASE_URL=https://<rusa-models-host>/openai/v1`
    - `RUSA_MODEL_NAME=rusa-general-4b`
    - `RUSA_MODEL_API_KEY=<dedicated-rusamodels-token>`
