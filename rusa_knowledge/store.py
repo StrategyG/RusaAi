@@ -193,13 +193,18 @@ class PostgresKnowledgeStore:
                 "DELETE FROM rusa_knowledge_chunks WHERE tenant_id=%s AND document_id=%s::uuid",
                 (tenant_id, document_id),
             )
+            from psycopg import sql
+
+            insert_sql = sql.SQL(
+                """
+                INSERT INTO rusa_knowledge_chunks
+                    (tenant_id, document_id, collection, chunk_index, content, {embedding_column}, metadata)
+                VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
+                """
+            ).format(embedding_column=sql.Identifier(self.embedding_column))
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    f"""
-                    INSERT INTO rusa_knowledge_chunks
-                        (tenant_id, document_id, collection, chunk_index, content, {self.embedding_column}, metadata)
-                    VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                    """,
+                    insert_sql,
                     [
                         (
                             tenant_id,
@@ -232,14 +237,17 @@ class PostgresKnowledgeStore:
         vector = _vector_literal(query_embedding, self.dimensions)
         candidate_limit = min(max(limit * 4, 20), 100)
 
-        sql = f"""
+        from psycopg import sql
+
+        query_sql = sql.SQL(
+            """
             WITH vector_candidates AS (
                 SELECT chunk_id,
-                       ROW_NUMBER() OVER (ORDER BY {self.embedding_column} <=> %s::vector) AS vector_rank
+                       ROW_NUMBER() OVER (ORDER BY {embedding_column} <=> %s::vector) AS vector_rank
                 FROM rusa_knowledge_chunks
                 WHERE tenant_id=%s AND collection=%s
-                  AND {self.embedding_column} IS NOT NULL
-                ORDER BY {self.embedding_column} <=> %s::vector
+                  AND {embedding_column} IS NOT NULL
+                ORDER BY {embedding_column} <=> %s::vector
                 LIMIT %s
             ),
             lexical_candidates AS (
@@ -262,7 +270,7 @@ class PostgresKnowledgeStore:
             )
             SELECT c.chunk_id, c.document_id, c.chunk_index, c.content,
                    d.title, d.source_uri, d.metadata, combined.rrf_score,
-                   COALESCE(1 - (c.{self.embedding_column} <=> %s::vector), 0.0) AS vector_similarity
+                   COALESCE(1 - (c.{embedding_column} <=> %s::vector), 0.0) AS vector_similarity
             FROM combined
             JOIN rusa_knowledge_chunks c
               ON c.chunk_id = combined.chunk_id AND c.tenant_id=%s
@@ -270,7 +278,8 @@ class PostgresKnowledgeStore:
               ON d.document_id=c.document_id AND d.tenant_id=c.tenant_id
             ORDER BY combined.rrf_score DESC
             LIMIT %s
-        """
+            """
+        ).format(embedding_column=sql.Identifier(self.embedding_column))
         params = (
             vector, tenant_id, collection, vector, candidate_limit,
             query, tenant_id, collection, query, query, candidate_limit,
@@ -278,7 +287,7 @@ class PostgresKnowledgeStore:
         )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
-            rows = connection.execute(sql, params).fetchall()
+            rows = connection.execute(query_sql, params).fetchall()
         return [
             {
                 "chunk_id": str(row[0]),
