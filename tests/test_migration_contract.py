@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == list(range(1, 11))
+    assert versions == list(range(1, 13))
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -47,6 +47,8 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "008_aicode_task_list_audit.sql",
         "009_platform_workflow_core.sql",
         "010_platform_governance_registry.sql",
+        "011_devops_durable_communication.sql",
+        "012_devops_task_leases_and_cancellation.sql",
     ]
 
 
