@@ -276,7 +276,7 @@ class TaskEnvelopeV2(ContractModel):
     message_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
     correlation_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
     causation_id: str | None = Field(default=None, min_length=1, max_length=128)
-    traceparent: str | None = Field(default=None, pattern=_TRACEPARENT_PATTERN)
+    traceparent: str = Field(pattern=_TRACEPARENT_PATTERN)
     domain: AgentDomain
     agent_id: str = Field(pattern=_AGENT_ID_PATTERN)
     agent_version: str = Field(pattern=_SEMVER_PATTERN)
@@ -549,7 +549,7 @@ class WorkflowEventV2(EventContractModel):
     message_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
     correlation_id: str = Field(min_length=1, max_length=128)
     causation_id: str | None = Field(default=None, min_length=1, max_length=128)
-    traceparent: str | None = Field(default=None, pattern=_TRACEPARENT_PATTERN)
+    traceparent: str = Field(pattern=_TRACEPARENT_PATTERN)
     event_type: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,127}$")
     producer_id: str = Field(min_length=1, max_length=128)
     producer_version: str = Field(min_length=1, max_length=64)
@@ -575,6 +575,19 @@ class WorkflowEventV2(EventContractModel):
 
     @model_validator(mode="after")
     def validate_known_payload(self) -> WorkflowEventV2:
+        task_scoped_events = {
+            "task.accepted",
+            "task.progress",
+            "tool.invocation",
+            "task.completed",
+            "task.failed",
+            "task.cancel.requested",
+            "task.cancelled",
+        }
+        if self.event_type in task_scoped_events and (
+            self.task_id is None or self.attempt is None
+        ):
+            raise ValueError("task lifecycle events require task_id and attempt")
         payload_model = EVENT_PAYLOAD_MODELS.get(self.event_type)
         if payload_model is not None:
             payload_model.model_validate(self.payload)
@@ -702,16 +715,25 @@ def platform_contract_schema(model: type[BaseModel], schema_id: str) -> dict[str
                     raise ValueError(f"conflicting event schema definition: {name}")
                 definitions[name] = definition
             definitions[payload_model.__name__] = payload_schema
-            conditions.append(
-                {
-                    "if": {"properties": {"event_type": {"const": event_type}}},
-                    "then": {
-                        "properties": {
-                            "payload": {"$ref": f"#/$defs/{payload_model.__name__}"}
-                        }
-                    },
-                }
-            )
+            condition = {
+                "if": {"properties": {"event_type": {"const": event_type}}},
+                "then": {
+                    "properties": {
+                        "payload": {"$ref": f"#/$defs/{payload_model.__name__}"}
+                    }
+                },
+            }
+            if event_type in {
+                "task.accepted",
+                "task.progress",
+                "tool.invocation",
+                "task.completed",
+                "task.failed",
+                "task.cancel.requested",
+                "task.cancelled",
+            }:
+                condition["then"]["required"] = ["task_id", "attempt"]
+            conditions.append(condition)
         schema["allOf"] = conditions
 
     return schema
