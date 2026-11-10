@@ -60,7 +60,7 @@ deployable. Install `requirements-rag-mcp.txt`, apply
 `migrations/007_rag_knowledge_pgvector.sql` to a PostgreSQL database with
 pgvector, and configure restricted database credentials and per-tenant MCP
 bearer-token hashes. The `rusa-knowledge` CLI supports ingestion, readiness,
-and retrieval evaluation. See `docs/RAG_MCP_OPERATIONS.md`.
+and retrieval evaluation. See `docs/RAG_MCP_OPERATIONS.md`. See [RusaModels chat/embedding integration](docs/RUSAMODELS-INTEGRATION.md) for the authenticated model gateway and non-destructive 384d vector migration.
 
 ## Repository Structure
 
