@@ -193,6 +193,22 @@
             "minLength": 1,
             "maxLength": 2000
           }
+        },
+        "release_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "target_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "rollback_plan_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "smoke_test_plan_ref": {
+          "type": "string",
+          "format": "uri"
         }
       }
     },
@@ -660,10 +676,20 @@
           "input": {
             "required": [
               "release_manifest_ref",
+              "release_evidence_ref",
               "environment",
+              "target_id",
+              "service",
               "commit_sha",
-              "artifact_digest"
-            ]
+              "artifact_digest",
+              "rollback_plan_ref",
+              "smoke_test_plan_ref"
+            ],
+            "properties": {
+              "environment": {
+                "const": "staging"
+              }
+            }
           }
         }
       }
@@ -942,7 +968,8 @@
                     "release.read",
                     "deployment.execute",
                     "health.read",
-                    "runbook.read"
+                    "runbook.read",
+                    "evidence.write"
                   ]
                 }
               }

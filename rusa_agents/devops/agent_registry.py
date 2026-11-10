@@ -257,6 +257,7 @@ _POLICIES = {
                 "deployment.execute",
                 "health.read",
                 "runbook.read",
+                "evidence.write",
             }
         ),
         write_scope_prefixes=("deployments/", "evidence/"),

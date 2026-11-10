@@ -33,6 +33,17 @@ from .release import (
     ReleaseAgentExecutor,
     ReleasePolicy,
 )
+from .deploy import (
+    DeployAgentExecutor,
+    DeployPolicy,
+    DeploymentCheckResult,
+    DeploymentExecutionResult,
+    DeploymentSnapshot,
+    DeploymentTarget,
+    DeploymentVerificationResult,
+    RollbackExecutionResult,
+    RollbackRehearsalResult,
+)
 from .specialists import (
     CodeAgentExecutor,
     ExecutionLease,
@@ -65,6 +76,15 @@ __all__ = [
     "ContractValidationError",
     "DevOpsDryRunOrchestrator",
     "DevOpsDryRunReport",
+    "DeployAgentExecutor",
+    "DeployPolicy",
+    "DeploymentCheckResult",
+    "DeploymentExecutionResult",
+    "DeploymentSnapshot",
+    "DeploymentTarget",
+    "DeploymentVerificationResult",
+    "RollbackExecutionResult",
+    "RollbackRehearsalResult",
     "ExecutionLease",
     "ExecutionLeaseError",
     "OutboxLeaseLostError",
