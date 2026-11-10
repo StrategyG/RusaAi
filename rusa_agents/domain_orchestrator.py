@@ -54,6 +54,8 @@ def authorize_domain_handoff(
     if source_domain == target_domain:
         return
     instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("cross-domain authorization time must be timezone-aware")
     if grant is None:
         raise DomainOrchestratorError("cross-domain handoff requires an explicit platform grant")
     if (
@@ -103,7 +105,7 @@ class AICodeDomainOrchestratorAdapter:
 
     @staticmethod
     def _tenant(task: CodingTask) -> str:
-        tenant_id = str(task.metadata.get("tenant_id", "default")).strip()
+        tenant_id = str(task.metadata.get("tenant_id", "")).strip()
         if not tenant_id:
             raise DomainOrchestratorError("AICode task tenant_id is required")
         return tenant_id
