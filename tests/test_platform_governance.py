@@ -140,6 +140,7 @@ def test_policy_engine_allows_only_explicit_low_risk_allowlist_actions():
         ({"authenticated_tenant_id": "tenant-b"}, "deny", "tenant_mismatch"),
         ({"action": "disable_audit"}, "deny", "action_prohibited"),
         ({"action": "unknown.action"}, "deny", "action_not_allowlisted"),
+        ({"action": "unknown.high_risk", "risk": RiskLevel.HIGH}, "deny", "action_not_allowlisted"),
         ({"risk": RiskLevel.HIGH}, "require_approval", "human_approval_required"),
         ({"requires_approval": True}, "require_approval", "human_approval_required"),
     ],
@@ -163,6 +164,42 @@ def test_policy_engine_denies_or_requires_approval_deterministically(changes, ou
     values.update(changes)
     decision = engine.evaluate(PolicyRequest(**values))
     assert (decision.outcome, decision.reason_code) == (outcome, reason)
+
+
+def test_policy_engine_only_releases_protected_action_after_exact_approval_consumption():
+    engine = DeterministicPolicyEngine(
+        policy_id="release-policy",
+        policy_version="4",
+        allowed_actions={"release.promote"},
+    )
+    base = {
+        "tenant_id": "tenant-a",
+        "authenticated_tenant_id": "tenant-a",
+        "actor": "release-agent",
+        "action": "release.promote",
+        "resource_ref": "artifact://release/candidate",
+        "policy_id": "release-policy",
+        "policy_version": "4",
+        "risk": RiskLevel.HIGH,
+        "workflow_id": "workflow-1",
+        "run_id": "run-1",
+        "task_id": "task-1",
+    }
+    pending = engine.evaluate(PolicyRequest(**base))
+    assert pending.outcome == "require_approval"
+    assert pending.approval_id is None
+
+    approved = engine.evaluate(
+        PolicyRequest(**base, approval_consumed=True, approval_id="approval-1")
+    )
+    assert approved.outcome == "allow"
+    assert approved.reason_code == "approved_action_authorized"
+    assert approved.approval_id == "approval-1"
+
+    with pytest.raises(ValueError, match="only after trusted one-time consumption"):
+        engine.evaluate(PolicyRequest(**base, approval_id="approval-1"))
+    with pytest.raises(ValueError, match="must include its approval ID"):
+        engine.evaluate(PolicyRequest(**base, approval_consumed=True))
 
 
 def test_policy_denial_is_stable_for_same_input_and_changes_when_input_changes():
@@ -270,6 +307,21 @@ def test_capability_authorization_requires_manifest_grant_role_resource_and_poli
         )
 
 
+def test_capability_authorization_requires_exact_task_and_manifest_policy_binding():
+    with pytest.raises(CapabilityDenied, match="deterministic policy"):
+        authorize_tool_invocation(
+            manifest(),
+            authorization_context(policy_decision=policy_decision(task_id=None)),
+            now=NOW,
+        )
+    with pytest.raises(CapabilityDenied, match="deterministic policy"):
+        authorize_tool_invocation(
+            manifest(),
+            authorization_context(policy_decision=policy_decision(policy_id="other-policy")),
+            now=NOW,
+        )
+
+
 def test_capability_authorization_rejects_tenant_policy_and_deadline_mismatch():
     with pytest.raises(CapabilityDenied, match="tenant scope"):
         authorize_tool_invocation(
@@ -334,6 +386,24 @@ def test_domain_orchestrator_adapter_preserves_legacy_aicode_contract():
     assert report["status"] == "received"
     with pytest.raises(DomainOrchestratorError, match="progress reader"):
         asyncio.run(adapter.progress("tenant-a", task.task_id))
+
+
+def test_domain_adapter_requires_authenticated_tenant_metadata():
+    task = CodingTask(
+        "Add a test",
+        RepositoryTarget("StrategyG/RusaAi"),
+        ["Tests pass"],
+    )
+
+    class FakeAICode:
+        async def run(self, incoming):
+            return TaskRecord(incoming)
+
+    import asyncio
+
+    adapter = AICodeDomainOrchestratorAdapter(FakeAICode())
+    with pytest.raises(DomainOrchestratorError, match="tenant_id is required"):
+        asyncio.run(adapter.plan(task))
 
 
 def test_cross_domain_handoff_requires_explicit_unexpired_tenant_grant():
