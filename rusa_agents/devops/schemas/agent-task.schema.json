@@ -310,6 +310,7 @@
             "type": "string",
             "enum": [
               "merge",
+              "operate",
               "release",
               "deploy",
               "secret_change",
