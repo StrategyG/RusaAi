@@ -147,11 +147,9 @@ rotation, durable worker heartbeat integration, and Release Agent verification.
 
 ## Next increments
 
-- **4C — Build and independent QA:** reproducible build output, SBOM, test
-  reports, and immutable commit/digest-bound evidence. QA must be an
-  independent Test Agent identity and cannot PASS without exact evidence.
-- **4D — Release and staging:** verify Build and QA evidence, produce a signed
-  release candidate, and deploy only to an approved staging target.
+- **4D — Release and staging:** verify signed Build, SBOM, and independent QA
+  evidence; produce an immutable signed release candidate; and deploy only to
+  an approved staging target with health checks and rollback rehearsal.
 - **4E — remaining specialists:** integrate Deploy, Operate, Monitor, and
   Security Guard against allowlisted services and telemetry.
 
