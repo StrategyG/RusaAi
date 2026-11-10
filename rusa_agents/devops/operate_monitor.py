@@ -774,8 +774,8 @@ class OperateAgentExecutor:
             return _failure(
                 task,
                 started_at=started,
-                code=f"operate.execution_failed.{type(exc).__name__.lower()}",
-                message=f"Operate Agent could not verify the operational result or persist its report: {exc}",
+                code="operate.execution_failed",
+                message="Operate Agent could not verify the operational result or persist its report.",
                 failure_category="AMBIGUOUS" if action_started else "PERMANENT",
                 side_effect="APPLIED" if record_persisted else "UNKNOWN" if action_started else "NONE",
                 source_commit=deployment["source_commit"],
@@ -1201,8 +1201,8 @@ class MonitorAgentExecutor:
             return _failure(
                 task,
                 started_at=started,
-                code=f"monitor.collection_invalid.{type(exc).__name__.lower()}",
-                message=f"Monitor Agent received invalid telemetry or could not persist the monitoring record: {exc}",
+                code="monitor.collection_invalid",
+                message="Monitor Agent received invalid telemetry or could not persist the monitoring record.",
                 failure_category="PERMANENT",
                 side_effect="APPLIED" if record_persisted else "NONE",
                 source_commit=source_commit,
