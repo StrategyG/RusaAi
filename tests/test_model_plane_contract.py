@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker
+import yaml
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 
 ROOT = Path(__file__).resolve().parents[1] / "contracts" / "model_plane" / "v0.1.0"
@@ -83,6 +84,19 @@ def test_model_plane_json_schemas_are_valid() -> None:
         Draft202012Validator.check_schema(load_schema(name))
 
 
+def test_openapi_document_references_existing_contract_schemas() -> None:
+    document = yaml.safe_load((ROOT / "openapi.yaml").read_text(encoding="utf-8"))
+    assert document["openapi"] == "3.1.0"
+    operation = document["paths"]["/model-plane/v1/inference"]["post"]
+    request_ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    assert (ROOT / request_ref).is_file()
+    for response in operation["responses"].values():
+        content = response.get("content", {}).get("application/json", {})
+        schema_ref = content.get("schema", {}).get("$ref")
+        if schema_ref:
+            assert (ROOT / schema_ref).is_file()
+
+
 def test_valid_chat_request_matches_contract() -> None:
     validator("inference-request.schema.json").validate(valid_request())
 
@@ -90,7 +104,7 @@ def test_valid_chat_request_matches_contract() -> None:
 def test_request_rejects_untrusted_tenant_override() -> None:
     payload = valid_request()
     payload["tenant_id"] = "attacker-selected-tenant"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         validator("inference-request.schema.json").validate(payload)
 
 
