@@ -71,7 +71,7 @@ Declared `allowed_tools`, `write_scope`, and `approval_required` values are cont
 
 ## Phase 1 dummy workflow
 
-`DummyWorkflowRunner` executes one stage-scoped specialist task entirely in-process. It validates the task recipient and stage against a registered specialist identity, rejects any declared tool, network, write, or approval capability, and refuses expired tasks. It emits a causally linked `task.request` → `task.accepted` → `task.completed` event sequence and returns a typed `passed` result with a SHA-256-bound evidence reference. The dummy runner does not invoke the Tool Gateway, access a repository, access the network, or publish to a broker. Its purpose is to prove contract-to-result handoff safely; it is not the production orchestrator.
+`DummyWorkflowRunner` executes one stage-scoped specialist task entirely in-process. It validates the task recipient and stage against a registered specialist identity, rejects any declared tool, network, write, or approval capability, and refuses expired tasks. It emits a causally linked `task.request` → `task.accepted` → `task.completed` event sequence and returns a typed `passed` result with a SHA-256-bound evidence reference. The completion event references a separately serialized result payload and its digest; both result and evidence bytes are returned in memory for a future artifact-store adapter. The dummy runner does not invoke the Tool Gateway, access a repository, access the network, or publish to a broker. Its purpose is to prove contract-to-result handoff safely; it is not the production orchestrator.
 
 ## Current limitations and next phase
 
