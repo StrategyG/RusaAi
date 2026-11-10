@@ -15,7 +15,6 @@ from rusa_agents.devops.contracts import (
 )
 from rusa_agents.devops.workflow import DummyWorkflowRunner
 
-
 TRACEPARENT = "00-" + "1" * 32 + "-" + "2" * 16 + "-01"
 
 
