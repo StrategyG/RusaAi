@@ -353,14 +353,58 @@ def validate_workflow_handoff(
             raise ContractValidationError(f"Workflow event does not match task field '{field}'")
     if event["producer"] != task["agent_id"]:
         raise ContractValidationError("Workflow event producer does not match the assigned agent")
-    expected_type = f"{task['stage']}.completed" if result["status"] == "passed" else "workflow.blocked"
-    if event["type"] != expected_type:
+    expected_events = {
+        "plan": {"plan.completed"},
+        "code": {"code.completed"},
+        "build": {"build.completed"},
+        "test": {"test.completed"},
+        "release": {"release.approved"},
+        "deploy": {"deploy.completed"},
+        "operate": {"operate.incident_detected", "operate.recovered"},
+        "monitor": {"monitor.alert_triggered", "monitor.feedback_created"},
+        "security": {"policy.violation", "workflow.blocked"},
+    }
+    allowed_events = (
+        expected_events[task["stage"]]
+        if result["status"] == "passed"
+        else {"workflow.blocked"}
+    )
+    if event["type"] not in allowed_events:
         raise ContractValidationError("Workflow event type does not match the agent result status")
-    if event["type"] != "workflow.blocked" and event["payload"].get("result_ref") not in {
-        artifact["ref"] for artifact in result["artifacts"]
-    }:
-        raise ContractValidationError("Workflow event result_ref is not bound to a result artifact")
-    event_refs = set(event["payload"].get("evidence_refs", []))
-    result_refs = {item["ref"] for item in result["evidence"]}
-    if event["type"] != "workflow.blocked" and not event_refs.issubset(result_refs):
-        raise ContractValidationError("Workflow event evidence refs are not bound to result evidence")
+
+    artifact_refs = {item["ref"] for item in result["artifacts"]}
+    artifact_digests = {item["digest"] for item in result["artifacts"]}
+    evidence_refs = {item["ref"] for item in result["evidence"]}
+    payload = event["payload"]
+    if event["type"] in {"plan.completed", "code.completed", "build.completed", "test.completed"}:
+        if payload.get("stage") != task["stage"] or payload.get("status") != "passed":
+            raise ContractValidationError("Workflow event stage/status does not match the result")
+        if payload.get("result_ref") not in artifact_refs:
+            raise ContractValidationError("Workflow event result_ref is not bound to a result artifact")
+        if not set(payload.get("evidence_refs", [])).issubset(evidence_refs):
+            raise ContractValidationError("Workflow event evidence refs are not bound to result evidence")
+    elif event["type"] == "release.approved":
+        if payload.get("release_ref") not in artifact_refs:
+            raise ContractValidationError("Release event does not reference a result artifact")
+        if payload.get("approval_ref") not in evidence_refs:
+            raise ContractValidationError("Release approval is not bound to result evidence")
+        if payload.get("manifest_digest") not in artifact_digests:
+            raise ContractValidationError("Release manifest digest does not match a result artifact")
+    elif event["type"] == "deploy.completed":
+        if payload.get("deployment_ref") not in artifact_refs:
+            raise ContractValidationError("Deployment event does not reference a result artifact")
+        if payload.get("artifact_digest") not in artifact_digests:
+            raise ContractValidationError("Deployment digest does not match a result artifact")
+        if payload.get("health_status") != "healthy":
+            raise ContractValidationError("A passed deployment requires a healthy status")
+    elif event["type"] in {"operate.incident_detected", "operate.recovered"}:
+        refs = {payload.get("incident_ref"), payload.get("recovery_ref")} - {None}
+        if not refs.issubset(artifact_refs | evidence_refs):
+            raise ContractValidationError("Operations event references are not bound to result evidence")
+    elif event["type"] == "monitor.alert_triggered":
+        if payload.get("alert_ref") not in artifact_refs | evidence_refs:
+            raise ContractValidationError("Monitor alert is not bound to result evidence")
+    elif event["type"] == "monitor.feedback_created":
+        refs = {payload.get("feedback_ref"), payload.get("source_ref")} - {None}
+        if not refs.issubset(artifact_refs | evidence_refs):
+            raise ContractValidationError("Monitor feedback references are not bound to result evidence")
