@@ -26,7 +26,7 @@ This document separates the current repository implementation from the broader a
 | Memory & Knowledge | Existing SQLite task memory and tenant-scoped RAG/knowledge services; dedicated agent behavior remains future work |
 | Evaluation & Reporting | Existing metrics/audit/evidence are a baseline; dedicated evaluation/reporting agent remains future work |
 
-## Eight-stage DevOps lifecycle
+## Phase 1 — Agent contract foundation\n\nThe initial contract foundation is implemented on the feature branch: Draft 2020-12 task/result/event schemas, a permission-scoped registry for the ten general agents and eight lifecycle agents, deterministic protected-action decisions, evidence-bound handoff validation, and a synthetic Plan Agent dry-run test. Existing AICode contracts remain unchanged. The existing PostgreSQL queue remains the single durable queue; a queue-capability partition is required before real DevOps tasks are enqueued so the current AICode worker cannot claim them. No new RabbitMQ/Kafka service or production executor is introduced in this phase.\n\n## Eight-stage DevOps lifecycle
 
 The separate Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agents remain a subsequent implementation phase. The current PR does not grant autonomous release/deploy/production permissions. Release, deployment, secrets, permissions, and destructive actions remain approval-gated.
 
