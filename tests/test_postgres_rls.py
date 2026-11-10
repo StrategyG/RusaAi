@@ -540,6 +540,8 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
     workflow_store = PostgresWorkflowStore(DSN)
     workflow_store.create_workflow(run, WorkflowGraph(run, (task,)))
     workflow_store.start_run(tenant_id, run_id)
+    lease = workflow_store.claim_ready_tasks("worker:approval", limit=1)[0]
+    assert lease["task_id"] == task_id
 
     manifest = AgentManifestV1(
         agent_id="rusa_test_agent",
@@ -649,19 +651,7 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
             tenant_id, requested["approval_id"],
             actor="agent:requester", decision="approved",
         )
-    assert approvals.decide(
-        tenant_id, requested["approval_id"],
-        actor="human:approver", decision="approved",
-    )["status"] == "approved"
-    consume_args = {
-        "actor": "agent:executor",
-        "action": "release.promote",
-        "resource_ref": "artifact://release/candidate",
-        "workflow_id": workflow_id,
-        "run_id": run_id,
-        "task_id": task_id,
-        "artifact_digest": artifact_digest,
-    }
+
     paused_version = workflow_store.await_approval_task(
         tenant_id,
         task_id,
@@ -678,10 +668,20 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
             requested["approval_id"],
             expected_state_version=paused_version,
         )
+
     assert approvals.decide(
         tenant_id, requested["approval_id"],
         actor="human:approver", decision="approved",
     )["status"] == "approved"
+    consume_args = {
+        "actor": "agent:executor",
+        "action": "release.promote",
+        "resource_ref": "artifact://release/candidate",
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "task_id": task_id,
+        "artifact_digest": artifact_digest,
+    }
     assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is True
     assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is False
     resumed_version = workflow_store.resume_approved_task(
@@ -700,10 +700,6 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
             tenant_id, requested["approval_id"],
             **{**consume_args, "action": "release.deploy"},
         )
-
-    # Pause and resume the exact task only after its exact approval is consumed.
-    lease = workflow_store.claim_ready_tasks("worker:approval", limit=1)[0]
-    assert lease["task_id"] == task_id
 
     evidence_store = PostgresEvidenceStore(DSN)
     evidence_ref = EvidenceReference(
