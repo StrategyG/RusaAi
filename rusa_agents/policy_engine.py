@@ -51,7 +51,7 @@ def _reject_secret_fields(value: Any, path: str = "context") -> None:
 
 def _canonical_digest(value: Mapping[str, Any]) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class DeterministicPolicyEngine:
