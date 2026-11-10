@@ -9,7 +9,6 @@ from rusa_agents.devops.closed_loop import (
     KillSwitchActiveError,
     SLOAlert,
     WorkflowExecutionGuard,
-    alert_fingerprint,
 )
 
 
