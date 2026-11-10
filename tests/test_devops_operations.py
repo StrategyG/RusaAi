@@ -17,6 +17,7 @@ from rusa_agents.devops.operations import (
     TelemetryFeedback,
     TelemetrySnapshot,
 )
+from rusa_agents.devops.closed_loop import alert_fingerprint
 from rusa_agents.devops.specialists import ExecutionLease
 
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
@@ -520,3 +521,138 @@ def test_monitor_rejects_non_finite_metrics_and_read_only_scope_escalation():
     task["constraints"]["write_scope"] = ["incidents/"]
     with pytest.raises(PermissionError):
         MonitorAgentExecutor._validate_task(task, MONITOR_AGENT)
+
+
+
+class FakeIncidentStore:
+    def __init__(self):
+        self.alert_batches = []
+        self.transitions = []
+
+    def record_slo_alerts(self, alerts):
+        self.alert_batches.append(list(alerts))
+        rows = []
+        for alert in alerts:
+            incident_id = str(uuid4())
+            rows.append({
+                "incident_id": incident_id,
+                "incident_ref": f"incident://{alert.tenant_id}/{incident_id}",
+                "state_version": 1,
+            })
+        return rows
+
+    def get_incident_by_ref(self, tenant_id, incident_ref):
+        return {
+            "incident_id": incident_ref.rsplit("/", 1)[-1],
+            "state_version": 1,
+            "status": "open",
+        }
+
+    def transition_incident(self, **kwargs):
+        self.transitions.append(kwargs)
+        return {"incident_id": kwargs["incident_id"], "status": kwargs["target_status"]}
+
+
+@pytest.mark.asyncio
+async def test_monitor_persists_stable_incident_reference_for_slo_alert(tmp_path):
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    evidence_ref = store.put("tenant-operations", b"durable-slo-evidence", namespace="evidence")
+    snapshot = TelemetrySnapshot(
+        observed_at=NOW,
+        metrics={"availability": 0.98},
+        log_count=2,
+        trace_count=1,
+        evidence_refs=(evidence_ref,),
+    )
+    incident_store = FakeIncidentStore()
+    executor = MonitorAgentExecutor(
+        telemetry_reader=FakeTelemetryReader(snapshot),
+        rules_by_service={
+            "rusa-api": (
+                SLORule(
+                    rule_id="availability",
+                    metric_name="availability",
+                    operator="gte",
+                    threshold=0.999,
+                    severity="critical",
+                    description="API availability SLO is below target.",
+                    recommendation="Inspect dependency health.",
+                ),
+            )
+        },
+        incident_store=incident_store,
+        require_durable_incidents=True,
+    )
+    task = _monitor_task()
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=MONITOR_AGENT,
+        lease=_lease(task, MONITOR_AGENT),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "passed"
+    finding = outcome.result["output"]["findings"][0]
+    assert finding["incident_ref"].startswith("incident://tenant-operations/")
+    assert finding["code"] == (
+        "monitor.slo_breach."
+        + alert_fingerprint("tenant-operations", "rusa-api", "staging", "availability")[:24]
+    )
+    assert len(incident_store.alert_batches) == 1
+    assert incident_store.alert_batches[0][0].fingerprint == alert_fingerprint(
+        "tenant-operations", "rusa-api", "staging", "availability"
+    )
+
+
+@pytest.mark.asyncio
+async def test_operate_resolves_durable_incident_only_after_evidence_persistence(tmp_path):
+    store, definition, task = _operate_fixture(tmp_path)
+    incident_id = str(uuid4())
+    task["input"]["incident_ref"] = f"incident://{task['tenant_id']}/{incident_id}"
+    incident_store = FakeIncidentStore()
+    runner = FakeRunbookRunner()
+    executor = OperateAgentExecutor(
+        artifact_store=store,
+        runbooks={definition.runbook_id: definition},
+        runner=runner,
+        policy_authorizer=AllowPolicy(),
+        incident_store=incident_store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=OPERATE_AGENT,
+        lease=_lease(task, OPERATE_AGENT),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "passed"
+    assert len(incident_store.transitions) == 1
+    transition = incident_store.transitions[0]
+    assert transition["incident_id"] == incident_id
+    assert transition["target_status"] == "resolved"
+    assert transition["evidence_ref"].startswith("artifact://sha256/")
+
+
+@pytest.mark.asyncio
+async def test_operate_blocks_incident_lifecycle_when_store_is_not_configured(tmp_path):
+    store, definition, task = _operate_fixture(tmp_path)
+    task["input"]["incident_ref"] = f"incident://{task['tenant_id']}/{uuid4()}"
+    runner = FakeRunbookRunner()
+    executor = OperateAgentExecutor(
+        artifact_store=store,
+        runbooks={definition.runbook_id: definition},
+        runner=runner,
+        policy_authorizer=AllowPolicy(),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=OPERATE_AGENT,
+        lease=_lease(task, OPERATE_AGENT),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "operate.incident_store_unavailable"
+    assert runner.calls == []

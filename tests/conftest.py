@@ -65,6 +65,7 @@ def apply_postgres_migrations_for_integration_suite():
         "011_platform_governance_registry.sql",
         "012_devops_durable_communication.sql",
         "013_devops_task_leases_and_cancellation.sql",
+        "014_devops_closed_loop_governance.sql",
     ]
     migrations = [migration_dir / name for name in expected]
     if any(not path.is_file() for path in migrations):

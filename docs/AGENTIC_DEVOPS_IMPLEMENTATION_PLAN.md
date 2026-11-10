@@ -197,15 +197,21 @@ whose tests and provenance match the exact source revision.
 
 ## Phase 5 — production operations and feedback
 
-- Implement Operate and Monitor against approved telemetry and runbooks.
-- Add SLO dashboards, alert routing, incident records, budget controls,
-  kill-switch and policy enforcement.
-- Test rollback, backup/restore, tenant isolation and disaster recovery.
-- Feed monitor findings back to Plan through an audited workflow event.
+**Implemented control-plane foundation (integration branch):**
+- Stable SLO alert fingerprints no longer vary by observation timestamp or metric window.
+- PostgreSQL-backed incident correlation, idempotent alert inbox, append-only incident events, and versioned incident lifecycle transitions.
+- Monitor can persist each alert and return a tenant-bound incident URI. Operate can resolve or advance that incident only after it has persisted its immutable recovery report.
+- Tenant and platform kill switches cover workflow, DevOps stages, model invocation, tool invocation, and deployment/operations scopes.
+- A host-injected execution guard checks kill switches and consumes workflow tool/token/cost budgets before guarded actions.
+- Migration 014 applies forced RLS to incident, inbox, event, and kill-switch state. Tests cover deduplication, correlation, lifecycle CAS, tenant boundaries, kill switches, and fail-closed execution guards.
 
-**Exit criteria:** durable Monitor → Operate/Plan feedback, incident lifecycle,
-SLO alert routing, cost/kill-switch controls, and rollback/backup recovery
-tests pass security, SRE, and product-owner sign-off.
+**Still required for production acceptance:**
+- Provision real telemetry, alert-routing, runbook, incident-notification, and dashboard adapters; the current specialist interfaces remain host-injected.
+- Connect every model and tool gateway to WorkflowExecutionGuard; the guard is available, while each production gateway must explicitly inject it.
+- Rehearse rollback, backup/restore, tenant isolation, worker recovery, and disaster recovery with real infrastructure.
+- Verify incident routing, on-call ownership, SLO dashboards, and feedback handoff with an independent operator; obtain owner sign-off.
+
+**Exit criteria:** durable Monitor → Operate/Plan feedback, incident lifecycle, SLO alert routing, cost/kill-switch controls, and rollback/backup recovery must pass automated tests and an independently witnessed staging rehearsal. The foundation above does not by itself constitute production certification.
 
 ## Phase 6 — scale and enterprise readiness
 

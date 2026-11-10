@@ -37,6 +37,7 @@ def apply_database_migrations():
             "011_platform_governance_registry.sql",
             "012_devops_durable_communication.sql",
             "013_devops_task_leases_and_cancellation.sql",
+            "014_devops_closed_loop_governance.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),

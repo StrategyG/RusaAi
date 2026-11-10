@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == list(range(1, 14))
+    assert versions == list(range(1, 15))
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -49,6 +49,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "011_platform_governance_registry.sql",
         "012_devops_durable_communication.sql",
         "013_devops_task_leases_and_cancellation.sql",
+        "014_devops_closed_loop_governance.sql",
     ]
 
 
@@ -95,3 +96,22 @@ def test_governance_migration_has_registry_approval_consumption_and_immutable_ev
     assert "rusa_evidence_records" in migration
     assert "human approval binding is immutable" in migration
     assert "rusa_platform_append_only" in migration
+
+
+
+def test_closed_loop_migration_has_tenant_scoped_incidents_and_kill_switches():
+    migration = Path("migrations/014_devops_closed_loop_governance.sql").read_text(encoding="utf-8")
+    for table in (
+        "rusa_incidents",
+        "rusa_incident_events",
+        "rusa_closed_loop_inbox",
+        "rusa_kill_switches",
+        "rusa_kill_switch_events",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS public.{table}" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "tenant_id = 'platform'" in migration
+    assert "REVOKE DELETE, TRUNCATE" in migration
+    assert "UNIQUE (tenant_id, fingerprint)" in migration
+    assert "UNIQUE (tenant_id, message_id)" in migration

@@ -141,6 +141,10 @@
               "evidence_ref": {
                 "type": "string",
                 "format": "uri"
+              },
+              "incident_ref": {
+                "type": "string",
+                "format": "uri"
               }
             }
           }
