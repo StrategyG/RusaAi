@@ -40,8 +40,8 @@ class PostgresKnowledgeStore:
     ) -> None:
         if not dsn:
             raise ValueError("knowledge database DSN is required")
-        if dimensions != 1536:
-            raise ValueError("the current migration fixes embedding dimensions at 1536")
+        if dimensions not in {384, 1536}:
+            raise ValueError("embedding dimensions must be 384 or 1536")
         if not 1 <= min_pool_size <= max_pool_size <= 50:
             raise ValueError("database pool limits are invalid")
         if db_role is not None and not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", db_role):
@@ -52,6 +52,8 @@ class PostgresKnowledgeStore:
         except ImportError as exc:
             raise RuntimeError("install psycopg with the pool extra to use the knowledge store") from exc
         self.dimensions = dimensions
+        # Both identifiers are fixed constants selected from the supported dimension allowlist.
+        self.embedding_column = "embedding_384" if dimensions == 384 else "embedding"
         self._pool = ConnectionPool(
             conninfo=dsn,
             min_size=min_pool_size,
@@ -91,10 +93,10 @@ class PostgresKnowledgeStore:
                         FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_chunks')
                     ), false),
                     COALESCE((
-                        SELECT format_type(a.atttypid, a.atttypmod) = 'vector(1536)'
+                        SELECT format_type(a.atttypid, a.atttypmod) = %s
                         FROM pg_attribute a
                         WHERE a.attrelid = to_regclass('public.rusa_knowledge_chunks')
-                          AND a.attname = 'embedding' AND NOT a.attisdropped
+                          AND a.attname = %s AND NOT a.attisdropped
                     ), false),
                     EXISTS (
                         SELECT 1 FROM pg_policies
@@ -118,7 +120,8 @@ class PostgresKnowledgeStore:
                         SELECT 1 FROM pg_roles
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
                     )
-                """
+                """,
+                (f"vector({self.dimensions})", self.embedding_column),
             ).fetchone()
         return bool(row and all(row))
 
@@ -194,9 +197,9 @@ class PostgresKnowledgeStore:
                 cursor.executemany(
                     """
                     INSERT INTO rusa_knowledge_chunks
-                        (tenant_id, document_id, collection, chunk_index, content, embedding, metadata)
+                        (tenant_id, document_id, collection, chunk_index, content, {self.embedding_column}, metadata)
                     VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                    """,
+                    """.format(self.embedding_column),
                     [
                         (
                             tenant_id,
@@ -229,13 +232,13 @@ class PostgresKnowledgeStore:
         vector = _vector_literal(query_embedding, self.dimensions)
         candidate_limit = min(max(limit * 4, 20), 100)
 
-        sql = """
+        sql = f"""
             WITH vector_candidates AS (
                 SELECT chunk_id,
-                       ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS vector_rank
+                       ROW_NUMBER() OVER (ORDER BY {self.embedding_column} <=> %s::vector) AS vector_rank
                 FROM rusa_knowledge_chunks
                 WHERE tenant_id=%s AND collection=%s
-                ORDER BY embedding <=> %s::vector
+                ORDER BY {self.embedding_column} <=> %s::vector
                 LIMIT %s
             ),
             lexical_candidates AS (
@@ -258,7 +261,7 @@ class PostgresKnowledgeStore:
             )
             SELECT c.chunk_id, c.document_id, c.chunk_index, c.content,
                    d.title, d.source_uri, d.metadata, combined.rrf_score,
-                   1 - (c.embedding <=> %s::vector) AS vector_similarity
+                   1 - (c.{self.embedding_column} <=> %s::vector) AS vector_similarity
             FROM combined
             JOIN rusa_knowledge_chunks c
               ON c.chunk_id = combined.chunk_id AND c.tenant_id=%s
