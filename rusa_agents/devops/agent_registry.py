@@ -62,10 +62,8 @@ READ_ONLY_TOOLS = frozenset(
     }
 )
 
-MONITOR_AGENT_TOOLS = MONITOR_READ_ONLY_TOOLS | frozenset(
-    {"artifact.read", "evidence.read", "monitoring.write"}
-)
-SECURITY_GUARD_TOOLS = READ_ONLY_TOOLS | frozenset({"evidence.write"})
+MONITOR_AGENT_TOOLS = MONITOR_READ_ONLY_TOOLS
+SECURITY_GUARD_TOOLS = READ_ONLY_TOOLS
 
 # The Code Agent receives a task-specific path scope. The workspace gateway
 # applies a second deny-list for secrets, CI, migrations, schemas, and infra.
@@ -288,15 +286,15 @@ _POLICIES = {
         agent_id=MONITOR_AGENT,
         stage="monitor",
         allowed_tools=MONITOR_AGENT_TOOLS,
-        write_scope_prefixes=("monitoring/",),
-        read_only=False,
+        write_scope_prefixes=(),
+        read_only=True,
     ),
     SECURITY_GUARD_AGENT: AgentPolicy(
         agent_id=SECURITY_GUARD_AGENT,
         stage=None,
         allowed_tools=SECURITY_GUARD_TOOLS,
-        write_scope_prefixes=("evidence/",),
-        read_only=False,
+        write_scope_prefixes=(),
+        read_only=True,
     ),
 }
 
