@@ -1,6 +1,6 @@
 # RUSA AI Platform Contracts v2
 
-**Status:** Contract foundation implemented; registry and live workflow control plane remain separate workstreams  
+**Status:** Contract foundation and code-bearing P0 control-plane services implemented; live AICode runtime cutover remains open  
 **Version:** Agent Manifest 1.0; Task, Result, Event, and Task Record 2.0  
 **Date:** 10 November 2026  
 **Implementation:** `rusa_agents/platform_contracts.py`
@@ -64,7 +64,7 @@ Important rules:
 - Tool permissions still require deterministic policy enforcement at the Tool Gateway.
 - `tenant_scope` supports tenant, system, or explicit tenant allowlist scope.
 
-The Pydantic model and transition helper validate the contract; they do not register or activate an agent in a runtime. The live registry API remains a separate P0 workstream.
+The Pydantic model and transition helper validate the contract. A separate PostgreSQL agent-registry service and migration now implement registration, validation, activation, suspension, deprecation, revocation, health updates, and audited lifecycle transitions. The registry service is not yet wired into live AICode worker startup or API dispatch.
 
 ## 4. Universal Task Envelope 2.0
 
@@ -141,4 +141,4 @@ Automated tests cover:
 - AICode task, TaskRecord, six-worker-role, queue-status, evidence-key, and approval round-trip compatibility.
 - JSON Schema validity, Pydantic/schema parity, and positive/negative payload fixtures.
 
-The contracts do not yet provide a live agent registry, workflow/run/task persistence, DAG scheduler, transactional outbox/inbox, central policy decision service, or human approval service. Those remain separate P0 engineering workstreams. No new production side effect is enabled by this increment.
+The branch now includes separate PostgreSQL services and migrations for agent registry, workflow/run/task persistence, DAG scheduling primitives, transactional outbox/inbox, deterministic policy decisions, durable human approvals, and immutable evidence verification. These components are exercised by unit and PostgreSQL integration tests, but they are not yet wired into live AICode task intake or worker dispatch. No new production side effect is enabled by this increment; the current AICode queue, APIs, and six worker roles remain the compatibility baseline.
