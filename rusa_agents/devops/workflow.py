@@ -28,6 +28,8 @@ class WorkflowExecution:
 
     result: AgentResult
     events: tuple[WorkflowEvent, ...]
+    evidence_content: bytes
+    result_content: bytes
 
 
 class DummyWorkflowRunner:
@@ -144,6 +146,16 @@ class DummyWorkflowRunner:
             model_id="dummy/no-model",
             policy_version="phase-1-no-side-effects-v1",
         )
+        result_content = json.dumps(
+            result.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        result_ref = (
+            f"asset://rusa/dummy-results/{task.workflow_id}/"
+            f"{task.task_id}/attempt-{task.attempt}"
+        )
+        result_sha256 = hashlib.sha256(result_content).hexdigest()
         completed_event = self._event(
             task,
             EventType.TASK_COMPLETED,
@@ -151,12 +163,14 @@ class DummyWorkflowRunner:
             TaskCompletedPayload(
                 lease_epoch=task.attempt,
                 state_version=2,
-                result_ref=evidence.uri,
-                sha256=evidence.sha256,
+                result_ref=result_ref,
+                sha256=result_sha256,
             ).model_dump(mode="json"),
             accepted_event.message_id,
         )
         return WorkflowExecution(
             result=result,
             events=(request_event, accepted_event, completed_event),
+            evidence_content=evidence_payload,
+            result_content=result_content,
         )
