@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
-from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,7 +16,7 @@ from rusa_agents.devops.build_test import (
     TestExecutionResult,
     TestSuiteResult,
 )
-from rusa_agents.devops.specialists import ExecutionLease, ExecutionLeaseError
+from rusa_agents.devops.specialists import ExecutionLease
 
 
 REGISTRY_HOST = "registry.example"

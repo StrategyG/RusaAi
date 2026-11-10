@@ -746,10 +746,8 @@ class TestAgentExecutor:
                 artifact_digest=artifact_digest,
             )
 
-        runner_started = False
         try:
             timeout = _timeout_seconds(task)
-            runner_started = True
             execution = await asyncio.wait_for(
                 self.runner.run(
                     repository=repository,
