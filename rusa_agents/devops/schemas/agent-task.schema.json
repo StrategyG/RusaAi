@@ -209,6 +209,18 @@
         "smoke_test_plan_ref": {
           "type": "string",
           "format": "uri"
+        },
+        "action_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "deployment_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "slo_profile_ref": {
+          "type": "string",
+          "format": "uri"
         }
       }
     },
@@ -298,6 +310,7 @@
             "type": "string",
             "enum": [
               "merge",
+              "operate",
               "release",
               "deploy",
               "secret_change",
@@ -716,8 +729,16 @@
           "input": {
             "required": [
               "service",
-              "runbook_ref"
+              "runbook_ref",
+              "deployment_evidence_ref"
             ]
+          },
+          "constraints": {
+            "properties": {
+              "network_access": {
+                "const": false
+              }
+            }
           }
         }
       }
@@ -744,16 +765,20 @@
           "input": {
             "required": [
               "service",
-              "metrics_window"
-            ]
+              "metrics_window",
+              "deployment_evidence_ref",
+              "slo_profile_ref"
+            ],
+            "properties": {
+              "metrics_window": {
+                "pattern": "^(5m|15m|1h|6h|24h|last-(5m|15m|1h|6h|24h))$"
+              }
+            }
           },
           "constraints": {
             "properties": {
               "network_access": {
                 "const": false
-              },
-              "write_scope": {
-                "maxItems": 0
               }
             }
           }
@@ -996,6 +1021,9 @@
               "allowed_tools": {
                 "items": {
                   "enum": [
+                    "artifact.read",
+                    "evidence.read",
+                    "health.read",
                     "metrics.read",
                     "logs.read",
                     "runbook.read",
@@ -1033,6 +1061,9 @@
                     "alerts.read"
                   ]
                 }
+              },
+              "write_scope": {
+                "maxItems": 0
               }
             }
           }
@@ -1116,6 +1147,32 @@
               "approval_ref": {
                 "type": "string",
                 "format": "uri"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "agent_id": {
+            "const": "rusa_monitor_agent"
+          }
+        },
+        "required": [
+          "agent_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "properties": {
+              "write_scope": {
+                "maxItems": 1,
+                "items": {
+                  "const": "monitoring/"
+                }
               }
             }
           }

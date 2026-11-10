@@ -175,10 +175,17 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - The immutable deployment record and detached-signed Deploy attestation are stored in the tenant content-addressed artifact store.
 - Optional automatic rollback is disabled by default and can only be enabled by host policy; when enabled, restoration is checked against the previous digest.
 
+**Phase 4F (this increment) implements Operations and Governance adapters:**
+
+- Operate Agent verifies signed staging deployment evidence, evaluates named runbook actions against host allowlists and autonomy policy, requires commit/digest-bound human approval for protected mutations, and records operational findings/incidents.
+- Monitor Agent remains read-only, validates fresh telemetry for the exact deployed digest, evaluates content-addressed SLO/capacity profiles, and emits correlated alerts through a host-scoped record writer.
+- Security Guard remains read-only, assesses tenant-scoped immutable evidence, binds findings to evidence digests, sanitizes likely secrets, and emits a detached-signed assessment through the host-controlled evidence store.
+- Unit tests use deterministic fakes; they validate the adapters and policy boundaries but do not claim live staging service, telemetry, alerting, or scanner integration.
+
 **Remaining Phase 4 work:**
 
-- Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
-- Provision production BuildKit/test services, worker pools, heartbeat loops, and live child-task orchestration.
+- Connect the host adapters to approved staging services, telemetry, alert routing, and security scanners.
+- Provision workload keys, worker pools, heartbeat loops, and live child-task orchestration.
 
 The detailed boundaries and follow-on increments are documented in
 [PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).
@@ -188,11 +195,12 @@ whose tests and provenance match the exact source revision.
 
 ## Phase 5 — production operations and feedback
 
-- Implement Operate and Monitor against approved telemetry and runbooks.
-- Add SLO dashboards, alert routing, incident records, budget controls,
-  kill-switch and policy enforcement.
+- Connect the Phase 4F Operate, Monitor, and Security Guard host adapters to
+  approved live services, telemetry, runbooks, alert routing, and scanners.
+- Add production SLO dashboards, incident response, budget controls, kill-switch
+  and policy enforcement.
 - Test rollback, backup/restore, tenant isolation and disaster recovery.
-- Feed monitor findings back to Plan through an audited workflow event.
+- Feed Monitor findings back to Plan through an audited workflow event.
 
 **Exit criteria:** controlled closed-loop operation passes security, SRE,
 and product-owner sign-off.

@@ -37,8 +37,8 @@ STAGE_AGENT_IDS = MappingProxyType(
     }
 )
 
-# These are observation-only capabilities. They cannot mutate a repository,
-# workflow, deployment, runbook, or evidence record.
+# Monitor remains read-only. Its monitoring record is persisted by a
+# host-scoped writer, not through an agent-granted service mutation capability.
 MONITOR_READ_ONLY_TOOLS = frozenset(
     {
         "metrics.read",
@@ -61,6 +61,9 @@ READ_ONLY_TOOLS = frozenset(
         "traces.read",
     }
 )
+
+MONITOR_AGENT_TOOLS = MONITOR_READ_ONLY_TOOLS
+SECURITY_GUARD_TOOLS = READ_ONLY_TOOLS
 
 # The Code Agent receives a task-specific path scope. The workspace gateway
 # applies a second deny-list for secrets, CI, migrations, schemas, and infra.
@@ -267,6 +270,9 @@ _POLICIES = {
         stage="operate",
         allowed_tools=frozenset(
             {
+                "artifact.read",
+                "evidence.read",
+                "health.read",
                 "metrics.read",
                 "logs.read",
                 "runbook.read",
@@ -279,14 +285,14 @@ _POLICIES = {
     MONITOR_AGENT: AgentPolicy(
         agent_id=MONITOR_AGENT,
         stage="monitor",
-        allowed_tools=MONITOR_READ_ONLY_TOOLS,
+        allowed_tools=MONITOR_AGENT_TOOLS,
         write_scope_prefixes=(),
         read_only=True,
     ),
     SECURITY_GUARD_AGENT: AgentPolicy(
         agent_id=SECURITY_GUARD_AGENT,
         stage=None,
-        allowed_tools=READ_ONLY_TOOLS,
+        allowed_tools=SECURITY_GUARD_TOOLS,
         write_scope_prefixes=(),
         read_only=True,
     ),

@@ -391,9 +391,15 @@ class DevOpsDryRunOrchestrator:
             return {
                 "service": service,
                 "runbook_ref": f"artifact://dry-run/runbooks/{service}",
+                "deployment_evidence_ref": f"evidence://dry-run/deployments/{workflow_id}",
             }
         if stage == "monitor":
-            return {"service": service, "metrics_window": metrics_window}
+            return {
+                "service": service,
+                "metrics_window": metrics_window,
+                "deployment_evidence_ref": f"evidence://dry-run/deployments/{workflow_id}",
+                "slo_profile_ref": f"artifact://dry-run/slo-profiles/{workflow_id}",
+            }
         raise ValueError(f"unknown DevOps stage: {stage}")
 
     def run(

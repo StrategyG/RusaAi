@@ -197,17 +197,79 @@ environment credentials, serialization, and secret-manager integration.
 The agent model cannot invoke shell commands or inspect raw secrets. Tests
 use deterministic fakes; they do not claim a live staging deployment.
 
-## Explicitly not completed by Phase 4E
+## Phase 4F — Operations and governance
 
-- Operate, Monitor, and Security Guard live service/telemetry integrations.
-- Production BuildKit/test/deployment services, workload key provisioning,
-  worker-pool provisioning, heartbeat loops, and live child-task orchestration.
+This increment adds claim-bound Operate, Monitor, and cross-cutting Security
+Guard executors. Their service, telemetry, record-writing, and scanner
+integrations are host-injected adapters; the unit tests use deterministic fakes
+and do not claim a live staging integration.
+
+### Operate Agent
+
+- Verifies the detached-signed Deploy attestation and the immutable deployment
+  record, including tenant, workflow, staging target, service, source commit,
+  and exact artifact digest.
+- Accepts only host-allowlisted staging targets, services, and named runbook
+  actions. Runbook artifacts are schema-validated and task input cannot supply
+  shell commands, endpoints, or credentials.
+- Evaluates each action with the deterministic autonomy policy. Host policy,
+  action risk, task policy, and approval scope are intersected; a protected
+  mutation waits for a human approval bound to the deployed commit and digest.
+- Inspects the exact deployment before and after an action, validates service
+  and dependency health, and writes an immutable operational or incident record
+  through a host-scoped record writer.
+- Hands a recovered service to Monitor. An unresolved service or failed
+  runbook action is recorded as an operational finding rather than a successful
+  recovery.
+
+### Monitor Agent
+
+- Uses only read-only metrics, logs, traces, and alert capabilities. Its
+  write_scope remains empty; a host-scoped record writer persists the
+  monitoring report without granting the agent service-write authority.
+- Verifies the signed Deploy evidence and collects telemetry only for the
+  exact allowlisted staging deployment and artifact digest.
+- Accepts a bounded metrics-window set, validates sample freshness, time
+  windows, counts, and finite metric ranges, then evaluates a content-addressed
+  SLO profile for availability, error rate, latency, queue depth, and capacity.
+- Emits deterministic correlation keys, a monitoring record, and a
+  content-addressed evidence manifest bound to the record digest. An SLO breach
+  hands off to Operate; the agent itself cannot mutate the observed service.
+
+### Cross-cutting Security Guard
+
+- Uses only read-only repository, issue, artifact, evidence, policy, audit, and
+  telemetry capabilities. Its write_scope remains empty.
+- Assesses a bounded set of tenant-scoped evidence references and binds every
+  finding to one of those references and its content digest.
+- Sanitizes likely secret values, applies host-configured critical/high finding
+  thresholds, and writes a detached-signed immutable assessment through the
+  host-controlled evidence store.
+- A blocking finding prevents the workflow from passing its security gate.
+  Evidence persistence is a host-side output operation, not an agent write
+  capability.
+
+### Execution adapter boundary
+
+The host owns service access, telemetry credentials, alert delivery, runbook
+execution, record persistence, scanner configuration, and signing keys. No
+specialist receives arbitrary network access or raw secrets. Tests exercise
+identity, approval, digest binding, read-only authority, SLO findings,
+secret sanitization, and signed evidence using deterministic adapters.
+
+## Explicitly not completed by Phase 4F
+
+- Live service, telemetry, alert-routing, and security-scanner integrations.
+- Production worker-pool provisioning, workload-key provisioning and rotation,
+  heartbeat loops, and live child-task orchestration.
+- Production SLO dashboards, backup/restore, and disaster-recovery exercises.
 
 ## Next increment
 
-- **4F — Operations and governance:** integrate Operate, Monitor, and Security
-  Guard with allowlisted services, telemetry, incident records, and
-  policy-engine decisions.
+- **4G — Production integration:** connect the host adapters to approved
+  staging services, telemetry and alerting systems, provision workload
+  identities/keys and worker pools, and exercise durable heartbeat and
+  child-task orchestration.
 
 The Phase 4 exit criterion remains a staging workflow that produces a signed
 release candidate whose tests and provenance match the exact source revision.
