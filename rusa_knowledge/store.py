@@ -354,7 +354,7 @@ class PostgresKnowledgeStore:
                 UUID(chunk_id)
             except (ValueError, TypeError, AttributeError) as exc:
                 raise ValueError("chunk_id must be a UUID") from exc
-            rows.append(( _vector_literal(vector, 384), tenant_id, chunk_id))
+            rows.append((_vector_literal(vector, 384), tenant_id, chunk_id))
         updated = 0
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
