@@ -137,13 +137,22 @@ class ImmutableArtifactReference(ContractModel):
 
 
 class EvidenceReference(ContractModel):
-    """Immutable evidence reference bound to a content digest."""
+    """Immutable evidence reference bound to a content digest and evaluated subject."""
 
     uri: str = Field(min_length=1, max_length=2048)
     sha256: str = Field(pattern=_SHA256_PATTERN)
     kind: str = Field(min_length=1, max_length=128)
     producer_id: str = Field(min_length=1, max_length=128)
+    producer_version: str | None = Field(default=None, max_length=64)
     subject_digest: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    subject_commit: str | None = Field(default=None, pattern=r"^[a-f0-9]{40,64}$")
+    test_profile: str | None = Field(default=None, max_length=128)
+    occurred_at: datetime | None = None
+
+    @field_validator("occurred_at")
+    @classmethod
+    def evidence_timestamp_is_aware(cls, value: datetime | None) -> datetime | None:
+        return _aware_utc(value) if value is not None else None
 
 
 class AgentHealthSnapshot(ContractModel):
@@ -422,17 +431,45 @@ class TaskFailedPayloadV2(EventContractModel):
 
 class PolicyDecisionPayloadV2(EventContractModel):
     decision_id: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
     policy_id: str = Field(min_length=1, max_length=128)
     policy_version: str = Field(min_length=1, max_length=64)
     decision: Literal["allow", "deny", "require_approval"]
     action: str = Field(min_length=1, max_length=256)
     resource_ref: str = Field(min_length=1, max_length=2048)
-    reason_code: str | None = Field(default=None, max_length=128)
+    reason_code: str = Field(min_length=1, max_length=128)
+    input_sha256: str = Field(pattern=_SHA256_PATTERN)
     evaluated_at: datetime = Field(default_factory=utc_now)
 
     @field_validator("evaluated_at")
     @classmethod
     def policy_timestamp_is_aware(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+
+class PolicyDecisionV1(ContractModel):
+    """Versioned deterministic authorization decision; no model-supplied outcome."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    decision_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=256)
+    resource_ref: str = Field(min_length=1, max_length=2048)
+    policy_id: str = Field(min_length=1, max_length=128)
+    policy_version: str = Field(min_length=1, max_length=64)
+    outcome: Literal["allow", "deny", "require_approval"]
+    reason_code: str = Field(min_length=1, max_length=128)
+    input_sha256: str = Field(pattern=_SHA256_PATTERN)
+    evaluated_at: datetime = Field(default_factory=utc_now)
+    workflow_id: str | None = Field(default=None, max_length=128)
+    run_id: str | None = Field(default=None, max_length=128)
+    task_id: str | None = Field(default=None, max_length=128)
+    approval_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("evaluated_at")
+    @classmethod
+    def decision_timestamp_is_aware(cls, value: datetime) -> datetime:
         return _aware_utc(value)
 
 
@@ -458,9 +495,14 @@ class TaskCancelledPayloadV2(EventContractModel):
 
 class ApprovalRequestPayloadV2(EventContractModel):
     approval_id: str = Field(min_length=1, max_length=128)
+    workflow_id: str = Field(min_length=1, max_length=128)
+    run_id: str = Field(min_length=1, max_length=128)
+    task_id: str = Field(min_length=1, max_length=128)
     requested_by: str = Field(min_length=1, max_length=128)
     action: str = Field(min_length=1, max_length=256)
     resource_ref: str = Field(min_length=1, max_length=2048)
+    artifact_digest: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+    binding_sha256: str = Field(pattern=_SHA256_PATTERN)
     reason: str = Field(min_length=1, max_length=2000)
     policy_id: str = Field(min_length=1, max_length=128)
     policy_version: str = Field(min_length=1, max_length=64)
@@ -507,8 +549,17 @@ class ValidationVerdictPayloadV2(EventContractModel):
 
     @model_validator(mode="after")
     def evidence_matches_subject(self) -> ValidationVerdictPayloadV2:
-        if any(item.subject_digest not in (None, self.subject_digest) for item in self.evidence_refs):
-            raise ValueError("validation evidence subject digest does not match verdict subject")
+        for item in self.evidence_refs:
+            if item.subject_digest != self.subject_digest:
+                raise ValueError("validation evidence subject digest does not match verdict subject")
+            if not item.producer_version or not item.test_profile or item.occurred_at is None:
+                raise ValueError(
+                    "validation evidence requires producer version, test profile, and timestamp"
+                )
+            if item.test_profile != self.test_profile:
+                raise ValueError("validation evidence test profile does not match verdict")
+            if self.commit_sha is not None and item.subject_commit != self.commit_sha:
+                raise ValueError("validation evidence commit does not match verdict commit")
         return self
 
 
@@ -686,6 +737,10 @@ PLATFORM_SCHEMA_MODELS: dict[str, tuple[type[BaseModel], str]] = {
     "workflow-event.v2.schema.json": (
         WorkflowEventV2,
         "https://schemas.rusa.ai/platform/workflow-event.v2.schema.json",
+    ),
+    "policy-decision.v1.schema.json": (
+        PolicyDecisionV1,
+        "https://schemas.rusa.ai/platform/policy-decision.v1.schema.json",
     ),
     "task-record.v2.schema.json": (
         TaskRecordSnapshotV2,
