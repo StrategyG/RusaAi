@@ -1,6 +1,5 @@
 from __future__ import annotations  # noqa: I001
 
-from copy import deepcopy
 from uuid import uuid4
 
 import pytest
@@ -70,9 +69,14 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         },
         "deploy": {
             "release_manifest_ref": "artifact://release/manifest-1",
+            "release_evidence_ref": "evidence://release/attestation-1",
             "environment": "staging",
+            "target_id": "staging-blue",
+            "service": "rusa-api",
             "commit_sha": "a" * 40,
             "artifact_digest": "sha256:" + "b" * 64,
+            "rollback_plan_ref": "artifact://deploy/rollback-1",
+            "smoke_test_plan_ref": "artifact://deploy/smoke-1",
         },
         "operate": {"service": "api", "runbook_ref": "runbook://api/restart"},
         "monitor": {"service": "api", "metrics_window": "last-15m"},
@@ -87,7 +91,7 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "build": ["build/"],
         "test": ["test-reports/"],
         "release": ["release/"],
-        "deploy": ["deployments/"],
+        "deploy": ["deployments/", "evidence/"],
         "operate": ["incidents/"],
         "monitor": [],
     }[stage]
@@ -236,21 +240,14 @@ def test_network_access_is_denied_until_a_stage_has_an_explicit_network_policy()
         authorize_agent_task(task, authenticated_principal=CODE_AGENT)
 
 
-def test_production_deployment_requires_an_explicit_human_approval_reference():
+def test_phase4e_deploy_contract_rejects_production_even_with_approval():
     task = _task("deploy")
     task["input"]["environment"] = "production"
-    with pytest.raises(ContractValidationError, match="approval_ref"):
+    task["constraints"]["approval_required"] = True
+    task["constraints"]["approval_scope"] = ["deploy"]
+    task["constraints"]["approval_ref"] = "approval://human/approved-123"
+    with pytest.raises(ContractValidationError, match="environment"):
         authorize_agent_task(task, authenticated_principal=DEPLOY_AGENT)
-
-    approved = deepcopy(task)
-    approved["constraints"]["approval_required"] = True
-    approved["constraints"]["approval_scope"] = ["deploy"]
-    approved["constraints"]["approval_ref"] = "approval://human/approved-123"
-    policy = authorize_agent_task(
-        approved,
-        authenticated_principal=DEPLOY_AGENT,
-    )
-    assert policy.agent_id == DEPLOY_AGENT
 
 
 def test_approval_required_must_name_an_approval_scope():

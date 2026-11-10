@@ -26,6 +26,17 @@ from .contracts import (
     validate_agent_task,
     validate_workflow_event,
 )
+from .deploy import (
+    DeployAgentExecutor,
+    DeploymentCheckResult,
+    DeploymentExecutionResult,
+    DeploymentSnapshot,
+    DeploymentTarget,
+    DeploymentVerificationResult,
+    DeployPolicy,
+    RollbackExecutionResult,
+    RollbackRehearsalResult,
+)
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
 from .release import (
     ApprovalDecision,
@@ -65,6 +76,15 @@ __all__ = [
     "ContractValidationError",
     "DevOpsDryRunOrchestrator",
     "DevOpsDryRunReport",
+    "DeployAgentExecutor",
+    "DeployPolicy",
+    "DeploymentCheckResult",
+    "DeploymentExecutionResult",
+    "DeploymentSnapshot",
+    "DeploymentTarget",
+    "DeploymentVerificationResult",
+    "RollbackExecutionResult",
+    "RollbackRehearsalResult",
     "ExecutionLease",
     "ExecutionLeaseError",
     "OutboxLeaseLostError",

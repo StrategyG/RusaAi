@@ -165,9 +165,18 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - A host-injected approval verifier enforces a release approval when the task policy requires it.
 - It creates an immutable signed release-candidate manifest and readiness report. It does not publish an official release or deploy an environment.
 
+**Phase 4E (this increment) implements staging-only deployment:**
+
+- Deploy Agent verifies the detached-signed Release attestation and content-addressed candidate manifest against the exact tenant, workflow, source commit, OCI digest, and registry allowlist.
+- Only host-configured staging target IDs and service names are accepted; the agent task has no raw network access, endpoint, command, or credential fields.
+- Host policy can require a human approval bound to the deployment stage, tenant, workflow, commit, and artifact digest.
+- Before deployment, the adapter inspects the active digest and rehearses rollback to the exact previous digest in the rollback plan.
+- Deployment must confirm the exact candidate digest; host-injected health and named smoke checks must observe that digest before the Deploy result passes.
+- The immutable deployment record and detached-signed Deploy attestation are stored in the tenant content-addressed artifact store.
+- Optional automatic rollback is disabled by default and can only be enabled by host policy; when enabled, restoration is checked against the previous digest.
+
 **Remaining Phase 4 work:**
 
-- Implement a staging-only Deploy Agent with target allowlists, approval verification, health checks, smoke tests, and rollback rehearsal.
 - Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
 - Provision production BuildKit/test services, worker pools, heartbeat loops, and live child-task orchestration.
 
