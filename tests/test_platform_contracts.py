@@ -37,6 +37,7 @@ from rusa_agents.platform_contracts import (
     AICodeTaskStateV1,
     ArtifactReference,
     EvidenceReference,
+    PolicyDecisionV1,
     TaskEnvelopeV2,
     TaskOutcome,
     TaskRecordSnapshotV2,
@@ -356,6 +357,18 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
             updated_at=NOW,
             queue_status=AICodeQueueStatusV1.AWAITING_APPROVAL,
         ).model_dump(mode="json"),
+        "policy-decision.v1.schema.json": PolicyDecisionV1(
+            tenant_id="tenant-a",
+            actor="rusa.worker",
+            action="repo.read",
+            resource_ref="repo://StrategyG/RusaAi",
+            policy_id="software-engineering",
+            policy_version="1",
+            outcome="allow",
+            reason_code="policy_allowlist_match",
+            input_sha256="a" * 64,
+            evaluated_at=NOW,
+        ).model_dump(mode="json"),
     }
     schema_dir = Path("schemas/platform")
 
@@ -483,7 +496,11 @@ def test_validation_verdict_is_bound_to_exact_artifact_digest() -> None:
         sha256="sha256:" + "a" * 64,
         kind="test_report",
         producer_id="aicode.worker.tester",
+        producer_version="1.0.0",
         subject_digest=digest,
+        subject_commit="c" * 40,
+        test_profile="release-gate-v1",
+        occurred_at=NOW,
     )
     event = WorkflowEventV2.model_validate(
         {
@@ -502,8 +519,10 @@ def test_validation_verdict_is_bound_to_exact_artifact_digest() -> None:
                 "verdict": "passed",
                 "subject_digest": digest,
                 "producer_id": "qa-agent",
+                "producer_version": "1.0.0",
                 "test_profile": "release-gate-v1",
                 "evidence_refs": [evidence.model_dump(mode="json")],
+                "commit_sha": "c" * 40,
                 "evaluated_at": NOW.isoformat(),
                 "summary": "Exact artifact passed the release gate",
             },
@@ -515,14 +534,20 @@ def test_validation_verdict_is_bound_to_exact_artifact_digest() -> None:
         "verdict": "passed",
         "subject_digest": digest,
         "producer_id": "qa-agent",
+        "producer_version": "1.0.0",
         "test_profile": "release-gate-v1",
+        "commit_sha": "c" * 40,
         "evidence_refs": [
             {
                 "uri": "artifact://runs/run-1/test-report.json",
                 "sha256": "sha256:" + "a" * 64,
                 "kind": "test_report",
                 "producer_id": "aicode.worker.tester",
+                "producer_version": "1.0.0",
                 "subject_digest": "sha256:" + "c" * 64,
+                "subject_commit": "c" * 40,
+                "test_profile": "release-gate-v1",
+                "occurred_at": NOW.isoformat(),
             }
         ],
         "evaluated_at": NOW.isoformat(),
@@ -672,11 +697,14 @@ def test_approval_decision_and_policy_decision_are_typed_auditable_events() -> N
             "event_type": "policy.decision",
             "payload": {
                 "decision_id": "decision-123",
+                "actor": "release-manager",
                 "policy_id": "release-policy",
                 "policy_version": "3",
                 "decision": "require_approval",
                 "action": "release.promote",
                 "resource_ref": "artifact://release/candidate",
+                "reason_code": "human_approval_required",
+                "input_sha256": "d" * 64,
                 "evaluated_at": NOW.isoformat(),
             },
         }
