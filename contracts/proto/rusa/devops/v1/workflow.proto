@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package rusa.devops.v1;
+
+option go_package = "github.com/StrategyG/RusaAi/gen/go/rusa/devops/v1;devopsv1";
+option java_multiple_files = true;
+option java_package = "ai.rusa.devops.v1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// Internal control-plane RPCs. Authentication is provided by workload mTLS;
+// tenant_id is retained in the message and must match the authenticated identity.
+service WorkflowControl {
+  rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
+  rpc HeartbeatTask(HeartbeatTaskRequest) returns (HeartbeatTaskResponse);
+  rpc ReportTaskProgress(ReportTaskProgressRequest) returns (ReportTaskProgressResponse);
+  rpc ReportTaskResult(ReportTaskResultRequest) returns (ReportTaskResultResponse);
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+}
+
+message GetRunRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+}
+
+message GetRunResponse {
+  string tenant_id = 1;
+  string run_id = 2;
+  string status = 3;
+  uint64 state_version = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  string result_ref = 7;
+  uint64 cancel_epoch = 8;
+}
+
+message GetTaskRequest {
+  string tenant_id = 1;
+  string task_id = 2;
+}
+
+message GetTaskResponse {
+  string tenant_id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  uint32 attempt = 4;
+  string status = 5;
+  uint64 state_version = 6;
+  uint64 lease_epoch = 7;
+  google.protobuf.Timestamp deadline_at = 8;
+  google.protobuf.Struct task = 9;
+  google.protobuf.Struct result = 10;
+  string lease_owner = 11;
+  google.protobuf.Timestamp lease_until = 12;
+  uint64 cancel_epoch = 13;
+}
+
+message ClaimTaskRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  uint32 attempt = 4;
+  string traceparent = 5;
+  string claim_id = 6;
+}
+
+message ClaimTaskResponse {
+  bool accepted = 1;
+  uint64 lease_epoch = 2;
+  uint64 state_version = 3;
+  string lease_owner = 4;
+  google.protobuf.Timestamp lease_until = 5;
+  google.protobuf.Timestamp deadline_at = 6;
+  string status = 7;
+  uint64 cancel_epoch = 8;
+}
+
+message HeartbeatTaskRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  uint32 attempt = 4;
+  uint64 lease_epoch = 5;
+  string traceparent = 6;
+  string claim_id = 7;
+}
+
+message HeartbeatTaskResponse {
+  bool accepted = 1;
+  uint64 state_version = 2;
+  google.protobuf.Timestamp lease_until = 3;
+  uint64 cancel_epoch = 4;
+  string run_status = 5;
+  string task_status = 6;
+}
+
+message ReportTaskProgressRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  uint32 attempt = 4;
+  uint64 lease_epoch = 5;
+  uint64 expected_state_version = 6;
+  uint32 percent = 7;
+  string stage = 8;
+  string message_id = 9;
+  string traceparent = 10;
+  string claim_id = 11;
+}
+
+message ReportTaskProgressResponse {
+  bool accepted = 1;
+  uint64 state_version = 2;
+}
+
+message ReportTaskResultRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  uint32 attempt = 4;
+  uint64 lease_epoch = 5;
+  uint64 expected_state_version = 6;
+  string message_id = 7;
+  string traceparent = 8;
+  google.protobuf.Struct result = 9;
+  string failure_category = 10;
+  string side_effect = 11;
+  string diagnostic_ref = 12;
+  string claim_id = 13;
+}
+
+message ReportTaskResultResponse {
+  bool accepted = 1;
+  uint64 state_version = 2;
+  string status = 3;
+}
+
+message CancelRunRequest {
+  string tenant_id = 1;
+  string run_id = 2;
+  string idempotency_key = 3;
+  string reason_code = 4;
+  string traceparent = 5;
+}
+
+message CancelRunResponse {
+  bool accepted = 1;
+  string status = 2;
+  uint64 state_version = 3;
+  uint64 cancel_epoch = 4;
+}
