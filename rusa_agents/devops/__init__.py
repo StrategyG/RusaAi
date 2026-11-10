@@ -37,6 +37,16 @@ from .deploy import (
     RollbackExecutionResult,
     RollbackRehearsalResult,
 )
+from .operations import (
+    MonitorAgentExecutor,
+    OperateAgentExecutor,
+    RunbookAction,
+    RunbookDefinition,
+    RunbookExecutionResult,
+    SLORule,
+    TelemetryFeedback,
+    TelemetrySnapshot,
+)
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
 from .release import (
     ApprovalDecision,
@@ -89,6 +99,14 @@ __all__ = [
     "ExecutionLeaseError",
     "OutboxLeaseLostError",
     "PlanAgentExecutor",
+    "MonitorAgentExecutor",
+    "OperateAgentExecutor",
+    "RunbookAction",
+    "RunbookDefinition",
+    "RunbookExecutionResult",
+    "SLORule",
+    "TelemetryFeedback",
+    "TelemetrySnapshot",
     "ReleaseAgentExecutor",
     "ReleasePolicy",
     "PostgresInbox",
