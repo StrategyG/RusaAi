@@ -317,7 +317,7 @@ CREATE POLICY rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox
 CREATE OR REPLACE FUNCTION public.rusa_workflow_event_immutable()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    RAISE EXCEPTION 'rusa_workflow_events is append-only';
+    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.rusa_workflow_event_immutable() FROM PUBLIC;
