@@ -121,7 +121,8 @@ def authorize_tool_invocation(
     if (
         decision.tenant_id != context.tenant_id
         or decision.actor != context.agent_id
-        or decision.task_id not in (None, context.task_id)
+        or decision.task_id != context.task_id
+        or decision.policy_id != manifest.policy_profile
         or decision.action != f"tool.invoke:{context.tool_name}"
         or decision.resource_ref != resource
         or decision.outcome != "allow"
