@@ -98,7 +98,7 @@ A result's timestamps must be timezone-aware and ordered. A task completion even
 
 ## 6. Workflow Event 2.0
 
-Events include tenant/workflow/run identity, optional task identity and attempt, message/correlation/causation IDs, trace context, event type, producer identity/version, optional sequence, occurrence timestamp, and payload.
+Events include tenant/workflow/run identity, optional task identity and attempt, message/correlation/causation IDs, required trace context, event type, producer identity/version, optional sequence, occurrence timestamp, and payload.
 
 Known lifecycle payloads are typed and validated. They carry the lease epoch and state version where the current communication ADR requires fencing. Policy decisions and approval decisions are explicit audit events. Validation verdicts bind evidence to an artifact digest.
 
