@@ -195,11 +195,11 @@ class PostgresKnowledgeStore:
             )
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    """
+                    f"""
                     INSERT INTO rusa_knowledge_chunks
                         (tenant_id, document_id, collection, chunk_index, content, {self.embedding_column}, metadata)
                     VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                    """.format(self.embedding_column),
+                    """,
                     [
                         (
                             tenant_id,
