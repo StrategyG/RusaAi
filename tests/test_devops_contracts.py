@@ -228,3 +228,46 @@ def test_event_requires_trace_context_and_event_specific_payload():
     event["payload"].pop("result_ref")
     with pytest.raises(ContractValidationError):
         validate_workflow_event(event)
+
+
+def test_release_and_deploy_events_bind_to_immutable_result_artifacts():
+    task = make_task(agent_id="rusa_release_agent", stage="release")
+    result = make_result(task)
+    release_ref = result["artifacts"][0]["ref"]
+    approval_ref = result["evidence"][0]["ref"]
+    event = make_event(task, result)
+    event["type"] = "release.approved"
+    event["payload"] = {
+        "release_ref": release_ref,
+        "manifest_digest": result["artifacts"][0]["digest"],
+        "approval_ref": approval_ref,
+        "approver": "release-manager",
+    }
+    validate_workflow_handoff(task, result, event)
+
+    deploy_task = make_task(agent_id="rusa_deploy_agent", stage="deploy")
+    deploy_result = make_result(deploy_task)
+    deploy_event = make_event(deploy_task, deploy_result)
+    deploy_event["type"] = "deploy.completed"
+    deploy_event["payload"] = {
+        "environment": "staging",
+        "deployment_ref": deploy_result["artifacts"][0]["ref"],
+        "health_status": "healthy",
+        "artifact_digest": deploy_result["artifacts"][0]["digest"],
+    }
+    validate_workflow_handoff(deploy_task, deploy_result, deploy_event)
+
+
+def test_deployment_result_cannot_claim_pass_when_health_is_unhealthy():
+    task = make_task(agent_id="rusa_deploy_agent", stage="deploy")
+    result = make_result(task)
+    event = make_event(task, result)
+    event["type"] = "deploy.completed"
+    event["payload"] = {
+        "environment": "staging",
+        "deployment_ref": result["artifacts"][0]["ref"],
+        "health_status": "unhealthy",
+        "artifact_digest": result["artifacts"][0]["digest"],
+    }
+    with pytest.raises(ContractValidationError, match="healthy"):
+        validate_workflow_handoff(task, result, event)
