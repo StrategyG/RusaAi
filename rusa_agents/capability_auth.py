@@ -109,11 +109,15 @@ def authorize_tool_invocation(
     if not resource:
         raise CapabilityDenied("resource reference is required")
     scope = manifest.resource_scope
-    if scope.include_patterns and not any(fnmatch.fnmatchcase(resource, pattern) for pattern in scope.include_patterns):
+    if not scope.include_patterns:
+        raise CapabilityDenied("manifest resource scope has no explicit include patterns")
+    if not any(fnmatch.fnmatchcase(resource, pattern) for pattern in scope.include_patterns):
         raise CapabilityDenied("resource is outside the manifest include scope")
     if any(fnmatch.fnmatchcase(resource, pattern) for pattern in scope.exclude_patterns):
         raise CapabilityDenied("resource is excluded by the manifest resource scope")
-    if grant.resource_patterns and not any(
+    if not grant.resource_patterns:
+        raise CapabilityDenied("task-scoped grant has no explicit resource patterns")
+    if not any(
         fnmatch.fnmatchcase(resource, pattern) for pattern in grant.resource_patterns
     ):
         raise CapabilityDenied("resource is outside the task-scoped grant")
