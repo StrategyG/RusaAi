@@ -116,7 +116,7 @@ Mount the workspace root at the same absolute host path inside the worker contai
 
 ## 7. Production environment
 
-Copy `.env.example` to a secret-managed environment file. Do not commit the production file.
+Copy `.env.example` to a secret-managed environment file. Do not commit the production file, and restrict it to the deployment operator (for example, mode `0600`). The production Compose file reads this file for variable interpolation only; it deliberately does not use Compose `env_file`. Only the explicit per-service environment allowlists in `docker-compose.production.yml` are passed into containers.
 
 API settings:
 
@@ -129,6 +129,7 @@ RUSA_METRICS_API_KEY=LONG_RANDOM_OPERATOR_ONLY_KEY_AT_LEAST_32_BYTES
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
 RUSA_MODEL_NAME=rusa-ai
+RUSA_MODEL_API_KEY=AT_LEAST_32_RANDOM_MODEL_GATEWAY_KEY_BYTES
 RUSA_RATE_LIMIT_CHAT_PER_MINUTE=60
 RUSA_RATE_LIMIT_TASKS_PER_MINUTE=10
 RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE=120
@@ -143,6 +144,10 @@ RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
 RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
+RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
+RUSA_MODEL_NAME=rusa-ai
+RUSA_MODEL_API_KEY=AT_LEAST_32_RANDOM_MODEL_GATEWAY_KEY_BYTES
 RUSA_TASK_TIMEOUT_SECONDS=3600
 RUSA_CI_TIMEOUT_SECONDS=900
 RUSA_CI_POLL_SECONDS=15
@@ -150,6 +155,12 @@ RUSA_METRICS_PORT=9100
 RUSA_METRICS_BIND=0.0.0.0
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
 RUSA_DOCKER_GID=1001
+```
+
+Web settings:
+
+```dotenv
+RUSA_WEB_SESSION_SECRET=AT_LEAST_32_RANDOM_WEB_SESSION_SECRET_BYTES
 ```
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
@@ -181,6 +192,7 @@ For production, set the API and worker image references to immutable registry di
 ```bash
 export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
 export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
+export RUSA_WEB_IMAGE=ghcr.io/ORG/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
 docker compose -f docker-compose.production.yml config
 docker compose -f docker-compose.production.yml pull
 docker compose -f docker-compose.production.yml up -d
@@ -188,7 +200,7 @@ docker compose -f docker-compose.production.yml ps
 docker compose -f docker-compose.production.yml logs --tail=200 api worker
 ```
 
-The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
+The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, uses explicit environment allowlists so the API, worker, and web containers do not inherit unrelated secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
 
 API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 

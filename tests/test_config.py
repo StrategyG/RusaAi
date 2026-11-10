@@ -164,3 +164,23 @@ def test_production_worker_rejects_placeholder_model_gateway_token(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "replace-with-model-token")
     with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
         RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_api_rejects_sslmode_require_without_server_identity_verification(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_API_DATABASE_URL",
+        "postgresql://rusa_api_login:secret@db/rusa?sslmode=require",
+    )
+    with pytest.raises(RuntimeError, match="sslmode=verify-full"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_worker_rejects_sslmode_require_without_server_identity_verification(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_WORKER_DATABASE_URL",
+        "postgresql://rusa_worker_login:secret@db/rusa?sslmode=require",
+    )
+    with pytest.raises(RuntimeError, match="sslmode=verify-full"):
+        RuntimeConfig.from_env().validate_worker()
