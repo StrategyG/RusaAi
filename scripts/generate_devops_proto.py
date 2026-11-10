@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROTO_DIR = ROOT / "contracts" / "proto" / "rusa" / "devops" / "v1"
 PROTO_FILE = PROTO_DIR / "workflow.proto"
-OUTPUT_DIR = ROOT / "rusa_agents" / "devops" / "generated"
+OUTPUT_DIR = Path(os.getenv("RUSA_DEVOPS_PROTO_OUTPUT_DIR", ROOT / "rusa_agents" / "devops" / "generated"))
 
 
 def main() -> None:
