@@ -118,9 +118,14 @@ def test_security_guard_is_cross_cutting_and_read_only():
     payload.update(agent_id="rusa_security_guard_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "staging",
+        "target_id": "staging-blue",
+        "service": "rusa-api",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "rollback_plan_ref": "artifact://deploy/rollback",
+        "smoke_test_plan_ref": "artifact://deploy/smoke",
         "evidence_refs": ["evidence://release/verification"],
     }
     payload["constraints"].update(
@@ -270,24 +275,31 @@ def test_agent_task_rejects_path_traversal_in_write_scope():
         validate_agent_task(payload)
 
 
-def test_production_deploy_requires_human_approval_reference():
+def test_phase4e_deploy_contract_rejects_production_even_with_approval():
     payload = _task()
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "production",
+        "target_id": "staging-blue",
+        "service": "rusa-api",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "rollback_plan_ref": "artifact://deploy/rollback",
+        "smoke_test_plan_ref": "artifact://deploy/smoke",
     }
     payload["constraints"].update(
-        allowed_tools=["artifact.read", "release.read", "deployment.execute"],
+        allowed_tools=[
+            "artifact.read", "release.read", "deployment.execute",
+            "health.read", "runbook.read", "evidence.write",
+        ],
+        write_scope=["deployments/", "evidence/"],
         approval_required=True,
         approval_scope=["deploy"],
         approval_ref="approval://change/123",
     )
-    validate_agent_task(payload)
-    payload["constraints"].pop("approval_ref")
-    with pytest.raises(ContractValidationError, match="approval_ref"):
+    with pytest.raises(ContractValidationError, match="staging"):
         validate_agent_task(payload)
 
 
@@ -413,13 +425,22 @@ def test_deploy_task_requires_source_commit_and_immutable_digest():
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "staging",
+        "target_id": "staging-blue",
+        "service": "rusa-api",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "rollback_plan_ref": "artifact://deploy/rollback",
+        "smoke_test_plan_ref": "artifact://deploy/smoke",
     }
-    payload["constraints"]["allowed_tools"] = [
-        "artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read"
-    ]
+    payload["constraints"].update(
+        allowed_tools=[
+            "artifact.read", "release.read", "deployment.execute",
+            "health.read", "runbook.read", "evidence.write",
+        ],
+        write_scope=["deployments/", "evidence/"],
+    )
     validate_agent_task(payload)
     payload["input"].pop("commit_sha")
     with pytest.raises(ContractValidationError, match="commit_sha"):
