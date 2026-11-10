@@ -68,7 +68,10 @@ def test_platform_workflow_migration_has_tenant_scoped_cas_outbox_and_dedup_cont
     assert "rusa_workflow_inbox" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "FORCE ROW LEVEL SECURITY" in migration
-    assert "FOR UPDATE SKIP LOCKED" in migration
+    scheduler = Path("rusa_agents/workflow_store.py").read_text(encoding="utf-8")
+    assert "FOR UPDATE OF r SKIP LOCKED" in scheduler
+    assert "final_artifact_digest" in migration
+    assert "side_effect_status" in migration
     assert "rusa_workflow_events is append-only" in migration
 
 
