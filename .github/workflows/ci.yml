@@ -52,6 +52,8 @@ jobs:
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Verify generated platform contract schemas
         run: python scripts/export_platform_contract_schemas.py --check
+      - name: Diagnose platform contract import ordering
+        run: ruff check --select I --fix --diff rusa_agents/platform_contracts.py tests/test_platform_contracts.py || true
       - name: Lint
         run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis
