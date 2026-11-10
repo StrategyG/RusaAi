@@ -267,12 +267,14 @@ def test_production_deploy_requires_human_approval_reference():
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "production",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "service": "rusa-api",
     }
     payload["constraints"].update(
-        allowed_tools=["artifact.read", "release.read", "deployment.execute"],
+        allowed_tools=["artifact.read", "release.read", "deployment.execute", "evidence.write"],
         approval_required=True,
         approval_scope=["deploy"],
         approval_ref="approval://change/123",
