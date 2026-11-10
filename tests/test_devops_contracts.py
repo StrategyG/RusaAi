@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,7 +16,7 @@ from rusa_agents.devops_contracts import (
 
 
 def make_task(**overrides):
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     task = {
         "schema_version": 1,
         "task_id": str(uuid4()),
@@ -72,7 +72,7 @@ def make_result(task):
         "next_actions": ["Review plan before enabling a real worker"],
         "side_effect": "NONE",
         "started_at": task["created_at"],
-        "completed_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "audit": {"policy_version": "devops-policy-v1", "model_id": "dummy/no-model"},
     }
 
@@ -93,7 +93,7 @@ def make_event(task, result):
         "correlation_id": task["correlation_id"],
         "traceparent": f"00-{trace}-{span}-01",
         "producer": task["agent_id"],
-        "occurred_at": datetime.now(UTC).isoformat(),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
         "payload": {
             "stage": "plan",
             "status": "passed",
