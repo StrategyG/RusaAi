@@ -36,13 +36,6 @@ jobs:
       - name: Install web dependencies
         working-directory: web
         run: npm install --no-audit --no-fund
-      - name: Upload resolved web dependency lockfile
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: web-package-lock-${{ github.sha }}
-          path: web/package-lock.json
-          if-no-files-found: error
-          retention-days: 1
       - name: Audit production web dependencies
         working-directory: web
         run: npm audit --omit=dev --audit-level=high
