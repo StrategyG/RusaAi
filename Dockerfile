@@ -3,8 +3,11 @@ FROM python:3.12.16-slim-trixie AS builder
 WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils pkg-config libbz2-dev libdb-dev libexpat1-dev libffi-dev libgdbm-dev liblzma-dev libncursesw5-dev libreadline-dev libsqlite3-dev libssl-dev libnsl-dev libtirpc-dev uuid-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+COPY docker/build-patched-native-libs.sh /tmp/build-patched-native-libs.sh
+RUN sh /tmp/build-patched-native-libs.sh
 COPY requirements.txt requirements-messaging.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
     && python -m pip install --no-cache-dir --prefix=/install -r requirements.txt -r requirements-messaging.txt
@@ -34,7 +37,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     LD_LIBRARY_PATH=/usr/local/lib
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libexpat1 libffi8 libssl3t64 libbz2-1.0 liblzma5 libsqlite3-0 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
+    && apt-get install -y --no-install-recommends ca-certificates libffi8 libssl3t64 libbz2-1.0 liblzma5 libreadline8t64 libncursesw6 libgdbm6t64 libgdbm-compat4t64 zlib1g libuuid1 libcrypt1 libnsl2 libtirpc3t64 libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && echo /usr/local/lib > /etc/ld.so.conf.d/usr-local.conf \
@@ -44,11 +47,35 @@ RUN apt-get update \
 COPY --from=builder /usr/local /usr/local
 COPY --from=builder /install /usr/local
 COPY --chown=appuser:appuser . /app
+COPY --from=builder /build/rusa_agents/devops/generated /app/rusa_agents/devops/generated
 
-RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && python - <<'PY'
 from importlib import import_module, metadata
+
+import ctypes
+import pyexpat
+import sqlite3
+import subprocess
+import _sqlite3
+
+expat = ctypes.CDLL("libexpat.so.1")
+expat.XML_ExpatVersion.restype = ctypes.c_char_p
+expat_version = expat.XML_ExpatVersion().decode("ascii")
+
+def linked_library(module, expected):
+    result = subprocess.run(["ldd", module.__file__], check=True, capture_output=True, text=True)
+    if expected not in result.stdout:
+        raise SystemExit(f"{module.__name__} is not using patched library {expected}: {result.stdout}")
+
+if expat_version != "expat_2.10.0":
+    raise SystemExit(f"Unpatched Expat runtime: {expat_version}")
+if sqlite3.sqlite_version_info < (3, 54, 1):
+    raise SystemExit(f"Unpatched SQLite runtime: {sqlite3.sqlite_version}")
+linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so")
+print(f"Patched native libraries active: Expat {expat_version}; SQLite {sqlite3.sqlite_version}")
 
 for package in ("pip", "setuptools", "wheel", "jaraco.context"):
     try:

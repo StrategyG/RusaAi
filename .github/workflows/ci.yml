@@ -39,8 +39,8 @@ jobs:
       RUSA_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
       RUSA_AUDIT_HMAC_KEY: ci-only-test-audit-key-change-me
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0, immutable commit
         with:
           python-version: "3.10"
           cache: pip
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
       - name: Build API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
@@ -201,6 +201,9 @@ jobs:
           RUSA_MODEL_BASE_URL: https://model.internal/v1
           RUSA_MODEL_NAME: rusa-ai
           RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_GRPC_SERVER_CERT_FILE: /tmp/rusa-ci/server.crt
+          RUSA_GRPC_SERVER_KEY_FILE: /tmp/rusa-ci/server.key
+          RUSA_GRPC_CLIENT_CA_FILE: /tmp/rusa-ci/client-ca.crt
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -214,16 +217,7 @@ jobs:
           RUSA_MAX_PARALLEL_WORKERS: "4"
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
-          # Placeholder PEM paths are used only for Compose interpolation validation.
-          # Runtime certificates are provisioned by the deployment secret manager.
-          RUSA_GRPC_SERVER_CERT_FILE: /tmp/rusa-ci/server.crt
-          RUSA_GRPC_SERVER_KEY_FILE: /tmp/rusa-ci/server.key
-          RUSA_GRPC_CLIENT_CA_FILE: /tmp/rusa-ci/client-ca.crt
         run: |
-          mkdir -p /tmp/rusa-ci
-          : > /tmp/rusa-ci/server.crt
-          : > /tmp/rusa-ci/server.key
-          : > /tmp/rusa-ci/client-ca.crt
           touch .env
           docker compose -f docker-compose.production.yml config --quiet
       - name: Validate CPU-only Compose configuration
@@ -272,8 +266,8 @@ jobs:
     env:
       RUSA_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rusa_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0, immutable commit
         with:
           python-version: "3.11"
           cache: pip

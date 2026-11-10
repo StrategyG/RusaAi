@@ -3,8 +3,11 @@ FROM python:3.12.16-slim-trixie AS builder
 WORKDIR /build
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils pkg-config libbz2-dev libdb-dev libexpat1-dev libffi-dev libgdbm-dev liblzma-dev libncursesw5-dev libreadline-dev libsqlite3-dev libssl-dev libnsl-dev libtirpc-dev uuid-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+COPY docker/build-patched-native-libs.sh /tmp/build-patched-native-libs.sh
+RUN sh /tmp/build-patched-native-libs.sh
 COPY pyproject.toml README.md requirements-rag-worker.txt requirements-messaging.txt ./
 COPY rusa_agents ./rusa_agents
 COPY rusa_knowledge ./rusa_knowledge
@@ -63,8 +66,9 @@ RUN apt-get update \
 
 COPY --from=builder /usr/local /usr/local
 COPY --chown=appuser:appuser . /app
+COPY --from=builder /build/rusa_agents/devops/generated /app/rusa_agents/devops/generated
 
-RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
+RUN ldconfig && ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && ! grep -q "not found" /tmp/python-ldd \
     && docker --version \
     && if dpkg-query -W -f='${binary:Package}\n' | grep -Eq '^(docker.io|docker-ce|containerd|containerd.io|runc)$'; then \
@@ -72,6 +76,29 @@ RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
        fi \
     && python - <<'PY'
 import importlib
+
+import ctypes
+import pyexpat
+import sqlite3
+import subprocess
+import _sqlite3
+
+expat = ctypes.CDLL("libexpat.so.1")
+expat.XML_ExpatVersion.restype = ctypes.c_char_p
+expat_version = expat.XML_ExpatVersion().decode("ascii")
+
+def linked_library(module, expected):
+    result = subprocess.run(["ldd", module.__file__], check=True, capture_output=True, text=True)
+    if expected not in result.stdout:
+        raise SystemExit(f"{module.__name__} is not using patched library {expected}: {result.stdout}")
+
+if expat_version != "expat_2.10.0":
+    raise SystemExit(f"Unpatched Expat runtime: {expat_version}")
+if sqlite3.sqlite_version_info < (3, 54, 1):
+    raise SystemExit(f"Unpatched SQLite runtime: {sqlite3.sqlite_version}")
+linked_library(pyexpat, "/usr/local/lib/libexpat.so.1")
+linked_library(_sqlite3, "/usr/local/lib/libsqlite3.so")
+print(f"Patched native libraries active: Expat {expat_version}; SQLite {sqlite3.sqlite_version}")
 
 for module in ("rusa_agents.worker_main", "psycopg", "prometheus_client", "httpx",
                "rusa_agents.devops.rabbitmq", "rusa_agents.devops.kafka",
