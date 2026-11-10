@@ -366,7 +366,7 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
             policy_version="1",
             outcome="allow",
             reason_code="policy_allowlist_match",
-            input_sha256="a" * 64,
+            input_sha256="sha256:" + "a" * 64,
             evaluated_at=NOW,
         ).model_dump(mode="json"),
     }
