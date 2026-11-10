@@ -47,7 +47,7 @@ def task_payload():
         "acceptance_criteria": ["All required tests pass", "Evidence references the tested commit"],
         "deadline_at": "2026-11-11T12:00:00Z",
         "attempt": 1,
-        "idempotency_key": "workflow-001/task-001/1",
+        "idempotency_key": "workflow-001.task-001.1",
         "correlation_id": "correlation-001",
         "traceparent": TRACEPARENT,
         "created_at": "2026-11-10T12:00:00Z",
@@ -71,7 +71,7 @@ def event_payload(**overrides):
             "capability": "test",
             "input_ref": "asset://rusa/commit-b",
             "deadline_at": "2026-11-11T12:00:00Z",
-            "idempotency_key": "workflow-001/task-001/1",
+            "idempotency_key": "workflow-001.task-001.1",
             "priority": "P2",
         },
     }
