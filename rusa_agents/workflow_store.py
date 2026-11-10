@@ -93,8 +93,9 @@ class PostgresWorkflowStore:
                 "rusa_workflow_runs", "rusa_workflow_tasks",
                 "rusa_workflow_dependencies", "rusa_workflow_events",
                 "rusa_workflow_outbox", "rusa_workflow_inbox",
-                "rusa_agent_registry", "rusa_policy_decisions",
-                "rusa_human_approvals", "rusa_evidence_records",
+                "rusa_agent_registry", "rusa_agent_registry_events",
+                "rusa_policy_decisions", "rusa_human_approvals",
+                "rusa_approval_consumptions", "rusa_evidence_records",
             }
             rows = conn.execute(
                 """
