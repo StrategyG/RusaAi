@@ -190,6 +190,16 @@ def test_pgvector_384d_backfill_preserves_legacy_vectors(knowledge_store):
         )
         assert len(batch) == 1
         assert batch[0]["content"] == "RUSA legacy knowledge needs new E5 embeddings"
+        lexical_results = e5_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="legacy knowledge",
+            query_embedding=_unit_vector_384(7),
+            limit=5,
+        )
+        assert lexical_results
+        assert lexical_results[0]["document_id"] == document_id
+        assert lexical_results[0]["vector_similarity"] == 0.0
         updated = e5_store.update_reembedded_embeddings(
             tenant_id=tenant_id,
             vectors=[(batch[0]["chunk_id"], _unit_vector_384(7))],
