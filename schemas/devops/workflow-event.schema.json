@@ -1048,6 +1048,24 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.blocked"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ]
+      }
     }
   ]
 }
