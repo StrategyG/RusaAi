@@ -14,6 +14,8 @@ This directory is the proposed canonical contract source for the RusaAi-to-RusaM
 - `v0.1.0/inference-response.schema.json` — successful response envelope.
 - `v0.1.0/inference-error.schema.json` — structured error envelope.
 
+The budget field `max_cost_microunits` uses millionths of the declared currency unit. The service must enforce cross-field constraints such as the requested output-token limit not exceeding the budget ceiling. `Idempotency-Key` is required on every canonical inference request and must be reused unchanged for a retry.
+
 ## Ownership invariants
 
 1. RusaAi owns end-user identity, tenant identity, workflow/run/task state, model-profile authorization, policy and Tool Gateway execution.
