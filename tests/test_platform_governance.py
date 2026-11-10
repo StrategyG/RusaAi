@@ -409,6 +409,7 @@ def test_approval_binding_changes_for_any_action_or_artifact_change():
         "expires_at": NOW + timedelta(hours=1),
     }
     binding = _binding_digest(**common)
+    assert binding.startswith("sha256:") and len(binding) == 71
     assert binding == _binding_digest(**common)
     assert binding != _binding_digest(**{**common, "artifact_digest": "b" * 64})
     assert binding != _binding_digest(**{**common, "action": "release.delete"})

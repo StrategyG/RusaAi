@@ -44,7 +44,7 @@ def _binding_digest(
         "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
     }
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class PostgresHumanApprovalService:
