@@ -44,6 +44,9 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
+        "008_aicode_task_list_audit.sql",
+        "009_platform_workflow_core.sql",
+        "010_platform_governance_registry.sql",
     ]
 
 
@@ -72,7 +75,12 @@ def test_platform_workflow_migration_has_tenant_scoped_cas_outbox_and_dedup_cont
     assert "FOR UPDATE OF r SKIP LOCKED" in scheduler
     assert "final_artifact_digest" in migration
     assert "side_effect_status" in migration
-    assert "rusa_workflow_events is append-only" in migration
+    assert "RAISE EXCEPTION '% is append-only'" in migration
+    assert "idx_rusa_workflow_events_run_sequence" in migration
+    assert "idx_rusa_workflow_events_task_sequence" in migration
+    assert migration.count("BEGIN;") == 1
+    assert migration.count("COMMIT;") == 1
+    assert migration.count("CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs") == 1
 
 
 def test_governance_migration_has_registry_approval_consumption_and_immutable_evidence():
