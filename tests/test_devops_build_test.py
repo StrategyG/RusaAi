@@ -7,7 +7,14 @@ from uuid import uuid4
 
 import pytest
 
-from rusa_agents.devops.agent_registry import (\n    AGENT_POLICIES,\n    BUILD_AGENT,\n    DEPLOY_AGENT,\n    OPERATE_AGENT,\n    RELEASE_AGENT,\n    TEST_AGENT,\n)
+from rusa_agents.devops.agent_registry import (
+    AGENT_POLICIES,
+    BUILD_AGENT,
+    DEPLOY_AGENT,
+    OPERATE_AGENT,
+    RELEASE_AGENT,
+    TEST_AGENT,
+)
 from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
 from rusa_agents.devops.build_test import (
     BuildAgentExecutor,
@@ -581,7 +588,7 @@ def _release_metadata(*, checklist_status: str = "passed") -> dict:
         "schema_version": 1,
         "version": "1.2.3",
         "service": "rusa-demo",
-        "changelog": "# 1.2.3\\n\\n- Hardened the release pipeline.",
+        "changelog": "# 1.2.3\n\n- Hardened the release pipeline.",
         "deployment_notes": "Deploy to the configured staging target and verify readiness.",
         "migration_notes": [],
         "migration_compatible": True,
