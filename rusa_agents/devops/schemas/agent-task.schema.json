@@ -806,10 +806,7 @@
           "constraints": {
             "properties": {
               "write_scope": {
-                "maxItems": 1,
-                "items": {
-                  "const": "evidence/"
-                }
+                "maxItems": 0
               }
             }
           }
@@ -1058,15 +1055,15 @@
               "allowed_tools": {
                 "items": {
                   "enum": [
-                    "artifact.read",
-                    "evidence.read",
                     "metrics.read",
                     "logs.read",
                     "traces.read",
-                    "alerts.read",
-                    "monitoring.write"
+                    "alerts.read"
                   ]
                 }
+              },
+              "write_scope": {
+                "maxItems": 0
               }
             }
           }
@@ -1099,8 +1096,7 @@
                     "audit.read",
                     "metrics.read",
                     "logs.read",
-                    "traces.read",
-                    "evidence.write"
+                    "traces.read"
                   ]
                 }
               }
