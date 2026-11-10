@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa.ai/schemas/devops/agent-task.schema.json",
+  "title": "RUSA-AI DevOps Agent Task v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "workflow_id",
+    "tenant_id",
+    "agent_id",
+    "stage",
+    "objective",
+    "input",
+    "constraints",
+    "priority",
+    "attempt",
+    "max_attempts",
+    "idempotency_key",
+    "correlation_id",
+    "deadline_at",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workflow_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "agent_id": {
+      "type": "string",
+      "enum": [
+        "supreme_orchestrator",
+        "system_architect",
+        "planner",
+        "task_decomposer",
+        "software_engineer",
+        "devops",
+        "qa_testing",
+        "security_policy",
+        "memory_knowledge",
+        "evaluation_reporting",
+        "rusa_devops_orchestrator",
+        "rusa_plan_agent",
+        "rusa_code_agent",
+        "rusa_build_agent",
+        "rusa_test_agent",
+        "rusa_release_agent",
+        "rusa_deploy_agent",
+        "rusa_operate_agent",
+        "rusa_monitor_agent",
+        "rusa_security_guard_agent"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "code",
+        "build",
+        "test",
+        "release",
+        "deploy",
+        "operate",
+        "monitor",
+        "security"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "input": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 20,
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{40}$"
+        },
+        "artifact_digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "plan_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "acceptance_criteria_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "refs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 8000
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_tools",
+        "network_access",
+        "write_scope",
+        "approval_required"
+      ],
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.:-]{1,95}$"
+          }
+        },
+        "network_access": {
+          "type": "boolean"
+        },
+        "write_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "approval_required": {
+          "type": "boolean"
+        },
+        "requested_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 30,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.:-]{1,95}$"
+          }
+        }
+      }
+    },
+    "priority": {
+      "enum": [
+        "P1",
+        "P2",
+        "P3"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "deadline_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lease_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "state_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next_agent",
+        "event"
+      ],
+      "properties": {
+        "next_agent": {
+          "type": "string",
+          "enum": [
+            "supreme_orchestrator",
+            "system_architect",
+            "planner",
+            "task_decomposer",
+            "software_engineer",
+            "devops",
+            "qa_testing",
+            "security_policy",
+            "memory_knowledge",
+            "evaluation_reporting",
+            "rusa_devops_orchestrator",
+            "rusa_plan_agent",
+            "rusa_code_agent",
+            "rusa_build_agent",
+            "rusa_test_agent",
+            "rusa_release_agent",
+            "rusa_deploy_agent",
+            "rusa_operate_agent",
+            "rusa_monitor_agent",
+            "rusa_security_guard_agent"
+          ]
+        },
+        "event": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{2,95}$"
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "policy_version": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "traceparent": {
+          "type": "string",
+          "pattern": "^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "max_attempts": {
+            "type": "integer"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "attempt": {
+            "maximum": 3
+          },
+          "max_attempts": {
+            "maximum": 3
+          }
+        }
+      }
+    }
+  ]
+}
