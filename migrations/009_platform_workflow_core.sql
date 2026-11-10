@@ -1,5 +1,5 @@
--- Platform Core 2.0 durable workflow state, DAG, event log, outbox, and inbox.
--- Apply after 008_aicode_task_list_audit.sql. Existing AICode tables remain unchanged.
+-- Platform Core 2.0 durable workflow state, task DAG, event log, outbox, and inbox.
+-- Apply after 008_aicode_task_list_audit.sql. Existing aicode_jobs remains unchanged.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs (
@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs (
     state TEXT NOT NULL DEFAULT 'queued'
         CHECK (state IN (
             'queued', 'planning', 'running', 'validating', 'awaiting_approval',
-            'reconciling', 'succeeded', 'failed', 'blocked',
-            'cancel_requested', 'cancelled', 'expired'
+            'reconciling', 'succeeded', 'failed', 'blocked', 'cancel_requested',
+            'cancelled', 'expired'
         )),
     state_version BIGINT NOT NULL DEFAULT 1 CHECK (state_version > 0),
     deadline_at TIMESTAMPTZ NOT NULL,
@@ -20,10 +20,7 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs (
     budget_consumed JSONB NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(budget_consumed) = 'object'),
     final_report_ref TEXT,
-    final_artifact_digest TEXT CHECK (
-        final_artifact_digest IS NULL
-        OR final_artifact_digest ~ '^(sha256:)?[a-f0-9]{64}$'
-    ),
+    final_artifact_digest TEXT,
     cancel_epoch BIGINT NOT NULL DEFAULT 0 CHECK (cancel_epoch >= 0),
     idempotency_key TEXT,
     created_by TEXT NOT NULL CHECK (length(created_by) BETWEEN 1 AND 128),
@@ -33,6 +30,26 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs (
     UNIQUE (tenant_id, workflow_id, run_id),
     CHECK (deadline_at > created_at)
 );
+
+ALTER TABLE public.rusa_workflow_runs
+    ADD COLUMN IF NOT EXISTS final_artifact_digest TEXT;
+DO $rusa$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='public.rusa_workflow_runs'::regclass
+          AND conname='rusa_workflow_runs_final_artifact_digest_check'
+    ) THEN
+        ALTER TABLE public.rusa_workflow_runs
+            ADD CONSTRAINT rusa_workflow_runs_final_artifact_digest_check
+            CHECK (
+                final_artifact_digest IS NULL
+                OR final_artifact_digest ~ '^(sha256:)?[a-f0-9]{64}$'
+            );
+    END IF;
+END;
+$rusa$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_runs_idempotency
     ON public.rusa_workflow_runs(tenant_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -70,12 +87,11 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_tasks (
     budget JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(budget) = 'object'),
     input JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(input) = 'object'),
     input_refs JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(input_refs) = 'array'),
-    result JSONB CHECK (result IS NULL OR jsonb_typeof(result) = 'object'),
+    result JSONB,
     result_ref TEXT,
     evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb
         CHECK (jsonb_typeof(evidence_refs) = 'array'),
-    side_effect_status TEXT NOT NULL DEFAULT 'NONE'
-        CHECK (side_effect_status IN ('NONE', 'APPLIED', 'UNKNOWN', 'RECONCILED')),
+    side_effect_status TEXT NOT NULL DEFAULT 'NONE',
     lease_owner TEXT,
     lease_epoch BIGINT NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
     lease_until TIMESTAMPTZ,
@@ -93,6 +109,23 @@ CREATE TABLE IF NOT EXISTS public.rusa_workflow_tasks (
         OR (status <> 'running' AND lease_owner IS NULL AND lease_until IS NULL)
     )
 );
+
+ALTER TABLE public.rusa_workflow_tasks
+    ADD COLUMN IF NOT EXISTS side_effect_status TEXT NOT NULL DEFAULT 'NONE';
+DO $rusa$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='public.rusa_workflow_tasks'::regclass
+          AND conname='rusa_workflow_tasks_side_effect_status_check'
+    ) THEN
+        ALTER TABLE public.rusa_workflow_tasks
+            ADD CONSTRAINT rusa_workflow_tasks_side_effect_status_check
+            CHECK (side_effect_status IN ('NONE', 'APPLIED', 'UNKNOWN', 'RECONCILED'));
+    END IF;
+END;
+$rusa$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_workflow_tasks_idempotency
     ON public.rusa_workflow_tasks(tenant_id, run_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
@@ -191,8 +224,8 @@ CREATE INDEX IF NOT EXISTS idx_rusa_workflow_inbox_event
     ON public.rusa_workflow_inbox(tenant_id, event_id)
     WHERE event_id IS NOT NULL;
 
--- The scheduler is a trusted cross-tenant service. Its worker role may inspect and
--- claim global queue rows; all event and inbox access remains tenant-bound.
+-- API access is tenant-scoped. Trusted workers may claim tasks and relay outbox
+-- records across tenants, but every mutation must still include tenant and lease fencing.
 DO $rusa$
 DECLARE
     table_name TEXT;
@@ -204,29 +237,23 @@ BEGIN
     ] LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', table_name);
-        EXECUTE format(
-            'REVOKE ALL ON public.%I FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime',
-            table_name
-        );
+        EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, rusa_runtime, rusa_api_runtime, rusa_worker_runtime', table_name);
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE ON public.%I TO rusa_api_runtime', table_name);
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE ON public.%I TO rusa_worker_runtime', table_name);
     END LOOP;
 END;
 $rusa$;
-
-GRANT SELECT, INSERT, UPDATE ON public.rusa_workflow_runs TO rusa_api_runtime, rusa_worker_runtime;
-GRANT SELECT, INSERT, UPDATE ON public.rusa_workflow_tasks TO rusa_api_runtime, rusa_worker_runtime;
-GRANT SELECT, INSERT ON public.rusa_workflow_dependencies TO rusa_api_runtime, rusa_worker_runtime;
-GRANT SELECT, INSERT ON public.rusa_workflow_events TO rusa_api_runtime, rusa_worker_runtime;
-GRANT SELECT, INSERT, UPDATE ON public.rusa_workflow_outbox TO rusa_api_runtime, rusa_worker_runtime;
-GRANT SELECT, INSERT ON public.rusa_workflow_inbox TO rusa_api_runtime, rusa_worker_runtime;
 
 DROP POLICY IF EXISTS rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs;
 CREATE POLICY rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
-DROP POLICY IF EXISTS rusa_workflow_runs_worker_queue ON public.rusa_workflow_runs;
+DROP POLICY IF EXISTS rusa_workflow_runs_worker_tenant ON public.rusa_workflow_runs;
 CREATE POLICY rusa_workflow_runs_worker_queue ON public.rusa_workflow_runs
-    FOR ALL TO rusa_worker_runtime USING (true) WITH CHECK (true);
+    FOR ALL TO rusa_worker_runtime
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks;
 CREATE POLICY rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks
@@ -235,16 +262,20 @@ CREATE POLICY rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 DROP POLICY IF EXISTS rusa_workflow_tasks_worker_queue ON public.rusa_workflow_tasks;
 CREATE POLICY rusa_workflow_tasks_worker_queue ON public.rusa_workflow_tasks
-    FOR ALL TO rusa_worker_runtime USING (true) WITH CHECK (true);
+    FOR ALL TO rusa_worker_runtime
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_dependencies_api_tenant ON public.rusa_workflow_dependencies;
 CREATE POLICY rusa_workflow_dependencies_api_tenant ON public.rusa_workflow_dependencies
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
-DROP POLICY IF EXISTS rusa_workflow_dependencies_worker_queue ON public.rusa_workflow_dependencies;
+DROP POLICY IF EXISTS rusa_workflow_dependencies_worker_tenant ON public.rusa_workflow_dependencies;
 CREATE POLICY rusa_workflow_dependencies_worker_queue ON public.rusa_workflow_dependencies
-    FOR ALL TO rusa_worker_runtime USING (true) WITH CHECK (true);
+    FOR ALL TO rusa_worker_runtime
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_events_api_tenant ON public.rusa_workflow_events;
 CREATE POLICY rusa_workflow_events_api_tenant ON public.rusa_workflow_events
@@ -264,7 +295,9 @@ CREATE POLICY rusa_workflow_outbox_api_tenant ON public.rusa_workflow_outbox
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 DROP POLICY IF EXISTS rusa_workflow_outbox_worker_relay ON public.rusa_workflow_outbox;
 CREATE POLICY rusa_workflow_outbox_worker_relay ON public.rusa_workflow_outbox
-    FOR ALL TO rusa_worker_runtime USING (true) WITH CHECK (true);
+    FOR ALL TO rusa_worker_runtime
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS rusa_workflow_inbox_api_tenant ON public.rusa_workflow_inbox;
 CREATE POLICY rusa_workflow_inbox_api_tenant ON public.rusa_workflow_inbox
@@ -277,40 +310,21 @@ CREATE POLICY rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
--- Dependency edges, inbox receipts, and workflow events are immutable facts.
-CREATE OR REPLACE FUNCTION public.rusa_workflow_immutable()
+-- Events are immutable facts. Delivery state lives in the mutable outbox table.
+CREATE OR REPLACE FUNCTION public.rusa_workflow_event_immutable()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+    RAISE EXCEPTION 'rusa_workflow_events is append-only';
 END;
 $$;
-REVOKE ALL ON FUNCTION public.rusa_workflow_immutable() FROM PUBLIC;
-
-DROP TRIGGER IF EXISTS trg_rusa_workflow_dependencies_immutable ON public.rusa_workflow_dependencies;
-CREATE TRIGGER trg_rusa_workflow_dependencies_immutable
-    BEFORE UPDATE OR DELETE ON public.rusa_workflow_dependencies
-    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_immutable();
-DROP TRIGGER IF EXISTS trg_rusa_workflow_dependencies_no_truncate ON public.rusa_workflow_dependencies;
-CREATE TRIGGER trg_rusa_workflow_dependencies_no_truncate
-    BEFORE TRUNCATE ON public.rusa_workflow_dependencies
-    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_immutable();
-
+REVOKE ALL ON FUNCTION public.rusa_workflow_event_immutable() FROM PUBLIC;
 DROP TRIGGER IF EXISTS trg_rusa_workflow_events_immutable ON public.rusa_workflow_events;
 CREATE TRIGGER trg_rusa_workflow_events_immutable
     BEFORE UPDATE OR DELETE ON public.rusa_workflow_events
-    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_immutable();
+    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_event_immutable();
 DROP TRIGGER IF EXISTS trg_rusa_workflow_events_no_truncate ON public.rusa_workflow_events;
 CREATE TRIGGER trg_rusa_workflow_events_no_truncate
     BEFORE TRUNCATE ON public.rusa_workflow_events
-    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_immutable();
-
-DROP TRIGGER IF EXISTS trg_rusa_workflow_inbox_immutable ON public.rusa_workflow_inbox;
-CREATE TRIGGER trg_rusa_workflow_inbox_immutable
-    BEFORE UPDATE OR DELETE ON public.rusa_workflow_inbox
-    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_immutable();
-DROP TRIGGER IF EXISTS trg_rusa_workflow_inbox_no_truncate ON public.rusa_workflow_inbox;
-CREATE TRIGGER trg_rusa_workflow_inbox_no_truncate
-    BEFORE TRUNCATE ON public.rusa_workflow_inbox
-    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_immutable();
+    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_event_immutable();
 
 COMMIT;
