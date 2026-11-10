@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == list(range(1, 11))
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -53,6 +53,32 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert sql.count("$$") % 2 == 0, (
             f"{migration.name} contains an unmatched dollar-quote delimiter"
         )
-        assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
+        assert not re.search(r"(?m)^\s*\$\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+def test_platform_workflow_migration_has_tenant_scoped_cas_outbox_and_dedup_contracts():
+    migration = Path("migrations/009_platform_workflow_core.sql").read_text(encoding="utf-8")
+    assert "rusa_workflow_runs" in migration
+    assert "rusa_workflow_tasks" in migration
+    assert "rusa_workflow_dependencies" in migration
+    assert "rusa_workflow_events" in migration
+    assert "rusa_workflow_outbox" in migration
+    assert "rusa_workflow_inbox" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "FOR UPDATE SKIP LOCKED" in migration
+    assert "rusa_workflow_events is append-only" in migration
+
+
+def test_governance_migration_has_registry_approval_consumption_and_immutable_evidence():
+    migration = Path("migrations/010_platform_governance_registry.sql").read_text(encoding="utf-8")
+    assert "rusa_agent_registry" in migration
+    assert "rusa_agent_registry_events" in migration
+    assert "rusa_policy_decisions" in migration
+    assert "rusa_human_approvals" in migration
+    assert "rusa_approval_consumptions" in migration
+    assert "rusa_evidence_records" in migration
+    assert "human approval binding is immutable" in migration
+    assert "rusa_platform_append_only" in migration
