@@ -245,6 +245,7 @@ class PostgresEvidenceStore:
                 task_id=task_id,
                 attempt=attempt,
                 correlation_id=workflow_id,
+                traceparent=f"00-{uuid4().hex}-{uuid4().hex[:16]}-01",
                 event_type="validation.verdict",
                 producer_id=verdict.producer_id,
                 producer_version=verdict.producer_version,
