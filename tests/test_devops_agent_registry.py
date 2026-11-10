@@ -1,6 +1,5 @@
 from __future__ import annotations  # noqa: I001
 
-from copy import deepcopy
 from uuid import uuid4
 
 import pytest
