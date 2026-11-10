@@ -61,6 +61,11 @@ def test_postgres_incident_dedup_lifecycle_reopen_and_kill_switches():
     assert duplicate["duplicate"] is True
     assert duplicate["occurrence_count"] == 2
 
+    with pytest.raises(ClosedLoopConflictError):
+        store.record_slo_alerts([
+            _alert(tenant_id, second_message_id, now + timedelta(minutes=6))
+        ])
+
     acknowledged = store.transition_incident(
         tenant_id=tenant_id,
         incident_id=second["incident_id"],
