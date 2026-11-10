@@ -10,7 +10,6 @@ from rusa_agents.workflow_graph import (
     dependency_outcome,
 )
 
-
 NOW = datetime(2026, 11, 10, 6, 0, tzinfo=timezone.utc)
 
 
