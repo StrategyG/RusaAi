@@ -231,7 +231,17 @@ def test_event_requires_trace_context_and_event_specific_payload():
 
 
 def test_release_and_deploy_events_bind_to_immutable_result_artifacts():
-    task = make_task(agent_id="rusa_release_agent", stage="release")
+    task = make_task(
+        agent_id="rusa_release_agent",
+        stage="release",
+        constraints={
+            "allowed_tools": ["evidence.read", "manifest.write", "release_candidate.create"],
+            "network_access": False,
+            "write_scope": ["release-manifests/"],
+            "approval_required": False,
+            "requested_actions": ["evidence.read", "manifest.write", "release_candidate.create"],
+        },
+    )
     result = make_result(task)
     release_ref = result["artifacts"][0]["ref"]
     approval_ref = result["evidence"][0]["ref"]
@@ -245,7 +255,17 @@ def test_release_and_deploy_events_bind_to_immutable_result_artifacts():
     }
     validate_workflow_handoff(task, result, event)
 
-    deploy_task = make_task(agent_id="rusa_deploy_agent", stage="deploy")
+    deploy_task = make_task(
+        agent_id="rusa_deploy_agent",
+        stage="deploy",
+        constraints={
+            "allowed_tools": ["deployment.status.read", "health_check.execute", "rollback.plan"],
+            "network_access": False,
+            "write_scope": ["deployment-records/"],
+            "approval_required": False,
+            "requested_actions": ["deployment.status.read", "health_check.execute", "rollback.plan"],
+        },
+    )
     deploy_result = make_result(deploy_task)
     deploy_event = make_event(deploy_task, deploy_result)
     deploy_event["type"] = "deploy.completed"
@@ -259,7 +279,17 @@ def test_release_and_deploy_events_bind_to_immutable_result_artifacts():
 
 
 def test_deployment_result_cannot_claim_pass_when_health_is_unhealthy():
-    task = make_task(agent_id="rusa_deploy_agent", stage="deploy")
+    task = make_task(
+        agent_id="rusa_deploy_agent",
+        stage="deploy",
+        constraints={
+            "allowed_tools": ["deployment.status.read", "health_check.execute", "rollback.plan"],
+            "network_access": False,
+            "write_scope": ["deployment-records/"],
+            "approval_required": False,
+            "requested_actions": ["deployment.status.read", "health_check.execute", "rollback.plan"],
+        },
+    )
     result = make_result(task)
     event = make_event(task, result)
     event["type"] = "deploy.completed"
