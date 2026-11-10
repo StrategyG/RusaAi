@@ -26,23 +26,23 @@ from .contracts import (
     validate_agent_task,
     validate_workflow_event,
 )
+from .deploy import (
+    DeployAgentExecutor,
+    DeploymentCheckResult,
+    DeploymentExecutionResult,
+    DeploymentSnapshot,
+    DeploymentTarget,
+    DeploymentVerificationResult,
+    DeployPolicy,
+    RollbackExecutionResult,
+    RollbackRehearsalResult,
+)
 from .orchestrator import DevOpsDryRunOrchestrator, DevOpsDryRunReport, SyntheticDevOpsAgent
 from .release import (
     ApprovalDecision,
     ApprovalVerifier,
     ReleaseAgentExecutor,
     ReleasePolicy,
-)
-from .deploy import (
-    DeployAgentExecutor,
-    DeployPolicy,
-    DeploymentCheckResult,
-    DeploymentExecutionResult,
-    DeploymentSnapshot,
-    DeploymentTarget,
-    DeploymentVerificationResult,
-    RollbackExecutionResult,
-    RollbackRehearsalResult,
 )
 from .specialists import (
     CodeAgentExecutor,
