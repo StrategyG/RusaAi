@@ -292,6 +292,8 @@ Every cross-domain task should carry the following logical fields:
 
 Do not put raw secrets, API keys, bearer tokens, or unrestricted credentials in durable task messages or event payloads.
 
+The initial internal platform contracts are defined in `rusa_agents/platform_contracts.py` and `schemas/platform/`. They are distinct from the existing A2A wire envelope (`schemas/a2a/task-envelope.schema.json`, protocol version 1.0), which remains unchanged. The AICode adapters provide a migration boundary; they are not yet wired into live task intake or worker execution.
+
 ### 8.5 State model compatibility
 
 The current system has two related state vocabularies: queue states (queued, running, awaiting_approval, succeeded, failed, cancelled) and in-process AICode phases (received, observing, planning, executing, verifying, awaiting_approval, succeeded, failed, blocked, cancelled).
