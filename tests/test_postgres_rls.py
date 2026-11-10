@@ -489,3 +489,112 @@ def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
                     "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
                     (event.message_id,),
                 )
+
+
+
+def test_closed_loop_incidents_and_kill_switches_are_tenant_scoped():
+    import psycopg
+
+    tenant_a = "rls-a-" + uuid4().hex[:12]
+    tenant_b = "rls-b-" + uuid4().hex[:12]
+    incident_id = str(uuid4())
+    fingerprint = hashlib.sha256((tenant_a + "|rusa-api|staging|availability").encode()).hexdigest()
+    evidence_ref = "artifact://sha256/" + "f" * 64
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_a)
+        conn.execute(
+            """
+            INSERT INTO public.rusa_incidents(
+                tenant_id, incident_id, fingerprint, service_id, environment,
+                rule_id, severity, title, summary, correlation_id, workflow_id,
+                first_seen_at, last_seen_at, occurrence_count, latest_evidence_ref
+            )
+            VALUES (%s, %s::uuid, %s, 'rusa-api', 'staging', 'availability',
+                    'critical', 'Availability SLO', 'Availability below threshold',
+                    'workflow-rls', 'workflow-rls', clock_timestamp(),
+                    clock_timestamp(), 1, %s)
+            """,
+            (tenant_a, incident_id, fingerprint, evidence_ref),
+        )
+        conn.execute(
+            """
+            INSERT INTO public.rusa_incident_events(
+                tenant_id, event_id, incident_id, message_id, correlation_id,
+                event_type, actor, payload
+            )
+            VALUES (%s, %s::uuid, %s::uuid, %s, 'workflow-rls',
+                    'incident.alert.observed', 'rusa_monitor_agent', '{}'::jsonb)
+            """,
+            (tenant_a, str(uuid4()), incident_id, "rls-event-" + uuid4().hex),
+        )
+        assert conn.execute(
+            "SELECT incident_id FROM public.rusa_incidents"
+        ).fetchall() == [(incident_id,)]
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_b)
+        assert conn.execute(
+            "SELECT incident_id FROM public.rusa_incidents"
+        ).fetchall() == []
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    """
+                    INSERT INTO public.rusa_incidents(
+                        tenant_id, incident_id, fingerprint, service_id, environment,
+                        rule_id, severity, title, summary, correlation_id,
+                        first_seen_at, last_seen_at, latest_evidence_ref
+                    )
+                    VALUES (%s, %s::uuid, %s, 'rusa-api', 'staging', 'availability',
+                            'critical', 'cross-tenant', 'must be denied', 'workflow',
+                            clock_timestamp(), clock_timestamp(), %s)
+                    """,
+                    (
+                        tenant_a, str(uuid4()), hashlib.sha256(b"cross-tenant").hexdigest(),
+                        evidence_ref,
+                    ),
+                )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_a)
+        conn.execute(
+            """
+            INSERT INTO public.rusa_kill_switches(
+                tenant_id, scope, enabled, reason_code, updated_by, version
+            )
+            VALUES (%s, 'deploy', true, 'tenant_maintenance', 'tenant_admin', 1)
+            """,
+            (tenant_a,),
+        )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_b)
+        visible = conn.execute(
+            "SELECT tenant_id, scope FROM public.rusa_kill_switches"
+        ).fetchall()
+        assert (tenant_a, "deploy") not in visible
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", "platform")
+        conn.execute(
+            """
+            INSERT INTO public.rusa_kill_switches(
+                tenant_id, scope, enabled, reason_code, updated_by, version
+            )
+            VALUES ('platform', 'all', true, 'platform_emergency', 'platform_admin', 1)
+            """
+        )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_b)
+        visible = conn.execute(
+            "SELECT tenant_id, scope FROM public.rusa_kill_switches"
+        ).fetchall()
+        assert ("platform", "all") in visible
+        assert (tenant_a, "deploy") not in visible
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_kill_switches SET enabled=false WHERE tenant_id='platform'"
+                )
