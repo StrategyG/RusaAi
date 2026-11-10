@@ -137,7 +137,8 @@
     "deadline_at",
     "idempotency_key",
     "correlation_id",
-    "traceparent"
+    "traceparent",
+    "attempt"
   ],
   "$defs": {
     "artifactReference": {
