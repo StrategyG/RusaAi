@@ -121,6 +121,8 @@ def _event_payload() -> dict:
         "tenant_id": "tenant-a",
         "workflow_id": "workflow-1",
         "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt": 1,
         "correlation_id": "workflow-1",
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         "event_type": "task.accepted",
