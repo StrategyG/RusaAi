@@ -143,6 +143,7 @@ def test_passed_agent_result_requires_evidence_and_completion_time():
         agent_id="rusa_test_agent",
         stage="test",
         status="passed",
+        attempt=1,
         summary="Required checks passed for the candidate commit.",
         evidence=[ARTIFACT],
         started_at=NOW,
