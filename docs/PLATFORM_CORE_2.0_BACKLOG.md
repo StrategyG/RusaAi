@@ -19,17 +19,18 @@ This backlog translates the Platform Architecture 2.0 into sequenced engineering
 
 ## 2. Implementation progress on the architecture branch
 
-The initial contract slice has been added to this branch:
+The contract foundation has been implemented on this branch:
 
-- [x] Agent Manifest 1.0 Pydantic model and JSON Schema.
-- [x] Task Envelope 2.0 Pydantic model and JSON Schema.
-- [x] Agent Result 2.0 Pydantic model and JSON Schema.
-- [x] Workflow Event 2.0 Pydantic model and JSON Schema.
-- [x] AICode task/result compatibility adapters.
-- [x] Schema exporter and CI drift check.
-- [x] Contract validation and adapter round-trip tests.
+- [x] Agent Manifest 1.0 Pydantic model and JSON Schema, including health snapshot and published-version immutability checks.
+- [x] Task Envelope 2.0 Pydantic model and JSON Schema, including tenant/workflow/task identity, deadlines, budgets, trace context, and approval fields.
+- [x] Agent Result 2.0 Pydantic model and JSON Schema, including digest-bound immutable output/evidence references.
+- [x] Workflow Event 2.0 Pydantic model and JSON Schema with typed task acceptance, progress, completion, failure, cancellation, policy, approval, audit, and validation-verdict payloads.
+- [x] Same-major event consumer compatibility for unknown optional fields.
+- [x] AICode adapters for CodingTask, WorkerResult, and TaskRecord state snapshots.
+- [x] Exact preservation tests for all six worker roles, legacy evidence keys, repository/tenant/approval metadata, and current PostgreSQL queue status values.
+- [x] Schema exporter, CI drift check, JSON Schema validation, and positive/negative contract fixtures.
 
-Still open in P0: the live agent registry, workflow/run/task persistence, DAG scheduler, transactional outbox/inbox, central policy decision service, and human approval records. The adapters are not yet wired into production task intake or worker execution.
+Still open in P0: the live agent registry and runtime registration, workflow/run/task persistence, DAG scheduler, transactional outbox/inbox, central policy decision service, and durable human approval records. The adapters are intentionally not wired into production task intake or worker execution in this increment.
 
 ## 3. Workstream overview
 
