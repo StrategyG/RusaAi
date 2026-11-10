@@ -5,7 +5,8 @@
 **Date:** 10 November 2026  
 **Target repository:** StrategyG/RusaAi  
 **Working branch:** architecture/rusa-ai-platform-core-2.0  
-**Validated commit:** `9e75790c98d372642a33d1da40cd5d89a0801d6c` (CI evidence; subsequent security-test commits require their own CI result)
+**Latest fully green CI commit:** `9e75790c98d372642a33d1da40cd5d89a0801d6c`  
+**Current branch head:** `5d64652f2a726de7e455f9649c1a40c9edd5da28` (additional integration/security tests and fixes; full CI rerun still required)
 
 This backlog translates the Platform Architecture 2.0 into sequenced engineering work. Items marked **P0** establish compatibility and shared control-plane foundations. Later domain work must not bypass these controls.
 
@@ -50,6 +51,12 @@ CI evidence for commit `9e75790c98d372642a33d1da40cd5d89a0801d6c`:
 - RAG/MCP integration suite: 45 passed.
 - All three CI jobs passed, including schema drift, lint, Bandit, image builds, isolated tests, and Compose validation.
 - Trivy reported 0 CRITICAL and 67–72 HIGH findings per image. The existing `--ignore-unfixed` gate passed; the HIGH findings remain a base-image/dependency disposition and refresh follow-up, not a clean scan.
+
+Follow-up validation after that green commit:
+- A PostgreSQL-backed service integration test was added for registry lifecycle/selection, policy decision persistence, self-approval rejection, one-time approval consumption, evidence-kind/provenance verification, and governance-table RLS/grants.
+- CI run #4141 exposed an untyped NULL in the optional registry domain filter; fixed with an explicit PostgreSQL text cast.
+- CI run #4148 stopped at Ruff import-order validation before tests; imports were moved to the module header in commit `5d64652f2a726de7e455f9649c1a40c9edd5da28`.
+- The later commits have not yet produced a complete green CI run. Manually dispatch workflow `RUSA-AI CI` against the current branch head before merge; do not use the earlier green run as evidence for the current head.
 
 ## 3. Workstream overview
 
