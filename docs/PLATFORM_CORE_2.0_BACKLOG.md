@@ -1,10 +1,11 @@
 # RUSA AI Platform Core 2.0 — Engineering Backlog
 
-**Status:** Proposed implementation backlog  
+**Status:** P0 control-plane foundations implemented on the architecture branch; runtime cutover and P1–P5 work remain open  
 **Version:** 2.0-draft  
 **Date:** 10 November 2026  
 **Target repository:** StrategyG/RusaAi  
-**Working branch:** architecture/rusa-ai-platform-core-2.0
+**Working branch:** architecture/rusa-ai-platform-core-2.0  
+**Validated commit:** `9e75790c98d372642a33d1da40cd5d89a0801d6c` (CI evidence; subsequent security-test commits require their own CI result)
 
 This backlog translates the Platform Architecture 2.0 into sequenced engineering work. Items marked **P0** establish compatibility and shared control-plane foundations. Later domain work must not bypass these controls.
 
@@ -19,21 +20,36 @@ This backlog translates the Platform Architecture 2.0 into sequenced engineering
 
 ## 2. Implementation progress on the architecture branch
 
-The contract foundation has been implemented on this branch:
+The branch now contains the contract foundation and the first code-bearing P0 control-plane implementation. These services and migrations are implemented as explicit platform components; they are **not yet wired into live AICode task intake or production worker dispatch**.
 
-- [x] Canonical orchestrator hierarchy and naming ADR (CORE-001).
-- [x] Communication ADR reconciled with the implemented PostgreSQL queue and deferred broker/stream proposals (CORE-002).
-- [x] Maintained capability matrix separates current AICode roles, partially represented target agents, and planned lifecycle/domain capabilities (CORE-003).
-- [x] Agent Manifest 1.0 Pydantic model and JSON Schema, including health snapshot and published-version immutability checks.
-- [x] Task Envelope 2.0 Pydantic model and JSON Schema, including tenant/workflow/task identity, deadlines, budgets, trace context, and approval fields.
-- [x] Agent Result 2.0 Pydantic model and JSON Schema, including digest-bound immutable output/evidence references.
-- [x] Workflow Event 2.0 Pydantic model and JSON Schema with typed task acceptance, progress, completion, failure, cancellation, policy, approval, audit, and validation-verdict payloads.
-- [x] Same-major event consumer compatibility for unknown optional fields.
-- [x] AICode adapters for CodingTask, WorkerResult, and TaskRecord state snapshots.
-- [x] Exact preservation tests for all six worker roles, legacy evidence keys, repository/tenant/approval metadata, and current PostgreSQL queue status values.
-- [x] Schema exporter, CI drift check, JSON Schema validation, and positive/negative contract fixtures.
+- [x] Canonical orchestrator hierarchy, communication ADR, and capability-status matrix.
+- [x] Agent Manifest 1.0, Task Envelope 2.0, Agent Result 2.0, Workflow Event 2.0, Task Record snapshot 2.0, and Policy Decision 1.0 contracts with generated Draft 2020-12 JSON Schemas.
+- [x] Backward-compatible AICode adapters and round-trip preservation tests for six worker roles, evidence, approval metadata, tenant/repository identity, and queue status values.
+- [x] PostgreSQL workflow/run/task/dependency/event/outbox/inbox schema in migration 009, with tenant RLS, indexes, immutable event/dependency/inbox records, and atomic DDL.
+- [x] DAG validation for missing dependencies, cycles, duplicate tasks/edges, fan-out, deadlines, and dependency outcomes.
+- [x] PostgreSQL workflow store for run/task creation, compare-and-set state versions, lease fencing, bounded concurrent task claims, retries, deadlines, budget consumption, cancellation, side-effect reconciliation, and evidence-gated completion.
+- [x] Transactional event/outbox append and at-least-once relay; tenant-aware inbox deduplication.
+- [x] PostgreSQL versioned agent registry in migration 010 and service lifecycle for register, validate, activate, suspend, deprecate, revoke, health updates, capability selection, and runtime-binding checks.
+- [x] Task-scoped capability authorization and an explicit Tool Gateway path that binds the policy resource to the actual tool arguments, worker role, tenant, agent version, task, resource scope, deadline, and deterministic decision.
+- [x] Domain-orchestrator interface and AICode adapter; cross-domain handoff requires an explicit unexpired tenant grant.
+- [x] Deterministic policy engine and append-only decision persistence, including allowlist precedence, deny, approval-required, stable identical denials, and canonical input digests.
+- [x] Durable human approval records with exact action/resource/workflow/task/artifact binding, authorized human decisions, expiry, one-time consumption, and workflow events.
+- [x] Immutable evidence records and QA verdict verification against exact artifact digest, commit, producer, evidence kind, test profile, and freshness.
+- [x] PostgreSQL integration coverage for workflow RLS/outbox behavior and platform registry, policy, approval, and evidence services.
 
-Still open in P0: the live agent registry and runtime registration, workflow/run/task persistence, DAG scheduler, transactional outbox/inbox, central policy decision service, and durable human approval records. The adapters are intentionally not wired into production task intake or worker execution in this increment.
+Still open before Platform Core 2.0 can be called end-to-end complete:
+
+- Runtime wiring from authenticated API intake and the AICode orchestrator/worker lifecycle into the new registry, workflow store, policy service, approval service, evidence service, and authorized Tool Gateway path.
+- Production-grade identity/approver authorization adapters, deployment configuration, migration runbook, backup/restore and rollback rehearsal, operational metrics/alerts, and owner sign-off.
+- Versioned registrations and validated execution evidence for the named Supreme/Domain/DevOps and lifecycle agents. The supplied lifecycle identities remain planned until they pass the promotion rule in `AGENT_CAPABILITY_MATRIX.md`.
+- P1 model/knowledge integration and the P2–P5 product-domain and enterprise-qualification workstreams.
+
+CI evidence for commit `9e75790c98d372642a33d1da40cd5d89a0801d6c`:
+- Main PostgreSQL-backed suite: 292 passed, 6 skipped.
+- Isolated sandbox suite: 270 passed, 28 skipped (the isolated container does not receive the PostgreSQL integration DSN; the main suite runs those database tests).
+- RAG/MCP integration suite: 45 passed.
+- All three CI jobs passed, including schema drift, lint, Bandit, image builds, isolated tests, and Compose validation.
+- Trivy reported 0 CRITICAL and 67–72 HIGH findings per image. The existing `--ignore-unfixed` gate passed; the HIGH findings remain a base-image/dependency disposition and refresh follow-up, not a clean scan.
 
 ## 3. Workstream overview
 
@@ -355,17 +371,22 @@ Acceptance criteria:
 - Missing evidence produces HOLD; mandatory failure produces FAIL.
 - No documentation or UI claims production-ready before an approved PASS decision.
 
-## 15. First implementation slice — completed on this branch
+## 15. P0 implementation increment — code-bearing foundation on this branch
 
-The first code-bearing contract increment is implemented in this branch:
+The branch includes the following implementation increment:
 
-1. Agent Manifest 1.0 and Task/Result/Event 2.0 Pydantic contracts with Draft 2020-12 JSON Schemas.
-2. Typed task lifecycle, policy, approval, audit, and validation-verdict event payloads.
-3. AICode CodingTask, WorkerResult, and TaskRecord compatibility adapters.
-4. Positive/negative contract fixtures, schema drift validation, lint, security analysis, and CI integration.
-5. No live worker execution or production side effect was changed.
+1. Versioned Pydantic contracts and generated JSON Schemas, plus backward-compatible AICode adapters.
+2. Migrations 009 and 010 for workflow control-plane and governance persistence.
+3. PostgreSQL workflow store, DAG validator, transactional outbox/inbox, and bounded task scheduler primitives.
+4. Agent registry, capability authorization, Tool Gateway authorization path, and domain-orchestrator adapter.
+5. Deterministic policy decision service, durable human approvals, one-time approval consumption, and immutable evidence verification.
+6. Contract, governance, workflow, migration, and PostgreSQL integration tests.
 
-The next independent P0 increments are the workflow/run/task persistence and transactional outbox/inbox migration design, followed by the agent registry, DAG scheduler, deterministic policy decision service, and durable approval records. Each requires its own migration plan and review before runtime cutover.
+**Integration boundary:** the new platform services are available as separate components, but they are not yet the live execution path for existing AICode intake and worker dispatch. No Supreme Orchestrator or eight lifecycle agents are promoted to active runtime identities by this increment. Existing AICode APIs, six worker roles, and queue remain the compatibility baseline.
+
+**Migration safety:** migrations 009 and 010 are additive and leave `aicode_jobs` intact. They contain append-only event/evidence/audit data; do not perform a destructive down-migration. Any rollback must use a reviewed backup/restore or forward-fix plan, with owner approval and a rehearsal against a representative database before production use.
+
+**Validation evidence:** see Section 2 for exact CI commit and suite counts. CI success is not production certification; the remaining HIGH image findings and the open runtime/operational qualification items must be dispositioned separately.
 
 ## 16. Definition of done for Platform Core 2.0
 
