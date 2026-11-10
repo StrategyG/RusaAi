@@ -4,7 +4,7 @@ This is a contract foundation only. A registered profile does not imply that an
 agent executor or its external tools are deployed.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 import json
 from dataclasses import dataclass
