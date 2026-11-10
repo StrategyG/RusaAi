@@ -32,7 +32,7 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "__init__.py").write_text(
-        '"""Generated RUSA DevOps protobuf modules."""\\n',
+        '"""Generated RUSA DevOps protobuf modules."""\n',
         encoding="utf-8",
     )
     well_known = Path(grpc_tools.__file__).resolve().parent / "_proto"
@@ -54,7 +54,7 @@ def main() -> None:
     for index, line in enumerate(lines):
         if line == "import workflow_pb2 as workflow__pb2":
             lines[index] = "from . import workflow_pb2 as workflow__pb2"
-    source = "\\n".join(lines) + "\\n"
+    source = "\n".join(lines) + "\n"
     if any(line == "import workflow_pb2 as workflow__pb2" for line in lines):
         raise SystemExit("failed to make generated gRPC stub package-relative")
     grpc_stub.write_text(source, encoding="utf-8")
