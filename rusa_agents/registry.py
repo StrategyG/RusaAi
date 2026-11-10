@@ -400,7 +400,7 @@ class PostgresAgentRegistry:
                 SELECT tenant_id, manifest
                 FROM public.rusa_agent_registry
                 WHERE tenant_id IN (%s, 'platform') AND status='active'
-                  AND (%s IS NULL OR domain=%s)
+                  AND (%s::text IS NULL OR domain=%s)
                 ORDER BY (tenant_id=%s) DESC, agent_id, version DESC
                 """,
                 (tenant_id, domain, domain, tenant_id),
