@@ -366,8 +366,13 @@ class DevOpsDryRunOrchestrator:
             return {
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
+                "build_evidence_ref": build_evidence_ref
+                or f"evidence://dry-run/build/{workflow_id}",
                 "test_evidence_ref": test_evidence_ref or f"evidence://dry-run/tests/{workflow_id}",
                 "sbom_ref": f"artifact://dry-run/sbom/{workflow_id}",
+                "release_version": "0.1.0-rc.1",
+                "changelog_ref": f"artifact://dry-run/changelog/{workflow_id}",
+                "migration_notes_ref": f"artifact://dry-run/migrations/{workflow_id}",
             }
         if stage == "deploy":
             return {

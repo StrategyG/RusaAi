@@ -61,8 +61,12 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
         "release": {
             "commit_sha": "a" * 40,
             "artifact_digest": "sha256:" + "b" * 64,
+            "build_evidence_ref": "evidence://build/evidence-1",
             "test_evidence_ref": "evidence://test/report-1",
             "sbom_ref": "artifact://sbom/sbom-1",
+            "release_version": "0.1.0-rc.1",
+            "changelog_ref": "artifact://release/changelog-1",
+            "migration_notes_ref": "artifact://release/migrations-1",
         },
         "deploy": {
             "release_manifest_ref": "artifact://release/manifest-1",

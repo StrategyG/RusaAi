@@ -379,11 +379,16 @@ def test_release_task_requires_the_commit_that_produced_its_artifact():
     payload["input"] = {
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "build_evidence_ref": "evidence://build/attestation",
         "test_evidence_ref": "evidence://tests/verified",
         "sbom_ref": "artifact://sbom/verified",
+        "release_version": "0.1.0-rc.1",
+        "changelog_ref": "artifact://release/changelog",
+        "migration_notes_ref": "artifact://release/migrations",
     }
     payload["constraints"]["allowed_tools"] = [
-        "artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read"
+        "artifact.read", "evidence.read", "release.prepare", "manifest.write",
+        "sbom.read", "evidence.write"
     ]
     validate_agent_task(payload)
     payload["input"].pop("commit_sha")

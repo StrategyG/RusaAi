@@ -124,6 +124,27 @@
           "type": "string",
           "format": "uri"
         },
+        "release_version": {
+          "type": "string",
+          "pattern": "^(v)?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-rc\\.[1-9][0-9]*)?$",
+          "maxLength": 64
+        },
+        "changelog_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "migration_notes_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "known_issues_ref": {
+          "type": "string",
+          "format": "uri"
+        },
+        "security_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
         "release_manifest_ref": {
           "type": "string",
           "format": "uri"
@@ -592,6 +613,34 @@
     {
       "if": {
         "properties": {
+          "agent_id": {
+            "const": "rusa_release_agent"
+          },
+          "stage": {
+            "const": "release"
+          }
+        },
+        "required": [
+          "agent_id",
+          "stage"
+        ]
+      },
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "build_evidence_ref",
+              "release_version",
+              "changelog_ref",
+              "migration_notes_ref"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "stage": {
             "const": "deploy"
           }
@@ -861,7 +910,8 @@
                     "evidence.read",
                     "release.prepare",
                     "manifest.write",
-                    "sbom.read"
+                    "sbom.read",
+                    "evidence.write"
                   ]
                 }
               }
