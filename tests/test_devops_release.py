@@ -19,7 +19,6 @@ from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
 from rusa_agents.devops.release import ApprovalDecision, ReleaseAgentExecutor, ReleasePolicy
 from rusa_agents.devops.specialists import ExecutionLease
 
-
 REGISTRY_HOST = "registry.example"
 SOURCE_COMMIT = "a" * 40
 ARTIFACT_DIGEST = "sha256:" + "b" * 64

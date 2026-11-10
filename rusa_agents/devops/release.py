@@ -18,9 +18,9 @@ from .agent_registry import (
 )
 from .artifacts import ContentAddressedArtifactStore
 from .build_test import (
+    _SHA256_RE,
     EvidenceSigner,
     EvidenceVerifier,
-    _SHA256_RE,
     _aware_timestamp,
     _load_json_artifact,
     _signed_evidence,
@@ -435,7 +435,7 @@ class ReleaseAgentExecutor:
                 f"## Changelog\n\n{changelog[:12000]}\n\n"
                 f"## Migration notes\n\n{migration_notes[:12000]}\n\n"
                 f"## Known issues\n\n{known_issues[:6000] or 'None supplied'}\n"
-            ).encode("utf-8")
+            ).encode()
             readiness_ref = self.artifact_store.put(task["tenant_id"], report_text, namespace="artifact")
             manifest_digest = manifest_ref.rsplit("/", 1)[-1]
             release_payload = {
