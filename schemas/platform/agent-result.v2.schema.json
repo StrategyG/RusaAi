@@ -2,7 +2,7 @@
   "$defs": {
     "EvidenceReference": {
       "additionalProperties": false,
-      "description": "Immutable evidence reference bound to a content digest.",
+      "description": "Immutable evidence reference bound to a content digest and evaluated subject.",
       "properties": {
         "kind": {
           "maxLength": 128,
@@ -39,6 +39,58 @@
           "minLength": 1,
           "title": "Uri",
           "type": "string"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At"
+        },
+        "producer_version": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer Version"
+        },
+        "subject_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{40,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Commit"
+        },
+        "test_profile": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Test Profile"
         }
       },
       "required": [
