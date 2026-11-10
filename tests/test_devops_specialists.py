@@ -1,0 +1,594 @@
+from __future__ import annotations  # noqa: I001
+
+import hashlib
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from rusa_agents.contracts import WorkerRole
+from rusa_agents.devops.agent_registry import (
+    AGENT_POLICIES,
+    BUILD_AGENT,
+    CODE_AGENT,
+    PLAN_AGENT,
+)
+from rusa_agents.devops.artifacts import (
+    ArtifactIntegrityError,
+    ArtifactNotFoundError,
+    ContentAddressedArtifactStore,
+)
+from rusa_agents.devops.specialists import (
+    CodeAgentExecutor,
+    ExecutionLease,
+    ExecutionLeaseError,
+    PlanAgentExecutor,
+    ScopedCodeWorkspaceGateway,
+)
+from rusa_agents.git_workspace import GitHubPublisher
+from rusa_agents.tool_gateway import ToolDenied
+
+
+TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+
+
+def _task(stage: str) -> dict:
+    now = datetime.now(timezone.utc)
+    agent_id = PLAN_AGENT if stage == "plan" else CODE_AGENT
+    if stage == "plan":
+        inputs = {"user_request": "Implement a safe example feature."}
+        scope = ["plans/"]
+    else:
+        inputs = {
+            "repository": "StrategyG/RusaAi",
+            "base_branch": "main",
+            "plan_ref": "artifact://sha256/" + "a" * 64,
+            "plan_evidence_ref": "evidence://sha256/" + "b" * 64,
+            "acceptance_criteria_ref": "artifact://sha256/" + "c" * 64,
+            "acceptance_criteria": ["The example feature has a regression test."],
+        }
+        scope = ["src/", "tests/", "docs/"]
+    return {
+        "schema_version": 1,
+        "task_id": f"task-{uuid4().hex[:12]}",
+        "workflow_id": f"run-{uuid4().hex[:12]}",
+        "tenant_id": "tenant-specialists",
+        "agent_id": agent_id,
+        "stage": stage,
+        "objective": "Implement a bounded example feature.",
+        "input": inputs,
+        "constraints": {
+            "allowed_tools": sorted(AGENT_POLICIES[agent_id].allowed_tools),
+            "network_access": False,
+            "allowed_network_destinations": [],
+            "write_scope": scope,
+            "approval_required": False,
+            "approval_scope": [],
+            "budget": {
+                "max_cost_usd": 2.0,
+                "max_tool_calls": 20,
+                "max_runtime_seconds": 300,
+            },
+        },
+        "attempt": 1,
+        "deadline_at": (now + timedelta(minutes=10)).isoformat(),
+        "audit": {
+            "created_at": now.isoformat(),
+            "requested_by": "pytest",
+            "policy_version": "policy-test-v1",
+            "traceparent": TRACEPARENT,
+        },
+    }
+
+
+def _lease(task: dict, *, principal: str | None = None, accepted: bool = True) -> ExecutionLease:
+    return ExecutionLease(
+        tenant_id=task["tenant_id"],
+        run_id=task["workflow_id"],
+        task_id=task["task_id"],
+        attempt=task["attempt"],
+        principal=principal or task["agent_id"],
+        claim_id=f"claim-{uuid4().hex}",
+        lease_epoch=1,
+        lease_until=datetime.now(timezone.utc) + timedelta(minutes=2),
+        accepted=accepted,
+    )
+
+
+def _valid_plan() -> dict:
+    return {
+        "title": "Example feature",
+        "goal": "Deliver a bounded example feature.",
+        "scope": {
+            "in_scope": ["Implement the requested feature."],
+            "out_of_scope": ["Production deployment."],
+        },
+        "requirements": [
+            {"id": "REQ-1", "kind": "functional", "statement": "The feature works."}
+        ],
+        "tasks": [
+            {
+                "id": "TASK-1",
+                "title": "Implement feature",
+                "description": "Implement the source change and regression test.",
+                "agent_id": CODE_AGENT,
+                "depends_on": [],
+            },
+            {
+                "id": "TASK-2",
+                "title": "Build and test",
+                "description": "Build and independently verify the exact source revision.",
+                "agent_id": BUILD_AGENT,
+                "depends_on": ["TASK-1"],
+            },
+        ],
+        "acceptance_criteria": [
+            {
+                "id": "AC-1",
+                "criterion": "The feature works as requested.",
+                "verification": "Run the regression test against the built artifact.",
+            }
+        ],
+        "risks": [
+            {
+                "id": "RISK-1",
+                "severity": "low",
+                "description": "The change may affect an existing API.",
+                "mitigation": "Keep the API backward compatible and run regression tests.",
+            }
+        ],
+        "approval_scopes": [],
+    }
+
+
+def _attach_plan_provenance(task: dict, store: ContentAddressedArtifactStore) -> None:
+    plan_bytes = b"# Approved plan\nImplement a small feature."
+    acceptance_bytes = (
+        "# Acceptance criteria\n\n"
+        "- **AC-1** — The example feature has a regression test.\n"
+        "  - Verification: run the independent regression test.\n"
+    ).encode()
+    plan_ref = store.put(task["tenant_id"], plan_bytes, namespace="artifact")
+    acceptance_ref = store.put(task["tenant_id"], acceptance_bytes, namespace="artifact")
+    evidence = {
+        "schema_version": 1,
+        "tenant_id": task["tenant_id"],
+        "workflow_id": task["workflow_id"],
+        "agent_id": PLAN_AGENT,
+        "artifacts": {
+            "plan.md": plan_ref,
+            "acceptance-criteria.md": acceptance_ref,
+        },
+        "artifact_sha256": {
+            "plan.md": hashlib.sha256(plan_bytes).hexdigest(),
+            "acceptance-criteria.md": hashlib.sha256(acceptance_bytes).hexdigest(),
+        },
+    }
+    task["input"]["plan_ref"] = plan_ref
+    task["input"]["acceptance_criteria_ref"] = acceptance_ref
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+
+
+class FakeProvider:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        return json.dumps(self.payload)
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_creates_five_immutable_documents_and_evidence(tmp_path):
+    task = _task("plan")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(_valid_plan()),
+        artifact_store=store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "passed"
+    assert len(outcome.result["output"]["artifact_refs"]) == 5
+    assert len(outcome.result["output"]["evidence_refs"]) == 1
+    assert outcome.result["handoff"] == {
+        "next_agent": CODE_AGENT,
+        "event": "plan.completed",
+    }
+    assert b"# Example feature" in store.get(
+        task["tenant_id"], outcome.result["output"]["artifact_refs"][0]
+    )
+    evidence = store.get_json(
+        task["tenant_id"], outcome.result["output"]["evidence_refs"][0]
+    )
+    assert evidence["task_id"] == task["task_id"]
+    assert len(evidence["artifact_sha256"]) == 5
+    assert set(evidence["artifacts"]) == {
+        "plan.md", "requirements.md", "backlog.yaml",
+        "acceptance-criteria.md", "risk-assessment.md",
+    }
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_holds_handoff_when_model_identifies_approval_scopes(tmp_path):
+    task = _task("plan")
+    plan = _valid_plan()
+    plan["approval_scopes"] = ["production_data_change", "external_publication"]
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(plan),
+        artifact_store=store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "needs_approval"
+    assert "handoff" not in outcome.result
+    approval_ref = outcome.result["output"]["approval_ref"]
+    assert approval_ref in outcome.result["output"]["artifact_refs"]
+    request = store.get_json(task["tenant_id"], approval_ref)
+    assert request["status"] == "pending"
+    assert request["approval_scopes"] == ["external_publication", "production_data_change"]
+    assert "not an approval" in request["notice"]
+    evidence = store.get_json(
+        task["tenant_id"],
+        outcome.result["output"]["evidence_refs"][0],
+    )
+    assert evidence["approval_required"] is True
+    assert evidence["approval_ref"] == approval_ref
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_honors_policy_mandated_approval_even_without_model_scope(tmp_path):
+    task = _task("plan")
+    task["constraints"]["approval_required"] = True
+    task["constraints"]["approval_scope"] = ["release"]
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(_valid_plan()),
+        artifact_store=store,
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "needs_approval"
+    assert "handoff" not in outcome.result
+    request = store.get_json(
+        task["tenant_id"],
+        outcome.result["output"]["approval_ref"],
+    )
+    assert request["approval_scopes"] == ["release"]
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_rejects_dependency_cycles_without_passing(tmp_path):
+    plan = _valid_plan()
+    plan["tasks"][0]["depends_on"] = ["TASK-2"]
+    task = _task("plan")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(plan),
+        artifact_store=ContentAddressedArtifactStore(tmp_path / "objects"),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=PLAN_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.failure_category == "PERMANENT"
+    assert outcome.result["output"]["findings"][0]["code"] == "plan.output_invalid"
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_requires_matching_accepted_claim(tmp_path):
+    task = _task("plan")
+    executor = PlanAgentExecutor(
+        provider=FakeProvider(_valid_plan()),
+        artifact_store=ContentAddressedArtifactStore(tmp_path / "objects"),
+    )
+
+    with pytest.raises(ExecutionLeaseError, match="accepted durable claim"):
+        await executor.execute(
+            task,
+            authenticated_principal=PLAN_AGENT,
+            lease=_lease(task, accepted=False),
+            checkpoint=lambda: True,
+        )
+
+    with pytest.raises(ExecutionLeaseError, match="identity"):
+        await executor.execute(
+            task,
+            authenticated_principal=PLAN_AGENT,
+            lease=_lease(task, principal=CODE_AGENT),
+            checkpoint=lambda: True,
+        )
+
+
+def test_artifact_store_is_immutable_and_tenant_scoped(tmp_path):
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    first = store.put("tenant-a", b"immutable plan")
+    second = store.put("tenant-a", b"immutable plan")
+
+    assert first == second
+    assert store.get("tenant-a", first) == b"immutable plan"
+    with pytest.raises(ArtifactNotFoundError):
+        store.get("tenant-b", first)
+
+
+def test_artifact_store_rejects_noncanonical_refs_and_detects_corruption(tmp_path):
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    reference = store.put("tenant-a", b"evidence")
+    with pytest.raises(ValueError, match="artifact reference"):
+        store.get("tenant-a", "artifact://sha256/../secrets")
+
+    digest = reference.rsplit("/", 1)[-1]
+    object_path = store._object_path("tenant-a", "artifact", digest)
+    object_path.write_bytes(b"tampered")
+    with pytest.raises(ArtifactIntegrityError, match="digest"):
+        store.get("tenant-a", reference)
+
+
+def test_scoped_code_gateway_enforces_actual_write_paths_and_capabilities():
+    task = _task("code")
+    task["constraints"]["write_scope"] = ["src/"]
+
+    class BaseGateway:
+        def execute(self, action, role):
+            return "executed"
+
+        def git_diff(self):
+            return "diff"
+
+    gateway = ScopedCodeWorkspaceGateway(BaseGateway(), task)
+    assert gateway.execute(
+        {"name": "write_file", "arguments": {"path": "src/main.py", "content": "x"}},
+        WorkerRole.DEVELOPER,
+    ) == "executed"
+
+    with pytest.raises(ToolDenied, match="write_scope"):
+        gateway.execute(
+            {"name": "write_file", "arguments": {"path": "tests/test_app.py", "content": "x"}},
+            WorkerRole.DEVELOPER,
+        )
+    with pytest.raises(ToolDenied, match="not registered"):
+        gateway.execute(
+            {"name": "run_check", "arguments": {"profile": "pytest"}},
+            WorkerRole.DEVELOPER,
+        )
+
+
+@pytest.mark.asyncio
+async def test_code_agent_rejects_plan_evidence_from_another_workflow(tmp_path):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    evidence = store.get_json(task["tenant_id"], task["input"]["plan_evidence_ref"])
+    evidence["workflow_id"] = "another-workflow"
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+        gateway_factory=lambda path, assigned_task, checkpoint: SimpleNamespace(workspace=path),
+        worker_factory=lambda provider, gateway: FakeCodeWorker(gateway.workspace),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_evidence_mismatch"
+    assert manager.created_task is None
+
+
+@pytest.mark.asyncio
+async def test_code_agent_rejects_plan_evidence_that_is_still_awaiting_approval(tmp_path):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    evidence = store.get_json(task["tenant_id"], task["input"]["plan_evidence_ref"])
+    evidence["approval_required"] = True
+    evidence["approval_scopes"] = ["release"]
+    evidence["approval_ref"] = store.put(
+        task["tenant_id"],
+        b'{"status":"pending"}',
+        namespace="artifact",
+    )
+    task["input"]["plan_evidence_ref"] = store.put_json(
+        task["tenant_id"], evidence, namespace="evidence"
+    )
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.plan_approval_pending"
+    assert manager.created_task is None
+
+
+@pytest.mark.asyncio
+async def test_code_agent_refuses_task_marked_as_awaiting_human_approval(tmp_path):
+    task = _task("code")
+    task["constraints"]["approval_required"] = True
+    task["constraints"]["approval_scope"] = ["release"]
+    task["constraints"]["approval_ref"] = "approval://pending/release"
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    manager = FakeWorkspaceManager(tmp_path / "worktree")
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=FakePublisher(),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.approval_required"
+    assert manager.created_task is None
+
+
+class FakeWorkspaceManager:
+    def __init__(self, workspace: Path):
+        self.workspace = workspace
+        self.cleaned = False
+        self.created_task = None
+
+    def create(self, task, tenant_id):
+        self.created_task = task
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        return self.workspace
+
+    def cleanup(self, task, tenant_id):
+        self.cleaned = True
+
+
+class FakePublisher:
+    def __init__(self, *, fail_pr: bool = False):
+        self.fail_pr = fail_pr
+        self.pushed = None
+
+    def commit_and_push(self, workspace, repository, branch, message):
+        self.pushed = (repository, branch, message)
+        return "c" * 40
+
+    async def create_or_get_draft_pr(self, repository, branch, base, title, body):
+        if self.fail_pr:
+            raise RuntimeError("simulated GitHub outage")
+        return f"https://github.com/{repository}/pull/123"
+
+
+class FakeCodeWorker:
+    def __init__(self, workspace: Path, *, succeed: bool = True):
+        self.workspace = workspace
+        self.succeed = succeed
+
+    async def run(self, task, prior_results):
+        if self.succeed:
+            target = self.workspace / "src" / "main.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("def feature(): return True\n", encoding="utf-8")
+            return SimpleNamespace(success=True, blockers=[])
+        return SimpleNamespace(success=False, blockers=["model did not finish"])
+
+
+@pytest.mark.asyncio
+async def test_code_agent_publishes_only_task_feature_branch_and_draft_pr(tmp_path, monkeypatch):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    workspace = tmp_path / "worktree"
+    manager = FakeWorkspaceManager(workspace)
+    publisher = FakePublisher()
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "_safe_changed_paths",
+        staticmethod(lambda path: ["src/main.py"]),
+    )
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=publisher,
+        gateway_factory=lambda path, assigned_task, checkpoint: SimpleNamespace(workspace=path),
+        worker_factory=lambda provider, gateway: FakeCodeWorker(gateway.workspace),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "passed"
+    assert outcome.result["audit"]["source_commit"] == "c" * 40
+    assert outcome.result["handoff"]["next_agent"] == BUILD_AGENT
+    assert publisher.pushed[1].startswith("feature/rusa-devops-")
+    assert publisher.pushed[1] not in {"main", "master"}
+    assert manager.cleaned is True
+    assert any("pull/123" in ref for ref in outcome.result["output"]["artifact_refs"])
+
+
+@pytest.mark.asyncio
+async def test_code_agent_records_applied_side_effect_if_draft_pr_creation_fails(tmp_path, monkeypatch):
+    task = _task("code")
+    store = ContentAddressedArtifactStore(tmp_path / "objects")
+    _attach_plan_provenance(task, store)
+    workspace = tmp_path / "worktree"
+    manager = FakeWorkspaceManager(workspace)
+    publisher = FakePublisher(fail_pr=True)
+    monkeypatch.setattr(
+        GitHubPublisher,
+        "_safe_changed_paths",
+        staticmethod(lambda path: ["src/main.py"]),
+    )
+    executor = CodeAgentExecutor(
+        provider=FakeProvider({}),
+        artifact_store=store,
+        workspace_manager=manager,
+        publisher=publisher,
+        gateway_factory=lambda path, assigned_task, checkpoint: SimpleNamespace(workspace=path),
+        worker_factory=lambda provider, gateway: FakeCodeWorker(gateway.workspace),
+    )
+
+    outcome = await executor.execute(
+        task,
+        authenticated_principal=CODE_AGENT,
+        lease=_lease(task),
+        checkpoint=lambda: True,
+    )
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.failure_category == "AMBIGUOUS"
+    assert outcome.side_effect == "APPLIED"
+    assert outcome.result["output"]["findings"][0]["code"] == "code.draft_pr_creation_failed"
+    assert manager.cleaned is True

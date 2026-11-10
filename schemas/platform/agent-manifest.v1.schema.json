@@ -1,0 +1,408 @@
+{
+  "$defs": {
+    "AgentDomain": {
+      "enum": [
+        "shared",
+        "software_engineering",
+        "intelligence",
+        "business",
+        "ecosystem"
+      ],
+      "title": "AgentDomain",
+      "type": "string"
+    },
+    "AgentHealthSnapshot": {
+      "additionalProperties": false,
+      "description": "Runtime health observation; not part of an agent's immutable executable version.",
+      "properties": {
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked At"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentHealthStatus",
+          "default": "unknown"
+        }
+      },
+      "title": "AgentHealthSnapshot",
+      "type": "object"
+    },
+    "AgentHealthStatus": {
+      "enum": [
+        "unknown",
+        "healthy",
+        "degraded",
+        "unhealthy",
+        "maintenance"
+      ],
+      "title": "AgentHealthStatus",
+      "type": "string"
+    },
+    "AgentStatus": {
+      "enum": [
+        "draft",
+        "validated",
+        "active",
+        "suspended",
+        "deprecated",
+        "revoked"
+      ],
+      "title": "AgentStatus",
+      "type": "string"
+    },
+    "BudgetPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_usd": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 1000000,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Cost Usd"
+        },
+        "max_parallel_tasks": {
+          "default": 1,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Parallel Tasks",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "anyOf": [
+            {
+              "maximum": 100000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens"
+        },
+        "max_tool_calls": {
+          "default": 100,
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        }
+      },
+      "title": "BudgetPolicy",
+      "type": "object"
+    },
+    "DeadlinePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "max_execution_seconds": {
+          "default": 3600,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Max Execution Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "DeadlinePolicy",
+      "type": "object"
+    },
+    "ModelPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_fallback": {
+          "default": false,
+          "title": "Allow Fallback",
+          "type": "boolean"
+        },
+        "allowed_models": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Allowed Models",
+          "type": "array"
+        },
+        "allowed_providers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Allowed Providers",
+          "type": "array"
+        },
+        "max_context_tokens": {
+          "anyOf": [
+            {
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Context Tokens"
+        }
+      },
+      "title": "ModelPolicy",
+      "type": "object"
+    },
+    "ResourceScope": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Exclude Patterns",
+          "type": "array"
+        },
+        "include_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Include Patterns",
+          "type": "array"
+        }
+      },
+      "title": "ResourceScope",
+      "type": "object"
+    },
+    "RuntimeBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RuntimeKind"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol"
+        },
+        "target": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target"
+      ],
+      "title": "RuntimeBinding",
+      "type": "object"
+    },
+    "RuntimeKind": {
+      "enum": [
+        "python_callable",
+        "http",
+        "container"
+      ],
+      "title": "RuntimeKind",
+      "type": "string"
+    },
+    "TenantScope": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "tenant",
+          "enum": [
+            "tenant",
+            "system",
+            "allowlist"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "tenant_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1000,
+          "title": "Tenant Ids",
+          "type": "array"
+        }
+      },
+      "title": "TenantScope",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rusa.ai/platform/agent-manifest.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Immutable, versioned description of an agent capability and its grants.",
+  "properties": {
+    "agent_id": {
+      "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "approval_policy": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "title": "Approval Policy",
+      "type": "array"
+    },
+    "budget_policy": {
+      "$ref": "#/$defs/BudgetPolicy"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "deadline_policy": {
+      "$ref": "#/$defs/DeadlinePolicy"
+    },
+    "domain": {
+      "$ref": "#/$defs/AgentDomain"
+    },
+    "evaluation_profile": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Evaluation Profile",
+      "type": "string"
+    },
+    "health": {
+      "$ref": "#/$defs/AgentHealthSnapshot"
+    },
+    "input_schema_ref": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "title": "Input Schema Ref",
+      "type": "string"
+    },
+    "model_policy": {
+      "$ref": "#/$defs/ModelPolicy"
+    },
+    "output_schema_ref": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "title": "Output Schema Ref",
+      "type": "string"
+    },
+    "owner": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Owner",
+      "type": "string"
+    },
+    "policy_profile": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Policy Profile",
+      "type": "string"
+    },
+    "resource_scope": {
+      "$ref": "#/$defs/ResourceScope"
+    },
+    "runtime_binding": {
+      "$ref": "#/$defs/RuntimeBinding"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/AgentStatus",
+      "default": "draft"
+    },
+    "tenant_scope": {
+      "$ref": "#/$defs/TenantScope"
+    },
+    "tool_allowlist": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 256,
+      "title": "Tool Allowlist",
+      "type": "array"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "version": {
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent_id",
+    "domain",
+    "version",
+    "capabilities",
+    "input_schema_ref",
+    "output_schema_ref",
+    "runtime_binding",
+    "policy_profile",
+    "evaluation_profile",
+    "health",
+    "owner"
+  ],
+  "title": "AgentManifestV1",
+  "type": "object"
+}

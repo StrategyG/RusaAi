@@ -30,6 +30,11 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            # 007 is the optional pgvector migration; this PostgreSQL service image
+            # does not bundle the vector extension. Platform Core is tested separately.
+            "008_aicode_task_list_audit.sql",
+            "009_platform_workflow_core.sql",
+            "010_platform_governance_registry.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -369,3 +374,115 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
+    from datetime import datetime, timedelta, timezone
+
+    import psycopg
+
+    from rusa_agents.platform_contracts import WorkflowEventV2
+    from rusa_agents.workflow_store import PostgresWorkflowStore
+
+    PostgresWorkflowStore(DSN).initialize()
+
+    now = datetime.now(timezone.utc)
+    tenant_a = "platform-core-" + uuid4().hex
+    tenant_b = "platform-core-" + uuid4().hex
+    workflow_id = "workflow-" + uuid4().hex
+    run_a = "run-" + uuid4().hex
+    run_b = "run-" + uuid4().hex
+
+    with connect() as admin:
+        for tenant, run_id in ((tenant_a, run_a), (tenant_b, run_b)):
+            admin.execute(
+                """
+                INSERT INTO public.rusa_workflow_runs(
+                    tenant_id, workflow_id, run_id, domain, objective,
+                    state, deadline_at, budget, created_by
+                )
+                VALUES (%s, %s, %s, 'software_engineering', 'RLS integration test',
+                        'running', %s, '{}'::jsonb, 'pytest')
+                """,
+                (tenant, workflow_id + "-" + tenant, run_id, now + timedelta(minutes=10)),
+            )
+
+    event = WorkflowEventV2(
+        tenant_id=tenant_a,
+        workflow_id=workflow_id + "-" + tenant_a,
+        run_id=run_a,
+        correlation_id=workflow_id,
+        traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        event_type="workflow.created",
+        producer_id="rusa.test",
+        producer_version="1.0.0",
+        sequence=1,
+        occurred_at=now,
+        payload={"test": "tenant-scoped event and outbox atomicity"},
+    )
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_a)
+        assert PostgresWorkflowStore._append_event(conn, event) is True
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_workflow_outbox WHERE tenant_id=%s",
+            (tenant_a,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_workflow_runs WHERE tenant_id=%s",
+            (tenant_a,),
+        ).fetchone()[0] == 1
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    """
+                    INSERT INTO public.rusa_workflow_runs(
+                        tenant_id, workflow_id, run_id, domain, objective,
+                        state, deadline_at, budget, created_by
+                    )
+                    VALUES (%s, %s, %s, 'software_engineering', 'cross-tenant write',
+                            'queued', %s, '{}'::jsonb, 'pytest')
+                    """,
+                    (tenant_b, "cross-" + uuid4().hex, "cross-" + uuid4().hex,
+                     now + timedelta(minutes=10)),
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
+                    (event.message_id,),
+                )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_b)
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_runs WHERE run_id=%s",
+            (run_a,),
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_events WHERE message_id=%s",
+            (event.message_id,),
+        ).fetchone() is None
+
+    # The trusted scheduler role may see work across tenants; event reads remain scoped.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_a)
+        visible = {
+            row[0] for row in conn.execute(
+                "SELECT tenant_id FROM public.rusa_workflow_runs WHERE run_id = ANY(%s)",
+                ([run_a, run_b],),
+            ).fetchall()
+        }
+        assert visible == {tenant_a, tenant_b}
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_events WHERE message_id=%s",
+            (event.message_id,),
+        ).fetchone() is not None
+
+    # Table owners still cannot rewrite immutable event facts.
+    with connect() as admin:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with admin.transaction():
+                admin.execute(
+                    "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
+                    (event.message_id,),
+                )

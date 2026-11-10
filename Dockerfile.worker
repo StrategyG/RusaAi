@@ -5,12 +5,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY pyproject.toml README.md requirements-rag-worker.txt ./
+COPY pyproject.toml README.md requirements-rag-worker.txt requirements-messaging.txt ./
 COPY rusa_agents ./rusa_agents
 COPY rusa_knowledge ./rusa_knowledge
+COPY contracts/proto/rusa/devops/v1/workflow.proto ./contracts/proto/rusa/devops/v1/workflow.proto
+COPY scripts/generate_devops_proto.py ./scripts/generate_devops_proto.py
+RUN python -m pip install --no-cache-dir --target=/tmp/proto-tools "grpcio-tools>=1.62,<2" \
+    && PYTHONPATH=/tmp/proto-tools python scripts/generate_devops_proto.py \
+    && rm -rf /tmp/proto-tools
 ARG RUSA_INSTALL_RAG=0
 RUN python -m pip install --upgrade pip "setuptools>=84.1.0" "wheel>=0.46.2" \
     && python -m pip install . \
+    && python -m pip install -r requirements-messaging.txt \
     && if [ "$RUSA_INSTALL_RAG" = "1" ]; then \
          python -m pip install -r requirements-rag-worker.txt; \
        fi
@@ -67,7 +73,9 @@ RUN ldd /usr/local/bin/python3.12 | tee /tmp/python-ldd \
     && python - <<'PY'
 import importlib
 
-for module in ("rusa_agents.worker_main", "psycopg", "prometheus_client", "httpx"):
+for module in ("rusa_agents.worker_main", "psycopg", "prometheus_client", "httpx",
+               "rusa_agents.devops.rabbitmq", "rusa_agents.devops.kafka",
+               "rusa_agents.devops.control_store", "rusa_agents.devops.grpc_server"):
     importlib.import_module(module)
 if __import__("os").getenv("RUSA_INSTALL_RAG") == "1":
     importlib.import_module("rusa_knowledge.service")
