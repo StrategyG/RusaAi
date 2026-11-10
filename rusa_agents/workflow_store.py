@@ -555,16 +555,27 @@ class PostgresWorkflowStore:
                 """
                 UPDATE public.rusa_workflow_tasks
                 SET status='awaiting_approval', phase='awaiting_approval',
-                    last_error=%s, state_version=state_version+1,
-                    lease_owner=NULL, lease_until=NULL, updated_at=clock_timestamp()
+                    approval_id=%s, last_error=%s,
+                    state_version=state_version+1, lease_owner=NULL,
+                    lease_until=NULL, updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
                   AND lease_owner=%s AND lease_epoch=%s
                   AND state_version=%s AND lease_until > clock_timestamp()
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_human_approvals a
+                      WHERE a.tenant_id=rusa_workflow_tasks.tenant_id
+                        AND a.approval_id=%s
+                        AND a.workflow_id=rusa_workflow_tasks.workflow_id
+                        AND a.run_id=rusa_workflow_tasks.run_id
+                        AND a.task_id=rusa_workflow_tasks.task_id
+                        AND a.status='pending'
+                        AND a.expires_at > clock_timestamp()
+                  )
                 RETURNING workflow_id, run_id, attempt, state_version
                 """,
                 (
-                    reason[:4000], tenant_id, task_id, worker_id,
-                    lease_epoch, expected_state_version,
+                    approval_id, reason[:4000], tenant_id, task_id, worker_id,
+                    lease_epoch, expected_state_version, approval_id,
                 ),
             ).fetchone()
             if row is None:
@@ -622,9 +633,10 @@ class PostgresWorkflowStore:
                 """
                 UPDATE public.rusa_workflow_tasks
                 SET status='queued', phase='received', available_at=clock_timestamp(),
-                    last_error=NULL, state_version=state_version+1,
-                    updated_at=clock_timestamp()
+                    approval_id=NULL, last_error=NULL,
+                    state_version=state_version+1, updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND task_id=%s AND run_id=%s
+                  AND workflow_id=%s AND approval_id=%s
                   AND status='awaiting_approval' AND state_version=%s
                   AND EXISTS (
                       SELECT 1 FROM public.rusa_workflow_runs r
@@ -634,7 +646,10 @@ class PostgresWorkflowStore:
                   )
                 RETURNING workflow_id, run_id, attempt, state_version
                 """,
-                (tenant_id, task_id, approval[1], expected_state_version),
+                (
+                    tenant_id, task_id, approval[1], approval[0],
+                    approval_id, expected_state_version,
+                ),
             ).fetchone()
             if row is None:
                 raise WorkflowConflictError("task state is stale or no longer awaiting approval")
