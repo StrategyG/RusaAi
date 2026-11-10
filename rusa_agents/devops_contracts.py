@@ -3,6 +3,7 @@
 This is a contract foundation only. A registered profile does not imply that an
 agent executor or its external tools are deployed.
 """
+
 from __future__ import annotations
 
 import json
