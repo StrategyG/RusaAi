@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 TRACEPARENT_PATTERN = (
-    r"^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+    r"^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$"
 )
 SHA256_PATTERN = r"^[a-f0-9]{64}$"
 AGENT_ID_PATTERN = r"^[a-z][a-z0-9_-]{1,63}$"
@@ -186,6 +186,14 @@ class AgentTask(ContractModel):
         if any(not item.strip() or len(item) > 1000 for item in values):
             raise ValueError("acceptance criteria must be non-empty and bounded")
         return values
+
+    @field_validator("traceparent")
+    @classmethod
+    def validate_traceparent_ids(cls, value: str) -> str:
+        _, trace_id, parent_id, _ = value.split("-")
+        if trace_id == "0" * 32 or parent_id == "0" * 16:
+            raise ValueError("traceparent trace and parent IDs must be non-zero")
+        return value
 
     @field_validator("deadline_at", "created_at")
     @classmethod
@@ -369,6 +377,14 @@ class WorkflowEvent(ContractModel):
     occurred_at: datetime.datetime
     payload: dict[str, typing.Any]
 
+    @field_validator("traceparent")
+    @classmethod
+    def validate_traceparent_ids(cls, value: str) -> str:
+        _, trace_id, parent_id, _ = value.split("-")
+        if trace_id == "0" * 32 or parent_id == "0" * 16:
+            raise ValueError("traceparent trace and parent IDs must be non-zero")
+        return value
+
     @field_validator("occurred_at")
     @classmethod
     def validate_occurred_at(cls, value: datetime.datetime):
@@ -400,7 +416,7 @@ LEGACY_AICODE_STATUS_MAP = {
 }
 
 
-def map_aicode_task_state(state: Any) -> AgentTaskStatus:
+def map_aicode_task_state(state: typing.Any) -> AgentTaskStatus:
     """Map existing AICode/queue states to the Agentic DevOps public status vocabulary."""
     value = getattr(state, "value", state)
     if not isinstance(value, str) or value not in LEGACY_AICODE_STATUS_MAP:
