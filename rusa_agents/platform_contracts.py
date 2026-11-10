@@ -224,7 +224,7 @@ class AgentManifestV1(ContractModel):
     policy_profile: str = Field(min_length=1, max_length=128)
     approval_policy: list[str] = Field(default_factory=list, max_length=128)
     evaluation_profile: str = Field(min_length=1, max_length=128)
-    health: AgentHealthSnapshot = Field(default_factory=AgentHealthSnapshot)
+    health: AgentHealthSnapshot
     owner: str = Field(min_length=1, max_length=256)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -606,14 +606,14 @@ def validate_manifest_update(
     candidate: AgentManifestV1,
 ) -> None:
     """Enforce immutable published manifest content while permitting lifecycle/health updates."""
-    if previous.agent_id != candidate.agent_id:
-        raise ValueError("agent_id is immutable")
-    if previous.version != candidate.version:
-        raise ValueError("published agent version is immutable; publish a new semantic version")
     if candidate.updated_at < previous.updated_at:
         raise ValueError("manifest updated_at cannot move backwards")
 
     if previous.status != AgentStatus.DRAFT:
+        if previous.agent_id != candidate.agent_id:
+            raise ValueError("published agent_id is immutable")
+        if previous.version != candidate.version:
+            raise ValueError("published agent version is immutable; publish a new semantic version")
         ignored = {"status", "updated_at", "health"}
         before = previous.model_dump(exclude=ignored, mode="json")
         after = candidate.model_dump(exclude=ignored, mode="json")
