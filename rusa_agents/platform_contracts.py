@@ -373,3 +373,17 @@ def platform_contract_schema(model: type[BaseModel], schema_id: str) -> dict[str
     schema["$schema"] = _SCHEMA_DRAFT
     schema["$id"] = schema_id
     return schema
+
+
+def normalize_contract_schema(value: Any) -> Any:
+    """Remove non-validation annotations that can vary across Pydantic minor releases."""
+    annotations = {"title", "default", "description", "examples", "deprecated"}
+    if isinstance(value, dict):
+        return {
+            key: normalize_contract_schema(item)
+            for key, item in value.items()
+            if key not in annotations
+        }
+    if isinstance(value, list):
+        return [normalize_contract_schema(item) for item in value]
+    return value
