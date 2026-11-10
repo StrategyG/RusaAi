@@ -37,7 +37,7 @@ The test suite includes a dummy Plan Agent contract dry-run. It produces only sy
 
 ## Durable queue mapping
 
-The existing `PostgresTaskQueue` remains the only durable task queue. The contract work does not introduce RabbitMQ, Kafka, or a second PostgreSQL queue. DevOps task enqueue/claim integration must be added as a separate worker-capability partition before real DevOps jobs are sent to the shared queue; the current AICode worker must not claim DevOps payloads.
+The existing `PostgresTaskQueue` remains the only durable task queue. Migration `009_aicode_queue_partitions.sql` adds `queue_name` and a claim index to the existing tenant-scoped table. AICode APIs and workers default to `queue_name="aicode"`; a future DevOps worker must explicitly use `queue_name="devops"` for enqueue, claim, lease renewal, authorization, and acknowledgement. Queue-name filtering is enforced on claim and lease operations, so the AICode worker cannot claim or acknowledge DevOps jobs. The existing tenant RLS policies remain in force. No RabbitMQ, Kafka, or second PostgreSQL queue is introduced. DevOps enqueue remains disabled until a dedicated DevOps worker and API adapter are implemented.
 
 ## Not implemented by this phase
 
