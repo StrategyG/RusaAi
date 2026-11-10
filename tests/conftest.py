@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,15 +20,27 @@ GENERATED_STUBS = (
     GENERATED_DIR / "workflow_pb2.py",
     GENERATED_DIR / "workflow_pb2_grpc.py",
 )
+_PROTO_TEMP_DIR = None
 
 if importlib.util.find_spec("grpc_tools") is not None and not all(
     path.is_file() for path in GENERATED_STUBS
 ):
+    # Tests also run in a read-only Docker sandbox. Generate into a writable
+    # temporary package path instead of mutating the checked-out source tree.
+    _PROTO_TEMP_DIR = tempfile.TemporaryDirectory(prefix="rusa-devops-proto-")
+    temporary_package_root = Path(_PROTO_TEMP_DIR.name) / "rusa_agents" / "devops"
+    output_dir = temporary_package_root / "generated"
+    environment = os.environ.copy()
+    environment["RUSA_DEVOPS_PROTO_OUTPUT_DIR"] = str(output_dir)
     subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "generate_devops_proto.py")],
         cwd=ROOT,
+        env=environment,
         check=True,
     )
+    import rusa_agents.devops as devops_package
+
+    devops_package.__path__.append(str(temporary_package_root))
 
 
 @pytest.fixture(scope="session", autouse=True)
