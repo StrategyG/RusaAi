@@ -1,26 +1,13 @@
 {
-  "$defs": {},
   "$id": "https://schemas.rusa.ai/platform/policy-decision.v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Versioned deterministic authorization decision; no model-supplied outcome.",
   "properties": {
-    "schema_version": {
-      "const": "1.0",
-      "default": "1.0",
-      "title": "Schema Version",
-      "type": "string"
-    },
-    "decision_id": {
-      "maxLength": 128,
+    "action": {
+      "maxLength": 256,
       "minLength": 1,
-      "title": "Decision Id",
-      "type": "string"
-    },
-    "tenant_id": {
-      "maxLength": 128,
-      "minLength": 1,
-      "title": "Tenant Id",
+      "title": "Action",
       "type": "string"
     },
     "actor": {
@@ -29,16 +16,42 @@
       "title": "Actor",
       "type": "string"
     },
-    "action": {
-      "maxLength": 256,
+    "approval_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approval Id"
+    },
+    "decision_id": {
+      "maxLength": 128,
       "minLength": 1,
-      "title": "Action",
+      "title": "Decision Id",
       "type": "string"
     },
-    "resource_ref": {
-      "maxLength": 2048,
-      "minLength": 1,
-      "title": "Resource Ref",
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "input_sha256": {
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "title": "Input Sha256",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "allow",
+        "deny",
+        "require_approval"
+      ],
+      "title": "Outcome",
       "type": "string"
     },
     "policy_id": {
@@ -53,43 +66,17 @@
       "title": "Policy Version",
       "type": "string"
     },
-    "outcome": {
-      "enum": [
-        "allow",
-        "deny",
-        "require_approval"
-      ],
-      "title": "Outcome",
-      "type": "string"
-    },
     "reason_code": {
       "maxLength": 128,
       "minLength": 1,
       "title": "Reason Code",
       "type": "string"
     },
-    "input_sha256": {
-      "pattern": "^sha256:[a-f0-9]{64}$",
-      "title": "Input Sha256",
+    "resource_ref": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "title": "Resource Ref",
       "type": "string"
-    },
-    "evaluated_at": {
-      "format": "date-time",
-      "title": "Evaluated At",
-      "type": "string"
-    },
-    "workflow_id": {
-      "anyOf": [
-        {
-          "maxLength": 128,
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Workflow Id"
     },
     "run_id": {
       "anyOf": [
@@ -104,6 +91,12 @@
       "default": null,
       "title": "Run Id"
     },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
     "task_id": {
       "anyOf": [
         {
@@ -117,7 +110,13 @@
       "default": null,
       "title": "Task Id"
     },
-    "approval_id": {
+    "tenant_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "workflow_id": {
       "anyOf": [
         {
           "maxLength": 128,
@@ -128,7 +127,7 @@
         }
       ],
       "default": null,
-      "title": "Approval Id"
+      "title": "Workflow Id"
     }
   },
   "required": [
