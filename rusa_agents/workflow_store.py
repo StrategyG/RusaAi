@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from .platform_contracts import WorkflowEventV2
-from .workflow_graph import WorkflowGraph, WorkflowRunSpec, WorkflowTaskSpec
+from .workflow_graph import WorkflowGraph, WorkflowRunSpec
 
 
 class WorkflowStoreError(RuntimeError):
@@ -120,7 +120,6 @@ class PostgresWorkflowStore:
 
     @staticmethod
     def _append_event(conn, event: WorkflowEventV2, destination: str = "workflow.events") -> bool:
-        payload = event.model_dump(mode="json")
         inserted = conn.execute(
             """
             INSERT INTO public.rusa_workflow_events(
