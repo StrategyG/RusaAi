@@ -61,7 +61,7 @@ def _task(
         "input": task_input,
         "constraints": constraints,
         "attempt": 1,
-        "deadline_at": (NOW + timedelta(minutes=5)).isoformat(),
+        "deadline_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         "audit": {
             "created_at": NOW.isoformat(),
             "requested_by": "pytest",
@@ -80,7 +80,7 @@ def _lease(task: dict, principal: str) -> ExecutionLease:
         principal=principal,
         claim_id="claim-" + uuid4().hex,
         lease_epoch=1,
-        lease_until=datetime.now(timezone.utc) + timedelta(minutes=2),
+        lease_until=datetime.now(timezone.utc) + timedelta(hours=1),
     )
 
 
