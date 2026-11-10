@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker
+import jsonschema
 
 
 _SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas" / "devops"
@@ -257,14 +257,16 @@ def _load_schema(kind: str) -> dict[str, Any]:
         schema = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Could not load DevOps {kind} schema") from exc
-    Draft202012Validator.check_schema(schema)
+    jsonschema.Draft202012Validator.check_schema(schema)
     return schema
 
 
 def _validate(kind: str, payload: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise ContractValidationError(f"{kind} contract must be a JSON object")
-    validator = Draft202012Validator(_load_schema(kind), format_checker=FormatChecker())
+    validator = jsonschema.Draft202012Validator(
+        _load_schema(kind), format_checker=jsonschema.FormatChecker()
+    )
     errors = sorted(validator.iter_errors(payload), key=lambda error: list(map(str, error.absolute_path)))
     if errors:
         error = errors[0]
