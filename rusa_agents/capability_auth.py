@@ -5,10 +5,10 @@ import fnmatch
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from .agent_tools import ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .platform_contracts import AgentHealthStatus, AgentManifestV1, AgentStatus, PolicyDecisionV1
 from .registry import _tenant_allowed
-from .agent_tools import ROLE_TOOL_ALLOWLIST
 
 
 class CapabilityDenied(PermissionError):
