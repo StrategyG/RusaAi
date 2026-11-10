@@ -945,7 +945,7 @@ class PostgresWorkflowStore:
         self.expire_due_tasks(producer_version=producer_version)
         self.expire_exhausted_tasks(producer_version=producer_version)
         self.block_failed_dependencies(producer_version=producer_version)
-        claimed: list[dict[str, Any]] =
+        claimed: list[dict[str, Any]] = []
         with self._connect() as conn:
             # Lock each eligible run row first. Concurrent schedulers skip a locked run,
             # which makes the per-run max_parallel_tasks check serializable.
