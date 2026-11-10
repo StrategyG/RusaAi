@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import math
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -30,6 +31,7 @@ class OpenAICompatibleEmbeddingProvider:
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 8 * 1024 * 1024,
         transport: httpx.BaseTransport | None = None,
+        input_type_enabled: bool = False,
     ) -> None:
         parsed = urlsplit(base_url)
         secure = parsed.scheme == "https"
@@ -56,8 +58,14 @@ class OpenAICompatibleEmbeddingProvider:
         self.timeout = httpx.Timeout(timeout_seconds, connect=5.0)
         self.max_response_bytes = max_response_bytes
         self.transport = transport
+        self.input_type_enabled = input_type_enabled
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        input_type: Literal["query", "passage"] | None = None,
+    ) -> list[list[float]]:
         if not isinstance(texts, list) or not 1 <= len(texts) <= 64:
             raise ValueError("embedding batch must contain between 1 and 64 texts")
         if any(not isinstance(text, str) or not text.strip() or len(text) > 20_000 for text in texts):
@@ -67,6 +75,11 @@ class OpenAICompatibleEmbeddingProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         payload = {"model": self.model, "input": texts}
+        if input_type is not None:
+            if input_type not in {"query", "passage"}:
+                raise ValueError("embedding input_type must be query or passage")
+            if self.input_type_enabled:
+                payload["input_type"] = input_type
         body = bytearray()
         with httpx.Client(
             timeout=self.timeout,
