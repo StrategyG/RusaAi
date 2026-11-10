@@ -197,17 +197,77 @@ environment credentials, serialization, and secret-manager integration.
 The agent model cannot invoke shell commands or inspect raw secrets. Tests
 use deterministic fakes; they do not claim a live staging deployment.
 
-## Explicitly not completed by Phase 4E
+## Phase 4F — Operate and Monitor execution adapters
 
-- Operate, Monitor, and Security Guard live service/telemetry integrations.
-- Production BuildKit/test/deployment services, workload key provisioning,
-  worker-pool provisioning, heartbeat loops, and live child-task orchestration.
+The initial Operate and Monitor executors are implemented in
+`rusa_agents/devops/operations.py`. They are host-adapter boundaries, not
+claims that production runbook or telemetry services are already deployed.
 
-## Next increment
+### Operate Agent
 
-- **4F — Operations and governance:** integrate Operate, Monitor, and Security
-  Guard with allowlisted services, telemetry, incident records, and
-  policy-engine decisions.
+- Accepts an immutable runbook invocation artifact whose exact reference is
+  registered by the host. The artifact can select only a registered runbook,
+  action ID, and schema-validated parameters.
+- The host runbook registry binds each runbook to an explicit service
+  allowlist, action allowlist, parameter schema, and execution-time ceiling.
+- A mandatory Policy Engine adapter authorizes the tenant, workflow, task,
+  service, runbook, action, and risk before the runner is called.
+- Destructive actions require an approval scope configured by the runbook and
+  a host approval verifier bound to the exact tenant, workflow, task, action,
+  and service. Missing, pending, expired, or mismatched approval fails closed.
+- A privileged host runner receives identifiers and structured parameters;
+  it does not receive model-supplied shell commands, endpoints, or credentials.
+- A confirmed runbook result is persisted as an immutable tenant-scoped
+  incident/recovery report. Ambiguous execution or evidence-persistence
+  failures report UNKNOWN/APPLIED side effects for reconciliation.
+
+### Monitor Agent
+
+- Uses a host-injected read-only telemetry adapter for a bounded service,
+  environment, and time-window allowlist.
+- Evaluates host-owned SLO rules deterministically; task input cannot change
+  thresholds or severity.
+- Requires immutable telemetry evidence references. It returns counts and
+  SLO findings, not raw log/trace content.
+- Uses a stable alert fingerprint bound to tenant, service, rule, window, and
+  observation timestamp so duplicate delivery of the same observation can be
+  correlated without suppressing later observations.
+- Routes SLO breaches to Operate with `monitor.alert_triggered`; recurring
+  trend feedback without an active SLO breach is handed to Plan with
+  `monitor.feedback_created`.
+- Monitor has no write scope, network authority, approval authority, or
+  mutating adapter interface.
+
+### Validation and remaining boundary
+
+Unit tests cover runbook allowlists, policy denial, destructive-action
+approval, ambiguous side-effect reporting, SLO evaluation, evidence
+requirements, feedback routing, and read-only enforcement. These tests use
+deterministic fake host adapters; they do not prove live service operations.
+
+Still required before claiming full Phase 4 production completion:
+
+- Production runbook adapter and allowlist provisioning.
+- Production metrics/logs/traces/alert adapter and evidence export.
+- Security Guard evidence production and its release/operations policy wiring.
+- Worker-pool deployment, heartbeat renewal, durable child-task handoffs, and
+  end-to-end staging-to-operate-to-monitor execution.
+
+## Phase 5 — closed-loop operations
+
+The first specialist feedback handoff is implemented, but Phase 5 is not
+complete until the durable workflow host persists and correlates these
+handoffs. Remaining work includes durable alert deduplication/correlation,
+incident lifecycle projections, SLO dashboards and routing, workflow/model/tool
+budget enforcement, kill-switch controls, backup/restore rehearsal, and
+security/SRE/product-owner sign-off.
+
+## Phase 6 — scale and enterprise readiness
+
+Phase 6 remains open: organization-specific policy and budgets, workload
+isolation, high availability, disaster recovery, regional deployment,
+enterprise audit retention, and measurable SLA/SLO reporting.
 
 The Phase 4 exit criterion remains a staging workflow that produces a signed
-release candidate whose tests and provenance match the exact source revision.
+release candidate whose tests and provenance match the exact source revision,
+followed by an approved and evidence-backed operations handoff.
