@@ -1,0 +1,408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa.ai/schemas/devops/agent-result.schema.json",
+  "title": "RUSA-AI DevOps Agent Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_id",
+    "task_id",
+    "workflow_id",
+    "tenant_id",
+    "agent_id",
+    "stage",
+    "attempt",
+    "status",
+    "summary",
+    "artifacts",
+    "evidence",
+    "findings",
+    "risks",
+    "unresolved_issues",
+    "next_actions",
+    "side_effect",
+    "started_at",
+    "completed_at",
+    "audit"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "result_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "task_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workflow_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "agent_id": {
+      "type": "string",
+      "enum": [
+        "supreme_orchestrator",
+        "system_architect",
+        "planner",
+        "task_decomposer",
+        "software_engineer",
+        "devops",
+        "qa_testing",
+        "security_policy",
+        "memory_knowledge",
+        "evaluation_reporting",
+        "rusa_devops_orchestrator",
+        "rusa_plan_agent",
+        "rusa_code_agent",
+        "rusa_build_agent",
+        "rusa_test_agent",
+        "rusa_release_agent",
+        "rusa_deploy_agent",
+        "rusa_operate_agent",
+        "rusa_monitor_agent",
+        "rusa_security_guard_agent"
+      ]
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "code",
+        "build",
+        "test",
+        "release",
+        "deploy",
+        "operate",
+        "monitor",
+        "security"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "passed",
+        "failed",
+        "blocked",
+        "needs_approval",
+        "cancelled",
+        "skipped"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref",
+          "digest"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "subject_commit_sha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}$"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "ref"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "plan",
+              "commit",
+              "pull_request",
+              "build_log",
+              "test_report",
+              "release_manifest",
+              "deployment_record",
+              "incident",
+              "alert",
+              "metrics",
+              "audit",
+              "other"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "subject_commit_sha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "code",
+          "summary"
+        ],
+        "properties": {
+          "severity": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    },
+    "unresolved_issues": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "string",
+        "maxLength": 2000
+      }
+    },
+    "side_effect": {
+      "enum": [
+        "NONE",
+        "APPLIED",
+        "UNKNOWN"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "category",
+        "retryable",
+        "side_effect"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "category": {
+          "enum": [
+            "TRANSIENT",
+            "PERMANENT",
+            "POLICY",
+            "AMBIGUOUS"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "side_effect": {
+          "enum": [
+            "NONE",
+            "APPLIED",
+            "UNKNOWN"
+          ]
+        }
+      }
+    },
+    "approval_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "reason",
+        "requested_at"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "requested_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "lease_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failure"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "needs_approval"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "approval_request"
+        ]
+      }
+    }
+  ]
+}

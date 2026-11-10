@@ -237,3 +237,88 @@ def test_postgres_queue_idempotency_key_replays_and_rejects_payload_changes():
                 "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
                 (tenant, key),
             )
+
+
+def test_postgres_queue_partitions_claims_and_lease_actions_by_worker_capability():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"tenant-queue-partition-{uuid4().hex}"
+    aicode_task = str(uuid4())
+    devops_task = str(uuid4())
+    try:
+        assert queue.enqueue(
+            aicode_task, tenant, {"objective": "AICode task"}, priority=10
+        )
+        assert queue.enqueue(
+            devops_task, tenant, {"schema_version": 1, "stage": "plan"},
+            priority=1000, queue_name="devops",
+        )
+
+        devops_job = queue.claim("devops-worker", queue_name="devops")
+        assert devops_job is not None
+        assert devops_job.task_id == devops_task
+        assert devops_job.queue_name == "devops"
+
+        # AICode defaults cannot read, heartbeat, or complete a DevOps lease.
+        assert queue.get(devops_task, tenant) is None
+        assert not queue.heartbeat(
+            devops_job.id, tenant, "devops-worker", devops_job.lease_token, 30
+        )
+        assert not queue.complete(
+            devops_job.id, tenant, "devops-worker", devops_job.lease_token
+        )
+        assert queue.heartbeat(
+            devops_job.id, tenant, "devops-worker", devops_job.lease_token,
+            30, queue_name="devops",
+        )
+        assert queue.complete(
+            devops_job.id, tenant, "devops-worker", devops_job.lease_token,
+            queue_name="devops",
+        )
+
+        aicode_job = queue.claim("aicode-worker")
+        assert aicode_job is not None
+        assert aicode_job.task_id == aicode_task
+        assert aicode_job.queue_name == "aicode"
+        assert queue.complete(
+            aicode_job.id, tenant, "aicode-worker", aicode_job.lease_token
+        )
+        assert queue.get(devops_task, tenant, queue_name="devops")["status"] == "succeeded"
+    finally:
+        with queue._connect() as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE tenant_id=%s AND task_id = ANY(%s::uuid[])",
+                (tenant, [aicode_task, devops_task]),
+            )
+
+
+def test_queue_name_rejects_untrusted_or_ambiguous_values():
+    queue = PostgresTaskQueue("postgresql://unused")
+    with pytest.raises(ValueError, match="queue_name"):
+        queue.claim("worker", queue_name="DevOps")
+    with pytest.raises(ValueError, match="queue_name"):
+        queue.enqueue(str(uuid4()), "tenant", {}, queue_name="devops;drop")
+
+
+def test_idempotency_keys_cannot_cross_worker_queue_partitions():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"tenant-queue-idempotency-{uuid4().hex}"
+    task_id = str(uuid4())
+    idempotency_key = f"queue-{uuid4().hex}"
+    payload = {"objective": "queue partition idempotency"}
+    try:
+        created = queue.enqueue_idempotent(
+            task_id, tenant, payload, idempotency_key, queue_name="aicode"
+        )
+        assert created[1] is True
+        with pytest.raises(IdempotencyConflictError, match="different queue"):
+            queue.enqueue_idempotent(
+                str(uuid4()), tenant, payload, idempotency_key, queue_name="devops"
+            )
+    finally:
+        with queue._connect() as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
+                (tenant, idempotency_key),
+            )

@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -56,3 +56,11 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+
+def test_shared_queue_partition_migration_preserves_aicode_default_and_indexes_workers():
+    migration = Path("migrations/009_aicode_queue_partitions.sql").read_text(encoding="utf-8")
+    assert "ADD COLUMN queue_name TEXT NOT NULL DEFAULT 'aicode'" in migration
+    assert "aicode_jobs_queue_name_check" in migration
+    assert "idx_aicode_jobs_queue_claim" in migration

@@ -14,7 +14,7 @@ RUSA-AI is an AI and autonomous-agent platform under active development. The rep
 - **Inference gateway**: FastAPI OpenAI-compatible API with an optional checksum-verified local Transformers/vLLM backend and external OpenAI-compatible provider support.
 - **Knowledge retrieval**: Optional tenant-scoped PostgreSQL/pgvector ingestion and hybrid retrieval, with offline Recall@K, MRR, and NDCG@K evaluation.
 - **Knowledge MCP**: Separate read-only, bearer-authenticated MCP service for tenant-scoped search and document access.
-- **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
+- **Agent runtime**: Tenant-scoped task orchestration, one durable PostgreSQL queue partitioned by worker capability, lease controls, retry/recovery, and sandboxed tool execution.
 - **Agent fine-tuning**: Qwen3-4B-Instruct-2507 QLoRA/SFT pipeline, role-scoped dataset validation, completion-only loss, held-out contract evaluation, and checksummed model artifact workflow.
 - **A2A task validation**: Versioned JSON Schema validation for agent task envelopes.
 - **Security and reliability controls**: API-key authentication, RBAC, tenant-aware data access, rate limiting, non-root containers, and audit events; production effectiveness still requires deployment-level verification.
