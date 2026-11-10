@@ -22,7 +22,6 @@ from rusa_agents.platform_contracts import (
     AgentResultV2,
     AgentStatus,
     ArtifactReference,
-    RuntimeBinding,
     RuntimeKind,
     TaskEnvelopeV2,
     TaskOutcome,
