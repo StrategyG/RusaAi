@@ -211,9 +211,7 @@ class PostgresHumanApprovalService:
                 expired = True
             else:
                 expired = False
-            if expired:
-                result = None
-            elif not self.approver_authorizer(actor, tenant_id, row[3], row[4]):
+            if not expired and not self.approver_authorizer(actor, tenant_id, row[3], row[4]):
                 raise PermissionError("actor is not authorized to decide this approval")
 
             if expired:
