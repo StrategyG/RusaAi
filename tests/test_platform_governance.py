@@ -32,6 +32,7 @@ from rusa_agents.policy_engine import (
     PolicyRequest,
 )
 from rusa_agents.registry import _manifest_hash, _tenant_allowed
+from rusa_agents.tool_gateway import ToolDenied, WorkspaceToolGateway
 
 
 NOW = datetime(2026, 11, 10, 9, 0, tzinfo=timezone.utc)
@@ -412,6 +413,46 @@ def test_domain_orchestrator_adapter_preserves_legacy_aicode_contract():
     assert report["status"] == "received"
     with pytest.raises(DomainOrchestratorError, match="progress reader"):
         asyncio.run(adapter.progress("tenant-a", task.task_id))
+
+
+def test_tool_gateway_binds_actual_arguments_to_authorized_resource(tmp_path):
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (source_dir / "main.py").write_text("print('ok')", encoding="utf-8")
+
+    gateway = WorkspaceToolGateway(tmp_path)
+    registered = manifest(resource_scope={"include_patterns": ["workspace://*"]})
+    grant = TaskScopedGrant(
+        tenant_id="tenant-a",
+        task_id="task-1",
+        agent_id="rusa_test_agent",
+        agent_version="1.0.0",
+        capability="repo.read",
+        allowed_tools=frozenset({"list_files"}),
+        expires_at=NOW + timedelta(minutes=2),
+        grant_id="grant-workspace",
+        resource_patterns=("workspace://src",),
+    )
+    context = authorization_context(
+        resource_ref="workspace://src",
+        grant=grant,
+        policy_decision=policy_decision(
+            resource_ref="workspace://src",
+            action="tool.invoke:list_files",
+        ),
+    )
+    action = {"name": "list_files", "arguments": {"path": "src"}}
+
+    result = gateway.execute_authorized(action, WorkerRole.ANALYST, registered, context)
+    assert result.ok
+    assert result.output == "src/main.py"
+
+    tampered = {"name": "list_files", "arguments": {"path": "other"}}
+    with pytest.raises(ToolDenied, match="different resource"):
+        gateway.execute_authorized(tampered, WorkerRole.ANALYST, registered, context)
+
+    with pytest.raises(ToolDenied, match="role does not match"):
+        gateway.execute_authorized(action, WorkerRole.DEVELOPER, registered, context)
 
 
 def test_domain_adapter_requires_authenticated_tenant_metadata():
