@@ -388,9 +388,7 @@ class OperateAgentExecutor:
                     task, started_at=started, code="operate.incident_reference_invalid",
                     message="The tenant-bound incident is missing or no longer actionable.",
                 )
-        elif incident_ref is not None and not _content_addressed_reference(
-            incident_ref, namespace="artifact"
-        ):
+        elif incident_ref is not None and not _content_addressed_reference(incident_ref):
             return _blocked(
                 task, started_at=started, code="operate.incident_reference_invalid",
                 message="Incident reference must be a tenant-bound incident URI or immutable artifact URI.",
@@ -524,24 +522,24 @@ class OperateAgentExecutor:
                 task["tenant_id"], report, namespace="artifact"
             )
             if incident is not None:
-                try:
-                    self.incident_store.transition_incident(
-                        tenant_id=task["tenant_id"],
-                        incident_id=incident["incident_id"],
-                        target_status=(
-                            "resolved" if execution.status == "passed" else "investigating"
-                        ),
-                        expected_state_version=incident["state_version"],
-                        actor=OPERATE_AGENT,
-                        message_id=f"operate:{task['task_id']}:{task['attempt']}",
-                        evidence_ref=report_ref,
-                    )
-                except Exception:
-                    return _failure(
-                        task, started_at=started, code="operate.incident_resolution_unconfirmed",
-                        message="Runbook evidence was persisted but the durable incident transition could not be confirmed; reconciliation is required.",
-                        failure_category="AMBIGUOUS", side_effect=side_effect,
-                    )
+                target_status = "resolved" if execution.status == "passed" else "investigating"
+                if target_status != incident["status"]:
+                    try:
+                        self.incident_store.transition_incident(
+                            tenant_id=task["tenant_id"],
+                            incident_id=incident["incident_id"],
+                            target_status=target_status,
+                            expected_state_version=incident["state_version"],
+                            actor=OPERATE_AGENT,
+                            message_id=f"operate:{task['task_id']}:{task['attempt']}",
+                            evidence_ref=report_ref,
+                        )
+                    except Exception:
+                        return _failure(
+                            task, started_at=started, code="operate.incident_resolution_unconfirmed",
+                            message="Runbook evidence was persisted but the durable incident transition could not be confirmed; reconciliation is required.",
+                            failure_category="AMBIGUOUS", side_effect=side_effect,
+                        )
             result = _result(
                 task,
                 status=execution.status,
@@ -913,7 +911,7 @@ class MonitorAgentExecutor:
                     return _failure(
                         task, started_at=started, code="monitor.incident_persistence_failed",
                         message="SLO alerts were detected but durable incident persistence could not be confirmed.",
-                        failure_category="TRANSIENT",
+                        failure_category="AMBIGUOUS",
                     )
             elif alerts and self.require_durable_incidents:
                 return _blocked(
