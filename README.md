@@ -226,7 +226,7 @@ Production deployment requires managed PostgreSQL, tenant repository allowlists,
 
 ## Agentic DevOps Contract Foundation
 
-The versioned task, result, agent identity and workflow event contracts for the eight-stage Agentic DevOps lifecycle are documented in [Agent Contract Foundation](docs/architecture/AGENT-CONTRACT-FOUNDATION.md). This is the contract layer only; the existing PostgreSQL queue remains in place and the specialist runtime rollout is staged separately.
+The versioned task, result, agent identity and workflow event contracts for the eight-stage Agentic DevOps lifecycle are documented in [Agent Contract Foundation](docs/architecture/AGENT-CONTRACT-FOUNDATION.md). Phase 1 also includes a no-side-effect dummy workflow that validates request → accepted → completed handoff and SHA-256 evidence. The existing PostgreSQL queue remains the only durable queue; production specialist runtimes are staged separately.
 
 ## Web Control Center
 
