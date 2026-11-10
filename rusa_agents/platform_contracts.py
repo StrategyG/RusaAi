@@ -17,7 +17,7 @@ _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 _SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"
 _AGENT_ID_PATTERN = r"^[a-z][a-z0-9_.-]{1,127}$"
 _CAPABILITY_PATTERN = r"^[a-z][a-z0-9_.-]{1,127}$"
-_TRACEPARENT_PATTERN = r"^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+_TRACEPARENT_PATTERN = r"^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
 _SHA256_PATTERN = r"^sha256:[a-f0-9]{64}$"
 _SENSITIVE_KEYS = frozenset(
     {
@@ -87,6 +87,14 @@ class AgentStatus(str, Enum):
     REVOKED = "revoked"
 
 
+class AgentHealthStatus(str, Enum):
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+    MAINTENANCE = "maintenance"
+
+
 class RuntimeKind(str, Enum):
     PYTHON_CALLABLE = "python_callable"
     HTTP = "http"
@@ -110,6 +118,15 @@ class ArtifactReference(ContractModel):
     label: str | None = Field(default=None, max_length=256)
 
 
+class ImmutableArtifactReference(ContractModel):
+    """Tenant-authorized immutable artifact reference bound to a SHA-256 digest."""
+
+    uri: str = Field(min_length=1, max_length=2048)
+    sha256: str = Field(pattern=_SHA256_PATTERN)
+    media_type: str | None = Field(default=None, max_length=255)
+    label: str | None = Field(default=None, max_length=256)
+
+
 class EvidenceReference(ContractModel):
     """Immutable evidence reference bound to a content digest."""
 
@@ -118,6 +135,19 @@ class EvidenceReference(ContractModel):
     kind: str = Field(min_length=1, max_length=128)
     producer_id: str = Field(min_length=1, max_length=128)
     subject_digest: str | None = Field(default=None, pattern=_SHA256_PATTERN)
+
+
+class AgentHealthSnapshot(ContractModel):
+    """Runtime health observation; not part of an agent's immutable executable version."""
+
+    status: AgentHealthStatus = AgentHealthStatus.UNKNOWN
+    checked_at: datetime | None = None
+    detail: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("checked_at")
+    @classmethod
+    def health_timestamp_is_aware(cls, value: datetime | None) -> datetime | None:
+        return _aware_utc(value) if value is not None else None
 
 
 class RuntimeBinding(ContractModel):
@@ -194,6 +224,7 @@ class AgentManifestV1(ContractModel):
     policy_profile: str = Field(min_length=1, max_length=128)
     approval_policy: list[str] = Field(default_factory=list, max_length=128)
     evaluation_profile: str = Field(min_length=1, max_length=128)
+    health: AgentHealthSnapshot = Field(default_factory=AgentHealthSnapshot)
     owner: str = Field(min_length=1, max_length=256)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -247,8 +278,9 @@ class TaskEnvelopeV2(ContractModel):
     deadline_at: datetime
     budget: ExecutionBudget = Field(default_factory=ExecutionBudget)
     input: dict[str, Any] = Field(default_factory=dict)
-    input_refs: list[ArtifactReference] = Field(default_factory=list, max_length=256)
+    input_refs: list[ImmutableArtifactReference] = Field(default_factory=list, max_length=256)
     policy_context: dict[str, str] = Field(default_factory=dict)
+    approval_required: bool = False
     approval_ref: str | None = Field(default=None, min_length=1, max_length=2048)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -286,7 +318,7 @@ class AgentResultV2(ContractModel):
     status: TaskOutcome
     summary: str = Field(min_length=1, max_length=8000)
     output: dict[str, Any] = Field(default_factory=dict)
-    output_refs: list[ArtifactReference] = Field(default_factory=list, max_length=256)
+    output_refs: list[ImmutableArtifactReference] = Field(default_factory=list, max_length=256)
     evidence_refs: list[EvidenceReference] = Field(default_factory=list, max_length=256)
     legacy_evidence: dict[str, Any] = Field(default_factory=dict)
     blockers: list[str] = Field(default_factory=list, max_length=128)
@@ -314,8 +346,184 @@ class AgentResultV2(ContractModel):
         return self
 
 
-class WorkflowEventV2(ContractModel):
-    """Versioned event envelope for workflow lifecycle and audit projections."""
+class EventContractModel(BaseModel):
+    """Event consumers ignore unknown optional fields within the same major version."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        str_strip_whitespace=True,
+        validate_assignment=True,
+    )
+
+
+class TaskAcceptedPayloadV2(EventContractModel):
+    worker_id: str = Field(min_length=1, max_length=128)
+    lease_epoch: int = Field(ge=1)
+    state_version: int = Field(ge=1)
+
+
+class TaskProgressPayloadV2(EventContractModel):
+    lease_epoch: int = Field(ge=1)
+    state_version: int = Field(ge=1)
+    percent: int = Field(ge=0, le=100)
+    stage: str = Field(min_length=1, max_length=128)
+
+
+class ToolInvocationPayloadV2(EventContractModel):
+    tool: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=128)
+    input_ref: str = Field(min_length=1, max_length=2048)
+    operation_id: str = Field(min_length=1, max_length=128)
+    lease_epoch: int = Field(ge=1)
+
+
+class TaskCompletedPayloadV2(EventContractModel):
+    lease_epoch: int = Field(ge=1)
+    state_version: int = Field(ge=1)
+    result_ref: str = Field(min_length=1, max_length=2048)
+    sha256: str = Field(pattern=r"^(?:sha256:)?[a-f0-9]{64}$")
+
+
+class TaskFailureCategory(str, Enum):
+    TRANSIENT = "TRANSIENT"
+    PERMANENT = "PERMANENT"
+    POLICY = "POLICY"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class SideEffectStatus(str, Enum):
+    NONE = "NONE"
+    APPLIED = "APPLIED"
+    UNKNOWN = "UNKNOWN"
+
+
+class TaskFailedPayloadV2(EventContractModel):
+    lease_epoch: int = Field(ge=1)
+    state_version: int = Field(ge=1)
+    code: str = Field(min_length=1, max_length=128)
+    category: TaskFailureCategory
+    side_effect: SideEffectStatus
+    diagnostic_ref: str | None = Field(default=None, max_length=2048)
+
+
+class PolicyDecisionPayloadV2(EventContractModel):
+    decision_id: str = Field(min_length=1, max_length=128)
+    policy_id: str = Field(min_length=1, max_length=128)
+    policy_version: str = Field(min_length=1, max_length=64)
+    decision: Literal["allow", "deny", "require_approval"]
+    action: str = Field(min_length=1, max_length=256)
+    resource_ref: str = Field(min_length=1, max_length=2048)
+    reason_code: str | None = Field(default=None, max_length=128)
+    evaluated_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("evaluated_at")
+    @classmethod
+    def policy_timestamp_is_aware(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+
+class PolicyViolationPayloadV2(EventContractModel):
+    policy_id: str = Field(min_length=1, max_length=128)
+    policy_version: str = Field(min_length=1, max_length=64)
+    decision_id: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=256)
+    resource_ref: str = Field(min_length=1, max_length=2048)
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class TaskCancellationRequestedPayloadV2(EventContractModel):
+    cancel_epoch: int = Field(ge=1)
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class TaskCancelledPayloadV2(EventContractModel):
+    cancel_epoch: int = Field(ge=1)
+    state_version: int = Field(ge=1)
+    side_effect: SideEffectStatus
+
+
+class ApprovalRequestPayloadV2(EventContractModel):
+    approval_id: str = Field(min_length=1, max_length=128)
+    requested_by: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=256)
+    resource_ref: str = Field(min_length=1, max_length=2048)
+    reason: str = Field(min_length=1, max_length=2000)
+    policy_id: str = Field(min_length=1, max_length=128)
+    policy_version: str = Field(min_length=1, max_length=64)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def approval_expiry_is_aware(cls, value: datetime | None) -> datetime | None:
+        return _aware_utc(value) if value is not None else None
+
+
+class ApprovalDecisionPayloadV2(EventContractModel):
+    approval_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["approved", "rejected", "expired", "cancelled"]
+    decided_by: str = Field(min_length=1, max_length=128)
+    decided_at: datetime = Field(default_factory=utc_now)
+    reason: str | None = Field(default=None, max_length=2000)
+    policy_id: str | None = Field(default=None, max_length=128)
+    policy_version: str | None = Field(default=None, max_length=64)
+
+    @field_validator("decided_at")
+    @classmethod
+    def approval_decision_timestamp_is_aware(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+
+class ValidationVerdictPayloadV2(EventContractModel):
+    verdict: Literal["passed", "failed", "inconclusive", "hold"]
+    subject_digest: str = Field(pattern=_SHA256_PATTERN)
+    producer_id: str = Field(min_length=1, max_length=128)
+    test_profile: str = Field(min_length=1, max_length=128)
+    evidence_refs: list[EvidenceReference] = Field(min_length=1, max_length=256)
+    evaluated_at: datetime = Field(default_factory=utc_now)
+    commit_sha: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{40,64}$",
+    )
+    summary: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("evaluated_at")
+    @classmethod
+    def verdict_timestamp_is_aware(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+    @model_validator(mode="after")
+    def evidence_matches_subject(self) -> ValidationVerdictPayloadV2:
+        if any(item.subject_digest not in (None, self.subject_digest) for item in self.evidence_refs):
+            raise ValueError("validation evidence subject digest does not match verdict subject")
+        return self
+
+
+class AuditRecordedPayloadV2(EventContractModel):
+    actor: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=256)
+    decision: Literal["allow", "deny"]
+    audit_ref: str = Field(min_length=1, max_length=2048)
+
+
+EVENT_PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
+    "task.accepted": TaskAcceptedPayloadV2,
+    "task.progress": TaskProgressPayloadV2,
+    "tool.invocation": ToolInvocationPayloadV2,
+    "task.completed": TaskCompletedPayloadV2,
+    "task.failed": TaskFailedPayloadV2,
+    "policy.decision": PolicyDecisionPayloadV2,
+    "policy.violation": PolicyViolationPayloadV2,
+    "task.cancel.requested": TaskCancellationRequestedPayloadV2,
+    "task.cancelled": TaskCancelledPayloadV2,
+    "approval.requested": ApprovalRequestPayloadV2,
+    "approval.decided": ApprovalDecisionPayloadV2,
+    "validation.verdict": ValidationVerdictPayloadV2,
+    "audit.recorded": AuditRecordedPayloadV2,
+}
+
+
+class WorkflowEventV2(EventContractModel):
+    """Versioned workflow event; known event payloads receive strict typed validation."""
 
     schema_version: Literal["2.0"] = "2.0"
     event_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
@@ -323,6 +531,7 @@ class WorkflowEventV2(ContractModel):
     workflow_id: str = Field(min_length=1, max_length=128)
     run_id: str = Field(min_length=1, max_length=128)
     task_id: str | None = Field(default=None, min_length=1, max_length=128)
+    attempt: int | None = Field(default=None, ge=1, le=100)
     message_id: str = Field(default_factory=lambda: str(uuid4()), min_length=1, max_length=128)
     correlation_id: str = Field(min_length=1, max_length=128)
     causation_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -345,6 +554,89 @@ class WorkflowEventV2(ContractModel):
         _reject_secret_fields(value)
         return value
 
+    @model_validator(mode="after")
+    def validate_known_payload(self) -> WorkflowEventV2:
+        payload_model = EVENT_PAYLOAD_MODELS.get(self.event_type)
+        if payload_model is not None:
+            payload_model.model_validate(self.payload)
+        return self
+
+
+class AICodeTaskStateV1(str, Enum):
+    RECEIVED = "received"
+    OBSERVING = "observing"
+    PLANNING = "planning"
+    EXECUTING = "executing"
+    VERIFYING = "verifying"
+    AWAITING_APPROVAL = "awaiting_approval"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+
+
+class AICodeQueueStatusV1(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TaskRecordSnapshotV2(ContractModel):
+    """Compatibility snapshot preserving the existing AICode TaskRecord state and results."""
+
+    schema_version: Literal["2.0"] = "2.0"
+    task: TaskEnvelopeV2
+    state: AICodeTaskStateV1
+    results: list[AgentResultV2] = Field(default_factory=list, max_length=256)
+    errors: list[str] = Field(default_factory=list, max_length=256)
+    updated_at: datetime = Field(default_factory=utc_now)
+    queue_status: AICodeQueueStatusV1 | None = None
+
+    @field_validator("updated_at")
+    @classmethod
+    def snapshot_timestamp_is_aware(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+
+def validate_manifest_update(
+    previous: AgentManifestV1,
+    candidate: AgentManifestV1,
+) -> None:
+    """Enforce immutable published manifest content while permitting lifecycle/health updates."""
+    if previous.agent_id != candidate.agent_id:
+        raise ValueError("agent_id is immutable")
+    if previous.version != candidate.version:
+        raise ValueError("published agent version is immutable; publish a new semantic version")
+    if candidate.updated_at < previous.updated_at:
+        raise ValueError("manifest updated_at cannot move backwards")
+
+    if previous.status != AgentStatus.DRAFT:
+        ignored = {"status", "updated_at", "health"}
+        before = previous.model_dump(exclude=ignored, mode="json")
+        after = candidate.model_dump(exclude=ignored, mode="json")
+        if before != after:
+            raise ValueError("published agent manifest content is immutable")
+
+    allowed_statuses = {
+        AgentStatus.DRAFT: {AgentStatus.VALIDATED, AgentStatus.REVOKED},
+        AgentStatus.VALIDATED: {
+            AgentStatus.ACTIVE, AgentStatus.SUSPENDED, AgentStatus.DEPRECATED, AgentStatus.REVOKED,
+        },
+        AgentStatus.ACTIVE: {AgentStatus.SUSPENDED, AgentStatus.DEPRECATED, AgentStatus.REVOKED},
+        AgentStatus.SUSPENDED: {AgentStatus.ACTIVE, AgentStatus.DEPRECATED, AgentStatus.REVOKED},
+        AgentStatus.DEPRECATED: {AgentStatus.REVOKED},
+        AgentStatus.REVOKED: set(),
+    }
+    if candidate.status != previous.status and candidate.status not in allowed_statuses[previous.status]:
+        raise ValueError(
+            f"invalid agent status transition: {previous.status.value} -> {candidate.status.value}"
+        )
+
+
+
 
 PLATFORM_SCHEMA_MODELS: dict[str, tuple[type[BaseModel], str]] = {
     "agent-manifest.v1.schema.json": (
@@ -363,6 +655,10 @@ PLATFORM_SCHEMA_MODELS: dict[str, tuple[type[BaseModel], str]] = {
         WorkflowEventV2,
         "https://schemas.rusa.ai/platform/workflow-event.v2.schema.json",
     ),
+    "task-record.v2.schema.json": (
+        TaskRecordSnapshotV2,
+        "https://schemas.rusa.ai/platform/task-record.v2.schema.json",
+    ),
 }
 
 
@@ -371,6 +667,34 @@ def platform_contract_schema(model: type[BaseModel], schema_id: str) -> dict[str
     schema = model.model_json_schema(mode="validation")
     schema["$schema"] = _SCHEMA_DRAFT
     schema["$id"] = schema_id
+
+    if model is WorkflowEventV2:
+        definitions = schema.setdefault("$defs", {})
+        conditions: list[dict[str, Any]] = []
+        for event_type, payload_model in EVENT_PAYLOAD_MODELS.items():
+            payload_schema = payload_model.model_json_schema(
+                mode="validation",
+                ref_template="#/$defs/{model}",
+            )
+            nested_definitions = payload_schema.pop("$defs", {})
+            for name, definition in nested_definitions.items():
+                existing = definitions.get(name)
+                if existing is not None and existing != definition:
+                    raise ValueError(f"conflicting event schema definition: {name}")
+                definitions[name] = definition
+            definitions[payload_model.__name__] = payload_schema
+            conditions.append(
+                {
+                    "if": {"properties": {"event_type": {"const": event_type}}},
+                    "then": {
+                        "properties": {
+                            "payload": {"$ref": f"#/$defs/{payload_model.__name__}"}
+                        }
+                    },
+                }
+            )
+        schema["allOf"] = conditions
+
     return schema
 
 
