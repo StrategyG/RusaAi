@@ -326,6 +326,8 @@ class PostgresAgentRegistry:
     ) -> AgentManifestV1:
         if not actor or len(actor) > 128:
             raise ValueError("registry actor is invalid")
+        if not _health_snapshot_is_fresh(health):
+            raise AgentRegistryError("health update must include a fresh timezone-aware timestamp")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute(
