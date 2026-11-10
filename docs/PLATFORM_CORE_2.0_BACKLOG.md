@@ -21,6 +21,9 @@ This backlog translates the Platform Architecture 2.0 into sequenced engineering
 
 The contract foundation has been implemented on this branch:
 
+- [x] Canonical orchestrator hierarchy and naming ADR (CORE-001).
+- [x] Communication ADR reconciled with the implemented PostgreSQL queue and deferred broker/stream proposals (CORE-002).
+- [x] Maintained capability matrix separates current AICode roles, partially represented target agents, and planned lifecycle/domain capabilities (CORE-003).
 - [x] Agent Manifest 1.0 Pydantic model and JSON Schema, including health snapshot and published-version immutability checks.
 - [x] Task Envelope 2.0 Pydantic model and JSON Schema, including tenant/workflow/task identity, deadlines, budgets, trace context, and approval fields.
 - [x] Agent Result 2.0 Pydantic model and JSON Schema, including digest-bound immutable output/evidence references.
@@ -49,6 +52,8 @@ Still open in P0: the live agent registry and runtime registration, workflow/run
 | P5 | Enterprise qualification | Operational evidence and production certification |
 
 ## 4. P0 — Architecture and naming alignment
+
+<badge>Completed on this branch: ADR-PLATFORM-001/002 and AGENT_CAPABILITY_MATRIX.md</badge>
 
 ### CORE-001 — Canonical orchestrator hierarchy
 
