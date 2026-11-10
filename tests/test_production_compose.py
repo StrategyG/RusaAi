@@ -1,6 +1,6 @@
 def _service_block(compose: str, service: str, next_service: str) -> str:
-    start = compose.index(f"  {service}:\\n")
-    end = compose.index(f"\\n  {next_service}:\\n", start)
+    start = compose.index(f"  {service}:\n")
+    end = compose.index(f"\n  {next_service}:\n", start)
     return compose[start:end]
 
 
@@ -12,7 +12,7 @@ def test_production_compose_uses_explicit_service_environment_allowlists():
 
     api = _service_block(compose, "api", "web")
     web = _service_block(compose, "web", "worker")
-    worker = compose.split("  worker:\\n", 1)[1].split("\\nnetworks:\\n", 1)[0]
+    worker = compose.split("  worker:\n", 1)[1].split("\nnetworks:\n", 1)[0]
 
     assert "RUSA_API_DATABASE_URL:" in api
     assert "RUSA_API_KEYS_JSON:" in api
