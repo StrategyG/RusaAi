@@ -298,3 +298,27 @@ def test_queue_name_rejects_untrusted_or_ambiguous_values():
         queue.claim("worker", queue_name="DevOps")
     with pytest.raises(ValueError, match="queue_name"):
         queue.enqueue(str(uuid4()), "tenant", {}, queue_name="devops;drop")
+
+
+def test_idempotency_keys_cannot_cross_worker_queue_partitions():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    tenant = f"tenant-queue-idempotency-{uuid4().hex}"
+    task_id = str(uuid4())
+    idempotency_key = f"queue-{uuid4().hex}"
+    payload = {"objective": "queue partition idempotency"}
+    try:
+        created = queue.enqueue_idempotent(
+            task_id, tenant, payload, idempotency_key, queue_name="aicode"
+        )
+        assert created[1] is True
+        with pytest.raises(IdempotencyConflictError, match="different queue"):
+            queue.enqueue_idempotent(
+                str(uuid4()), tenant, payload, idempotency_key, queue_name="devops"
+            )
+    finally:
+        with queue._connect() as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE tenant_id=%s AND idempotency_key=%s",
+                (tenant, idempotency_key),
+            )
