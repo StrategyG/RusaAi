@@ -244,7 +244,7 @@ class PostgresEvidenceStore:
                 correlation_id=workflow_id,
                 event_type="validation.verdict",
                 producer_id=verdict.producer_id,
-                producer_version=verdict.evidence_refs[0].producer_version or "unknown",
+                producer_version=verdict.producer_version,
                 occurred_at=verdict.evaluated_at,
                 payload=verdict.model_dump(mode="json"),
             )
