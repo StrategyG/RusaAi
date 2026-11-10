@@ -119,6 +119,27 @@ result = evaluate_production_certification(
 The evaluator is deterministic when an explicit timezone-aware `now` value
 is supplied. It returns a report with status and blockers; it does not deploy.
 
+
+### Command-line interface
+
+The package exposes the rusa-certify command (also available as
+python -m rusa_agents.certification). It is suitable for CI gates:
+
+~~~bash
+rusa-certify validate-release-manifest \
+  --manifest release-manifest.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA"
+
+rusa-certify evaluate \
+  --record production-certification.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA" \
+  --manifest-digest "$RELEASE_MANIFEST_DIGEST"
+~~~
+
+Exit codes are stable: 0 = PASS, 2 = HOLD, 3 = FAIL, and 4 = invalid input. The manifest digest is calculated from the exact file bytes, so the detached signature must be verified against those same bytes. The CLI validates contract metadata; cryptographic verification remains the responsibility of the trusted release workflow.
+
 ## 7. Trust boundary and limitations
 
 Schema validation is not cryptographic verification. The Python validator
