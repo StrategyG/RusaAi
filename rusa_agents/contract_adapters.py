@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from .contracts import CodingTask, RepositoryTarget, TaskRecord, TaskState, WorkerResult, WorkerRole
 from .platform_contracts import (
@@ -78,6 +79,7 @@ def coding_task_to_envelope(
         agent_id=agent_id,
         agent_version=agent_version,
         capability=capability,
+        traceparent=f"00-{uuid4().hex}-{uuid4().hex[:16]}-01",
         attempt=attempt,
         priority=priority,
         deadline_at=effective_deadline,
