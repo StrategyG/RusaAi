@@ -909,7 +909,9 @@ class PostgresWorkflowStore:
                 producer_version=verdict.producer_version,
                 occurred_at=verdict.evaluated_at,
                 payload=verdict.model_dump(mode="json"),
-                sequence=updated[0] - 1,
+                # QA evidence is a run-level fact, not a run-state transition.
+                # Leave its sequence unset so it cannot collide with the last state version.
+                sequence=None,
             )
             self._append_event(conn, verdict_event)
             self._append_event(
