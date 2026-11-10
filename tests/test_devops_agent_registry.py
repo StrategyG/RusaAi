@@ -78,8 +78,17 @@ def _task(stage: str, *, agent_id: str | None = None) -> dict:
             "rollback_plan_ref": "artifact://deploy/rollback-1",
             "smoke_test_plan_ref": "artifact://deploy/smoke-1",
         },
-        "operate": {"service": "api", "runbook_ref": "runbook://api/restart"},
-        "monitor": {"service": "api", "metrics_window": "last-15m"},
+        "operate": {
+            "service": "api",
+            "runbook_ref": "artifact://runbooks/api-restart",
+            "deployment_evidence_ref": "evidence://deployments/staging-api",
+        },
+        "monitor": {
+            "service": "api",
+            "metrics_window": "last-15m",
+            "deployment_evidence_ref": "evidence://deployments/staging-api",
+            "slo_profile_ref": "artifact://slo-profiles/api",
+        },
     }[stage]
     if agent_id == SECURITY_GUARD_AGENT:
         inputs["evidence_refs"] = ["evidence://test/report-1"]
