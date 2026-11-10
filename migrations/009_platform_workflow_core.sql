@@ -247,6 +247,13 @@ BEGIN
 END;
 $rusa$;
 
+-- Immutable facts may be appended and read, but never rewritten by runtime roles.
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE
+    public.rusa_workflow_dependencies,
+    public.rusa_workflow_events,
+    public.rusa_workflow_inbox
+FROM rusa_api_runtime, rusa_worker_runtime;
+
 DROP POLICY IF EXISTS rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs;
 CREATE POLICY rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs
     FOR ALL TO rusa_api_runtime
