@@ -1,5 +1,5 @@
+# ruff: noqa: I001
 import json
-# ruff: noqa: I001  # Keep the contract test's mixed third-party import block stable.
 from pathlib import Path
 
 import jsonschema
