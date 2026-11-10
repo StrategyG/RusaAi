@@ -349,6 +349,8 @@ class PostgresClosedLoopStore:
                         metadata=current.metadata || EXCLUDED.metadata,
                         status=CASE WHEN current.status IN ('resolved', 'closed')
                                     THEN 'open' ELSE current.status END,
+                        resolved_by=CASE WHEN current.status IN ('resolved', 'closed')
+                                         THEN NULL ELSE current.resolved_by END,
                         resolved_at=CASE WHEN current.status IN ('resolved', 'closed')
                                          THEN NULL ELSE current.resolved_at END,
                         closed_at=CASE WHEN current.status IN ('resolved', 'closed')
@@ -432,6 +434,7 @@ class PostgresClosedLoopStore:
             or parsed.fragment
             or parsed.username
             or parsed.password
+            or parsed.port is not None
             or parsed.path.count("/") != 1
         ):
             raise ValueError("incident_ref must be tenant-bound incident:// URI")
@@ -453,7 +456,11 @@ class PostgresClosedLoopStore:
     ) -> dict[str, Any]:
         if target_status not in _TRANSITIONS:
             raise ValueError("incident target_status is invalid")
-        if isinstance(expected_state_version, bool) or expected_state_version < 1:
+        if (
+            isinstance(expected_state_version, bool)
+            or not isinstance(expected_state_version, int)
+            or expected_state_version < 1
+        ):
             raise ValueError("expected_state_version must be a positive integer")
         _safe_text(actor, "actor", 128)
         _safe_text(message_id, "message_id", 128)
