@@ -200,6 +200,7 @@ class PostgresPolicyDecisionStore:
                     input_sha256, evaluated_at, approval_id
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
                 """,
                 (
                     decision.tenant_id, decision.decision_id, decision.actor,
