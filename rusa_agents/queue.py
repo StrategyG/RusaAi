@@ -406,7 +406,10 @@ class PostgresTaskQueue:
             )
             return str(existing[0]), False, str(existing[2])
 
-    def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
+    def claim(
+        self, worker_id: str, lease_seconds: int = 180, *, queue_name: str = "aicode"
+    ) -> Job | None:
+        self._validate_queue_name(queue_name)
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
             raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
         lease_token = str(uuid4())
@@ -415,12 +418,13 @@ class PostgresTaskQueue:
                 UPDATE aicode_jobs
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
-                WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
-            """)
+                WHERE queue_name=%s AND status='running'
+                  AND lease_until < NOW() AND attempts >= max_attempts
+            """, (queue_name,))
             row = conn.execute("""
                 WITH candidate AS (
                     SELECT id FROM aicode_jobs
-                    WHERE attempts < max_attempts
+                    WHERE queue_name=%s AND attempts < max_attempts
                       AND ((status='queued' AND available_at <= NOW())
                         OR (status='running' AND lease_until < NOW()))
                     ORDER BY priority DESC, created_at ASC
@@ -434,12 +438,13 @@ class PostgresTaskQueue:
                 FROM candidate
                 WHERE job.id=candidate.id
                 RETURNING job.id, job.task_id::text, job.tenant_id, job.payload,
-                          job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text
-            """, (worker_id, lease_token, lease_seconds)).fetchone()
+                          job.attempts, job.max_attempts, job.lease_owner,
+                          job.lease_token::text, job.queue_name
+            """, (queue_name, worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7])
+        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7], row[8])
 
     def heartbeat(
         self, job_id: int, tenant_id: str, worker_id: str,
