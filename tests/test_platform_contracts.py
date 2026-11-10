@@ -35,6 +35,8 @@ from rusa_agents.platform_contracts import (
     AgentManifestV1,
     AgentResultV2,
     AgentStatus,
+    AICodeQueueStatusV1,
+    AICodeTaskStateV1,
     ArtifactReference,
     EvidenceReference,
     TaskEnvelopeV2,
@@ -156,9 +158,23 @@ def test_agent_manifest_rejects_unknown_fields_and_invalid_versions() -> None:
         AgentManifestV1.model_validate(payload)
 
 
-def test_agent_manifest_requires_explicit_runtime_and_policy_profiles() -> None:
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "capabilities",
+        "input_schema_ref",
+        "output_schema_ref",
+        "runtime_binding",
+        "policy_profile",
+        "evaluation_profile",
+        "health",
+    ],
+)
+def test_agent_manifest_requires_capability_schema_policy_runtime_and_health(
+    missing_field: str,
+) -> None:
     payload = _manifest_payload()
-    del payload["runtime_binding"]
+    del payload[missing_field]
     with pytest.raises(ValidationError):
         AgentManifestV1.model_validate(payload)
 
@@ -634,3 +650,120 @@ def test_approval_decision_and_policy_decision_are_typed_auditable_events() -> N
     )
     assert approval.event_type == "approval.decided"
     assert policy.event_type == "policy.decision"
+
+
+
+def test_workflow_event_catalog_validates_progress_completion_failure_cancellation_and_audit() -> None:
+    base = {
+        "tenant_id": "tenant-a",
+        "workflow_id": "workflow-1",
+        "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt": 1,
+        "correlation_id": "workflow-1",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "producer_id": "aicode.worker.tester",
+        "producer_version": "1.0.0",
+        "occurred_at": NOW.isoformat(),
+    }
+    events = {
+        "task.progress": {
+            "lease_epoch": 1,
+            "state_version": 2,
+            "percent": 50,
+            "stage": "verification",
+        },
+        "tool.invocation": {
+            "tool": "pytest",
+            "action": "run",
+            "input_ref": "artifact://runs/run-1/test-input.json",
+            "operation_id": "op-123",
+            "lease_epoch": 1,
+        },
+        "task.completed": {
+            "lease_epoch": 1,
+            "state_version": 3,
+            "result_ref": "artifact://runs/run-1/result.json",
+            "sha256": "a" * 64,
+        },
+        "task.failed": {
+            "lease_epoch": 1,
+            "state_version": 3,
+            "code": "TEST_FAILURE",
+            "category": "PERMANENT",
+            "side_effect": "NONE",
+        },
+        "task.cancel.requested": {
+            "cancel_epoch": 1,
+            "reason_code": "user_requested",
+        },
+        "task.cancelled": {
+            "cancel_epoch": 1,
+            "state_version": 4,
+            "side_effect": "NONE",
+        },
+    }
+    for event_type, payload in events.items():
+        event = WorkflowEventV2.model_validate(
+            {**base, "event_type": event_type, "payload": payload}
+        )
+        assert event.event_type == event_type
+
+    with pytest.raises(ValidationError, match="task_id and attempt"):
+        WorkflowEventV2.model_validate(
+            {
+                **base,
+                "task_id": None,
+                "attempt": None,
+                "event_type": "task.accepted",
+                "payload": {
+                    "worker_id": "worker-1",
+                    "lease_epoch": 1,
+                    "state_version": 1,
+                },
+            }
+        )
+
+
+def test_policy_violation_approval_request_and_audit_event_payloads() -> None:
+    base = {
+        "tenant_id": "tenant-a",
+        "workflow_id": "workflow-1",
+        "run_id": "run-1",
+        "correlation_id": "workflow-1",
+        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "producer_id": "policy-engine",
+        "producer_version": "1.0.0",
+        "occurred_at": NOW.isoformat(),
+    }
+    events = {
+        "policy.violation": {
+            "policy_id": "release-policy",
+            "policy_version": "3",
+            "decision_id": "decision-123",
+            "action": "release.promote",
+            "resource_ref": "artifact://release/candidate",
+            "reason_code": "approval_missing",
+        },
+        "approval.requested": {
+            "approval_id": "approval-123",
+            "requested_by": "release-agent",
+            "action": "release.promote",
+            "resource_ref": "artifact://release/candidate",
+            "reason": "Production release requires an approver",
+            "policy_id": "release-policy",
+            "policy_version": "3",
+            "expires_at": (NOW + timedelta(hours=1)).isoformat(),
+        },
+        "audit.recorded": {
+            "actor": "policy-engine",
+            "action": "release.promote",
+            "decision": "deny",
+            "audit_ref": "audit://events/123",
+        },
+    }
+    for event_type, payload in events.items():
+        event = WorkflowEventV2.model_validate(
+            {**base, "event_type": event_type, "payload": payload}
+        )
+        assert event.event_type == event_type
