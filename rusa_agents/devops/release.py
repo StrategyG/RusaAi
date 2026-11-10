@@ -252,6 +252,8 @@ class ReleaseAgentExecutor:
                     ("status", "passed"),
                     ("source_commit", source_commit),
                     ("artifact_digest", artifact_digest),
+                    ("artifact_ref", artifact_ref),
+                    ("build_evidence_ref", build_ref),
                 )
             ):
                 raise ValueError("Test report does not match the exact release artifact")
@@ -269,7 +271,14 @@ class ReleaseAgentExecutor:
                 raise ValueError("Test report is missing a host-required release gate")
             for suite_id in self.policy.required_test_suites:
                 row = suites[suite_id]
-                if row.get("status") != "passed" or row.get("failed") != 0 or row.get("skipped") != 0:
+                if (
+                    row.get("status") != "passed"
+                    or not isinstance(row.get("passed"), int)
+                    or isinstance(row.get("passed"), bool)
+                    or row.get("passed", 0) < 1
+                    or row.get("failed") != 0
+                    or row.get("skipped") != 0
+                ):
                     raise ValueError(f"Required test suite {suite_id} did not pass")
 
             changelog_ref = task["input"]["changelog_ref"]
@@ -304,6 +313,8 @@ class ReleaseAgentExecutor:
                 findings = security.get("findings")
                 if not isinstance(findings, list) or any(not isinstance(item, dict) for item in findings):
                     raise ValueError("Security evidence findings are malformed")
+                if any(item.get("severity") not in {"critical", "high", "medium", "low", "info"} for item in findings):
+                    raise ValueError("Security evidence contains an unsupported severity")
                 security_findings = findings
             elif self.policy.require_security_evidence:
                 raise ValueError("Release policy requires signed Security Guard evidence")
