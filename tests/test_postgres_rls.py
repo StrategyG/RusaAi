@@ -411,6 +411,7 @@ def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
         workflow_id=workflow_id + "-" + tenant_a,
         run_id=run_a,
         correlation_id=workflow_id,
+        traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
         event_type="workflow.created",
         producer_id="rusa.test",
         producer_version="1.0.0",
