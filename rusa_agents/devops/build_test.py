@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -337,7 +337,6 @@ def _validate_specialist_task(
 
 def _signed_evidence(
     *,
-    tenant_id: str,
     payload: dict[str, Any],
     signer: EvidenceSigner,
     expected_producer: str,
@@ -367,7 +366,7 @@ def _verified_evidence(
     envelope = _load_json_artifact(store, tenant_id, reference, label="signed evidence")
     if set(envelope) != {"schema_version", "producer_id", "payload", "signature"}:
         raise ValueError("signed evidence envelope has unsupported fields")
-    if envelope["schema_version"] != 1 or envelope["producer_id"] != expected_producer:
+    if type(envelope["schema_version"]) is not int or envelope["schema_version"] != 1 or envelope["producer_id"] != expected_producer:
         raise ValueError("signed evidence producer or schema version is invalid")
     payload = envelope["payload"]
     signature = envelope["signature"]
@@ -434,17 +433,17 @@ class BuildAgentExecutor:
         lease: ExecutionLease,
         checkpoint: Callable[[], bool] | None,
     ) -> SpecialistOutcome:
+        if authenticated_principal != BUILD_AGENT:
+            raise ExecutionLeaseError("Build Agent requires its authenticated workload identity")
         _validate_specialist_task(
             task,
-            principal=BUILD_AGENT,
+            principal=authenticated_principal,
             stage="build",
             required_tools=frozenset(
                 {"repository.read", "artifact.read", "build.execute", "artifact.write", "sbom.write"}
             ),
             required_write_scopes=frozenset({"build/", "artifacts/", "sbom/"}),
         )
-        if authenticated_principal != BUILD_AGENT:
-            raise ExecutionLeaseError("Build Agent requires its authenticated workload identity")
         lease.validate(task, authenticated_principal)
         _checkpoint(checkpoint)
         started = _now()
@@ -548,7 +547,6 @@ class BuildAgentExecutor:
             sbom_evidence_ref = self.artifact_store.put_json(
                 task["tenant_id"],
                 _signed_evidence(
-                    tenant_id=task["tenant_id"],
                     payload=sbom_payload,
                     signer=self.signer,
                     expected_producer=BUILD_AGENT,
@@ -572,7 +570,6 @@ class BuildAgentExecutor:
             build_evidence_ref = self.artifact_store.put_json(
                 task["tenant_id"],
                 _signed_evidence(
-                    tenant_id=task["tenant_id"],
                     payload=build_payload,
                     signer=self.signer,
                     expected_producer=BUILD_AGENT,
@@ -654,17 +651,17 @@ class TestAgentExecutor:
         lease: ExecutionLease,
         checkpoint: Callable[[], bool] | None,
     ) -> SpecialistOutcome:
+        if authenticated_principal != TEST_AGENT:
+            raise ExecutionLeaseError("Test Agent requires its authenticated workload identity")
         _validate_specialist_task(
             task,
-            principal=TEST_AGENT,
+            principal=authenticated_principal,
             stage="test",
             required_tools=frozenset(
                 {"repository.read", "artifact.read", "test.execute", "evidence.write", "metrics.read"}
             ),
             required_write_scopes=frozenset({"test-reports/", "evidence/"}),
         )
-        if authenticated_principal != TEST_AGENT:
-            raise ExecutionLeaseError("Test Agent requires its authenticated workload identity")
         lease.validate(task, authenticated_principal)
         _checkpoint(checkpoint)
         started = _now()
@@ -679,17 +676,23 @@ class TestAgentExecutor:
                 expected_producer=BUILD_AGENT,
                 expected_type="rusa.devops.build.attestation",
             )
+            build_metadata = build_payload.get("build_metadata")
+            if not isinstance(build_metadata, dict):
+                raise ValueError("Build evidence is missing build provenance metadata")
             if (
                 build_payload.get("tenant_id") != task["tenant_id"]
                 or build_payload.get("workflow_id") != task["workflow_id"]
                 or build_payload.get("source_commit") != source_commit
                 or build_payload.get("artifact_digest") != artifact_digest
                 or build_payload.get("agent_id") != BUILD_AGENT
-                or build_payload.get("build_metadata", {}).get("reproducibility_verified") is not True
+                or build_metadata.get("reproducibility_verified") is not True
             ):
                 raise ValueError("Build evidence does not match this tenant, workflow, commit, or artifact")
             artifact_ref = build_payload.get("artifact_ref")
             _validate_oci_reference(artifact_ref, artifact_digest, self.allowed_registry_hosts)
+            repository = build_payload.get("repository")
+            if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+                raise ValueError("Build evidence repository identity is invalid")
             sbom_ref = build_payload.get("sbom_ref")
             sbom_digest = build_payload.get("sbom_digest")
             if not isinstance(sbom_ref, str) or not isinstance(sbom_digest, str):
@@ -749,7 +752,7 @@ class TestAgentExecutor:
             runner_started = True
             execution = await asyncio.wait_for(
                 self.runner.run(
-                    repository=build_payload["repository"],
+                    repository=repository,
                     source_commit=source_commit,
                     artifact_ref=artifact_ref,
                     artifact_digest=artifact_digest,
@@ -807,7 +810,7 @@ class TestAgentExecutor:
                     raise ValueError("test suite duration is invalid")
                 if suite.status not in {"passed", "failed", "skipped"}:
                     raise ValueError("test suite status is invalid")
-                if suite.status == "passed" and (suite.failed != 0 or suite.skipped != 0):
+                if suite.status == "passed" and (suite.passed < 1 or suite.failed != 0 or suite.skipped != 0):
                     raise ValueError("a passing suite cannot contain failed or skipped tests")
                 if suite.status == "failed" and suite.failed < 1:
                     raise ValueError("a failed suite must report at least one failed test")
@@ -857,7 +860,7 @@ class TestAgentExecutor:
                 "status": "passed" if passed else "failed",
             }
             report_ref = self.artifact_store.put_json(
-                task["tenant_id"], report, namespace="artifact"
+                task["tenant_id"], report, namespace="evidence"
             )
             report_digest = report_ref.rsplit("/", 1)[-1]
             evidence_payload = {
@@ -886,7 +889,6 @@ class TestAgentExecutor:
             evidence_ref = self.artifact_store.put_json(
                 task["tenant_id"],
                 _signed_evidence(
-                    tenant_id=task["tenant_id"],
                     payload=evidence_payload,
                     signer=self.signer,
                     expected_producer=TEST_AGENT,
