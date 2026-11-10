@@ -13,7 +13,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -37,8 +37,8 @@ from .build_test import (
     EvidenceSigner,
     EvidenceVerifier,
     _load_json_artifact,
-    _verified_evidence,
     _validate_time_window,
+    _verified_evidence,
 )
 from .deploy import DeploymentTarget, _verify_approval
 from .release import ApprovalVerifier
@@ -933,7 +933,7 @@ def _slo_findings(
     findings: list[dict[str, Any]] = []
     for code, severity, observed, threshold, unit in breaches:
         correlation_key = hashlib.sha256(
-            f"{tenant_id}|{service}|{deployment_id}|{code}".encode("utf-8")
+            f"{tenant_id}|{service}|{deployment_id}|{code}".encode()
         ).hexdigest()
         findings.append({
             "severity": severity,
