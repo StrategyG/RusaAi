@@ -38,6 +38,7 @@ class RuntimeConfig:
     model_base_url: str | None
     model_name: str
     tenant_repositories: dict[str, list[str]]
+    model_api_key: str | None = None
     aicode_enabled: bool = False
 
     @staticmethod
@@ -146,6 +147,7 @@ class RuntimeConfig:
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
             model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
             tenant_repositories=tenant_repositories,
+            model_api_key=os.getenv("RUSA_MODEL_API_KEY"),
             aicode_enabled=aicode_enabled,
         )
 
@@ -195,6 +197,14 @@ class RuntimeConfig:
                 errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
             if self._looks_placeholder(model_url.hostname):
                 errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
+        if self.environment == "production":
+            if not self.model_api_key:
+                errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
+            elif (
+                len(self.model_api_key.encode("utf-8")) < 32
+                or self._looks_placeholder(self.model_api_key)
+            ):
+                errors.append("RUSA_MODEL_API_KEY must be a real secret of at least 32 UTF-8 bytes")
         return errors
 
     def validate_api(self) -> None:
