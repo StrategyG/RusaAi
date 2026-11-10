@@ -100,6 +100,12 @@ def test_agent_task_rejects_missing_acceptance_criteria_and_bad_trace_context():
     with pytest.raises(ValidationError):
         AgentTask.model_validate(payload)
 
+    payload = task_payload()
+    payload["traceparent"] = "00-" + "0" * 32 + "-" + "2" * 16 + "-01"
+    with pytest.raises(ValidationError, match="must be non-zero"):
+        AgentTask.model_validate(payload)
+
+
 
 def test_agent_task_rejects_write_scope_path_traversal():
     payload = task_payload()
@@ -201,6 +207,11 @@ def test_workflow_event_validates_event_specific_payload():
     invalid = event_payload(payload={"capability": "test"})
     with pytest.raises(ValidationError):
         WorkflowEvent.model_validate(invalid)
+
+    invalid_trace = event_payload()
+    invalid_trace["traceparent"] = "00-" + "1" * 32 + "-" + "0" * 16 + "-01"
+    with pytest.raises(ValidationError, match="must be non-zero"):
+        WorkflowEvent.model_validate(invalid_trace)
 
 
 def test_task_lifecycle_event_requires_task_id_and_attempt():
