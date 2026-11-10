@@ -29,7 +29,7 @@ from rusa_agents.policy_engine import (
 )
 from rusa_agents.registry import AgentRegistryError, PostgresAgentRegistry
 from rusa_agents.workflow_graph import WorkflowGraph, WorkflowRunSpec, WorkflowTaskSpec
-from rusa_agents.workflow_store import PostgresWorkflowStore
+from rusa_agents.workflow_store import PostgresWorkflowStore, WorkflowConflictError
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -662,13 +662,48 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
         "task_id": task_id,
         "artifact_digest": artifact_digest,
     }
+    paused_version = workflow_store.await_approval_task(
+        tenant_id,
+        task_id,
+        lease["worker_id"],
+        lease["lease_epoch"],
+        lease["state_version"],
+        approval_id=requested["approval_id"],
+        reason="Wait for the human release approval",
+    )
+    with pytest.raises(WorkflowConflictError, match="live, consumed approval"):
+        workflow_store.resume_approved_task(
+            tenant_id,
+            task_id,
+            requested["approval_id"],
+            expected_state_version=paused_version,
+        )
+    assert approvals.decide(
+        tenant_id, requested["approval_id"],
+        actor="human:approver", decision="approved",
+    )["status"] == "approved"
     assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is True
     assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is False
+    resumed_version = workflow_store.resume_approved_task(
+        tenant_id,
+        task_id,
+        requested["approval_id"],
+        expected_state_version=paused_version,
+    )
+    resumed = workflow_store.claim_ready_tasks("worker:approval-resumed", limit=1)
+    assert len(resumed) == 1
+    assert resumed[0]["task_id"] == task_id
+    assert resumed[0]["attempt"] == 2
+    assert resumed[0]["state_version"] > resumed_version
     with pytest.raises(ApprovalError, match="different action"):
         approvals.consume(
             tenant_id, requested["approval_id"],
             **{**consume_args, "action": "release.deploy"},
         )
+
+    # Pause and resume the exact task only after its exact approval is consumed.
+    lease = workflow_store.claim_ready_tasks("worker:approval", limit=1)[0]
+    assert lease["task_id"] == task_id
 
     evidence_store = PostgresEvidenceStore(DSN)
     evidence_ref = EvidenceReference(
