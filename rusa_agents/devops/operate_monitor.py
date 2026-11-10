@@ -770,7 +770,7 @@ class OperateAgentExecutor:
                 source_commit=deployment["source_commit"],
                 artifact_digest=deployment["artifact_digest"],
             )
-        except Exception as exc:
+        except Exception:
             return _failure(
                 task,
                 started_at=started,
@@ -1197,7 +1197,7 @@ class MonitorAgentExecutor:
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
-        except Exception as exc:
+        except Exception:
             return _failure(
                 task,
                 started_at=started,
