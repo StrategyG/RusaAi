@@ -37,8 +37,8 @@ STAGE_AGENT_IDS = MappingProxyType(
     }
 )
 
-# These are read-only telemetry capabilities. Monitor may append only its own
-# monitoring record; it cannot mutate the service being observed.
+# Monitor remains read-only. Its monitoring record is persisted by a
+# host-scoped writer, not through an agent-granted service mutation capability.
 MONITOR_READ_ONLY_TOOLS = frozenset(
     {
         "metrics.read",
