@@ -491,6 +491,7 @@ def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
 def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
     from datetime import datetime, timedelta, timezone
 
+    import psycopg
     from rusa_agents.approvals import (
         ApprovalError,
         PostgresHumanApprovalService,
