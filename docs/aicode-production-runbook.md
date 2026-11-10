@@ -118,7 +118,7 @@ Mount the workspace root at the same absolute host path inside the worker contai
 
 ## 7. Production environment
 
-Copy `.env.example` to a secret-managed environment file. Do not commit the production file, and restrict it to the deployment operator (for example, mode `0600`). The production Compose file reads this file for variable interpolation only; it deliberately does not use Compose `env_file`. Only the explicit per-service environment allowlists in `docker-compose.production.yml` are passed into containers.
+Copy `.env.example` to a secret-managed environment file. Do not commit the production file, and restrict it to the deployment operator (for example, mode `0600`). Remove or comment out the development-only `RUSA_API_KEYS`, `RUSA_API_KEY`, `RUSA_DATABASE_URL`, and `POSTGRES_PASSWORD` entries; production uses hashed tenant keys and separate API/worker DSNs. The production Compose file reads this file for variable interpolation only; it deliberately does not use Compose `env_file`. The preflight loads the same `.env` file without overriding values already supplied by the deployment environment. Only the explicit per-service environment allowlists in `docker-compose.production.yml` are passed into containers.
 
 API settings:
 
