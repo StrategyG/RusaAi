@@ -313,14 +313,34 @@ CREATE POLICY rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
--- Events are immutable facts. Delivery state lives in the mutable outbox table.
+-- Events, dependency edges, and inbox receipts are immutable facts.
+-- Delivery state alone is mutable in the outbox table.
 CREATE OR REPLACE FUNCTION public.rusa_workflow_event_immutable()
-RETURNS trigger LANGUAGE plpgsql AS $$
+RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
     RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END;
-$$;
+$;
 REVOKE ALL ON FUNCTION public.rusa_workflow_event_immutable() FROM PUBLIC;
+
+DROP TRIGGER IF EXISTS trg_rusa_workflow_dependencies_immutable ON public.rusa_workflow_dependencies;
+CREATE TRIGGER trg_rusa_workflow_dependencies_immutable
+    BEFORE UPDATE OR DELETE ON public.rusa_workflow_dependencies
+    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_event_immutable();
+DROP TRIGGER IF EXISTS trg_rusa_workflow_dependencies_no_truncate ON public.rusa_workflow_dependencies;
+CREATE TRIGGER trg_rusa_workflow_dependencies_no_truncate
+    BEFORE TRUNCATE ON public.rusa_workflow_dependencies
+    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_event_immutable();
+
+DROP TRIGGER IF EXISTS trg_rusa_workflow_inbox_immutable ON public.rusa_workflow_inbox;
+CREATE TRIGGER trg_rusa_workflow_inbox_immutable
+    BEFORE UPDATE OR DELETE ON public.rusa_workflow_inbox
+    FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_event_immutable();
+DROP TRIGGER IF EXISTS trg_rusa_workflow_inbox_no_truncate ON public.rusa_workflow_inbox;
+CREATE TRIGGER trg_rusa_workflow_inbox_no_truncate
+    BEFORE TRUNCATE ON public.rusa_workflow_inbox
+    FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_event_immutable();
+
 DROP TRIGGER IF EXISTS trg_rusa_workflow_events_immutable ON public.rusa_workflow_events;
 CREATE TRIGGER trg_rusa_workflow_events_immutable
     BEFORE UPDATE OR DELETE ON public.rusa_workflow_events
