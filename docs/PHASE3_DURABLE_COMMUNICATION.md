@@ -34,7 +34,7 @@ Phase 3 is deliberately split into independently reviewable increments. This PR 
 
 ## Database security
 
-Migration 008_devops_durable_communication.sql creates separate NOLOGIN groups for API, worker, and relay identities. Deployment must provision distinct LOGIN roles as members of exactly one matching group. The relay role is intentionally cross-tenant because it only transports opaque, already-authorized envelopes; it must not invoke tools or read workflow payload references. API and worker workflow access is constrained by forced row-level security using rusa.tenant_id.
+Migration 011_devops_durable_communication.sql creates separate NOLOGIN groups for API, worker, and relay identities. Deployment must provision distinct LOGIN roles as members of exactly one matching group. The relay role is intentionally cross-tenant because it only transports opaque, already-authorized envelopes; it must not invoke tools or read workflow payload references. API and worker workflow access is constrained by forced row-level security using rusa.tenant_id.
 
 The runtime role groups are not login credentials. Do not run the relay with a superuser, migration owner, API login, or worker login. The current migration grants only the relay group access to claim and settle outbox rows.
 
@@ -46,11 +46,11 @@ Generated stubs and a live gRPC server are intentionally deferred to Phase 3D. J
 
 ## Deployment and migration
 
-Apply migrations in numeric order after 006_aicode_idempotency.sql. Migration 007 does not alter aicode_jobs. It creates the rusa_relay_runtime NOLOGIN group; production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
+Apply migrations in numeric order after 010_platform_governance_registry.sql. Migration 007 does not alter aicode_jobs. It creates the rusa_relay_runtime NOLOGIN group; production provisioning must create a dedicated rusa_relay_login and grant membership using the secrets manager. Do not enable broker dispatch until the broker adapter and publisher-confirm integration tests in Phase 3B pass.
 
 ## Exit criteria for Phase 3A
 
-- PostgreSQL integration suite applies migrations 001–007.
+- PostgreSQL integration suite applies the unified AICode, Platform Core, and DevOps migrations in numeric order (excluding the optional pgvector extension migration in the base PostgreSQL service).
 - Same idempotency key and body returns one run and one command.
 - Same idempotency key with a different body is rejected.
 - Outbox claim is lease-fenced; only the current lease can settle a row.
