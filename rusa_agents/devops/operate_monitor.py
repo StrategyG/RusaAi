@@ -26,7 +26,9 @@ from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from .agent_registry import (
     DEPLOY_AGENT,
     MONITOR_AGENT,
+    MONITOR_READ_ONLY_TOOLS,
     OPERATE_AGENT,
+    READ_ONLY_TOOLS,
     SECURITY_GUARD_AGENT,
     authorize_agent_task,
 )
@@ -358,9 +360,10 @@ def _validate_operate_task(task: dict[str, Any], principal: str) -> None:
     if policy.stage != "operate":
         raise ValueError("Operate Agent is only authorized for the Operate stage")
     constraints = task["constraints"]
+    # Artifact and deployment evidence reads are performed by the injected
+    # host-side verifier; the agent's tool authority remains the registry ceiling.
     required = {
-        "artifact.read", "evidence.read", "health.read", "metrics.read",
-        "logs.read", "runbook.read", "runbook.execute", "incident.write",
+        "metrics.read", "logs.read", "runbook.read", "runbook.execute", "incident.write",
     }
     if not required.issubset(set(constraints["allowed_tools"])):
         raise ValueError("Operate task is missing a required health, runbook, or incident capability")
@@ -946,15 +949,11 @@ def _validate_monitor_task(task: dict[str, Any], principal: str) -> None:
     policy = authorize_agent_task(task, authenticated_principal=principal)
     if policy.stage != "monitor":
         raise ValueError("Monitor Agent is only authorized for the Monitor stage")
-    required = {
-        "artifact.read", "evidence.read", "metrics.read", "logs.read",
-        "traces.read", "alerts.read", "monitoring.write",
-    }
-    if not required.issubset(set(task["constraints"]["allowed_tools"])):
-        raise ValueError("Monitor task is missing a telemetry or monitoring-record capability")
+    if not MONITOR_READ_ONLY_TOOLS.issubset(set(task["constraints"]["allowed_tools"])):
+        raise ValueError("Monitor task is missing a read-only telemetry capability")
     _validate_task_network(task)
-    if "monitoring/" not in set(task["constraints"]["write_scope"]):
-        raise ValueError("Monitor task write scope must be limited to monitoring/ records")
+    if task["constraints"]["write_scope"]:
+        raise ValueError("Monitor Agent is read-only; the host persists monitoring records")
     if task["constraints"]["approval_required"] or task["constraints"].get("approval_ref"):
         raise ValueError("Monitor Agent cannot self-authorize operational changes")
 
@@ -1220,18 +1219,11 @@ def _validate_security_task(task: dict[str, Any], principal: str) -> None:
     policy = authorize_agent_task(task, authenticated_principal=principal)
     if policy.agent_id != SECURITY_GUARD_AGENT:
         raise ValueError("Security Guard task has an invalid workload identity")
-    required = {
-        "repository.read", "issue.read", "artifact.read", "evidence.read",
-        "policy.read", "audit.read", "metrics.read", "logs.read", "traces.read",
-        "evidence.write",
-    }
-    if not required.issubset(set(task["constraints"]["allowed_tools"])):
-        raise ValueError("Security Guard task is missing an assessment or evidence capability")
+    if not READ_ONLY_TOOLS.issubset(set(task["constraints"]["allowed_tools"])):
+        raise ValueError("Security Guard task is missing a read-only assessment capability")
     _validate_task_network(task)
-    if "evidence/" not in set(task["constraints"]["write_scope"]):
-        raise ValueError("Security Guard may write only its signed assessment evidence")
-    if len(task["constraints"]["write_scope"]) != 1:
-        raise ValueError("Security Guard cannot write outside the evidence/ scope")
+    if task["constraints"]["write_scope"]:
+        raise ValueError("Security Guard is read-only; the host persists its signed assessment evidence")
 
 
 class SecurityGuardExecutor:
@@ -1292,7 +1284,7 @@ class SecurityGuardExecutor:
                 hashlib.sha256(self.artifact_store.get(task["tenant_id"], ref)).hexdigest()
                 for ref in refs
             )
-        except ArtifactStoreError:
+        except (ArtifactStoreError, ValueError):
             return _failure(
                 task,
                 started_at=started,
