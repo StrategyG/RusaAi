@@ -6,7 +6,9 @@
 **Baseline:** main at c2866e2d9747b9de4ea9d5f9696b8ded11121006  
 **Scope:** RusaAi platform, RusaModels integration, and the four RUSA AI product domains
 
-> This document separates verified repository capabilities from proposed platform capabilities. A target component is not considered implemented until it has a runtime registration, an API or execution contract, tests, operational evidence, and documentation.
+> This document separates verified repository capabilities from proposed platform capabilities. A target component is not considered live until it has a runtime registration, an API or execution contract, tests, operational evidence, and documentation.
+
+**Architecture-branch implementation note (10 November 2026):** the branch now contains code-bearing P0 foundations for the PostgreSQL workflow store/DAG scheduler, transactional outbox/inbox, versioned agent registry, deterministic policy decisions, durable approvals, evidence verification, and capability authorization. These components are tested as separate services, but are not yet wired into live AICode task intake or worker dispatch. The eight DevOps lifecycle identities and Supreme Orchestrator therefore remain target capabilities, not active runtime agents. See `PLATFORM_CORE_2.0_BACKLOG.md` for exact implementation and validation status.
 
 ## 1. Executive direction
 
@@ -320,7 +322,7 @@ Keep existing AICode API status values backward-compatible during migration. Do 
 9. **Cancellation and kill switch:** cancellation is durable; uncertain external side effects enter reconciliation rather than being assumed cancelled.
 10. **Auditability:** state-changing decisions, policy outcomes, approvals, tool invocations, release decisions, and administrative controls are recorded.
 
-The existing AutonomyPolicy, role allowlists, Tool Gateway, PostgreSQL tenant controls, audit ledger, and production-certification contracts are useful foundations. They do not yet constitute a complete cross-domain policy/approval service.
+The existing AutonomyPolicy, role allowlists, Tool Gateway, PostgreSQL tenant controls, audit ledger, and production-certification contracts remain the live runtime foundations. The architecture branch adds separate deterministic policy-decision and durable human-approval services, but those services are not yet integrated with live API/worker identity, the existing Tool Gateway execution path, or the Control Center.
 
 ## 10. Deployment topology and service boundaries
 
