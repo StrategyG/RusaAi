@@ -169,6 +169,80 @@ CREATE POLICY rusa_evidence_records_worker_tenant ON public.rusa_evidence_record
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+
+CREATE OR REPLACE FUNCTION public.rusa_agent_registry_guard()
+RETURNS trigger LANGUAGE plpgsql AS $
+DECLARE
+    allowed_status BOOLEAN;
+BEGIN
+    IF OLD.status <> 'draft' THEN
+        IF NEW.tenant_id <> OLD.tenant_id
+            OR NEW.agent_id <> OLD.agent_id
+            OR NEW.version <> OLD.version
+            OR NEW.domain <> OLD.domain
+            OR NEW.manifest <> OLD.manifest
+            OR NEW.manifest_sha256 <> OLD.manifest_sha256
+            OR NEW.registered_by <> OLD.registered_by
+            OR NEW.created_at <> OLD.created_at THEN
+            RAISE EXCEPTION 'published agent manifest content is immutable';
+        END IF;
+    END IF;
+
+    allowed_status :=
+        (OLD.status = 'draft' AND NEW.status IN ('validated', 'revoked'))
+        OR (OLD.status = 'validated' AND NEW.status IN ('active', 'suspended', 'deprecated', 'revoked'))
+        OR (OLD.status = 'active' AND NEW.status IN ('suspended', 'deprecated', 'revoked'))
+        OR (OLD.status = 'suspended' AND NEW.status IN ('active', 'deprecated', 'revoked'))
+        OR (OLD.status = 'deprecated' AND NEW.status = 'revoked')
+        OR (OLD.status = NEW.status);
+
+    IF NOT allowed_status THEN
+        RAISE EXCEPTION 'invalid agent registry status transition: % -> %', OLD.status, NEW.status;
+    END IF;
+    IF NEW.updated_at < OLD.updated_at THEN
+        RAISE EXCEPTION 'agent registry updated_at cannot move backwards';
+    END IF;
+    RETURN NEW;
+END;
+$;
+REVOKE ALL ON FUNCTION public.rusa_agent_registry_guard() FROM PUBLIC;
+CREATE TRIGGER trg_rusa_agent_registry_guard
+    BEFORE UPDATE ON public.rusa_agent_registry
+    FOR EACH ROW EXECUTE FUNCTION public.rusa_agent_registry_guard();
+
+CREATE OR REPLACE FUNCTION public.rusa_human_approval_guard()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+    IF OLD.tenant_id <> NEW.tenant_id
+        OR OLD.approval_id <> NEW.approval_id
+        OR OLD.workflow_id IS DISTINCT FROM NEW.workflow_id
+        OR OLD.run_id IS DISTINCT FROM NEW.run_id
+        OR OLD.task_id IS DISTINCT FROM NEW.task_id
+        OR OLD.action <> NEW.action
+        OR OLD.resource_ref <> NEW.resource_ref
+        OR OLD.artifact_digest IS DISTINCT FROM NEW.artifact_digest
+        OR OLD.binding_sha256 <> NEW.binding_sha256
+        OR OLD.policy_id <> NEW.policy_id
+        OR OLD.policy_version <> NEW.policy_version
+        OR OLD.requested_by <> NEW.requested_by
+        OR OLD.expires_at <> NEW.expires_at
+        OR OLD.created_at <> NEW.created_at THEN
+        RAISE EXCEPTION 'human approval binding is immutable';
+    END IF;
+    IF OLD.status <> 'pending' OR NEW.status NOT IN ('approved', 'rejected', 'expired', 'cancelled') THEN
+        RAISE EXCEPTION 'human approval may transition once from pending to a terminal decision';
+    END IF;
+    IF NEW.decided_by IS NULL OR NEW.decided_at IS NULL THEN
+        RAISE EXCEPTION 'human approval decision requires actor and timestamp';
+    END IF;
+    RETURN NEW;
+END;
+$;
+REVOKE ALL ON FUNCTION public.rusa_human_approval_guard() FROM PUBLIC;
+CREATE TRIGGER trg_rusa_human_approval_guard
+    BEFORE UPDATE ON public.rusa_human_approvals
+    FOR EACH ROW EXECUTE FUNCTION public.rusa_human_approval_guard();
+
 -- Decisions and evidence are append-only. Approval rows may transition exactly once
 -- from pending to a terminal decision and are protected by compare-and-set in the service.
 CREATE OR REPLACE FUNCTION public.rusa_platform_append_only()
