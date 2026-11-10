@@ -17,7 +17,21 @@ This backlog translates the Platform Architecture 2.0 into sequenced engineering
 - Do not enable new production side effects as part of the architecture-only phase.
 - A green CI run validates only the exact commit and jobs executed; it is not production certification.
 
-## 2. Workstream overview
+## 2. Implementation progress on the architecture branch
+
+The initial contract slice has been added to this branch:
+
+- [x] Agent Manifest 1.0 Pydantic model and JSON Schema.
+- [x] Task Envelope 2.0 Pydantic model and JSON Schema.
+- [x] Agent Result 2.0 Pydantic model and JSON Schema.
+- [x] Workflow Event 2.0 Pydantic model and JSON Schema.
+- [x] AICode task/result compatibility adapters.
+- [x] Schema exporter and CI drift check.
+- [x] Contract validation and adapter round-trip tests.
+
+Still open in P0: the live agent registry, workflow/run/task persistence, DAG scheduler, transactional outbox/inbox, central policy decision service, and human approval records. The adapters are not yet wired into production task intake or worker execution.
+
+## 3. Workstream overview
 
 | Priority | Workstream | Outcome |
 |---|---|---|
@@ -33,7 +47,7 @@ This backlog translates the Platform Architecture 2.0 into sequenced engineering
 | P4 | RUSA Ecosystem | Developer platform, agent builder, integrations, and marketplace |
 | P5 | Enterprise qualification | Operational evidence and production certification |
 
-## 3. P0 — Architecture and naming alignment
+## 4. P0 — Architecture and naming alignment
 
 ### CORE-001 — Canonical orchestrator hierarchy
 
@@ -67,7 +81,7 @@ Acceptance criteria:
 - No UI surface labels a planned agent as active without a runtime registration and execution evidence.
 - The matrix records owner, status, contract version, tests, and evidence link.
 
-## 4. P0 — Agent and workflow contracts v2
+## 5. P0 — Agent and workflow contracts v2
 
 ### CORE-010 — Agent manifest schema
 
@@ -121,7 +135,7 @@ Acceptance criteria:
 - Existing evidence keys and current queue status values remain readable during migration.
 - Contract tests prove round-trip conversion without losing tenant, repository, task, evidence, or approval information.
 
-## 5. P0 — Durable workflow control plane
+## 6. P0 — Durable workflow control plane
 
 ### CORE-020 — Workflow data model
 
@@ -165,7 +179,7 @@ Acceptance criteria:
 - Event schema version, timestamp, producer, correlation, causation, and trace context are validated.
 - Metrics expose outbox age, publish failures, consumer lag, redelivery, and dead-letter counts.
 
-## 6. P0 — Agent registry and execution
+## 7. P0 — Agent registry and execution
 
 ### CORE-030 — Registry API and runtime binding
 
@@ -199,7 +213,7 @@ Acceptance criteria:
 - Domain orchestrators cannot access another domain's tools or data without an explicit cross-domain grant.
 - Supreme Orchestrator can coordinate domain runs but cannot override domain or platform policy.
 
-## 7. P0 — Policy, approval, and evidence
+## 8. P0 — Policy, approval, and evidence
 
 ### CORE-040 — Policy decision contract
 
@@ -231,7 +245,7 @@ Acceptance criteria:
 - Missing, stale, or mismatched evidence blocks completion or release.
 - Audit events retain evidence references and digest values.
 
-## 8. P1 — Software Engineering lifecycle
+## 9. P1 — Software Engineering lifecycle
 
 Implement the eight lifecycle identities in the supplied DevOps specification as a staged migration:
 
@@ -251,7 +265,7 @@ Acceptance criteria:
 - Merge, release promotion, production deployment, infrastructure mutation, and secret changes remain human-gated.
 - Monitor feedback creates a new workflow request; it does not silently mutate production.
 
-## 9. P1 — Model and knowledge integration
+## 10. P1 — Model and knowledge integration
 
 ### MODEL-001 — RusaModels API client
 
@@ -273,7 +287,7 @@ Acceptance criteria:
 - Retrieved content is treated as untrusted data, not instructions.
 - Research outputs preserve source references and retrieval provenance.
 
-## 10. P2 — RUSA Intelligence
+## 11. P2 — RUSA Intelligence
 
 Candidate first capabilities:
 
@@ -290,7 +304,7 @@ Acceptance criteria:
 - Data access is read-only by default; writes and external actions require policy grants.
 - Retrieval quality and groundedness are measured before activation.
 
-## 11. P3 — RUSA Business
+## 12. P3 — RUSA Business
 
 Candidate first capabilities:
 
@@ -306,7 +320,7 @@ Acceptance criteria:
 - CRM, accounting, email, and other connectors use scoped credentials through Tool Gateway.
 - Every business action has an operation ID, audit record, and reconciliation path.
 
-## 12. P4 — RUSA Ecosystem
+## 13. P4 — RUSA Ecosystem
 
 Candidate platform surfaces:
 
@@ -323,7 +337,7 @@ Acceptance criteria:
 - Tenant admins control installation, data access, and allowed capabilities.
 - Usage, costs, version changes, and deprecation are observable.
 
-## 13. P5 — Enterprise qualification
+## 14. P5 — Enterprise qualification
 
 Use the existing production-certification contract and its evidence-bound decision model. Do not create a parallel certification mechanism.
 
@@ -335,7 +349,7 @@ Acceptance criteria:
 - Missing evidence produces HOLD; mandatory failure produces FAIL.
 - No documentation or UI claims production-ready before an approved PASS decision.
 
-## 14. First implementation slice
+## 15. First implementation slice
 
 Recommended first code-bearing increment after this architecture PR:
 
@@ -347,7 +361,7 @@ Recommended first code-bearing increment after this architecture PR:
 
 This sequence gives RUSA AI a safe expansion point without disturbing the currently functioning coding-agent pipeline.
 
-## 15. Definition of done for Platform Core 2.0
+## 16. Definition of done for Platform Core 2.0
 
 - A versioned agent can be registered, validated, activated, suspended, and revoked.
 - A cross-domain workflow can be planned as a validated DAG and executed with bounded task ownership.
