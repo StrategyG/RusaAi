@@ -398,10 +398,11 @@ async def test_monitor_evaluates_slo_and_routes_alert_to_operate(tmp_path):
         },
     )
 
+    task = _monitor_task()
     outcome = await executor.execute(
-        _monitor_task(),
+        task,
         authenticated_principal=MONITOR_AGENT,
-        lease=_lease(_monitor_task(), MONITOR_AGENT),
+        lease=_lease(task, MONITOR_AGENT),
         checkpoint=lambda: True,
     )
 
