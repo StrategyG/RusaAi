@@ -20,6 +20,9 @@ from rusa_agents.devops.deploy import (
     DeployPolicy,
     RollbackExecutionResult,
     RollbackRehearsalResult,
+    _rollback_plan,
+    _smoke_test_plan,
+    _verify_release_candidate,
 )
 from rusa_agents.devops.release import ApprovalDecision
 from rusa_agents.devops.specialists import ExecutionLease
@@ -364,6 +367,33 @@ def _approval(task):
         issued_at=now - timedelta(minutes=1),
         expires_at=now + timedelta(minutes=10),
     )
+
+
+def test_deploy_fixture_release_and_plans_are_verifiable(tmp_path):
+    task = _task()
+    runner = FakeDeploymentRunner()
+    store, executor, _, verifier, _ = _executor(tmp_path, runner, task)
+    evidence, manifest = _verify_release_candidate(
+        store,
+        task["tenant_id"],
+        task["workflow_id"],
+        SOURCE_COMMIT,
+        ARTIFACT_DIGEST,
+        task["input"]["release_manifest_ref"],
+        task["input"]["release_evidence_ref"],
+        verifier,
+        frozenset({REGISTRY_HOST}),
+    )
+    smoke = _smoke_test_plan(
+        store, task["tenant_id"], task["input"]["smoke_test_plan_ref"],
+        frozenset({"api_smoke"}),
+    )
+    rollback = _rollback_plan(
+        store, task["tenant_id"], task["input"]["rollback_plan_ref"]
+    )
+    assert evidence["release_version"] == manifest["release_version"]
+    assert smoke["checks"]
+    assert rollback["expected_previous_digest"] == PREVIOUS_DIGEST
 
 
 def _executor(tmp_path, runner, task, *, auto_rollback=False):
