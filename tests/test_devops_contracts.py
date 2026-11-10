@@ -155,8 +155,17 @@ def test_agent_cannot_escalate_tools_write_scope_or_network_access():
     with pytest.raises(ContractValidationError, match="write scope"):
         validate_agent_task(task)
 
-    task = make_task()
-    task["constraints"]["network_access"] = True
+    task = make_task(
+        agent_id="rusa_build_agent",
+        stage="build",
+        constraints={
+            "allowed_tools": ["source.read", "container.build", "artifact.write"],
+            "network_access": True,
+            "write_scope": ["build-artifacts/"],
+            "approval_required": False,
+            "requested_actions": ["source.read", "container.build", "artifact.write"],
+        },
+    )
     with pytest.raises(ContractValidationError, match="network access"):
         validate_agent_task(task)
 
