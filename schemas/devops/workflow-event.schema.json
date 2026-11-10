@@ -68,7 +68,7 @@
     },
     "traceparent": {
       "type": "string",
-      "pattern": "^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+      "pattern": "^00-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$"
     },
     "producer": {
       "type": "string",
