@@ -11,22 +11,39 @@ from pydantic import ValidationError
 from rusa_agents.contract_adapters import (
     agent_result_to_worker_result,
     coding_task_to_envelope,
+    queue_status_from_legacy,
+    queue_status_to_legacy,
+    snapshot_to_task_record,
     task_envelope_to_coding_task,
+    task_record_to_snapshot,
     worker_result_to_agent_result,
 )
-from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerResult, WorkerRole
+from rusa_agents.contracts import (
+    CodingTask,
+    RepositoryTarget,
+    TaskRecord,
+    TaskState,
+    WorkerResult,
+    WorkerRole,
+)
 from rusa_agents.platform_contracts import (
     PLATFORM_SCHEMA_MODELS,
+    AICodeQueueStatusV1,
+    AICodeTaskStateV1,
     AgentDomain,
+    AgentHealthStatus,
     AgentManifestV1,
     AgentResultV2,
     AgentStatus,
     ArtifactReference,
+    EvidenceReference,
     TaskEnvelopeV2,
     TaskOutcome,
+    TaskRecordSnapshotV2,
     WorkflowEventV2,
     normalize_contract_schema,
     platform_contract_schema,
+    validate_manifest_update,
 )
 
 NOW = datetime(2026, 11, 10, 6, 0, tzinfo=timezone.utc)
@@ -50,6 +67,7 @@ def _manifest_payload() -> dict:
         "policy_profile": "software-engineering-default",
         "evaluation_profile": "planning-v1",
         "owner": "platform-engineering",
+        "health": {"status": "unknown"},
         "created_at": NOW.isoformat(),
         "updated_at": NOW.isoformat(),
     }
@@ -284,6 +302,12 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
         "workflow-event.v2.schema.json": WorkflowEventV2.model_validate(
             _event_payload()
         ).model_dump(mode="json"),
+        "task-record.v2.schema.json": TaskRecordSnapshotV2(
+            task=TaskEnvelopeV2.model_validate(_task_payload()),
+            state=AICodeTaskStateV1.AWAITING_APPROVAL,
+            updated_at=NOW,
+            queue_status=AICodeQueueStatusV1.AWAITING_APPROVAL,
+        ).model_dump(mode="json"),
     }
     schema_dir = Path("schemas/platform")
 
@@ -307,3 +331,245 @@ def test_artifact_reference_rejects_malformed_sha256() -> None:
             uri="artifact://test/report.json",
             sha256="not-a-digest",
         )
+
+
+
+def test_published_manifest_content_is_immutable_but_health_and_status_can_change() -> None:
+    previous = AgentManifestV1.model_validate(_manifest_payload())
+    candidate_payload = _manifest_payload()
+    candidate_payload["status"] = "active"
+    candidate_payload["health"] = {
+        "status": "healthy",
+        "checked_at": (NOW + timedelta(minutes=1)).isoformat(),
+    }
+    candidate_payload["updated_at"] = (NOW + timedelta(minutes=1)).isoformat()
+    candidate = AgentManifestV1.model_validate(candidate_payload)
+    validate_manifest_update(previous, candidate)
+
+    changed = candidate.model_dump(mode="json")
+    changed["tool_allowlist"] = ["delete_repository"]
+    with pytest.raises(ValueError, match="published agent manifest content is immutable"):
+        validate_manifest_update(candidate, AgentManifestV1.model_validate(changed))
+
+    changed = candidate.model_dump(mode="json")
+    changed["version"] = "2.0.0"
+    with pytest.raises(ValueError, match="published agent version is immutable"):
+        validate_manifest_update(candidate, AgentManifestV1.model_validate(changed))
+
+
+def test_manifest_health_snapshot_has_bounded_status_and_timezone() -> None:
+    payload = _manifest_payload()
+    payload["health"] = {
+        "status": AgentHealthStatus.DEGRADED.value,
+        "checked_at": NOW.replace(tzinfo=None).isoformat(),
+    }
+    with pytest.raises(ValidationError, match="timestamp must include a timezone"):
+        AgentManifestV1.model_validate(payload)
+
+
+def test_task_envelope_preserves_approval_contract() -> None:
+    envelope = TaskEnvelopeV2.model_validate(_task_payload())
+    assert envelope.approval_required
+    assert envelope.approval_ref == "approval://change-123"
+
+
+def test_workflow_events_validate_known_payloads_and_ignore_unknown_optional_fields() -> None:
+    event = WorkflowEventV2.model_validate(
+        {
+            "tenant_id": "tenant-a",
+            "workflow_id": "workflow-1",
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt": 1,
+            "correlation_id": "workflow-1",
+            "event_type": "task.accepted",
+            "producer_id": "aicode.worker.developer",
+            "producer_version": "1.0.0",
+            "occurred_at": NOW.isoformat(),
+            "future_optional_field": "ignored by same-major consumer",
+            "payload": {
+                "worker_id": "worker-1",
+                "lease_epoch": 1,
+                "state_version": 2,
+                "future_optional_field": {"new": "field"},
+            },
+        }
+    )
+    assert event.event_type == "task.accepted"
+
+    invalid = {
+        "tenant_id": "tenant-a",
+        "workflow_id": "workflow-1",
+        "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt": 1,
+        "correlation_id": "workflow-1",
+        "event_type": "task.accepted",
+        "producer_id": "worker-1",
+        "producer_version": "1.0.0",
+        "occurred_at": NOW.isoformat(),
+        "payload": {"worker_id": "worker-1", "lease_epoch": 0, "state_version": 1},
+    }
+    with pytest.raises(ValidationError):
+        WorkflowEventV2.model_validate(invalid)
+
+
+def test_validation_verdict_is_bound_to_exact_artifact_digest() -> None:
+    digest = "sha256:" + "b" * 64
+    evidence = EvidenceReference(
+        uri="artifact://runs/run-1/test-report.json",
+        sha256="sha256:" + "a" * 64,
+        kind="test_report",
+        producer_id="aicode.worker.tester",
+        subject_digest=digest,
+    )
+    event = WorkflowEventV2.model_validate(
+        {
+            "tenant_id": "tenant-a",
+            "workflow_id": "workflow-1",
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "attempt": 1,
+            "correlation_id": "workflow-1",
+            "event_type": "validation.verdict",
+            "producer_id": "qa-agent",
+            "producer_version": "1.0.0",
+            "occurred_at": NOW.isoformat(),
+            "payload": {
+                "verdict": "passed",
+                "subject_digest": digest,
+                "producer_id": "qa-agent",
+                "test_profile": "release-gate-v1",
+                "evidence_refs": [evidence.model_dump(mode="json")],
+                "evaluated_at": NOW.isoformat(),
+                "summary": "Exact artifact passed the release gate",
+            },
+        }
+    )
+    assert event.event_type == "validation.verdict"
+
+    invalid_payload = {
+        "verdict": "passed",
+        "subject_digest": digest,
+        "producer_id": "qa-agent",
+        "test_profile": "release-gate-v1",
+        "evidence_refs": [
+            {
+                "uri": "artifact://runs/run-1/test-report.json",
+                "sha256": "sha256:" + "a" * 64,
+                "kind": "test_report",
+                "producer_id": "aicode.worker.tester",
+                "subject_digest": "sha256:" + "c" * 64,
+            }
+        ],
+        "evaluated_at": NOW.isoformat(),
+        "summary": "Mismatched evidence must fail",
+    }
+    with pytest.raises(ValidationError, match="validation evidence subject digest"):
+        WorkflowEventV2.model_validate(
+            {
+                "tenant_id": "tenant-a",
+                "workflow_id": "workflow-1",
+                "run_id": "run-1",
+                "correlation_id": "workflow-1",
+                "event_type": "validation.verdict",
+                "producer_id": "qa-agent",
+                "producer_version": "1.0.0",
+                "occurred_at": NOW.isoformat(),
+                "payload": invalid_payload,
+            }
+        )
+
+
+def test_aicode_task_record_round_trip_preserves_state_results_approval_and_tenant() -> None:
+    task = CodingTask(
+        objective="Prepare a controlled repository change",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi",
+            "main",
+            "feature/contract-adapter",
+        ),
+        acceptance_criteria=["All contract tests pass"],
+        context="Preserve current worker and queue semantics",
+        metadata={
+            "tenant_id": "tenant-a",
+            "approval_required": True,
+            "approval_ref": "approval://release/123",
+            "policy_id": "release-policy",
+            "policy_version": "3",
+            "unapproved_extra": "must not cross the adapter",
+        },
+    )
+    record = TaskRecord(
+        task=task,
+        state=TaskState.AWAITING_APPROVAL,
+        results=[
+            WorkerResult(
+                role=WorkerRole.TESTER,
+                summary="Tests passed",
+                success=True,
+                artifacts=["reports/test.json"],
+                evidence={"check:pytest": {"exit_code": 0}},
+            ),
+            WorkerResult(
+                role=WorkerRole.SECURITY,
+                summary="Security checks passed",
+                success=True,
+                artifacts=["reports/security.json"],
+                evidence={"check:bandit": {"exit_code": 0}},
+            ),
+        ],
+        errors=["Awaiting release approval"],
+        updated_at=(NOW + timedelta(minutes=2)).isoformat(),
+    )
+
+    snapshot = task_record_to_snapshot(
+        record,
+        queue_status=queue_status_from_legacy("awaiting_approval"),
+    )
+    assert snapshot.state == AICodeTaskStateV1.AWAITING_APPROVAL
+    assert snapshot.task.approval_required
+    assert snapshot.task.approval_ref == "approval://release/123"
+    assert "unapproved_extra" not in snapshot.task.model_dump(mode="json")
+
+    restored = snapshot_to_task_record(snapshot)
+    assert restored.task.task_id == record.task.task_id
+    assert restored.task.repository == record.task.repository
+    assert restored.task.metadata == {
+        "tenant_id": "tenant-a",
+        "approval_required": True,
+        "approval_ref": "approval://release/123",
+        "policy_id": "release-policy",
+        "policy_version": "3",
+    }
+    assert restored.state == record.state
+    assert restored.errors == record.errors
+    assert [item.role for item in restored.results] == [WorkerRole.TESTER, WorkerRole.SECURITY]
+    assert [item.evidence for item in restored.results] == [
+        item.evidence for item in record.results
+    ]
+    assert snapshot.queue_status == AICodeQueueStatusV1.AWAITING_APPROVAL
+
+
+def test_all_six_worker_roles_and_queue_status_values_remain_compatible() -> None:
+    for role in WorkerRole:
+        task = CodingTask(
+            objective=f"Check {role.value} compatibility",
+            repository=RepositoryTarget("StrategyG/RusaAi"),
+            acceptance_criteria=["Role identity preserved"],
+        )
+        envelope = coding_task_to_envelope(task)
+        legacy = WorkerResult(
+            role=role,
+            summary=f"{role.value} completed",
+            success=True,
+            evidence={f"legacy:{role.value}": {"exit_code": 0}},
+        )
+        adapted = worker_result_to_agent_result(legacy, envelope)
+        assert adapted.agent_id == f"aicode.worker.{role.value}"
+        restored = agent_result_to_worker_result(adapted, role=role)
+        assert restored.role == role
+        assert restored.evidence == legacy.evidence
+
+    statuses = ("queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled")
+    assert [queue_status_to_legacy(queue_status_from_legacy(item)) for item in statuses] == list(statuses)
