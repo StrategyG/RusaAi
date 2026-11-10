@@ -483,6 +483,7 @@ class PostgresTaskQueue:
         releases the row. The publisher must use a task/lease-specific branch.
         """
         self._validate_queue_name(queue_name)
+        self._validate_queue_name(queue_name)
         if (
             type(job_id) is not int
             or job_id <= 0
@@ -552,7 +553,9 @@ class PostgresTaskQueue:
         worker_id: str,
         lease_token: str,
         result: dict[str, Any] | None = None,
+        *, queue_name: str = "aicode",
     ) -> bool:
+        self._validate_queue_name(queue_name)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
@@ -560,9 +563,10 @@ class PostgresTaskQueue:
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+                  AND queue_name=%s
             """, (
                 json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
-                job_id, tenant_id, worker_id, lease_token,
+                job_id, tenant_id, worker_id, lease_token, queue_name,
             ))
         return cur.rowcount == 1
 
@@ -574,7 +578,9 @@ class PostgresTaskQueue:
         lease_token: str,
         reason: str,
         result: dict[str, Any] | None = None,
+        *, queue_name: str = "aicode",
     ) -> bool:
+        self._validate_queue_name(queue_name)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
@@ -583,16 +589,19 @@ class PostgresTaskQueue:
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+                  AND queue_name=%s
             """, (
                 json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
-                reason[:4000], job_id, tenant_id, worker_id, lease_token,
+                reason[:4000], job_id, tenant_id, worker_id, lease_token, queue_name,
             ))
         return cur.rowcount == 1
 
     def fail(
         self, job_id: int, tenant_id: str, worker_id: str,
-        lease_token: str, error: str, retry_delay_seconds: int = 30,
+        lease_token: str, error: str, retry_delay_seconds: int = 30, *,
+        queue_name: str = "aicode",
     ) -> bool:
+        self._validate_queue_name(queue_name)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
@@ -603,9 +612,10 @@ class PostgresTaskQueue:
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
+                  AND queue_name=%s
             """, (
                 max(0, retry_delay_seconds), error[:4000],
-                job_id, tenant_id, worker_id, lease_token,
+                job_id, tenant_id, worker_id, lease_token, queue_name,
             ))
         return cur.rowcount == 1
 
@@ -617,6 +627,7 @@ class PostgresTaskQueue:
         tenant_id: str,
         worker_id: str,
         lease_token: str,
+        *, queue_name: str = "aicode",
     ) -> bool:
         """Atomically verify a live tenant-bound lease and append its policy decision."""
         if (
@@ -636,10 +647,10 @@ class PostgresTaskQueue:
                 SELECT 1 FROM aicode_jobs
                 WHERE id=%s AND task_id=%s AND tenant_id=%s
                   AND lease_owner=%s AND lease_token=%s::uuid
-                  AND status='running' AND lease_until > NOW()
+                  AND status='running' AND lease_until > NOW() AND queue_name=%s
                 FOR UPDATE
                 """,
-                (job_id, task_id, tenant_id, worker_id, lease_token),
+                (job_id, task_id, tenant_id, worker_id, lease_token, queue_name),
             ).fetchone()
             self._record_policy_event(
                 conn,
@@ -653,7 +664,9 @@ class PostgresTaskQueue:
 
     def owns_lease(
         self, job_id: int, tenant_id: str, worker_id: str, lease_token: str,
+        *, queue_name: str = "aicode",
     ) -> bool:
+        self._validate_queue_name(queue_name)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
@@ -661,9 +674,9 @@ class PostgresTaskQueue:
                     SELECT 1 FROM aicode_jobs
                     WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                       AND lease_token=%s::uuid AND status='running'
-                      AND lease_until > NOW()
+                      AND lease_until > NOW() AND queue_name=%s
                 )
-            """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
+            """, (job_id, tenant_id, worker_id, lease_token, queue_name)).fetchone()
         return bool(row and row[0])
 
     def retry(
