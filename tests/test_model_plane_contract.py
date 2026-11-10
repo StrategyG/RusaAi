@@ -28,6 +28,12 @@ def valid_request() -> dict:
         "task_id": "task_01",
         "model_profile": "private-code-reasoning",
         "capability": "chat",
+        "policy_decision": {
+            "decision_id": "decision_01",
+            "policy_id": "model-inference-policy",
+            "policy_version": "1.0.0",
+            "input_sha256": "a" * 64,
+        },
         "input": {
             "messages": [{"role": "user", "content": "Review this change."}],
             "temperature": 0,
@@ -114,6 +120,14 @@ def test_request_rejects_unsupported_capability() -> None:
     payload["capability"] = "tool_execution"
     with pytest.raises(jsonschema.ValidationError):
         validator("inference-request.schema.json").validate(payload)
+
+
+def test_request_requires_trace_and_policy_decision_binding() -> None:
+    for field in ("traceparent", "policy_decision"):
+        payload = valid_request()
+        payload.pop(field)
+        with pytest.raises(jsonschema.ValidationError):
+            validator("inference-request.schema.json").validate(payload)
 
 
 def test_valid_inference_response_matches_contract() -> None:
