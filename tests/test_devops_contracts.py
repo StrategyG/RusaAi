@@ -118,9 +118,11 @@ def test_security_guard_is_cross_cutting_and_read_only():
     payload.update(agent_id="rusa_security_guard_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "staging",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "service": "rusa-api",
         "evidence_refs": ["evidence://release/verification"],
     }
     payload["constraints"].update(
@@ -136,12 +138,14 @@ def test_deploy_task_requires_approval_and_deploy_scope():
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "production",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "service": "rusa-api",
     }
     payload["constraints"].update(
-        allowed_tools=["artifact.read", "release.read", "deployment.execute"],
+        allowed_tools=["artifact.read", "release.read", "deployment.execute", "evidence.write"],
         approval_required=False,
         approval_scope=[],
     )
@@ -379,11 +383,15 @@ def test_release_task_requires_the_commit_that_produced_its_artifact():
     payload["input"] = {
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "build_evidence_ref": "evidence://build/verified",
         "test_evidence_ref": "evidence://tests/verified",
         "sbom_ref": "artifact://sbom/verified",
+        "release_metadata_ref": "artifact://release/metadata",
+        "rollback_plan_ref": "artifact://release/rollback",
+        "service": "rusa-api",
     }
     payload["constraints"]["allowed_tools"] = [
-        "artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read"
+        "artifact.read", "evidence.read", "release.prepare", "manifest.write", "sbom.read", "evidence.write"
     ]
     validate_agent_task(payload)
     payload["input"].pop("commit_sha")
@@ -396,12 +404,14 @@ def test_deploy_task_requires_source_commit_and_immutable_digest():
     payload.update(agent_id="rusa_deploy_agent", stage="deploy")
     payload["input"] = {
         "release_manifest_ref": "artifact://release/manifest",
+        "release_evidence_ref": "evidence://release/attestation",
         "environment": "staging",
         "commit_sha": "a" * 40,
         "artifact_digest": "sha256:" + "b" * 64,
+        "service": "rusa-api",
     }
     payload["constraints"]["allowed_tools"] = [
-        "artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read"
+        "artifact.read", "release.read", "deployment.execute", "health.read", "runbook.read", "evidence.write"
     ]
     validate_agent_task(payload)
     payload["input"].pop("commit_sha")
