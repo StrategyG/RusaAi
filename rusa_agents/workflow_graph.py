@@ -1,11 +1,12 @@
 """Validated workflow DAG primitives for bounded, tenant-safe task scheduling."""
 from __future__ import annotations
 
+import math
 from collections import defaultdict, deque
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import math
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 
 class WorkflowGraphError(ValueError):
