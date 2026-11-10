@@ -533,6 +533,7 @@ class ValidationVerdictPayloadV2(EventContractModel):
     verdict: Literal["passed", "failed", "inconclusive", "hold"]
     subject_digest: str = Field(pattern=_SHA256_PATTERN)
     producer_id: str = Field(min_length=1, max_length=128)
+    producer_version: str = Field(min_length=1, max_length=64)
     test_profile: str = Field(min_length=1, max_length=128)
     evidence_refs: list[EvidenceReference] = Field(min_length=1, max_length=256)
     evaluated_at: datetime = Field(default_factory=utc_now)
