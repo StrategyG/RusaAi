@@ -808,9 +808,13 @@ def test_policy_violation_approval_request_and_audit_event_payloads() -> None:
         },
         "approval.requested": {
             "approval_id": "approval-123",
+            "workflow_id": "workflow-1",
+            "run_id": "run-1",
+            "task_id": "task-1",
             "requested_by": "release-agent",
             "action": "release.promote",
             "resource_ref": "artifact://release/candidate",
+            "binding_sha256": "sha256:" + "e" * 64,
             "reason": "Production release requires an approver",
             "policy_id": "release-policy",
             "policy_version": "3",
