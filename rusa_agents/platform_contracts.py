@@ -5,7 +5,6 @@ A2A wire protocol in schemas/a2a/task-envelope.schema.json.
 """
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
