@@ -40,7 +40,7 @@ def test_agent_task_json_schema_matches_typed_model():
         "acceptance_criteria": ["Plan includes test and security gates"],
         "attempt": 1,
         "deadline_at": "2026-11-11T12:00:00Z",
-        "idempotency_key": "workflow-schema/task-schema/1",
+        "idempotency_key": "workflow-schema.task-schema.1",
         "correlation_id": "corr-schema",
         "traceparent": TRACEPARENT,
     })
