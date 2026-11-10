@@ -7,9 +7,9 @@ from uuid import uuid4
 from .contracts import CodingTask, RepositoryTarget, TaskRecord, TaskState, WorkerResult, WorkerRole
 from .platform_contracts import (
     AgentDomain,
+    AgentResultV2,
     AICodeQueueStatusV1,
     AICodeTaskStateV1,
-    AgentResultV2,
     ExecutionBudget,
     TaskEnvelopeV2,
     TaskOutcome,
@@ -46,9 +46,10 @@ def coding_task_to_envelope(
     The one-hour/100-tool-call defaults are migration bounds, not a replacement
     for a future tenant policy or an agent manifest budget.
     """
-    tenant_id = str(task.metadata.get("tenant_id", "default")).strip()
-    if not tenant_id:
-        raise ValueError("task tenant_id cannot be empty")
+    raw_tenant_id = task.metadata.get("tenant_id", "default")
+    if not isinstance(raw_tenant_id, str) or not raw_tenant_id.strip():
+        raise ValueError("task tenant_id must be a non-empty string")
+    tenant_id = raw_tenant_id.strip()
 
     effective_budget = budget or ExecutionBudget()
     created_at = _legacy_timestamp(task.created_at)
