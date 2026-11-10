@@ -89,7 +89,7 @@ class SideEffect(str, enum.Enum):
     UNKNOWN = "UNKNOWN"
 
 
-def _require_timezone(value: datetime.datetime, field_name: str) -> datetime:
+def _require_timezone(value: datetime.datetime, field_name: str) -> datetime.datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must include a timezone")
     return value
@@ -258,7 +258,7 @@ class TaskRequestPayload(ContractModel):
 
     @field_validator("deadline_at")
     @classmethod
-    def validate_deadline(cls, value: datetime):
+    def validate_deadline(cls, value: datetime.datetime):
         return _require_timezone(value, "deadline_at")
 
 
@@ -365,12 +365,12 @@ class WorkflowEvent(ContractModel):
     causation_id: str | None = Field(default=None, min_length=1, max_length=128)
     traceparent: str = Field(pattern=TRACEPARENT_PATTERN)
     producer: str = Field(min_length=1, max_length=128)
-    occurred_at: datetime
+    occurred_at: datetime.datetime
     payload: dict[str, typing.Any]
 
     @field_validator("occurred_at")
     @classmethod
-    def validate_occurred_at(cls, value: datetime):
+    def validate_occurred_at(cls, value: datetime.datetime):
         return _require_timezone(value, "occurred_at")
 
     @model_validator(mode="after")
