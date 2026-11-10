@@ -342,6 +342,7 @@ def _result(
     started_at: datetime,
     handoff: dict[str, str] | None = None,
     source_commit: str | None = None,
+    artifact_digest: str | None = None,
     approval_ref: str | None = None,
 ) -> dict[str, Any]:
     audit: dict[str, Any] = {
@@ -351,6 +352,8 @@ def _result(
     }
     if source_commit:
         audit["source_commit"] = source_commit
+    if artifact_digest:
+        audit["artifact_digest"] = artifact_digest
     result: dict[str, Any] = {
         "schema_version": 1,
         "task_id": task["task_id"],
@@ -385,6 +388,8 @@ def _failure(
     status: str = "failed",
     side_effect: str = "NONE",
     failure_category: str = "PERMANENT",
+    source_commit: str | None = None,
+    artifact_digest: str | None = None,
 ) -> SpecialistOutcome:
     result = _result(
         task,
@@ -394,6 +399,8 @@ def _failure(
         evidence_refs=[],
         findings=[{"severity": "high", "code": code, "message": message[:1000]}],
         started_at=started_at,
+        source_commit=source_commit,
+        artifact_digest=artifact_digest,
     )
     return SpecialistOutcome(
         result=result,

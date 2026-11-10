@@ -93,14 +93,57 @@ atomic claim transaction and verifies the lease epoch remains zero.
   heartbeat renewal and cancellation during model/tool execution. The worker
   host remains responsible for running the heartbeat loop.
 
-## Explicitly not completed by Phase 4B
+## Phase 4C — Build and independent QA
 
-- Build Agent reproducible build execution and SBOM generation.
-- Independent Test Agent execution and commit/digest-bound QA evidence.
-- Cryptographically signed build, SBOM, test, and release evidence.
-- Release-candidate publication and staging deployment.
+The Build and Test specialists are separate claim-bound executors. Both
+require an authenticated workload principal, an accepted durable claim, a
+live lease/cancellation checkpoint, and the capability/write scopes in the
+agent registry.
+
+### Build Agent
+
+- Accepts only a content-addressed build profile with an allowlisted recipe,
+  approved target platforms, network access disabled, and a two-clean-build
+  reproducibility requirement.
+- Delegates execution to an injected isolated BuildKit runner. The task never
+  supplies shell commands, Docker arguments, credentials, or registry hosts.
+- Requires both clean builds to produce the same SHA-256 OCI digest and
+  validates the exact registry host against a host-side allowlist.
+- Validates SPDX or CycloneDX SBOM JSON, stores it immutably, and signs both
+  the SBOM attestation and build provenance using a Build Agent workload key.
+- Emits a Build-to-Test handoff only after artifact, SBOM, and provenance
+  evidence have been stored and signed.
+
+### Independent Test Agent
+
+- Requires a separate Test Agent identity and a signed Build evidence ref.
+- Verifies the Build and SBOM detached signatures against trusted workload
+  keys and checks tenant, workflow, source commit, artifact digest, SBOM
+  digest, and approved OCI registry before invoking the test runner.
+- Accepts only named suites from an offline test plan; no task-provided shell
+  command or arbitrary network access is accepted.
+- Runs the exact OCI artifact and rejects runner output that reports a
+  different source commit or artifact digest.
+- Signs the immutable test report. Required skipped suites and any failed
+  suite produce a failed QA result with no Release handoff.
+- A passing result is bound to the exact source commit, artifact digest,
+  Build evidence, SBOM evidence, test plan, and acceptance criteria.
+
+### Execution adapter boundary
+
+The BuildKit and test runner are injected host adapters, not shell commands
+executed by the agent model. Unit tests use deterministic fakes and verify
+authorization, reproducibility, evidence signatures, tenant isolation,
+commit/digest binding, and QA independence. A production rollout still needs
+the actual isolated builder/test services, workload key provisioning and
+rotation, durable worker heartbeat integration, and Release Agent verification.
+
+## Explicitly not completed by Phase 4C
+
+- Release Agent verification of signed Build, SBOM, and Test evidence.
+- Signed release-candidate publication and staging-only deployment.
 - Deploy, Operate, Monitor, and Security Guard stage handlers.
-- Production worker-pool provisioning and orchestration of live child tasks.
+- Production BuildKit/test service provisioning, worker-pool provisioning, and live child-task orchestration.
 
 ## Next increments
 

@@ -29,6 +29,13 @@ from .specialists import (
     SpecialistExecutionError,
     SpecialistOutcome,
 )
+from .build_test import (
+    BuildAgentExecutor,
+    BuildExecutionResult,
+    TestAgentExecutor,
+    TestExecutionResult,
+    TestSuiteResult,
+)
 from .store import (
     OutboxLeaseLostError,
     PostgresInbox,
@@ -43,6 +50,8 @@ __all__ = [
     "AgentPolicy",
     "ArtifactIntegrityError",
     "ArtifactNotFoundError",
+    "BuildAgentExecutor",
+    "BuildExecutionResult",
     "CodeAgentExecutor",
     "ContentAddressedArtifactStore",
     "ContractValidationError",
@@ -59,6 +68,9 @@ __all__ = [
     "SpecialistExecutionError",
     "SpecialistOutcome",
     "SyntheticDevOpsAgent",
+    "TestAgentExecutor",
+    "TestExecutionResult",
+    "TestSuiteResult",
     "WorkflowIdempotencyConflictError",
     "authorize_agent_task",
     "registered_agent_ids",

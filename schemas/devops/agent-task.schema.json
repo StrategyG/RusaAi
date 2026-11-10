@@ -112,6 +112,10 @@
           "type": "string",
           "format": "uri"
         },
+        "build_evidence_ref": {
+          "type": "string",
+          "format": "uri"
+        },
         "test_evidence_ref": {
           "type": "string",
           "format": "uri"
@@ -523,6 +527,7 @@
             "required": [
               "commit_sha",
               "test_plan_ref",
+              "build_evidence_ref",
               "acceptance_criteria_ref",
               "artifact_digest"
             ]
