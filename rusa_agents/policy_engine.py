@@ -201,10 +201,10 @@ class PostgresPolicyDecisionStore:
             evaluated_at=row[10], approval_id=row[11],
         )
 
-    def record(self, decision: PolicyDecisionV1) -> None:
+    def record(self, decision: PolicyDecisionV1) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, decision.tenant_id)
-            conn.execute(
+            inserted = conn.execute(
                 """
                 INSERT INTO public.rusa_policy_decisions(
                     tenant_id, decision_id, actor, action, resource_ref,
@@ -221,6 +221,7 @@ class PostgresPolicyDecisionStore:
                     decision.input_sha256, decision.evaluated_at, decision.approval_id,
                 ),
             )
+            return inserted.rowcount == 1
 
 
 class PolicyDecisionService:
@@ -241,5 +242,10 @@ class PolicyDecisionService:
                 previous = self.store.find_identical_denial(decision)
                 if previous is not None:
                     return previous
-            self.store.record(decision)
+            if not self.store.record(decision):
+                if decision.outcome == "deny":
+                    previous = self.store.find_identical_denial(decision)
+                    if previous is not None:
+                        return previous
+                raise PolicyDecisionError("policy decision was not durably recorded")
         return decision
