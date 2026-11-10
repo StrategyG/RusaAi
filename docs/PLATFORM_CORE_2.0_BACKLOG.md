@@ -383,7 +383,7 @@ Acceptance criteria:
 The branch includes the following implementation increment:
 
 1. Versioned Pydantic contracts and generated JSON Schemas, plus backward-compatible AICode adapters.
-2. Migrations 009 and 010 for workflow control-plane and governance persistence.
+2. Migrations 010 and 011 for workflow control-plane and governance persistence.
 3. PostgreSQL workflow store, DAG validator, transactional outbox/inbox, and bounded task scheduler primitives.
 4. Agent registry, capability authorization, Tool Gateway authorization path, and domain-orchestrator adapter.
 5. Deterministic policy decision service, durable human approvals, one-time approval consumption, and immutable evidence verification.
@@ -391,7 +391,7 @@ The branch includes the following implementation increment:
 
 **Integration boundary:** the new platform services are available as separate components, but they are not yet the live execution path for existing AICode intake and worker dispatch. No Supreme Orchestrator or eight lifecycle agents are promoted to active runtime identities by this increment. Existing AICode APIs, six worker roles, and queue remain the compatibility baseline.
 
-**Migration safety:** migrations 009 and 010 are additive and leave `aicode_jobs` intact. They contain append-only event/evidence/audit data; do not perform a destructive down-migration. Any rollback must use a reviewed backup/restore or forward-fix plan, with owner approval and a rehearsal against a representative database before production use.
+**Migration safety:** migrations 010 and 011 are additive and leave `aicode_jobs` intact. They contain append-only event/evidence/audit data; do not perform a destructive down-migration. Any rollback must use a reviewed backup/restore or forward-fix plan, with owner approval and a rehearsal against a representative database before production use.
 
 **Validation evidence:** see Section 2 for exact CI commit and suite counts. CI success is not production certification; the remaining HIGH image findings and the open runtime/operational qualification items must be dispositioned separately.
 

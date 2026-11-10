@@ -226,6 +226,10 @@ def evaluate_production_certification(
 
     failures: list[str] = []
     holds: list[str] = []
+
+    generated_at = datetime.fromisoformat(payload["generated_at"].replace("Z", "+00:00"))
+    if generated_at.astimezone(timezone.utc) > current:
+        holds.append("certification document generation timestamp is in the future")
     candidate = payload["candidate"]
     candidate_sha = candidate["commit_sha"].lower()
 
@@ -241,6 +245,9 @@ def evaluate_production_certification(
         holds.append("certification evidence attestation has not been verified")
 
     for check_name, check in payload["checks"].items():
+        observed_at = datetime.fromisoformat(check["observed_at"].replace("Z", "+00:00"))
+        if observed_at.astimezone(timezone.utc) > current:
+            holds.append(f"{check_name}: evidence observation timestamp is in the future")
         if check["subject_commit_sha"].lower() != candidate_sha:
             failures.append(f"{check_name}: evidence targets a different source commit")
         if check["status"] == "FAIL":

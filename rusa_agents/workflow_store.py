@@ -112,7 +112,7 @@ class PostgresWorkflowStore:
             if set(states) != required:
                 missing = sorted(required - set(states))
                 raise RuntimeError(
-                    "Platform Core migrations are missing; apply 009 and 010. Missing: "
+                    "Platform Core migrations are missing; apply 010 and 011. Missing: "
                     + ", ".join(missing)
                 )
             if any(not enabled or not forced for enabled, forced in states.values()):

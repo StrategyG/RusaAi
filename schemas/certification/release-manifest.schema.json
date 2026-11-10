@@ -349,7 +349,7 @@
                 },
                 "medium": {
                   "type": "integer",
-                  "minimu": 0
+                  "minimum": 0
                 },
                 "low": {
                   "type": "integer",

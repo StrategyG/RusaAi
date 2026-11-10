@@ -1,5 +1,5 @@
 -- Platform Core 2.0 durable workflow state, task DAG, event log, outbox, and inbox.
--- Apply after 008_aicode_task_list_audit.sql. Existing aicode_jobs remains unchanged.
+-- Apply after 009_knowledge_embedding_384.sql when that vector migration is installed; Platform Core does not depend on its vector columns. Existing aicode_jobs remains unchanged.
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS public.rusa_workflow_runs (

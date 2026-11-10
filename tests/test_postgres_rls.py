@@ -53,11 +53,11 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
-            # 007 is the optional pgvector migration; this PostgreSQL service image
-            # does not bundle the vector extension. Platform Core is tested separately.
+            # 007 and 009 add vector-backed knowledge schemas; this PostgreSQL service
+            # image does not bundle pgvector. Platform Core migrations are independent.
             "008_aicode_task_list_audit.sql",
-            "009_platform_workflow_core.sql",
-            "010_platform_governance_registry.sql",
+            "010_platform_workflow_core.sql",
+            "011_platform_governance_registry.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),

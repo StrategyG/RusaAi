@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == list(range(1, 11))
+    assert versions == list(range(1, 12))
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -45,8 +45,8 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "008_aicode_task_list_audit.sql",
-        "009_platform_workflow_core.sql",
-        "010_platform_governance_registry.sql",
+        "010_platform_workflow_core.sql",
+        "011_platform_governance_registry.sql",
     ]
 
 
@@ -62,7 +62,7 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
 
 
 def test_platform_workflow_migration_has_tenant_scoped_cas_outbox_and_dedup_contracts():
-    migration = Path("migrations/009_platform_workflow_core.sql").read_text(encoding="utf-8")
+    migration = Path("migrations/010_platform_workflow_core.sql").read_text(encoding="utf-8")
     assert "rusa_workflow_runs" in migration
     assert "rusa_workflow_tasks" in migration
     assert "rusa_workflow_dependencies" in migration
@@ -84,7 +84,7 @@ def test_platform_workflow_migration_has_tenant_scoped_cas_outbox_and_dedup_cont
 
 
 def test_governance_migration_has_registry_approval_consumption_and_immutable_evidence():
-    migration = Path("migrations/010_platform_governance_registry.sql").read_text(encoding="utf-8")
+    migration = Path("migrations/011_platform_governance_registry.sql").read_text(encoding="utf-8")
     assert "rusa_agent_registry" in migration
     assert "rusa_agent_registry_events" in migration
     assert "rusa_policy_decisions" in migration

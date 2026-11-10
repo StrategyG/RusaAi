@@ -40,8 +40,8 @@ class PostgresKnowledgeStore:
     ) -> None:
         if not dsn:
             raise ValueError("knowledge database DSN is required")
-        if dimensions != 1536:
-            raise ValueError("the current migration fixes embedding dimensions at 1536")
+        if dimensions not in {384, 1536}:
+            raise ValueError("embedding dimensions must be 384 or 1536")
         if not 1 <= min_pool_size <= max_pool_size <= 50:
             raise ValueError("database pool limits are invalid")
         if db_role is not None and not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", db_role):
@@ -52,6 +52,8 @@ class PostgresKnowledgeStore:
         except ImportError as exc:
             raise RuntimeError("install psycopg with the pool extra to use the knowledge store") from exc
         self.dimensions = dimensions
+        # Both identifiers are fixed constants selected from the supported dimension allowlist.
+        self.embedding_column = "embedding_384" if dimensions == 384 else "embedding"
         self._pool = ConnectionPool(
             conninfo=dsn,
             min_size=min_pool_size,
@@ -91,10 +93,10 @@ class PostgresKnowledgeStore:
                         FROM pg_class WHERE oid = to_regclass('public.rusa_knowledge_chunks')
                     ), false),
                     COALESCE((
-                        SELECT format_type(a.atttypid, a.atttypmod) = 'vector(1536)'
+                        SELECT format_type(a.atttypid, a.atttypmod) = %s
                         FROM pg_attribute a
                         WHERE a.attrelid = to_regclass('public.rusa_knowledge_chunks')
-                          AND a.attname = 'embedding' AND NOT a.attisdropped
+                          AND a.attname = %s AND NOT a.attisdropped
                     ), false),
                     EXISTS (
                         SELECT 1 FROM pg_policies
@@ -118,7 +120,8 @@ class PostgresKnowledgeStore:
                         SELECT 1 FROM pg_roles
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
                     )
-                """
+                """,
+                (f"vector({self.dimensions})", self.embedding_column),
             ).fetchone()
         return bool(row and all(row))
 
@@ -190,13 +193,18 @@ class PostgresKnowledgeStore:
                 "DELETE FROM rusa_knowledge_chunks WHERE tenant_id=%s AND document_id=%s::uuid",
                 (tenant_id, document_id),
             )
+            from psycopg import sql
+
+            insert_sql = sql.SQL(
+                """
+                INSERT INTO rusa_knowledge_chunks
+                    (tenant_id, document_id, collection, chunk_index, content, {embedding_column}, metadata)
+                VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
+                """
+            ).format(embedding_column=sql.Identifier(self.embedding_column))
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    """
-                    INSERT INTO rusa_knowledge_chunks
-                        (tenant_id, document_id, collection, chunk_index, content, embedding, metadata)
-                    VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                    """,
+                    insert_sql,
                     [
                         (
                             tenant_id,
@@ -229,13 +237,17 @@ class PostgresKnowledgeStore:
         vector = _vector_literal(query_embedding, self.dimensions)
         candidate_limit = min(max(limit * 4, 20), 100)
 
-        sql = """
+        from psycopg import sql
+
+        query_sql = sql.SQL(
+            """
             WITH vector_candidates AS (
                 SELECT chunk_id,
-                       ROW_NUMBER() OVER (ORDER BY embedding <=> %s::vector) AS vector_rank
+                       ROW_NUMBER() OVER (ORDER BY {embedding_column} <=> %s::vector) AS vector_rank
                 FROM rusa_knowledge_chunks
                 WHERE tenant_id=%s AND collection=%s
-                ORDER BY embedding <=> %s::vector
+                  AND {embedding_column} IS NOT NULL
+                ORDER BY {embedding_column} <=> %s::vector
                 LIMIT %s
             ),
             lexical_candidates AS (
@@ -258,7 +270,7 @@ class PostgresKnowledgeStore:
             )
             SELECT c.chunk_id, c.document_id, c.chunk_index, c.content,
                    d.title, d.source_uri, d.metadata, combined.rrf_score,
-                   1 - (c.embedding <=> %s::vector) AS vector_similarity
+                   COALESCE(1 - (c.{embedding_column} <=> %s::vector), 0.0) AS vector_similarity
             FROM combined
             JOIN rusa_knowledge_chunks c
               ON c.chunk_id = combined.chunk_id AND c.tenant_id=%s
@@ -266,7 +278,8 @@ class PostgresKnowledgeStore:
               ON d.document_id=c.document_id AND d.tenant_id=c.tenant_id
             ORDER BY combined.rrf_score DESC
             LIMIT %s
-        """
+            """
+        ).format(embedding_column=sql.Identifier(self.embedding_column))
         params = (
             vector, tenant_id, collection, vector, candidate_limit,
             query, tenant_id, collection, query, query, candidate_limit,
@@ -274,7 +287,7 @@ class PostgresKnowledgeStore:
         )
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
-            rows = connection.execute(sql, params).fetchall()
+            rows = connection.execute(query_sql, params).fetchall()
         return [
             {
                 "chunk_id": str(row[0]),
@@ -289,6 +302,85 @@ class PostgresKnowledgeStore:
             }
             for row in rows
         ]
+
+    def fetch_chunks_for_reembedding(
+        self,
+        *,
+        tenant_id: str,
+        collection: str | None = None,
+        after_chunk_id: str | None = None,
+        limit: int = 64,
+    ) -> list[dict[str, str]]:
+        """Read legacy 1536d chunks missing their 384d replacement, in bounded batches."""
+        if self.dimensions != 384:
+            raise ValueError("re-embedding requires a 384-dimensional knowledge store")
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        if collection is not None and (
+            not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection)
+        ):
+            raise ValueError("collection is invalid")
+        if not 1 <= limit <= 64:
+            raise ValueError("re-embedding batch size must be between 1 and 64")
+        if after_chunk_id is not None:
+            try:
+                UUID(after_chunk_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("after_chunk_id must be a UUID") from exc
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            rows = connection.execute(
+                """
+                SELECT chunk_id::text, content
+                FROM rusa_knowledge_chunks
+                WHERE tenant_id=%s
+                  AND embedding_384 IS NULL
+                  AND embedding IS NOT NULL
+                  AND (%s::text IS NULL OR collection=%s)
+                  AND (%s::uuid IS NULL OR chunk_id > %s::uuid)
+                ORDER BY chunk_id
+                LIMIT %s
+                """,
+                (tenant_id, collection, collection, after_chunk_id, after_chunk_id, limit),
+            ).fetchall()
+        return [{"chunk_id": str(row[0]), "content": row[1]} for row in rows]
+
+    def update_reembedded_embeddings(
+        self,
+        *,
+        tenant_id: str,
+        vectors: list[tuple[str, list[float]]],
+    ) -> int:
+        """Set 384d vectors only where the legacy vector still exists and no replacement exists."""
+        if self.dimensions != 384:
+            raise ValueError("re-embedding requires a 384-dimensional knowledge store")
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        if not vectors or len(vectors) > 64:
+            raise ValueError("re-embedding update batch must contain between 1 and 64 vectors")
+        rows = []
+        for chunk_id, vector in vectors:
+            try:
+                UUID(chunk_id)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError("chunk_id must be a UUID") from exc
+            rows.append((_vector_literal(vector, 384), tenant_id, chunk_id))
+        updated = 0
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            with connection.cursor() as cursor:
+                for vector, scoped_tenant, chunk_id in rows:
+                    cursor.execute(
+                        """
+                        UPDATE rusa_knowledge_chunks
+                        SET embedding_384=%s::vector
+                        WHERE tenant_id=%s AND chunk_id=%s::uuid
+                          AND embedding_384 IS NULL AND embedding IS NOT NULL
+                        """,
+                        (vector, scoped_tenant, chunk_id),
+                    )
+                    updated += cursor.rowcount
+        return updated
 
     def get_document(
         self,
