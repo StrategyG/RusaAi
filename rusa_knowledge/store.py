@@ -327,8 +327,8 @@ class PostgresKnowledgeStore:
                 WHERE tenant_id=%s
                   AND embedding_384 IS NULL
                   AND embedding IS NOT NULL
-                  AND (%s IS NULL OR collection=%s)
-                  AND (%s IS NULL OR chunk_id > %s::uuid)
+                  AND (%s::text IS NULL OR collection=%s)
+                  AND (%s::uuid IS NULL OR chunk_id > %s::uuid)
                 ORDER BY chunk_id
                 LIMIT %s
                 """,
