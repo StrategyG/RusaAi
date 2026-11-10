@@ -61,6 +61,18 @@ _METRICS_WINDOWS = frozenset(
 )
 _DEPLOY_EVIDENCE_TYPE = "rusa.devops.deploy.attestation"
 
+
+def _content_digest(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 _RUNBOOK_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -568,6 +580,7 @@ class OperateAgentExecutor:
             return value
 
         action_started = False
+        record_persisted = False
         try:
             before = await asyncio.wait_for(
                 self.runner.inspect_service(
@@ -694,9 +707,30 @@ class OperateAgentExecutor:
                 ),
                 timeout=remaining(),
             )
+            record_persisted = True
             parsed_ref = urlsplit(record_ref) if isinstance(record_ref, str) else None
             if parsed_ref is None or parsed_ref.scheme not in {"report", "incident"} or not parsed_ref.netloc:
                 raise ValueError("operational record writer returned an invalid record reference")
+            evidence_ref = self.artifact_store.put_json(
+                task["tenant_id"],
+                {
+                    "schema_version": 1,
+                    "type": "rusa.devops.operate.evidence",
+                    "tenant_id": task["tenant_id"],
+                    "workflow_id": task["workflow_id"],
+                    "task_id": task["task_id"],
+                    "agent_id": OPERATE_AGENT,
+                    "operational_record_ref": record_ref,
+                    "operational_record_digest": _content_digest(record),
+                    "deployment_evidence_ref": task["input"]["deployment_evidence_ref"],
+                    "source_commit": deployment["source_commit"],
+                    "artifact_digest": deployment["artifact_digest"],
+                    "status": status,
+                    "created_at": record["created_at"],
+                    "policy_version": task["audit"]["policy_version"],
+                },
+                namespace="evidence",
+            )
             result = _result(
                 task,
                 status=status,
@@ -706,7 +740,7 @@ class OperateAgentExecutor:
                     else "Operational checks identified an unresolved service or dependency issue."
                 ),
                 artifact_refs=[record_ref],
-                evidence_refs=[],
+                evidence_refs=[evidence_ref],
                 findings=findings,
                 started_at=started,
                 handoff=(
@@ -721,7 +755,7 @@ class OperateAgentExecutor:
             return SpecialistOutcome(
                 result=result,
                 failure_category="" if status == "passed" else "PERMANENT",
-                side_effect="APPLIED" if action_started else "NONE",
+                side_effect="APPLIED" if record_persisted else "UNKNOWN" if action_started else "NONE",
             )
         except ExecutionLeaseError:
             raise
@@ -732,7 +766,7 @@ class OperateAgentExecutor:
                 code="operate.execution_timeout",
                 message="Operational inspection or recovery exceeded its execution deadline.",
                 failure_category="AMBIGUOUS" if action_started else "TRANSIENT",
-                side_effect="UNKNOWN" if action_started else "NONE",
+                side_effect="APPLIED" if record_persisted else "UNKNOWN" if action_started else "NONE",
                 source_commit=deployment["source_commit"],
                 artifact_digest=deployment["artifact_digest"],
             )
@@ -743,7 +777,7 @@ class OperateAgentExecutor:
                 code=f"operate.execution_failed.{type(exc).__name__.lower()}",
                 message=f"Operate Agent could not verify the operational result or persist its report: {exc}",
                 failure_category="AMBIGUOUS" if action_started else "PERMANENT",
-                side_effect="UNKNOWN" if action_started else "NONE",
+                side_effect="APPLIED" if record_persisted else "UNKNOWN" if action_started else "NONE",
                 source_commit=deployment["source_commit"],
                 artifact_digest=deployment["artifact_digest"],
             )
@@ -1045,6 +1079,7 @@ class MonitorAgentExecutor:
                 raise asyncio.TimeoutError
             return value
 
+        record_persisted = False
         try:
             snapshot = await asyncio.wait_for(
                 self.runner.collect_telemetry(
@@ -1104,9 +1139,30 @@ class MonitorAgentExecutor:
                 ),
                 timeout=remaining(),
             )
+            record_persisted = True
             parsed_ref = urlsplit(report_ref) if isinstance(report_ref, str) else None
             if parsed_ref is None or parsed_ref.scheme != "monitoring" or not parsed_ref.netloc:
                 raise ValueError("monitoring record writer returned an invalid record reference")
+            evidence_ref = self.artifact_store.put_json(
+                task["tenant_id"],
+                {
+                    "schema_version": 1,
+                    "type": "rusa.devops.monitor.evidence",
+                    "tenant_id": task["tenant_id"],
+                    "workflow_id": task["workflow_id"],
+                    "task_id": task["task_id"],
+                    "agent_id": MONITOR_AGENT,
+                    "monitoring_record_ref": report_ref,
+                    "monitoring_record_digest": _content_digest(record),
+                    "deployment_evidence_ref": task["input"]["deployment_evidence_ref"],
+                    "source_commit": source_commit,
+                    "artifact_digest": artifact_digest,
+                    "status": record["status"],
+                    "created_at": record["created_at"],
+                    "policy_version": task["audit"]["policy_version"],
+                },
+                namespace="evidence",
+            )
             result = _result(
                 task,
                 status="passed",
@@ -1116,7 +1172,7 @@ class MonitorAgentExecutor:
                     else "Telemetry collected and all configured SLO and capacity thresholds passed."
                 ),
                 artifact_refs=[report_ref],
-                evidence_refs=[],
+                evidence_refs=[evidence_ref],
                 findings=findings,
                 started_at=started,
                 handoff=(
@@ -1127,7 +1183,7 @@ class MonitorAgentExecutor:
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
-            return SpecialistOutcome(result=result)
+            return SpecialistOutcome(result=result, side_effect="APPLIED")
         except ExecutionLeaseError:
             raise
         except asyncio.TimeoutError:
@@ -1137,7 +1193,7 @@ class MonitorAgentExecutor:
                 code="monitor.collection_timeout",
                 message="Telemetry collection or SLO evaluation exceeded its execution deadline.",
                 failure_category="TRANSIENT",
-                side_effect="NONE",
+                side_effect="APPLIED" if record_persisted else "NONE",
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
@@ -1148,7 +1204,7 @@ class MonitorAgentExecutor:
                 code=f"monitor.collection_invalid.{type(exc).__name__.lower()}",
                 message=f"Monitor Agent received invalid telemetry or could not persist the monitoring record: {exc}",
                 failure_category="PERMANENT",
-                side_effect="NONE",
+                side_effect="APPLIED" if record_persisted else "NONE",
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
