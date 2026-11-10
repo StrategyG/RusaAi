@@ -19,6 +19,7 @@ from rusa_agents.platform_contracts import (
     RuntimeBinding,
     RuntimeKind,
     ValidationVerdictPayloadV2,
+    WorkflowEventV2,
 )
 from rusa_agents.policy import RiskLevel
 from rusa_agents.policy_engine import (
@@ -399,13 +400,6 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
 
 
 def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
-    from datetime import datetime, timedelta, timezone
-
-    import psycopg
-
-    from rusa_agents.platform_contracts import WorkflowEventV2
-    from rusa_agents.workflow_store import PostgresWorkflowStore
-
     PostgresWorkflowStore(DSN).initialize()
 
     now = datetime.now(timezone.utc)
