@@ -196,7 +196,7 @@ class AgentTask(ContractModel):
 class AgentResult(ContractModel):
     """A specialist's report, bound to task/workflow and immutable evidence."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1]
     task_id: str = Field(min_length=1, max_length=128)
     workflow_id: str = Field(min_length=1, max_length=128)
     tenant_id: str = Field(min_length=1, max_length=128)
@@ -354,7 +354,7 @@ TASK_SCOPED_EVENTS = {
 class WorkflowEvent(ContractModel):
     """Versioned JSON event envelope compatible with the communication ADR."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1]
     type: EventType
     message_id: str = Field(min_length=1, max_length=128)
     tenant_id: str = Field(min_length=1, max_length=128)
