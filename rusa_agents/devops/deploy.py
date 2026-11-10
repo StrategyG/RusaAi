@@ -392,6 +392,7 @@ def _verify_approval(
     verifier: ApprovalVerifier,
     approval_ref: str,
     *,
+    stage: str = "deploy",
     tenant_id: str,
     workflow_id: str,
     source_commit: str,
@@ -401,7 +402,7 @@ def _verify_approval(
         approval_ref,
         tenant_id=tenant_id,
         workflow_id=workflow_id,
-        stage="deploy",
+        stage=stage,
         source_commit=source_commit,
         artifact_digest=artifact_digest,
     )
@@ -410,7 +411,7 @@ def _verify_approval(
         or decision.approved is not True
         or decision.tenant_id != tenant_id
         or decision.workflow_id != workflow_id
-        or decision.stage != "deploy"
+        or decision.stage != stage
         or decision.source_commit != source_commit
         or decision.artifact_digest != artifact_digest
         or not isinstance(decision.approval_id, str)
