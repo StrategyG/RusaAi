@@ -242,7 +242,11 @@ def _executor(tmp_path, approval_verifier):
     build_signer = FakeSigner(BUILD_AGENT, b"build-key")
     test_signer = FakeSigner(TEST_AGENT, b"test-key")
     release_signer = FakeSigner(RELEASE_AGENT, b"release-key")
-    verifier = FakeVerifier({BUILD_AGENT: build_signer.key, TEST_AGENT: test_signer.key})
+    verifier = FakeVerifier({
+        BUILD_AGENT: build_signer.key,
+        TEST_AGENT: test_signer.key,
+        RELEASE_AGENT: release_signer.key,
+    })
     executor = ReleaseAgentExecutor(
         artifact_store=store,
         signer=release_signer,
