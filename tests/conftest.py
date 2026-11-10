@@ -1,7 +1,6 @@
 """Shared test import setup and PostgreSQL migration bootstrap."""
 import importlib.util
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -53,17 +52,6 @@ def apply_postgres_migrations_for_integration_suite():
     import psycopg
 
     migration_dir = ROOT / "migrations"
-    migrations = sorted(
-        path for path in migration_dir.glob("*.sql")
-        if re.match(r"^\d{3}_[A-Za-z0-9_-]+\.sql$", path.name)
-        and (
-            int(path.name.split("_", 1)[0]) <= 6
-            or path.name in {
-                "008_devops_durable_communication.sql",
-                "009_devops_task_leases_and_cancellation.sql",
-            }
-        )
-    )
     expected = [
         "001_aicode_core.sql",
         "002_aicode_lease_fencing.sql",
@@ -71,10 +59,14 @@ def apply_postgres_migrations_for_integration_suite():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
-        "008_devops_durable_communication.sql",
-        "009_devops_task_leases_and_cancellation.sql",
+        "008_aicode_task_list_audit.sql",
+        "009_platform_workflow_core.sql",
+        "010_platform_governance_registry.sql",
+        "011_devops_durable_communication.sql",
+        "012_devops_task_leases_and_cancellation.sql",
     ]
-    if [path.name for path in migrations] != expected:
+    migrations = [migration_dir / name for name in expected]
+    if any(not path.is_file() for path in migrations):
         raise RuntimeError("PostgreSQL integration migration set is incomplete or out of order")
 
     with psycopg.connect(dsn, connect_timeout=5, autocommit=True) as connection:
