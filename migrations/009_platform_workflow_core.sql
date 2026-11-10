@@ -320,7 +320,7 @@ RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
     RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END;
-$;
+$$;
 REVOKE ALL ON FUNCTION public.rusa_workflow_event_immutable() FROM PUBLIC;
 
 DROP TRIGGER IF EXISTS trg_rusa_workflow_dependencies_immutable ON public.rusa_workflow_dependencies;
