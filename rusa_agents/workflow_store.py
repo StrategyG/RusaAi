@@ -349,6 +349,7 @@ class PostgresWorkflowStore:
                 SET status='failed', phase='failed',
                     last_error='Maximum task attempts exhausted',
                     lease_epoch=lease_epoch+1, lease_owner=NULL, lease_until=NULL,
+                    side_effect_status=CASE WHEN status='running' THEN 'UNKNOWN' ELSE side_effect_status END,
                     state_version=state_version+1, updated_at=clock_timestamp()
                 WHERE attempt >= max_attempts
                   AND (
@@ -395,6 +396,7 @@ class PostgresWorkflowStore:
                 SET status='expired', phase='failed',
                     last_error='Task or workflow deadline expired',
                     lease_epoch=t.lease_epoch+1, lease_owner=NULL, lease_until=NULL,
+                    side_effect_status=CASE WHEN t.status='running' THEN 'UNKNOWN' ELSE t.side_effect_status END,
                     state_version=t.state_version+1, updated_at=clock_timestamp()
                 WHERE t.status IN ('queued', 'running')
                   AND (
@@ -600,7 +602,8 @@ class PostgresWorkflowStore:
             self._set_tenant(conn, tenant_id)
             approval = conn.execute(
                 """
-                SELECT a.workflow_id, a.run_id, a.status, a.expires_at, c.approval_id
+                SELECT a.workflow_id, a.run_id, a.status, a.expires_at,
+                       c.approval_id, a.binding_sha256, c.binding_sha256
                 FROM public.rusa_human_approvals a
                 LEFT JOIN public.rusa_approval_consumptions c
                   ON c.tenant_id=a.tenant_id AND c.approval_id=a.approval_id
@@ -611,6 +614,7 @@ class PostgresWorkflowStore:
             if (
                 approval is None or approval[2] != "approved"
                 or approval[3] <= datetime.now(timezone.utc) or approval[4] is None
+                or approval[5] != approval[6]
             ):
                 raise WorkflowConflictError("task cannot resume without a live, consumed approval bound to it")
             row = conn.execute(
@@ -621,6 +625,12 @@ class PostgresWorkflowStore:
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND task_id=%s AND run_id=%s
                   AND status='awaiting_approval' AND state_version=%s
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_runs r
+                      WHERE r.tenant_id=rusa_workflow_tasks.tenant_id
+                        AND r.run_id=rusa_workflow_tasks.run_id
+                        AND r.state='running' AND r.deadline_at > clock_timestamp()
+                  )
                 RETURNING workflow_id, run_id, attempt, state_version
                 """,
                 (tenant_id, task_id, approval[1], expected_state_version),
@@ -639,6 +649,112 @@ class PostgresWorkflowStore:
                     producer_id="rusa.workflow_store",
                     producer_version=producer_version,
                     payload={"approval_id": approval_id, "state_version": row[3]},
+                    sequence=row[3],
+                ),
+            )
+            return int(row[3])
+
+    def acknowledge_cancel(
+        self,
+        tenant_id: str,
+        task_id: str,
+        worker_id: str,
+        lease_epoch: int,
+        *,
+        cancel_epoch: int,
+        side_effect: str = "NONE",
+        producer_version: str = "2.0.0",
+    ) -> int:
+        if side_effect not in {"NONE", "APPLIED", "UNKNOWN"}:
+            raise ValueError("cancel side-effect status must be NONE, APPLIED, or UNKNOWN")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks t
+                SET status='cancelled', phase='cancelled',
+                    side_effect_status=%s, lease_epoch=lease_epoch+1,
+                    lease_owner=NULL, lease_until=NULL,
+                    state_version=state_version+1, updated_at=clock_timestamp()
+                WHERE t.tenant_id=%s AND t.task_id=%s AND t.status='running'
+                  AND t.lease_owner=%s AND t.lease_epoch=%s
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_runs r
+                      WHERE r.tenant_id=t.tenant_id AND r.run_id=t.run_id
+                        AND r.state='cancel_requested' AND r.cancel_epoch=%s
+                  )
+                RETURNING t.workflow_id, t.run_id, t.attempt, t.state_version
+                """,
+                (side_effect, tenant_id, task_id, worker_id, lease_epoch, cancel_epoch),
+            ).fetchone()
+            if row is None:
+                raise WorkflowLeaseLostError("cancel acknowledgement rejected: task lease or cancel epoch is stale")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=task_id,
+                    attempt=row[2],
+                    event_type="task.cancelled",
+                    producer_id="rusa.workflow_worker",
+                    producer_version=producer_version,
+                    payload={
+                        "cancel_epoch": cancel_epoch,
+                        "state_version": row[3],
+                        "side_effect": side_effect,
+                    },
+                    sequence=row[3],
+                ),
+            )
+            return int(row[3])
+
+    def reconcile_task_side_effect(
+        self,
+        tenant_id: str,
+        task_id: str,
+        *,
+        expected_state_version: int,
+        evidence_ref: str,
+        actor: str,
+        producer_version: str = "2.0.0",
+    ) -> int:
+        if not evidence_ref or not actor:
+            raise ValueError("side-effect reconciliation requires evidence and actor")
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                UPDATE public.rusa_workflow_tasks
+                SET side_effect_status='RECONCILED',
+                    state_version=state_version+1, updated_at=clock_timestamp()
+                WHERE tenant_id=%s AND task_id=%s
+                  AND status IN ('cancelled', 'failed', 'expired')
+                  AND side_effect_status IN ('APPLIED', 'UNKNOWN')
+                  AND state_version=%s
+                RETURNING workflow_id, run_id, attempt, state_version
+                """,
+                (tenant_id, task_id, expected_state_version),
+            ).fetchone()
+            if row is None:
+                raise WorkflowConflictError("task side effect is not pending reconciliation or state is stale")
+            self._append_event(
+                conn,
+                _event(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=task_id,
+                    attempt=max(1, row[2]),
+                    event_type="workflow.task.reconciled",
+                    producer_id=actor,
+                    producer_version=producer_version,
+                    payload={
+                        "side_effect": "RECONCILED",
+                        "evidence_ref": evidence_ref,
+                        "state_version": row[3],
+                    },
                     sequence=row[3],
                 ),
             )
@@ -664,7 +780,10 @@ class PostgresWorkflowStore:
                   AND NOT EXISTS (
                       SELECT 1 FROM public.rusa_workflow_tasks t
                       WHERE t.tenant_id=r.tenant_id AND t.run_id=r.run_id
-                        AND t.status='running'
+                        AND (
+                            t.status='running'
+                            OR t.side_effect_status IN ('APPLIED', 'UNKNOWN')
+                        )
                   )
                 RETURNING workflow_id, state_version
                 """,
@@ -1018,7 +1137,7 @@ class PostgresWorkflowStore:
                     task_id=task_id,
                     attempt=row[2],
                     event_type="task.completed",
-                    producer_id=f"rusa.worker.{worker_id}",
+                    producer_id="rusa.workflow_worker",
                     producer_version=producer_version,
                     payload={
                         "lease_epoch": lease_epoch,
@@ -1055,6 +1174,7 @@ class PostgresWorkflowStore:
                 """
                 UPDATE public.rusa_workflow_tasks
                 SET status='failed', phase='failed', last_error=%s,
+                    side_effect_status=%s,
                     state_version=state_version+1, lease_owner=NULL, lease_until=NULL,
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
@@ -1063,7 +1183,7 @@ class PostgresWorkflowStore:
                 RETURNING workflow_id, run_id, attempt, state_version
                 """,
                 (
-                    code[:4000], tenant_id, task_id, worker_id, lease_epoch,
+                    code[:4000], side_effect, tenant_id, task_id, worker_id, lease_epoch,
                     expected_state_version,
                 ),
             ).fetchone()
@@ -1078,7 +1198,7 @@ class PostgresWorkflowStore:
                     task_id=task_id,
                     attempt=row[2],
                     event_type="task.failed",
-                    producer_id=f"rusa.worker.{worker_id}",
+                    producer_id="rusa.workflow_worker",
                     producer_version=producer_version,
                     payload={
                         "lease_epoch": lease_epoch,
@@ -1165,15 +1285,36 @@ class PostgresWorkflowStore:
             ).fetchone()
             if row is None:
                 raise WorkflowConflictError("workflow run is stale or already terminal")
-            conn.execute(
+            queued = conn.execute(
                 """
                 UPDATE public.rusa_workflow_tasks
                 SET status='cancelled', phase='cancelled', state_version=state_version+1,
                     lease_owner=NULL, lease_until=NULL, updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND run_id=%s AND status='queued'
+                RETURNING task_id, attempt, state_version
                 """,
                 (tenant_id, run_id),
-            )
+            ).fetchall()
+            for task_id, attempt, state_version in queued:
+                self._append_event(
+                    conn,
+                    _event(
+                        tenant_id=tenant_id,
+                        workflow_id=row[0],
+                        run_id=run_id,
+                        task_id=task_id,
+                        attempt=max(1, attempt),
+                        event_type="task.cancelled",
+                        producer_id="rusa.workflow_store",
+                        producer_version=producer_version,
+                        payload={
+                            "cancel_epoch": row[1],
+                            "state_version": state_version,
+                            "side_effect": "NONE",
+                        },
+                        sequence=state_version,
+                    ),
+                )
             running = conn.execute(
                 """
                 SELECT task_id, attempt, state_version
