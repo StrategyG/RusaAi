@@ -330,7 +330,7 @@ async def test_operate_executes_only_allowlisted_runbook_action_and_hands_off_to
         checkpoint=lambda: True,
     )
 
-    assert outcome.result["status"] == "passed"
+    assert outcome.result["status"] == "passed", outcome.result["output"]["findings"]
     assert outcome.result["handoff"] == {
         "next_agent": MONITOR_AGENT,
         "event": "operate.recovered",
@@ -435,7 +435,7 @@ async def test_monitor_is_read_only_and_routes_slo_breach_to_operate(tmp_path):
         checkpoint=lambda: True,
     )
 
-    assert outcome.result["status"] == "passed"
+    assert outcome.result["status"] == "passed", outcome.result["output"]["findings"]
     assert outcome.result["handoff"] == {
         "next_agent": OPERATE_AGENT,
         "event": "monitor.alert_triggered",
@@ -558,6 +558,8 @@ async def test_security_guard_invalid_evidence_uri_fails_closed(tmp_path):
             "evidence_refs": ["https://untrusted.example/evidence.json"],
             "commit_sha": SOURCE_COMMIT,
             "artifact_digest": ARTIFACT_DIGEST,
+            "test_plan_ref": "artifact://test-plans/security-review",
+            "acceptance_criteria_ref": "artifact://acceptance/security-review",
         },
         write_scope=[],
     )
