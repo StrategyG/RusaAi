@@ -322,6 +322,32 @@ def test_capability_authorization_requires_exact_task_and_manifest_policy_bindin
         )
 
 
+def test_capability_authorization_rejects_unbounded_manifest_or_task_resource_scope():
+    with pytest.raises(CapabilityDenied, match="no explicit include patterns"):
+        authorize_tool_invocation(
+            manifest(resource_scope={}),
+            authorization_context(),
+            now=NOW,
+        )
+    with pytest.raises(CapabilityDenied, match="no explicit resource patterns"):
+        authorize_tool_invocation(
+            manifest(),
+            authorization_context(
+                grant=TaskScopedGrant(
+                    tenant_id="tenant-a",
+                    task_id="task-1",
+                    agent_id="rusa_test_agent",
+                    agent_version="1.0.0",
+                    capability="repo.read",
+                    allowed_tools=frozenset({"list_files"}),
+                    expires_at=NOW + timedelta(minutes=2),
+                    grant_id="grant-unscoped",
+                )
+            ),
+            now=NOW,
+        )
+
+
 def test_capability_authorization_rejects_tenant_policy_and_deadline_mismatch():
     with pytest.raises(CapabilityDenied, match="tenant scope"):
         authorize_tool_invocation(
