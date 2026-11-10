@@ -762,3 +762,48 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
             """,
             (tenant_id,),
         ).fetchone()[0] == 1
+
+    # The API role sees only the authenticated tenant's governance records.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_id)
+        for table in (
+            "rusa_agent_registry",
+            "rusa_agent_registry_events",
+            "rusa_policy_decisions",
+            "rusa_human_approvals",
+            "rusa_approval_consumptions",
+            "rusa_evidence_records",
+        ):
+            assert conn.execute(
+                f"SELECT count(*) FROM public.{table}"
+            ).fetchone()[0] > 0
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_policy_decisions SET reason_code='tampered'"
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_evidence_records SET kind='tampered'"
+                )
+
+    # Workers may read tenant-scoped approval/evidence data, but cannot mutate registry or approvals.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_id)
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_human_approvals"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_evidence_records"
+        ).fetchone()[0] == 1
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_human_approvals SET status='rejected'"
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_agent_registry SET status='revoked'"
+                )
