@@ -75,20 +75,20 @@ The coding endpoint receives repository files and task context. Confirm data res
 Build the API, worker, web, and isolated sandbox images from the reviewed commit. Use the image names defined by the production certification contract:
 
 ```bash
-docker build -t ghcr.io/ORG/rusa-ai-api:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-ai-worker:RELEASE .
-docker build -f web/Dockerfile -t ghcr.io/ORG/rusa-ai-web:RELEASE web
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-ai-sandbox:RELEASE .
-docker push ghcr.io/ORG/rusa-ai-api:RELEASE
-docker push ghcr.io/ORG/rusa-ai-worker:RELEASE
-docker push ghcr.io/ORG/rusa-ai-web:RELEASE
-docker push ghcr.io/ORG/rusa-ai-sandbox:RELEASE
+docker build -t ghcr.io/strategyg/rusa-ai-api:RELEASE .
+docker build -f Dockerfile.worker -t ghcr.io/strategyg/rusa-ai-worker:RELEASE .
+docker build -f web/Dockerfile -t ghcr.io/strategyg/rusa-ai-web:RELEASE web
+docker build -f Dockerfile.agent-sandbox -t ghcr.io/strategyg/rusa-ai-sandbox:RELEASE .
+docker push ghcr.io/strategyg/rusa-ai-api:RELEASE
+docker push ghcr.io/strategyg/rusa-ai-worker:RELEASE
+docker push ghcr.io/strategyg/rusa-ai-web:RELEASE
+docker push ghcr.io/strategyg/rusa-ai-sandbox:RELEASE
 ```
 
-Resolve each image digest from the registry. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
+Resolve each image digest from the registry. Use the lowercase owner namespace `ghcr.io/strategyg` required by the certification contract. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
 
 ```text
-ghcr.io/ORG/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
 ```
 
 The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
@@ -145,7 +145,7 @@ RUSA_AUDIT_HMAC_KEY=AT_LEAST_32_RANDOM_UTF8_BYTES
 RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
-RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
+RUSA_SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
 RUSA_MODEL_NAME=rusa-ai
@@ -199,10 +199,10 @@ docker compose --profile worker up -d --build
 For production, set the API, worker, and web image references to immutable registry digests, set the sandbox image digest, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then run the fail-closed environment preflight and validate the external-database stack:
 
 ```bash
-export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai-api@sha256:API_IMAGE_DIGEST
-export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-ai-worker@sha256:WORKER_IMAGE_DIGEST
-export RUSA_WEB_IMAGE=ghcr.io/ORG/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
-export RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-ai-sandbox@sha256:SANDBOX_IMAGE_DIGEST
+export RUSA_API_IMAGE=ghcr.io/strategyg/rusa-ai-api@sha256:API_IMAGE_DIGEST
+export RUSA_WORKER_IMAGE=ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_IMAGE_DIGEST
+export RUSA_WEB_IMAGE=ghcr.io/strategyg/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
+export RUSA_SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_IMAGE_DIGEST
 python -m rusa_agents.production_preflight
 docker compose -f docker-compose.production.yml config
 docker compose -f docker-compose.production.yml pull

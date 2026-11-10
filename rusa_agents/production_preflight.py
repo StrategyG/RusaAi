@@ -10,6 +10,8 @@ import os
 import re
 import sys
 
+from dotenv import load_dotenv
+
 from .config import RuntimeConfig
 
 _EXPECTED_IMAGES = {
@@ -66,6 +68,9 @@ def validate_production_environment() -> list[str]:
 
 
 def main() -> int:
+    # Compose uses .env for interpolation; load the same file for this process
+    # without overriding secrets already injected by the deployment environment.
+    load_dotenv(override=False)
     errors = validate_production_environment()
     if errors:
         for error in errors:
