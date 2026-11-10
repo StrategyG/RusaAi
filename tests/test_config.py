@@ -38,6 +38,7 @@ def set_worker_environment(monkeypatch):
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
 
 
 def test_production_api_accepts_dedicated_tls_database_role(monkeypatch):
