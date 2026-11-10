@@ -33,7 +33,6 @@ from rusa_agents.policy_engine import (
 from rusa_agents.registry import _manifest_hash, _tenant_allowed
 from rusa_agents.tool_gateway import ToolDenied, WorkspaceToolGateway
 
-
 NOW = datetime(2026, 11, 10, 9, 0, tzinfo=timezone.utc)
 
 
