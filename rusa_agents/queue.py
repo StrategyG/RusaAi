@@ -483,7 +483,6 @@ class PostgresTaskQueue:
         releases the row. The publisher must use a task/lease-specific branch.
         """
         self._validate_queue_name(queue_name)
-        self._validate_queue_name(queue_name)
         if (
             type(job_id) is not int
             or job_id <= 0
@@ -630,6 +629,7 @@ class PostgresTaskQueue:
         *, queue_name: str = "aicode",
     ) -> bool:
         """Atomically verify a live tenant-bound lease and append its policy decision."""
+        self._validate_queue_name(queue_name)
         if (
             type(job_id) is not int
             or job_id <= 0
