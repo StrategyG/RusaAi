@@ -492,6 +492,7 @@ def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
     from datetime import datetime, timedelta, timezone
 
     import psycopg
+
     from rusa_agents.approvals import (
         ApprovalError,
         PostgresHumanApprovalService,
