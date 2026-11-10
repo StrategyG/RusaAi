@@ -204,60 +204,82 @@ class PostgresHumanApprovalService:
             if row[10] != "pending":
                 raise ApprovalError("approval is already decided or terminal")
             if row[11] <= now:
-                self._mark_expired(conn, tenant_id, approval_id, row, now)
-                raise ApprovalError("approval has expired")
-            if not self.approver_authorizer(actor, tenant_id, row[3], row[4]):
+                self._mark_expired(
+                    conn, tenant_id, approval_id,
+                    row[0], row[1], row[2], row[7], row[8], now,
+                )
+                expired = True
+            else:
+                expired = False
+            if expired:
+                result = None
+            elif not self.approver_authorizer(actor, tenant_id, row[3], row[4]):
                 raise PermissionError("actor is not authorized to decide this approval")
 
-            expected = _binding_digest(
-                tenant_id=tenant_id,
-                workflow_id=row[0],
-                run_id=row[1],
-                task_id=row[2],
-                action=row[3],
-                resource_ref=row[4],
-                artifact_digest=row[5],
-                policy_id=row[7],
-                policy_version=row[8],
-                expires_at=row[11],
-            )
-            if expected != row[6]:
-                raise ApprovalError("approval binding digest does not match its immutable request")
+            if expired:
+                pass
+            else:
+                expected = _binding_digest(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=row[2],
+                    action=row[3],
+                    resource_ref=row[4],
+                    artifact_digest=row[5],
+                    policy_id=row[7],
+                    policy_version=row[8],
+                    expires_at=row[11],
+                )
+                if expected != row[6]:
+                    raise ApprovalError("approval binding digest does not match its immutable request")
 
-            conn.execute(
-                """
-                UPDATE public.rusa_human_approvals
-                SET status=%s, decided_by=%s, decided_at=%s,
-                    decision_reason=%s, updated_at=%s
-                WHERE tenant_id=%s AND approval_id=%s AND status='pending'
-                """,
-                (decision, actor, now, reason, now, tenant_id, approval_id),
-            )
-            event = WorkflowEventV2(
-                tenant_id=tenant_id,
-                workflow_id=row[0],
-                run_id=row[1],
-                task_id=row[2],
-                correlation_id=row[0],
-                event_type="approval.decided",
-                producer_id="rusa.approval_service",
-                producer_version="1.0.0",
-                occurred_at=now,
-                payload={
-                    "approval_id": approval_id,
-                    "decision": decision,
-                    "decided_by": actor,
-                    "decided_at": now.isoformat(),
-                    "reason": reason,
-                    "policy_id": row[7],
-                    "policy_version": row[8],
-                },
-            )
-            PostgresWorkflowStore._append_event(conn, event)
+                conn.execute(
+                    """
+                    UPDATE public.rusa_human_approvals
+                    SET status=%s, decided_by=%s, decided_at=%s,
+                        decision_reason=%s, updated_at=%s
+                    WHERE tenant_id=%s AND approval_id=%s AND status='pending'
+                    """,
+                    (decision, actor, now, reason, now, tenant_id, approval_id),
+                )
+                event = WorkflowEventV2(
+                    tenant_id=tenant_id,
+                    workflow_id=row[0],
+                    run_id=row[1],
+                    task_id=row[2],
+                    correlation_id=row[0],
+                    event_type="approval.decided",
+                    producer_id="rusa.approval_service",
+                    producer_version="1.0.0",
+                    occurred_at=now,
+                    payload={
+                        "approval_id": approval_id,
+                        "decision": decision,
+                        "decided_by": actor,
+                        "decided_at": now.isoformat(),
+                        "reason": reason,
+                        "policy_id": row[7],
+                        "policy_version": row[8],
+                    },
+                )
+                PostgresWorkflowStore._append_event(conn, event)
+        if expired:
+            raise ApprovalError("approval has expired")
         return {"approval_id": approval_id, "status": decision}
 
     @staticmethod
-    def _mark_expired(conn, tenant_id: str, approval_id: str, row: tuple[Any, ...], now: datetime) -> None:
+    def _mark_expired(
+        conn,
+        tenant_id: str,
+        approval_id: str,
+        workflow_id: str,
+        run_id: str,
+        task_id: str,
+        policy_id: str,
+        policy_version: str,
+        now: datetime,
+    ) -> None:
         conn.execute(
             """
             UPDATE public.rusa_human_approvals
@@ -269,10 +291,10 @@ class PostgresHumanApprovalService:
         )
         event = WorkflowEventV2(
             tenant_id=tenant_id,
-            workflow_id=row[0],
-            run_id=row[1],
-            task_id=row[2],
-            correlation_id=row[0],
+            workflow_id=workflow_id,
+            run_id=run_id,
+            task_id=task_id,
+            correlation_id=workflow_id,
             event_type="approval.decided",
             producer_id="rusa.approval_service",
             producer_version="1.0.0",
@@ -283,8 +305,8 @@ class PostgresHumanApprovalService:
                 "decided_by": "system:approval-expirer",
                 "decided_at": now.isoformat(),
                 "reason": "approval_expired",
-                "policy_id": row[7],
-                "policy_version": row[8],
+                "policy_id": policy_id,
+                "policy_version": policy_version,
             },
         )
         PostgresWorkflowStore._append_event(conn, event)
@@ -310,7 +332,9 @@ class PostgresHumanApprovalService:
                 (tenant_id, now, limit),
             ).fetchall()
             for row in rows:
-                self._mark_expired(conn, tenant_id, row[0], row, now)
+                self._mark_expired(
+                    conn, tenant_id, row[0], row[1], row[2], row[3], row[8], row[9], now,
+                )
                 expired += 1
         return expired
 
