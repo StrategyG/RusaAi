@@ -24,6 +24,18 @@ The budget field `max_cost_microunits` uses millionths of the declared currency 
 4. Model-produced tool calls are untrusted proposals and never execute in RusaModels.
 5. The repositories do not share mutable databases or import each other's private implementation modules.
 
+## Alignment with Platform Contracts v2
+
+The separate RusaAi Platform Core 2.0 draft (PR #99) defines `AgentManifestV1`, `ModelPolicy`, `TaskEnvelopeV2`, `ExecutionBudget`, `BudgetPolicy` and `PolicyDecisionV1`. The Model Plane contract must consume these authorities rather than create a parallel policy source.
+
+- Tenant, run/task identity, deadline and trace context originate in the authenticated task envelope. Tenant identity is signed into the RusaAi service credential, never accepted from the model-plane body.
+- `model_profile` is a RusaAi logical profile resolved against manifest provider/model allowlists, context-token ceiling and `allow_fallback`.
+- The request carries a `policy_decision` reference (decision ID, policy ID/version and input digest). Its values and allow outcome must match signed service-token claims.
+- Token and USD-cost budgets must not exceed the strictest task/manifest limits. The current Platform Contracts v2 draft uses floating-point `max_cost_usd`; implementation must avoid rounding drift when mapping to USD microunits.
+- Data classification and region do not yet have typed canonical fields in that draft. A signed, typed policy-context extension is required before production.
+
+PR #99 is a draft and is not merged. This mapping is an integration requirement, not evidence that its registry or policy runtime is active on main.
+
 ## Current compatibility surface
 
 Current RusaAi provider appends `/chat/completions` to `RUSA_MODEL_BASE_URL`. Current RusaModels Model Server exposes OpenAI-compatible routes under `/openai/v1`. The interim base URL therefore ends in `/openai/v1`, and the client model name must match the configured RusaModels model ID. RusaModels main has a least-privilege `inference` role with only `inference:invoke`.
