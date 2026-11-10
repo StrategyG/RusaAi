@@ -478,7 +478,7 @@ class PostgresClosedLoopStore:
         if not _REF_RE.fullmatch(evidence_ref):
             raise ValueError("incident lifecycle evidence must be content-addressed")
         receipt_fingerprint = hashlib.sha256(
-            f"{incident_id}|{target_status}|{expected_state_version}|{evidence_ref}".encode()
+            f"{incident_id}|{target_status}|{expected_state_version}|{actor}|{evidence_ref}".encode()
         ).hexdigest()
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
@@ -611,7 +611,7 @@ class PostgresClosedLoopStore:
         ):
             raise ValueError("expected_version must be a non-negative integer")
         fingerprint = hashlib.sha256(
-            f"{scope}|{enabled}|{reason_code}|{expected_version}".encode()
+            f"{scope}|{enabled}|{reason_code}|{actor}|{expected_version}".encode()
         ).hexdigest()
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
