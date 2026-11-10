@@ -1,62 +1,8 @@
 {
   "$defs": {
-    "ArtifactReference": {
-      "additionalProperties": false,
-      "properties": {
-        "label": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Label"
-        },
-        "media_type": {
-          "anyOf": [
-            {
-              "maxLength": 255,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Media Type"
-        },
-        "sha256": {
-          "anyOf": [
-            {
-              "pattern": "^sha256:[a-f0-9]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sha256"
-        },
-        "uri": {
-          "maxLength": 2048,
-          "minLength": 1,
-          "title": "Uri",
-          "type": "string"
-        }
-      },
-      "required": [
-        "uri"
-      ],
-      "title": "ArtifactReference",
-      "type": "object"
-    },
     "EvidenceReference": {
       "additionalProperties": false,
+      "description": "Immutable evidence reference bound to a content digest.",
       "properties": {
         "kind": {
           "maxLength": 128,
@@ -104,6 +50,55 @@
       "title": "EvidenceReference",
       "type": "object"
     },
+    "ImmutableArtifactReference": {
+      "additionalProperties": false,
+      "description": "Tenant-authorized immutable artifact reference bound to a SHA-256 digest.",
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "sha256": {
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "uri": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uri",
+        "sha256"
+      ],
+      "title": "ImmutableArtifactReference",
+      "type": "object"
+    },
     "TaskOutcome": {
       "enum": [
         "succeeded",
@@ -119,6 +114,7 @@
   "$id": "https://schemas.rusa.ai/platform/agent-result.v2.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "description": "Typed result. Legacy worker evidence is retained but is not a QA verdict.",
   "properties": {
     "agent_id": {
       "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
@@ -188,7 +184,7 @@
     },
     "output_refs": {
       "items": {
-        "$ref": "#/$defs/ArtifactReference"
+        "$ref": "#/$defs/ImmutableArtifactReference"
       },
       "maxItems": 256,
       "title": "Output Refs",
