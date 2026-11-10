@@ -711,7 +711,8 @@ class MonitorAgentExecutor:
                     )
                     severity = rule.severity
                     fingerprint = hashlib.sha256(
-                        f"{task['tenant_id']}|{service}|{rule.rule_id}|{window}".encode("utf-8")
+                        f"{task['tenant_id']}|{service}|{rule.rule_id}|{window}|"
+                        f"{_aware_timestamp(snapshot.observed_at)}".encode("utf-8")
                     ).hexdigest()[:24]
                     code = f"monitor.slo_breach.{fingerprint}"
                 alert_count += 1
