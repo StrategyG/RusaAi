@@ -59,13 +59,13 @@ def _alert(**overrides):
 
 
 def test_alert_fingerprint_is_stable_across_windows_and_observations():
-    first = alert_fingerprint("tenant-a", "rusa-api", "staging", "availability")
-    later = alert_fingerprint("tenant-a", "rusa-api", "staging", "availability")
-    other_rule = alert_fingerprint("tenant-a", "rusa-api", "staging", "latency")
+    first = _alert(observed_at=datetime(2026, 11, 11, 1, 0, tzinfo=timezone.utc))
+    later = _alert(observed_at=datetime(2026, 11, 11, 1, 15, tzinfo=timezone.utc))
+    other_rule = _alert(rule_id="latency")
 
-    assert first == later
-    assert first != other_rule
-    assert len(first) == 64
+    assert first.fingerprint == later.fingerprint
+    assert first.fingerprint != other_rule.fingerprint
+    assert len(first.fingerprint) == 64
 
 
 def test_slo_alert_requires_immutable_evidence_and_finite_measurements():
