@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import grpc
 import pytest
 from google.protobuf.json_format import ParseDict
+from rusa_agents.devops.generated import workflow_pb2 as pb
 
 from rusa_agents.devops.control_store import WorkflowNotFoundError
-from rusa_agents.devops.generated import workflow_pb2 as pb
 from rusa_agents.devops.grpc_server import (
     DEFAULT_PRINCIPAL_METHODS,
     IdentityAuthenticationError,
