@@ -448,8 +448,9 @@ class PostgresTaskQueue:
 
     def heartbeat(
         self, job_id: int, tenant_id: str, worker_id: str,
-        lease_token: str, lease_seconds: int = 180,
+        lease_token: str, lease_seconds: int = 180, *, queue_name: str = "aicode",
     ) -> bool:
+        self._validate_queue_name(queue_name)
         if not lease_token or not 15 <= lease_seconds <= 3600:
             raise ValueError("A lease token and lease duration between 15 and 3600 seconds are required")
         with self._connect() as conn:
@@ -459,7 +460,8 @@ class PostgresTaskQueue:
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
-            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
+                  AND queue_name=%s
+            """, (lease_seconds, job_id, tenant_id, worker_id, lease_token, queue_name))
         return cur.rowcount == 1
 
     def publish_if_lease_owned(
@@ -471,6 +473,7 @@ class PostgresTaskQueue:
         publish: Callable[[], str | None],
         *,
         lease_seconds: int = 900,
+        queue_name: str = "aicode",
     ) -> str | None:
         """Hold the queue row lock across remote publication to prevent lease handoff races.
 
@@ -479,6 +482,7 @@ class PostgresTaskQueue:
         The lease is extended before publication and refreshed again before the transaction
         releases the row. The publisher must use a task/lease-specific branch.
         """
+        self._validate_queue_name(queue_name)
         if (
             type(job_id) is not int
             or job_id <= 0
@@ -498,10 +502,10 @@ class PostgresTaskQueue:
                 SELECT 1 FROM public.aicode_jobs
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
-                  AND lease_until > NOW()
+                  AND lease_until > NOW() AND queue_name=%s
                 FOR UPDATE
                 """,
-                (job_id, tenant_id, worker_id, lease_token),
+                (job_id, tenant_id, worker_id, lease_token, queue_name),
             ).fetchone()
             if owned is None:
                 raise LeaseLostError("Refusing repository publication without the active task lease")
@@ -513,10 +517,10 @@ class PostgresTaskQueue:
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running'
-                  AND lease_until > NOW()
+                  AND lease_until > NOW() AND queue_name=%s
                 RETURNING id
                 """,
-                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token, queue_name),
             ).fetchone()
             if extended is None:
                 raise LeaseLostError("Task lease expired before repository publication")
@@ -532,10 +536,10 @@ class PostgresTaskQueue:
                 SET lease_until=NOW() + (180 * INTERVAL '1 second'),
                     updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
-                  AND lease_token=%s::uuid AND status='running'
+                  AND lease_token=%s::uuid AND status='running' AND queue_name=%s
                 RETURNING id
                 """,
-                (job_id, tenant_id, worker_id, lease_token),
+                (job_id, tenant_id, worker_id, lease_token, queue_name),
             ).fetchone()
             if refreshed is None:
                 raise LeaseLostError("Task lease changed during repository publication")
