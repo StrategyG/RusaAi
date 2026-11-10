@@ -106,6 +106,7 @@ def authorization_context(**overrides):
         "resource_ref": "repo://StrategyG/RusaAi/src",
         "worker_role": WorkerRole.ANALYST,
         "task_deadline_at": NOW + timedelta(minutes=5),
+        "policy_version": "1",
         "grant": grant,
         "policy_decision": policy_decision(),
     }
@@ -421,8 +422,11 @@ def test_tool_gateway_binds_actual_arguments_to_authorized_resource(tmp_path):
     (source_dir / "main.py").write_text("print('ok')", encoding="utf-8")
 
     gateway = WorkspaceToolGateway(tmp_path)
-    registered = manifest(resource_scope={"include_patterns": ["workspace://*"]})
     now = datetime.now(timezone.utc)
+    registered = manifest(
+        resource_scope={"include_patterns": ["workspace://*"]},
+        health={"status": AgentHealthStatus.HEALTHY, "checked_at": now},
+    )
     grant = TaskScopedGrant(
         tenant_id="tenant-a",
         task_id="task-1",
@@ -441,6 +445,7 @@ def test_tool_gateway_binds_actual_arguments_to_authorized_resource(tmp_path):
         policy_decision=policy_decision(
             resource_ref="workspace://src",
             action="tool.invoke:list_files",
+            evaluated_at=now,
         ),
     )
     action = {"name": "list_files", "arguments": {"path": "src"}}
