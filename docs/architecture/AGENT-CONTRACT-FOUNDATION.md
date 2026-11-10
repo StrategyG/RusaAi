@@ -30,7 +30,7 @@ The contract also supports non-stage identities such as `rusa_devops_orchestrato
 - `schemas/devops/workflow-event.schema.json` — versioned event envelope and event-specific payloads.
 - `tests/agents/test_devops_contracts.py` and `tests/contracts/test_devops_schemas.py` — contract and JSON Schema conformance tests.
 
-All contracts reject undeclared fields. Timestamps must include a timezone. Trace context follows the W3C version-00 `traceparent` format. Artifact references carry a SHA-256 digest so a result can be bound to the exact evidence version that was reviewed.
+All contracts reject undeclared fields. Task requests and results carry an explicit attempt number so retries cannot silently reuse evidence from another attempt. Timestamps must include a timezone. Trace context follows the W3C version-00 `traceparent` format. Artifact references carry a SHA-256 digest so a result can be bound to the exact evidence version that was reviewed; the consumer must still authorize access to the reference under the authenticated tenant context.
 
 ## Vocabulary and compatibility
 
