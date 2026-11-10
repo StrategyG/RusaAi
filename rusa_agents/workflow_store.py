@@ -47,6 +47,7 @@ def _event(
     correlation_id: str | None = None,
     causation_id: str | None = None,
     sequence: int | None = None,
+    traceparent: str | None = None,
 ) -> WorkflowEventV2:
     return WorkflowEventV2(
         tenant_id=tenant_id,
@@ -56,6 +57,7 @@ def _event(
         attempt=attempt,
         correlation_id=correlation_id or workflow_id,
         causation_id=causation_id,
+        traceparent=traceparent or f"00-{uuid4().hex}-{uuid4().hex[:16]}-01",
         event_type=event_type,
         producer_id=producer_id,
         producer_version=producer_version,
@@ -901,6 +903,7 @@ class PostgresWorkflowStore:
                 workflow_id=run[0],
                 run_id=run_id,
                 correlation_id=run[0],
+                traceparent=f"00-{uuid4().hex}-{uuid4().hex[:16]}-01",
                 event_type="validation.verdict",
                 producer_id=verdict.producer_id,
                 producer_version=verdict.producer_version,
