@@ -40,7 +40,7 @@ def export_schemas(output_dir: Path, *, check: bool = False) -> list[Path]:
                     tofile="generated",
                     lineterm="",
                 )
-                print("\n".join(list(diff)[:120]))
+                print("\n".join(list(diff)[:1000]))
                 raise SystemExit(f"platform contract schema is stale: {path}")
         else:
             path.write_text(rendered, encoding="utf-8")
