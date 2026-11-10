@@ -704,7 +704,7 @@ def test_approval_decision_and_policy_decision_are_typed_auditable_events() -> N
                 "action": "release.promote",
                 "resource_ref": "artifact://release/candidate",
                 "reason_code": "human_approval_required",
-                "input_sha256": "d" * 64,
+                "input_sha256": "sha256:" + "d" * 64,
                 "evaluated_at": NOW.isoformat(),
             },
         }
