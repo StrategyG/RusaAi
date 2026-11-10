@@ -175,10 +175,19 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - The immutable deployment record and detached-signed Deploy attestation are stored in the tenant content-addressed artifact store.
 - Optional automatic rollback is disabled by default and can only be enabled by host policy; when enabled, restoration is checked against the previous digest.
 
-**Remaining Phase 4 work:**
+**Phase 4F (this increment) implements initial Operate and Monitor adapters:**
 
-- Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
-- Provision production BuildKit/test services, worker pools, heartbeat loops, and live child-task orchestration.
+- Operate accepts only immutable host-registered runbook references, service/action allowlists, and strict parameter schemas.
+- Every runbook action is authorized by a mandatory host Policy Engine adapter. Destructive actions require the configured human approval scope and an approval verifier bound to the exact tenant/workflow/task/action/resource.
+- Runbook execution is delegated to a host adapter; the agent cannot supply shell commands, endpoints, or credentials. Immutable incident/recovery reports are tenant-scoped.
+- Monitor uses an injected read-only telemetry adapter and host-owned SLO rules. It requires immutable evidence, produces bounded findings, and hands alerts to Operate or recurring feedback to Plan.
+- Deterministic tests cover approval, policy denial, runbook allowlists, evidence, SLO findings, feedback routing, and read-only authority. They use fakes and do not claim live production telemetry or runbook integration.
+
+**Remaining Phase 4 production work:**
+
+- Provision production BuildKit/test/deployment/runbook/telemetry adapters and workload identities.
+- Wire Security Guard evidence into Release and Operate policy decisions.
+- Deploy worker pools, heartbeat renewal, durable child-task handoffs, and end-to-end staging-to-operations execution.
 
 The detailed boundaries and follow-on increments are documented in
 [PHASE4_SPECIALIST_EXECUTION.md](PHASE4_SPECIALIST_EXECUTION.md).
@@ -194,8 +203,25 @@ whose tests and provenance match the exact source revision.
 - Test rollback, backup/restore, tenant isolation and disaster recovery.
 - Feed monitor findings back to Plan through an audited workflow event.
 
-**Exit criteria:** controlled closed-loop operation passes security, SRE,
-and product-owner sign-off.
+**Exit criteria:** durable Monitor → Operate/Plan feedback, incident lifecycle,
+SLO alert routing, cost/kill-switch controls, and rollback/backup recovery
+tests pass security, SRE, and product-owner sign-off.
+
+## Phase 6 — scale and enterprise readiness
+
+- Enforce organization-specific policy, budgets, retention, and approval
+  requirements without sharing tenant execution context.
+- Isolate agent workloads, artifact access, runtime credentials, and resource
+  quotas per tenant/organization.
+- Add high-availability control-plane deployment and tested failover.
+- Define and rehearse disaster-recovery RPO/RTO, backup restoration, and
+  regional recovery procedures.
+- Add regional deployment controls and data-residency-aware storage/routing.
+- Provide enterprise audit retention, SLA/SLO reporting, and operational
+  evidence exports.
+
+**Exit criteria:** tenant isolation, workload isolation, HA/DR, regional
+recovery, enterprise audit, and SLA evidence are independently verified.
 
 ## Non-negotiable controls
 
