@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from rusa_agents.devops.agent_registry import AGENT_POLICIES, BUILD_AGENT, TEST_AGENT
+from rusa_agents.devops.agent_registry import (\n    AGENT_POLICIES,\n    BUILD_AGENT,\n    DEPLOY_AGENT,\n    OPERATE_AGENT,\n    RELEASE_AGENT,\n    TEST_AGENT,\n)
 from rusa_agents.devops.artifacts import ContentAddressedArtifactStore
 from rusa_agents.devops.build_test import (
     BuildAgentExecutor,
@@ -173,6 +173,30 @@ def _task(stage: str, *, tenant_id: str = "tenant-build-qa") -> dict:
             "acceptance_criteria_ref": "artifact://sha256/" + "3" * 64,
         }
         write_scope = ["test-reports/", "evidence/"]
+    elif stage == "release":
+        agent_id = RELEASE_AGENT
+        inputs = {
+            "commit_sha": SOURCE_COMMIT,
+            "artifact_digest": ARTIFACT_DIGEST,
+            "build_evidence_ref": "evidence://sha256/" + "1" * 64,
+            "test_evidence_ref": "evidence://sha256/" + "2" * 64,
+            "sbom_ref": "artifact://sha256/" + "3" * 64,
+            "release_metadata_ref": "artifact://sha256/" + "4" * 64,
+            "rollback_plan_ref": "artifact://sha256/" + "5" * 64,
+            "service": "rusa-demo",
+        }
+        write_scope = ["release/", "manifests/", "evidence/"]
+    elif stage == "deploy":
+        agent_id = DEPLOY_AGENT
+        inputs = {
+            "release_manifest_ref": "artifact://sha256/" + "1" * 64,
+            "release_evidence_ref": "evidence://sha256/" + "2" * 64,
+            "environment": "staging",
+            "commit_sha": SOURCE_COMMIT,
+            "artifact_digest": ARTIFACT_DIGEST,
+            "service": "rusa-demo",
+        }
+        write_scope = ["deployments/", "evidence/"]
     else:
         raise ValueError("unsupported test fixture stage")
     return {
@@ -186,11 +210,11 @@ def _task(stage: str, *, tenant_id: str = "tenant-build-qa") -> dict:
         "input": inputs,
         "constraints": {
             "allowed_tools": sorted(AGENT_POLICIES[agent_id].allowed_tools),
-            "network_access": False,
-            "allowed_network_destinations": [],
+            "network_access": stage == "deploy",
+            "allowed_network_destinations": ["staging.api.internal"] if stage == "deploy" else [],
             "write_scope": write_scope,
-            "approval_required": False,
-            "approval_scope": [],
+            "approval_required": stage == "release",
+            "approval_scope": ["release"] if stage == "release" else [],
             "budget": {
                 "max_cost_usd": 2.0,
                 "max_tool_calls": 20,
@@ -496,3 +520,304 @@ def test_build_and_test_signers_are_bound_to_specialist_identity(tmp_path):
             signer=FakeSigner(TEST_AGENT, b"wrong"),
             allowed_registry_hosts={REGISTRY_HOST},
         )
+
+
+class FakeApprovalVerifier:
+    def __init__(self, approved: bool = True):
+        self.approved = approved
+        self.calls = []
+
+    async def verify(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.approved and kwargs["reference"].startswith("approval://")
+
+
+class FakeDeploymentRunner:
+    def __init__(self, *, healthy: bool = True, rollback_passed: bool = True):
+        self.healthy = healthy
+        self.rollback_passed = rollback_passed
+        self.calls = []
+
+    async def deploy(self, **kwargs):
+        self.calls.append(("deploy", kwargs))
+        now = datetime.now(timezone.utc)
+        return DeploymentExecutionResult(
+            deployment_id="staging-deploy-001",
+            target_id=kwargs["target_id"],
+            service=kwargs["service"],
+            environment=kwargs["environment"],
+            release_manifest_ref=kwargs["release_manifest_ref"],
+            artifact_digest=kwargs["artifact_digest"],
+            started_at=now - timedelta(seconds=5),
+            completed_at=now,
+        )
+
+    async def health_check(self, **kwargs):
+        self.calls.append(("health_check", kwargs))
+        return HealthCheckResult(
+            deployment_id=kwargs["deployment_id"],
+            healthy=self.healthy,
+            smoke_tests_passed=self.healthy,
+            checks=(
+                HealthProbeResult("readiness", self.healthy, "readiness probe"),
+                HealthProbeResult("smoke", self.healthy, "smoke suite"),
+            ),
+            checked_at=datetime.now(timezone.utc),
+        )
+
+    async def rehearse_rollback(self, **kwargs):
+        self.calls.append(("rehearse_rollback", kwargs))
+        return RollbackRehearsalResult(
+            deployment_id=kwargs["deployment_id"],
+            rollback_plan_ref=kwargs["rollback_plan_ref"],
+            passed=self.rollback_passed,
+            previous_artifact_digest="sha256:" + "a" * 64,
+            completed_at=datetime.now(timezone.utc),
+        )
+
+
+def _release_metadata(*, checklist_status: str = "passed") -> dict:
+    return {
+        "schema_version": 1,
+        "version": "1.2.3",
+        "service": "rusa-demo",
+        "changelog": "# 1.2.3\\n\\n- Hardened the release pipeline.",
+        "deployment_notes": "Deploy to the configured staging target and verify readiness.",
+        "migration_notes": [],
+        "migration_compatible": True,
+        "known_issues": ["Dashboard refresh can be delayed by up to 30 seconds."],
+        "rollback_notes": "Restore the previously deployed immutable image digest.",
+        "release_checklist": [
+            {"id": "build-provenance", "required": True, "status": checklist_status},
+            {"id": "release-notes", "required": True, "status": "passed"},
+        ],
+    }
+
+
+def _rollback_plan() -> dict:
+    return {
+        "schema_version": 1,
+        "service": "rusa-demo",
+        "target_id": "staging-rusa",
+        "strategy": "blue_green",
+        "trigger_conditions": [
+            "Readiness probe fails for two consecutive intervals.",
+            "Smoke tests fail after deployment.",
+        ],
+        "approval_ref": "approval://rollback/rusa-demo/staging",
+    }
+
+
+async def _run_release(
+    tmp_path,
+    *,
+    release_approved: bool = True,
+    checklist_status: str = "passed",
+):
+    test_task, store, test_outcome, _, verifier = await _run_build_then_test(tmp_path)
+    build_envelope = store.get_json(
+        test_task["tenant_id"], test_task["input"]["build_evidence_ref"]
+    )
+    release_task = _task("release", tenant_id=test_task["tenant_id"])
+    release_task["workflow_id"] = test_task["workflow_id"]
+    release_task["input"].update(
+        {
+            "commit_sha": SOURCE_COMMIT,
+            "artifact_digest": ARTIFACT_DIGEST,
+            "build_evidence_ref": test_task["input"]["build_evidence_ref"],
+            "test_evidence_ref": test_outcome.result["output"]["evidence_refs"][0],
+            "sbom_ref": build_envelope["payload"]["sbom_ref"],
+            "release_metadata_ref": store.put_json(
+                test_task["tenant_id"],
+                _release_metadata(checklist_status=checklist_status),
+                namespace="artifact",
+            ),
+            "rollback_plan_ref": store.put_json(
+                test_task["tenant_id"], _rollback_plan(), namespace="artifact"
+            ),
+            "service": "rusa-demo",
+        }
+    )
+    if release_approved:
+        release_task["constraints"]["approval_ref"] = "approval://release/rusa-demo/1.2.3"
+    signer = FakeSigner(RELEASE_AGENT, b"release-signing-test-key")
+    approval_verifier = FakeApprovalVerifier()
+    executor = ReleaseAgentExecutor(
+        artifact_store=store,
+        signer=signer,
+        verifier=verifier,
+        approval_verifier=approval_verifier,
+        allowed_registry_hosts={REGISTRY_HOST},
+    )
+    outcome = await executor.execute(
+        release_task,
+        authenticated_principal=RELEASE_AGENT,
+        lease=_lease(release_task),
+        checkpoint=lambda: True,
+    )
+    return release_task, store, outcome, verifier, signer, approval_verifier
+
+
+async def _run_deploy(
+    tmp_path,
+    *,
+    environment: str = "staging",
+    healthy: bool = True,
+    rollback_passed: bool = True,
+):
+    release_task, store, release_outcome, verifier, release_signer, approval_verifier = (
+        await _run_release(tmp_path, release_approved=True)
+    )
+    deploy_task = _task("deploy", tenant_id=release_task["tenant_id"])
+    deploy_task["workflow_id"] = release_task["workflow_id"]
+    deploy_task["input"].update(
+        {
+            "release_manifest_ref": release_outcome.result["output"]["artifact_refs"][0],
+            "release_evidence_ref": release_outcome.result["output"]["evidence_refs"][0],
+            "environment": environment,
+            "commit_sha": SOURCE_COMMIT,
+            "artifact_digest": ARTIFACT_DIGEST,
+            "service": "rusa-demo",
+        }
+    )
+    deploy_signer = FakeSigner(DEPLOY_AGENT, b"deploy-signing-test-key")
+    trusted_verifier = FakeVerifier(
+        {**verifier.keys, RELEASE_AGENT: release_signer.key, DEPLOY_AGENT: deploy_signer.key}
+    )
+    runner = FakeDeploymentRunner(healthy=healthy, rollback_passed=rollback_passed)
+    executor = DeployAgentExecutor(
+        artifact_store=store,
+        runner=runner,
+        signer=deploy_signer,
+        verifier=trusted_verifier,
+        approval_verifier=approval_verifier,
+        allowed_registry_hosts={REGISTRY_HOST},
+        staging_target_id="staging-rusa",
+        allowed_services={"rusa-demo"},
+        allowed_network_destinations={"staging.api.internal"},
+    )
+    outcome = await executor.execute(
+        deploy_task,
+        authenticated_principal=DEPLOY_AGENT,
+        lease=_lease(deploy_task),
+        checkpoint=lambda: True,
+    )
+    return deploy_task, store, outcome, runner, trusted_verifier
+
+
+@pytest.mark.asyncio
+async def test_release_agent_verifies_all_gates_and_signs_immutable_candidate(tmp_path):
+    task, store, outcome, verifier, signer, approval_verifier = await _run_release(tmp_path)
+
+    assert outcome.result["status"] == "passed"
+    assert outcome.result["handoff"] == {
+        "next_agent": DEPLOY_AGENT,
+        "event": "release.approved",
+    }
+    manifest_ref, report_ref, rollback_ref = outcome.result["output"]["artifact_refs"]
+    manifest = store.get_json(task["tenant_id"], manifest_ref)
+    assert manifest["type"] == "rusa.devops.release-candidate"
+    assert manifest["approval_status"] == "approved"
+    assert manifest["source_commit"] == SOURCE_COMMIT
+    assert manifest["artifact_digest"] == ARTIFACT_DIGEST
+    assert manifest["rollback_plan_ref"] == rollback_ref
+    assert manifest["version"] == "1.2.3"
+    assert store.get(task["tenant_id"], report_ref).startswith(b"# Release readiness:")
+    envelope = store.get_json(task["tenant_id"], outcome.result["output"]["evidence_refs"][0])
+    assert envelope["producer_id"] == RELEASE_AGENT
+    assert envelope["payload"]["release_manifest_ref"] == manifest_ref
+    assert envelope["payload"]["approval_status"] == "approved"
+    assert signer.producer_id == RELEASE_AGENT
+    assert approval_verifier.calls[0]["scope"] == "release"
+
+
+@pytest.mark.asyncio
+async def test_release_agent_prepares_candidate_but_waits_for_required_approval(tmp_path):
+    task, store, outcome, _, _, _ = await _run_release(tmp_path, release_approved=False)
+
+    assert outcome.result["status"] == "needs_approval"
+    assert outcome.result["output"]["approval_ref"].startswith("approval://requests/")
+    assert "handoff" not in outcome.result
+    manifest = store.get_json(task["tenant_id"], outcome.result["output"]["artifact_refs"][0])
+    assert manifest["approval_status"] == "pending_approval"
+
+
+@pytest.mark.asyncio
+async def test_release_agent_blocks_failed_required_checklist_item(tmp_path):
+    _, _, outcome, _, _, _ = await _run_release(
+        tmp_path, checklist_status="failed"
+    )
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "release.gate_verification_failed"
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_verifies_release_then_runs_staging_health_and_rollback(tmp_path):
+    task, store, outcome, runner, verifier = await _run_deploy(tmp_path)
+
+    assert outcome.result["status"] == "passed"
+    assert outcome.result["handoff"] == {
+        "next_agent": OPERATE_AGENT,
+        "event": "deploy.completed",
+    }
+    assert [call[0] for call in runner.calls] == [
+        "deploy",
+        "health_check",
+        "rehearse_rollback",
+    ]
+    record = store.get_json(task["tenant_id"], outcome.result["output"]["artifact_refs"][0])
+    assert record["environment"] == "staging"
+    assert record["source_commit"] == SOURCE_COMMIT
+    assert record["artifact_digest"] == ARTIFACT_DIGEST
+    assert record["health_check"]["healthy"] is True
+    assert record["rollback_rehearsal"]["passed"] is True
+    envelope = store.get_json(task["tenant_id"], outcome.result["output"]["evidence_refs"][0])
+    assert envelope["producer_id"] == DEPLOY_AGENT
+    assert envelope["payload"]["status"] == "passed"
+    assert verifier.verify(
+        __import__("json").dumps(
+            envelope["payload"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8"),
+        envelope["signature"],
+    ) == DEPLOY_AGENT
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_rejects_production_even_with_approved_release(tmp_path):
+    _, _, outcome, runner, _ = await _run_deploy(tmp_path, environment="production")
+
+    assert outcome.result["status"] == "blocked"
+    assert outcome.result["output"]["findings"][0]["code"] == "deploy.environment_not_allowed"
+    assert runner.calls == []
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_records_failed_health_gate_without_operate_handoff(tmp_path):
+    task, store, outcome, runner, _ = await _run_deploy(tmp_path, healthy=False)
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.result["output"]["findings"][0]["code"] == "deploy.health_check_failed"
+    assert "handoff" not in outcome.result
+    assert outcome.side_effect == "APPLIED"
+    record = store.get_json(task["tenant_id"], outcome.result["output"]["artifact_refs"][0])
+    assert record["status"] == "failed"
+    assert record["health_check"]["healthy"] is False
+    assert [call[0] for call in runner.calls] == [
+        "deploy",
+        "health_check",
+        "rehearse_rollback",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_requires_rollback_rehearsal_to_pass(tmp_path):
+    _, _, outcome, _, _ = await _run_deploy(tmp_path, rollback_passed=False)
+
+    assert outcome.result["status"] == "failed"
+    assert outcome.result["output"]["findings"][0]["code"] == "deploy.rollback_rehearsal_failed"
+    assert "handoff" not in outcome.result
