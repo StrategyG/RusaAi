@@ -800,3 +800,41 @@ def test_policy_violation_approval_request_and_audit_event_payloads() -> None:
             {**base, "event_type": event_type, "payload": payload}
         )
         assert event.event_type == event_type
+
+
+
+def test_devops_lifecycle_event_vocabulary_remains_accepted() -> None:
+    lifecycle_events = (
+        "plan.completed",
+        "code.completed",
+        "build.completed",
+        "test.completed",
+        "release.approved",
+        "deploy.completed",
+        "operate.incident_detected",
+        "operate.recovered",
+        "monitor.alert_triggered",
+        "monitor.feedback_created",
+        "workflow.blocked",
+        "workflow.completed",
+    )
+    for event_type in lifecycle_events:
+        event = WorkflowEventV2.model_validate(
+            {
+                "tenant_id": "tenant-a",
+                "workflow_id": "workflow-1",
+                "run_id": "run-1",
+                "correlation_id": "workflow-1",
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                "event_type": event_type,
+                "producer_id": "rusa_test_agent",
+                "producer_version": "1.0.0",
+                "occurred_at": NOW.isoformat(),
+                "payload": {
+                    "actor": "rusa_test_agent",
+                    "summary": f"{event_type} event",
+                    "evidence_refs": ["artifact://evidence/test-report"],
+                },
+            }
+        )
+        assert event.event_type == event_type
