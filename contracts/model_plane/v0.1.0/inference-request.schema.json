@@ -13,7 +13,9 @@
     "capability",
     "input",
     "constraints",
-    "deadline"
+    "deadline",
+    "policy_decision",
+    "traceparent"
   ],
   "properties": {
     "contract_version": {
@@ -135,8 +137,7 @@
               "minimum": 1
             },
             "currency": {
-              "type": "string",
-              "pattern": "^[A-Z]{3}$"
+              "const": "USD"
             },
             "max_cost_microunits": {
               "type": "integer",
@@ -159,6 +160,37 @@
     "traceparent": {
       "type": "string",
       "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+    },
+    "policy_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_id",
+        "policy_id",
+        "policy_version",
+        "input_sha256"
+      ],
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^(sha256:)?[0-9a-f]{64}$"
+        }
+      }
     }
   }
 }
