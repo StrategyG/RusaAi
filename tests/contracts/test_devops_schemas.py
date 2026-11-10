@@ -56,6 +56,7 @@ def test_agent_result_json_schema_matches_typed_model():
         "agent_id": "rusa_test_agent",
         "stage": "test",
         "status": "passed",
+        "attempt": 1,
         "summary": "All required tests passed.",
         "evidence": [ARTIFACT],
         "completed_at": "2026-11-10T12:05:00Z",
