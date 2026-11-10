@@ -482,6 +482,12 @@ class PostgresWorkflowStore:
                     updated_at=clock_timestamp()
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
                   AND lease_owner=%s AND lease_epoch=%s AND lease_until > clock_timestamp()
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_runs r
+                      WHERE r.tenant_id=rusa_workflow_tasks.tenant_id
+                        AND r.run_id=rusa_workflow_tasks.run_id
+                        AND r.state='running' AND r.deadline_at > clock_timestamp()
+                  )
                 RETURNING task_id
                 """,
                 (lease_seconds, tenant_id, task_id, worker_id, lease_epoch),
@@ -515,6 +521,12 @@ class PostgresWorkflowStore:
                 WHERE tenant_id=%s AND task_id=%s AND status='running'
                   AND lease_owner=%s AND lease_epoch=%s
                   AND state_version=%s AND lease_until > clock_timestamp()
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_runs r
+                      WHERE r.tenant_id=rusa_workflow_tasks.tenant_id
+                        AND r.run_id=rusa_workflow_tasks.run_id
+                        AND r.state='running' AND r.deadline_at > clock_timestamp()
+                  )
                 RETURNING workflow_id, run_id, attempt, state_version
                 """,
                 (
