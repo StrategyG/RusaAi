@@ -84,6 +84,10 @@ Migration 009 does not delete or overwrite the existing 1536-dimensional vectors
 
 For new documents after cutover, RUSA AI writes 384d vectors to `embedding_384`. The old `embedding` column remains null for those rows. Do not mix 1536d and 384d vectors in one query or index.
 
+## Colab connectivity check
+
+Open `notebooks/RusaModels_Codespaces_Colab_Smoke_Test.ipynb` in Google Colab to validate the HTTPS forwarded Model Server endpoint from Colab. The notebook checks the authenticated model list, chat completion, and normalized 384-dimensional E5 query/passage vectors. It asks for the bearer token using hidden input and does not put a token in notebook source. It is a connectivity test only; it does not start the full RUSA AI worker or configure PostgreSQL.
+
 ## Rollback
 
 To roll back the application to the old provider:
@@ -91,7 +95,7 @@ To roll back the application to the old provider:
 2. Restore `RUSA_EMBEDDING_DIMENSIONS=1536`, the prior provider model/base URL and credentials.
 3. Restart the worker and verify the 1536d knowledge store readiness.
 
-The 1536d vectors for pre-existing chunks are retained. New documents created only in 384d mode have no legacy 1536d vector; lexical retrieval remains available for those chunks, but full vector retrieval for them requires re-embedding with the legacy provider. Migration 009 is additive and does not need to be rolled back.
+The 1536d vectors for pre-existing chunks are retained. New documents created only in 384d mode have no legacy 1536d vector; lexical retrieval remains available for those chunks, but full vector retrieval for them requires re-embedding with the legacy provider. Keep the post-migration RUSA AI code release when switching settings back to 1536; do not deploy a pre-migration binary after 384-only chunks have been written, because that older code does not handle null legacy vectors in lexical fallback results. Migration 009 is additive and does not need to be rolled back.
 
 ## Security and networking
 
