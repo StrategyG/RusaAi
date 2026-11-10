@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():

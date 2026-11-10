@@ -19,6 +19,7 @@ def set_api_environment(monkeypatch):
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
 
 
 def set_worker_environment(monkeypatch):
@@ -37,6 +38,7 @@ def set_worker_environment(monkeypatch):
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
 
 
 def test_production_api_accepts_dedicated_tls_database_role(monkeypatch):
@@ -147,4 +149,18 @@ def test_production_worker_rejects_plain_http_model_endpoint(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "http://llama-cpp:8080/v1")
 
     with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_api_rejects_missing_model_gateway_token(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_worker_rejects_placeholder_model_gateway_token(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "replace-with-model-token")
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
         RuntimeConfig.from_env().validate_worker()
