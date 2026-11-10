@@ -486,3 +486,271 @@ def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
                     "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
                     (event.message_id,),
                 )
+
+
+def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
+    from datetime import datetime, timedelta, timezone
+
+    import psycopg
+    from rusa_agents.approvals import (
+        ApprovalError,
+        PostgresHumanApprovalService,
+    )
+    from rusa_agents.evidence import EvidenceValidationError, PostgresEvidenceStore
+    from rusa_agents.platform_contracts import (
+        AgentDomain,
+        AgentHealthSnapshot,
+        AgentManifestV1,
+        AgentStatus,
+        EvidenceReference,
+        RuntimeBinding,
+        RuntimeKind,
+        ValidationVerdictPayloadV2,
+    )
+    from rusa_agents.policy import RiskLevel
+    from rusa_agents.policy_engine import (
+        DeterministicPolicyEngine,
+        PolicyDecisionService,
+        PolicyRequest,
+        PostgresPolicyDecisionStore,
+    )
+    from rusa_agents.registry import AgentRegistryError, PostgresAgentRegistry
+    from rusa_agents.workflow_graph import (
+        WorkflowGraph,
+        WorkflowRunSpec,
+        WorkflowTaskSpec,
+    )
+    from rusa_agents.workflow_store import PostgresWorkflowStore
+
+    now = datetime.now(timezone.utc)
+    tenant_id = "platform-services-" + uuid4().hex
+    workflow_id = "workflow-" + uuid4().hex
+    run_id = "run-" + uuid4().hex
+    task_id = "task-" + uuid4().hex
+    artifact_digest = "sha256:" + "a" * 64
+    artifact_commit = "b" * 40
+
+    run = WorkflowRunSpec(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        domain="software_engineering",
+        objective="Exercise platform governance persistence",
+        deadline_at=now + timedelta(hours=1),
+        created_by="test:owner",
+        budget={"max_parallel_tasks": 1},
+    )
+    task = WorkflowTaskSpec(
+        task_id=task_id,
+        domain="software_engineering",
+        agent_id="rusa_test_agent",
+        agent_version="1.0.0",
+        capability="repo.read",
+        deadline_at=now + timedelta(minutes=30),
+    )
+    workflow_store = PostgresWorkflowStore(DSN)
+    workflow_store.create_workflow(run, WorkflowGraph(run, (task,)))
+    workflow_store.start_run(tenant_id, run_id)
+
+    manifest = AgentManifestV1(
+        agent_id="rusa_test_agent",
+        domain=AgentDomain.SOFTWARE_ENGINEERING,
+        version="1.0.0",
+        status=AgentStatus.DRAFT,
+        capabilities=["repo.read"],
+        input_schema_ref="schema://rusa/test/input.v1",
+        output_schema_ref="schema://rusa/test/output.v1",
+        runtime_binding=RuntimeBinding(
+            kind=RuntimeKind.PYTHON_CALLABLE,
+            target="tests.fake_agents:ReadAgent",
+        ),
+        tool_allowlist=["list_files"],
+        tenant_scope={"mode": "tenant"},
+        resource_scope={"include_patterns": ["workspace://*"]},
+        policy_profile="test-policy",
+        evaluation_profile="test-evaluation",
+        health=AgentHealthSnapshot(status="healthy", checked_at=now),
+        owner="platform-integration-tests",
+        created_at=now,
+        updated_at=now,
+    )
+    registry = PostgresAgentRegistry(
+        DSN,
+        runtime_resolver=lambda *_: True,
+        schema_resolver=lambda *_: True,
+        policy_resolver=lambda *_: True,
+    )
+    registry.register(tenant_id, manifest, actor="test:admin")
+    assert registry.validate(tenant_id, manifest.agent_id, manifest.version, actor="test:admin").status == AgentStatus.VALIDATED
+    active = registry.activate(tenant_id, manifest.agent_id, manifest.version, actor="test:admin")
+    assert active.status == AgentStatus.ACTIVE
+    assert registry.assert_runnable(tenant_id, manifest.agent_id, manifest.version, "repo.read").status == AgentStatus.ACTIVE
+    assert registry.select(tenant_id, "repo.read").agent_id == manifest.agent_id
+    with pytest.raises(AgentRegistryError, match="different immutable content"):
+        registry.register(
+            tenant_id,
+            manifest.model_copy(update={"tool_allowlist": ["list_files", "write_file"]}),
+            actor="test:admin",
+        )
+
+    engine = DeterministicPolicyEngine(
+        policy_id="test-policy",
+        policy_version="1",
+        allowed_actions={"tool.invoke:list_files"},
+    )
+    policy_service = PolicyDecisionService(engine, PostgresPolicyDecisionStore(DSN))
+    allowed = policy_service.evaluate(PolicyRequest(
+        tenant_id=tenant_id,
+        authenticated_tenant_id=tenant_id,
+        actor=manifest.agent_id,
+        action="tool.invoke:list_files",
+        resource_ref="workspace://src",
+        policy_id="test-policy",
+        policy_version="1",
+        risk=RiskLevel.LOW,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+    ))
+    assert allowed.outcome == "allow"
+    denial_request = PolicyRequest(
+        tenant_id=tenant_id,
+        authenticated_tenant_id=tenant_id,
+        actor=manifest.agent_id,
+        action="tool.invoke:write_file",
+        resource_ref="workspace://src/main.py",
+        policy_id="test-policy",
+        policy_version="1",
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+    )
+    first_denial = policy_service.evaluate(denial_request)
+    second_denial = policy_service.evaluate(denial_request)
+    assert first_denial.outcome == "deny"
+    assert second_denial.decision_id == first_denial.decision_id
+
+    approvals = PostgresHumanApprovalService(
+        DSN,
+        approver_authorizer=lambda actor, _tenant, _action, _resource: actor == "human:approver",
+        consumer_authorizer=lambda actor, _tenant, _action, _resource: actor == "agent:executor",
+    )
+    requested = approvals.request(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        requested_by="agent:requester",
+        action="release.promote",
+        resource_ref="artifact://release/candidate",
+        reason="Promote the exact QA-verified candidate",
+        policy_id="release-policy",
+        policy_version="3",
+        expires_at=now + timedelta(minutes=10),
+        artifact_digest=artifact_digest,
+    )
+    with pytest.raises(PermissionError, match="cannot approve their own"):
+        approvals.decide(
+            tenant_id, requested["approval_id"],
+            actor="agent:requester", decision="approved",
+        )
+    assert approvals.decide(
+        tenant_id, requested["approval_id"],
+        actor="human:approver", decision="approved",
+    )["status"] == "approved"
+    consume_args = {
+        "actor": "agent:executor",
+        "action": "release.promote",
+        "resource_ref": "artifact://release/candidate",
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "task_id": task_id,
+        "artifact_digest": artifact_digest,
+    }
+    assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is True
+    assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is False
+    with pytest.raises(ApprovalError, match="different action"):
+        approvals.consume(
+            tenant_id, requested["approval_id"],
+            **{**consume_args, "action": "release.deploy"},
+        )
+
+    evidence_store = PostgresEvidenceStore(DSN)
+    evidence_ref = EvidenceReference(
+        uri="artifact://evidence/" + uuid4().hex,
+        sha256="sha256:" + "c" * 64,
+        kind="test_report",
+        producer_id="rusa_test_agent",
+        producer_version="1.0.0",
+        subject_digest=artifact_digest,
+        subject_commit=artifact_commit,
+        test_profile="ci-full",
+        occurred_at=now,
+    )
+    evidence_id = evidence_store.record(
+        tenant_id,
+        evidence_ref,
+        subject_commit=artifact_commit,
+        test_profile="ci-full",
+        metadata={"workflow_id": workflow_id, "source": "pytest"},
+    )
+    verdict = ValidationVerdictPayloadV2(
+        verdict="passed",
+        subject_digest=artifact_digest,
+        commit_sha=artifact_commit,
+        producer_id="rusa_qa_agent",
+        producer_version="1.0.0",
+        test_profile="ci-full",
+        evidence_refs=[evidence_ref],
+        evaluated_at=now,
+        summary="All required CI checks passed for the exact artifact.",
+    )
+    assert evidence_store.verify_verdict(
+        tenant_id, verdict,
+        expected_digest=artifact_digest,
+        expected_commit=artifact_commit,
+    ) == [evidence_id]
+    wrong_kind_ref = evidence_ref.model_copy(update={"kind": "build_log"})
+    wrong_kind_verdict = verdict.model_copy(update={"evidence_refs": [wrong_kind_ref]})
+    with pytest.raises(EvidenceValidationError, match="provenance"):
+        evidence_store.verify_verdict(
+            tenant_id, wrong_kind_verdict,
+            expected_digest=artifact_digest,
+            expected_commit=artifact_commit,
+        )
+    with pytest.raises(EvidenceValidationError, match="different provenance"):
+        evidence_store.record(
+            tenant_id,
+            evidence_ref,
+            subject_commit=artifact_commit,
+            test_profile="ci-full",
+            metadata={"workflow_id": workflow_id, "source": "tampered"},
+        )
+    assert evidence_store.verify_and_publish_verdict(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        attempt=1,
+        verdict=verdict,
+        expected_digest=artifact_digest,
+        expected_commit=artifact_commit,
+    ) == [evidence_id]
+
+    with connect() as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_agent_registry_events WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 3
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_policy_decisions WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_approval_consumptions WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_workflow_events WHERE tenant_id=%s AND event_type='validation.verdict'",
+            (tenant_id,),
+        ).fetchone()[0] == 1
