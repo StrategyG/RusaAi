@@ -1,5 +1,6 @@
 """End-to-end proof that Phase 1 contracts support a safe dummy workflow."""
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -73,7 +74,7 @@ def test_dummy_workflow_completes_request_acceptance_and_result_handoff():
     assert execution.result.status == AgentTaskStatus.PASSED
     assert execution.result.attempt == 1
     assert len(execution.result.evidence) == 1
-    assert len(execution.result.evidence[0].sha256) == 64
+    assert hashlib.sha256(execution.evidence_content).hexdigest() == execution.result.evidence[0].sha256
     assert [event.type for event in execution.events] == [
         EventType.TASK_REQUEST,
         EventType.TASK_ACCEPTED,
@@ -81,7 +82,8 @@ def test_dummy_workflow_completes_request_acceptance_and_result_handoff():
     ]
     assert execution.events[1].causation_id == execution.events[0].message_id
     assert execution.events[2].causation_id == execution.events[1].message_id
-    assert execution.events[2].payload["sha256"] == execution.result.evidence[0].sha256
+    assert hashlib.sha256(execution.result_content).hexdigest() == execution.events[2].payload["sha256"]
+    assert execution.events[2].payload["result_ref"].endswith("/attempt-1")
     assert all(event.tenant_id == "tenant-test" for event in execution.events)
 
 
