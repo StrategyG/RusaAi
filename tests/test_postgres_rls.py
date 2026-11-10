@@ -529,7 +529,7 @@ def test_closed_loop_incidents_and_kill_switches_are_tenant_scoped():
             (tenant_a, str(uuid4()), incident_id, "rls-event-" + uuid4().hex),
         )
         assert conn.execute(
-            "SELECT incident_id FROM public.rusa_incidents"
+            "SELECT incident_id::text FROM public.rusa_incidents"
         ).fetchall() == [(incident_id,)]
 
     with connect() as conn:
