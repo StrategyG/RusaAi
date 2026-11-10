@@ -350,17 +350,17 @@ Acceptance criteria:
 - Missing evidence produces HOLD; mandatory failure produces FAIL.
 - No documentation or UI claims production-ready before an approved PASS decision.
 
-## 15. First implementation slice
+## 15. First implementation slice — completed on this branch
 
-Recommended first code-bearing increment after this architecture PR:
+The first code-bearing contract increment is implemented in this branch:
 
-1. Add JSON Schemas and Pydantic models for Agent Manifest v1 and Task/Result/Event v2.
-2. Add compatibility adapters and fixtures for current AICode contracts.
-3. Add contract tests and CI checks; do not change worker execution behavior yet.
-4. Prepare a separate migration design for workflow tables and outbox/inbox.
-5. Review the schema and migration design before enabling new workflow persistence.
+1. Agent Manifest 1.0 and Task/Result/Event 2.0 Pydantic contracts with Draft 2020-12 JSON Schemas.
+2. Typed task lifecycle, policy, approval, audit, and validation-verdict event payloads.
+3. AICode CodingTask, WorkerResult, and TaskRecord compatibility adapters.
+4. Positive/negative contract fixtures, schema drift validation, lint, security analysis, and CI integration.
+5. No live worker execution or production side effect was changed.
 
-This sequence gives RUSA AI a safe expansion point without disturbing the currently functioning coding-agent pipeline.
+The next independent P0 increments are the workflow/run/task persistence and transactional outbox/inbox migration design, followed by the agent registry, DAG scheduler, deterministic policy decision service, and durable approval records. Each requires its own migration plan and review before runtime cutover.
 
 ## 16. Definition of done for Platform Core 2.0
 
