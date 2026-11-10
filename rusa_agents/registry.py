@@ -4,8 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .platform_contracts import (
@@ -34,6 +33,19 @@ def _manifest_hash(manifest: AgentManifestV1) -> str:
     )
     encoded = json.dumps(immutable, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _health_snapshot_is_fresh(
+    health: AgentHealthSnapshot,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    instant = now or datetime.now(timezone.utc)
+    checked_at = health.checked_at
+    if checked_at is None or checked_at.tzinfo is None or checked_at.utcoffset() is None:
+        return False
+    age = instant.astimezone(timezone.utc) - checked_at.astimezone(timezone.utc)
+    return timedelta(0) <= age <= timedelta(minutes=5)
 
 
 def _tenant_allowed(manifest: AgentManifestV1, tenant_id: str, registry_tenant: str) -> bool:
@@ -274,8 +286,11 @@ class PostgresAgentRegistry:
         if manifest is None or manifest.status != AgentStatus.VALIDATED:
             raise AgentRegistryError("only a validated agent can be activated")
         self._validate_bindings(manifest)
-        if manifest.health.status != AgentHealthStatus.HEALTHY:
-            raise AgentRegistryError("agent must have a healthy runtime snapshot before activation")
+        if (
+            manifest.health.status != AgentHealthStatus.HEALTHY
+            or not _health_snapshot_is_fresh(manifest.health)
+        ):
+            raise AgentRegistryError("agent must have a fresh healthy runtime snapshot before activation")
         return self._transition(
             tenant_id, agent_id, version, AgentStatus.ACTIVE,
             actor=actor, action="activated", activated_at=datetime.now(timezone.utc),
@@ -310,6 +325,8 @@ class PostgresAgentRegistry:
     ) -> AgentManifestV1:
         if not actor or len(actor) > 128:
             raise ValueError("registry actor is invalid")
+        if not _health_snapshot_is_fresh(health):
+            raise AgentRegistryError("health update must include a fresh timezone-aware timestamp")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute(
@@ -359,8 +376,11 @@ class PostgresAgentRegistry:
             raise AgentRegistryError(f"agent version is not active: {manifest.status.value}")
         if capability not in manifest.capabilities:
             raise AgentRegistryError("agent version does not declare the requested capability")
-        if manifest.health.status != AgentHealthStatus.HEALTHY:
-            raise AgentRegistryError("agent runtime health is not healthy")
+        if (
+            manifest.health.status != AgentHealthStatus.HEALTHY
+            or not _health_snapshot_is_fresh(manifest.health)
+        ):
+            raise AgentRegistryError("agent runtime health is not fresh and healthy")
         if not _tenant_allowed(manifest, tenant_id, "platform" if manifest.tenant_scope.mode == "system" else tenant_id):
             raise AgentRegistryError("agent tenant scope does not authorize this tenant")
         self._validate_bindings(manifest)
@@ -390,7 +410,10 @@ class PostgresAgentRegistry:
             manifest = AgentManifestV1.model_validate(data)
             if capability not in manifest.capabilities:
                 continue
-            if manifest.health.status != AgentHealthStatus.HEALTHY:
+            if (
+                manifest.health.status != AgentHealthStatus.HEALTHY
+                or not _health_snapshot_is_fresh(manifest.health)
+            ):
                 continue
             if _tenant_allowed(manifest, tenant_id, registry_tenant):
                 self._validate_bindings(manifest)

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
 
 from .platform_contracts import PolicyDecisionV1
@@ -37,13 +38,18 @@ class PolicyDecisionError(RuntimeError):
 
 def _reject_secret_fields(value: Any, path: str = "context") -> None:
     blocked = {
-        "api_key", "apikey", "access_token", "refresh_token", "authorization",
-        "password", "client_secret", "private_key", "secret", "bearer_token",
+        "api_key", "apikey", "access_token", "accesstoken",
+        "refresh_token", "refreshtoken", "authorization", "password",
+        "client_secret", "clientsecret", "private_key", "privatekey",
+        "secret", "secret_key", "secretkey", "bearer_token", "bearertoken",
+        "credential", "credentials", "token",
     }
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in blocked:
+            if not isinstance(key, str):
+                raise ValueError(f"policy context keys must be strings: {path}")
+            normalized = key.lower().replace("-", "_").replace(" ", "_")
+            if normalized in blocked or normalized.replace("_", "") in blocked:
                 raise ValueError(f"credential-shaped policy field is prohibited: {path}.{key}")
             _reject_secret_fields(item, f"{path}.{key}")
     elif isinstance(value, (list, tuple)):
@@ -52,7 +58,13 @@ def _reject_secret_fields(value: Any, path: str = "context") -> None:
 
 
 def _canonical_digest(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("policy inputs must be deterministic JSON values") from exc
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -201,10 +213,10 @@ class PostgresPolicyDecisionStore:
             evaluated_at=row[10], approval_id=row[11],
         )
 
-    def record(self, decision: PolicyDecisionV1) -> None:
+    def record(self, decision: PolicyDecisionV1) -> bool:
         with self._connect() as conn:
             self._set_tenant(conn, decision.tenant_id)
-            conn.execute(
+            inserted = conn.execute(
                 """
                 INSERT INTO public.rusa_policy_decisions(
                     tenant_id, decision_id, actor, action, resource_ref,
@@ -221,6 +233,7 @@ class PostgresPolicyDecisionStore:
                     decision.input_sha256, decision.evaluated_at, decision.approval_id,
                 ),
             )
+            return inserted.rowcount == 1
 
 
 class PolicyDecisionService:
@@ -241,5 +254,10 @@ class PolicyDecisionService:
                 previous = self.store.find_identical_denial(decision)
                 if previous is not None:
                     return previous
-            self.store.record(decision)
+            if not self.store.record(decision):
+                if decision.outcome == "deny":
+                    previous = self.store.find_identical_denial(decision)
+                    if previous is not None:
+                        return previous
+                raise PolicyDecisionError("policy decision was not durably recorded")
         return decision

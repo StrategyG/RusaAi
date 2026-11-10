@@ -392,6 +392,7 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
             "agent-result.v2.schema.json": "summary",
             "workflow-event.v2.schema.json": "event_type",
             "task-record.v2.schema.json": "state",
+            "policy-decision.v1.schema.json": "actor",
         }[filename]
         invalid_payload.pop(required_field)
         with pytest.raises(jsonschema.ValidationError):

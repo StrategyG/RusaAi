@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import fnmatch
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from .agent_tools import ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .platform_contracts import AgentHealthStatus, AgentManifestV1, AgentStatus, PolicyDecisionV1
 from .registry import _tenant_allowed
-from .agent_tools import ROLE_TOOL_ALLOWLIST
 
 
 class CapabilityDenied(PermissionError):
@@ -51,6 +51,7 @@ class ToolAuthorizationContext:
     resource_ref: str
     worker_role: WorkerRole
     task_deadline_at: datetime
+    policy_version: str
     grant: TaskScopedGrant
     policy_decision: PolicyDecisionV1
 
@@ -73,6 +74,12 @@ def authorize_tool_invocation(
         raise CapabilityDenied("agent version is not active")
     if manifest.health.status != AgentHealthStatus.HEALTHY:
         raise CapabilityDenied("agent runtime health is not healthy")
+    health_checked_at = manifest.health.checked_at
+    if health_checked_at is None:
+        raise CapabilityDenied("agent runtime health snapshot has no timestamp")
+    health_age = instant - health_checked_at.astimezone(timezone.utc)
+    if health_age < timedelta(0) or health_age > timedelta(minutes=5):
+        raise CapabilityDenied("agent runtime health snapshot is stale or from the future")
     if (
         manifest.agent_id != context.agent_id
         or manifest.version != context.agent_version
@@ -127,6 +134,9 @@ def authorize_tool_invocation(
         or decision.actor != context.agent_id
         or decision.task_id != context.task_id
         or decision.policy_id != manifest.policy_profile
+        or decision.policy_version != context.policy_version
+        or decision.evaluated_at > instant
+        or instant - decision.evaluated_at.astimezone(timezone.utc) > timedelta(minutes=5)
         or decision.action != f"tool.invoke:{context.tool_name}"
         or decision.resource_ref != resource
         or decision.outcome != "allow"
