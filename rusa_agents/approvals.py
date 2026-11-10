@@ -355,11 +355,16 @@ class PostgresHumanApprovalService:
             self._set_tenant(conn, tenant_id)
             row = conn.execute(
                 """
-                SELECT workflow_id, run_id, task_id, action, resource_ref,
-                       artifact_digest, binding_sha256, policy_id, policy_version,
-                       expires_at, status
-                FROM public.rusa_human_approvals
-                WHERE tenant_id=%s AND approval_id=%s
+                SELECT a.workflow_id, a.run_id, a.task_id, a.action, a.resource_ref,
+                       a.artifact_digest, a.binding_sha256, a.policy_id, a.policy_version,
+                       a.expires_at, a.status
+                FROM public.rusa_human_approvals a
+                WHERE a.tenant_id=%s AND a.approval_id=%s
+                  AND EXISTS (
+                      SELECT 1 FROM public.rusa_workflow_runs r
+                      WHERE r.tenant_id=a.tenant_id AND r.run_id=a.run_id
+                        AND r.state='running' AND r.deadline_at > clock_timestamp()
+                  )
                 FOR UPDATE
                 """,
                 (tenant_id, approval_id),
