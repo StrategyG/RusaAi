@@ -60,7 +60,7 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Apply migrations `001` through `006` in order using the database owner before
+- Apply migrations `001` through `009` in order using the database owner before
   enabling production task intake. The API runtime must not have schema-owner or
   superuser privileges.
 - Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
