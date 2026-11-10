@@ -457,7 +457,13 @@ class WorkspaceToolGateway:
             normalized = PurePosixPath(raw_path).as_posix()
             return "workspace://" + normalized
 
-        if name in {"run_check", "git_diff"}:
+        if name == "run_check":
+            profile = args.get("profile")
+            if not isinstance(profile, str) or not profile.strip():
+                raise ToolDenied("Validation profile is required for resource authorization")
+            return f"workspace://root/checks/{profile}"
+
+        if name == "git_diff":
             return "workspace://root"
 
         if name == "search_knowledge":
