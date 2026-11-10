@@ -38,7 +38,7 @@ paths:
             maxLength: 128
         - in: header
           name: traceparent
-          required: false
+          required: true
           schema:
             type: string
       requestBody:
