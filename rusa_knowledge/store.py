@@ -238,6 +238,7 @@ class PostgresKnowledgeStore:
                        ROW_NUMBER() OVER (ORDER BY {self.embedding_column} <=> %s::vector) AS vector_rank
                 FROM rusa_knowledge_chunks
                 WHERE tenant_id=%s AND collection=%s
+                  AND {self.embedding_column} IS NOT NULL
                 ORDER BY {self.embedding_column} <=> %s::vector
                 LIMIT %s
             ),
@@ -261,7 +262,7 @@ class PostgresKnowledgeStore:
             )
             SELECT c.chunk_id, c.document_id, c.chunk_index, c.content,
                    d.title, d.source_uri, d.metadata, combined.rrf_score,
-                   1 - (c.{self.embedding_column} <=> %s::vector) AS vector_similarity
+                   COALESCE(1 - (c.{self.embedding_column} <=> %s::vector), 0.0) AS vector_similarity
             FROM combined
             JOIN rusa_knowledge_chunks c
               ON c.chunk_id = combined.chunk_id AND c.tenant_id=%s
