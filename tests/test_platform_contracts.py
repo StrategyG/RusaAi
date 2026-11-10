@@ -88,6 +88,8 @@ def _task_payload() -> dict:
         "created_at": NOW.isoformat(),
         "budget": {"max_execution_seconds": 3600, "max_tool_calls": 100},
         "input": {"objective": "Add a test"},
+        "approval_required": True,
+        "approval_ref": "approval://change-123",
     }
 
 
@@ -119,11 +121,11 @@ def _event_payload() -> dict:
         "workflow_id": "workflow-1",
         "run_id": "run-1",
         "correlation_id": "workflow-1",
-        "event_type": "task.succeeded",
+        "event_type": "task.accepted",
         "producer_id": "aicode.worker.tester",
         "producer_version": "1.0.0",
         "occurred_at": NOW.isoformat(),
-        "payload": {"status": "succeeded"},
+        "payload": {"worker_id": "worker-1", "lease_epoch": 1, "state_version": 1},
     }
 
 
@@ -209,7 +211,7 @@ def test_result_requires_ordered_timestamps_and_keeps_legacy_evidence_separate()
 
 def test_workflow_event_requires_versioned_identity_and_safe_payload() -> None:
     event = WorkflowEventV2.model_validate(_event_payload())
-    assert event.event_type == "task.succeeded"
+    assert event.event_type == "task.accepted"
 
     payload = _event_payload()
     payload["payload"] = {"credentials": {"password": "never-store"}}
@@ -573,3 +575,48 @@ def test_all_six_worker_roles_and_queue_status_values_remain_compatible() -> Non
 
     statuses = ("queued", "running", "awaiting_approval", "succeeded", "failed", "cancelled")
     assert [queue_status_to_legacy(queue_status_from_legacy(item)) for item in statuses] == list(statuses)
+
+
+
+def test_approval_decision_and_policy_decision_are_typed_auditable_events() -> None:
+    base = {
+        "tenant_id": "tenant-a",
+        "workflow_id": "workflow-1",
+        "run_id": "run-1",
+        "task_id": "task-1",
+        "attempt": 1,
+        "correlation_id": "workflow-1",
+        "producer_id": "policy-engine",
+        "producer_version": "1.0.0",
+        "occurred_at": NOW.isoformat(),
+    }
+    approval = WorkflowEventV2.model_validate(
+        {
+            **base,
+            "event_type": "approval.decided",
+            "payload": {
+                "approval_id": "approval-123",
+                "decision": "approved",
+                "decided_by": "release-manager",
+                "decided_at": NOW.isoformat(),
+                "reason": "Evidence reviewed",
+            },
+        }
+    )
+    policy = WorkflowEventV2.model_validate(
+        {
+            **base,
+            "event_type": "policy.decision",
+            "payload": {
+                "decision_id": "decision-123",
+                "policy_id": "release-policy",
+                "policy_version": "3",
+                "decision": "require_approval",
+                "action": "release.promote",
+                "resource_ref": "artifact://release/candidate",
+                "evaluated_at": NOW.isoformat(),
+            },
+        }
+    )
+    assert approval.event_type == "approval.decided"
+    assert policy.event_type == "policy.decision"
