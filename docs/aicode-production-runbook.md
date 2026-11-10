@@ -72,26 +72,28 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build all three images from the reviewed commit:
+Build the API, worker, web, and isolated sandbox images from the reviewed commit. Use the image names defined by the production certification contract:
 
 ```bash
-docker build -t ghcr.io/ORG/rusa-ai:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-aicode-worker:RELEASE .
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-aicode-sandbox:RELEASE .
-docker push ghcr.io/ORG/rusa-ai:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-worker:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-sandbox:RELEASE
+docker build -t ghcr.io/ORG/rusa-ai-api:RELEASE .
+docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-ai-worker:RELEASE .
+docker build -f web/Dockerfile -t ghcr.io/ORG/rusa-ai-web:RELEASE web
+docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-ai-sandbox:RELEASE .
+docker push ghcr.io/ORG/rusa-ai-api:RELEASE
+docker push ghcr.io/ORG/rusa-ai-worker:RELEASE
+docker push ghcr.io/ORG/rusa-ai-web:RELEASE
+docker push ghcr.io/ORG/rusa-ai-sandbox:RELEASE
 ```
 
-Resolve the sandbox digest from the registry and configure `RUSA_SANDBOX_IMAGE` as an immutable reference:
+Resolve each image digest from the registry. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
 
 ```text
-ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/ORG/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
 ```
 
 The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
 
-The current CI builds images but does not publish them to a registry automatically. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
+The CI workflows build the API, worker, web, and sandbox images but do not publish them to a registry automatically; publishing remains a controlled release operation. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
 
 ## 6. Prepare Git mirrors and storage
 
@@ -143,7 +145,7 @@ RUSA_AUDIT_HMAC_KEY=AT_LEAST_32_RANDOM_UTF8_BYTES
 RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
-RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
 RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
 RUSA_MODEL_NAME=rusa-ai
@@ -194,12 +196,14 @@ docker compose up -d
 docker compose --profile worker up -d --build
 ```
 
-For production, set the API and worker image references to immutable registry digests in the deployment environment, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then validate and deploy the external-database stack:
+For production, set the API, worker, and web image references to immutable registry digests, set the sandbox image digest, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then run the fail-closed environment preflight and validate the external-database stack:
 
 ```bash
-export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
-export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
+export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai-api@sha256:API_IMAGE_DIGEST
+export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-ai-worker@sha256:WORKER_IMAGE_DIGEST
 export RUSA_WEB_IMAGE=ghcr.io/ORG/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
+export RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-ai-sandbox@sha256:SANDBOX_IMAGE_DIGEST
+python -m rusa_agents.production_preflight
 docker compose -f docker-compose.production.yml config
 docker compose -f docker-compose.production.yml pull
 docker compose -f docker-compose.production.yml up -d

@@ -187,21 +187,21 @@ jobs:
           done
       - name: Validate production Compose configuration
         env:
-          RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WEB_IMAGE: example.invalid/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
+          RUSA_API_IMAGE: ghcr.io/strategyg/rusa-ai-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_IMAGE: ghcr.io/strategyg/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_SESSION_SECRET: ci-web-session-secret-123456789012345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
-          RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_METRICS_API_KEY: ci-metrics-key-12345678901234567890123456789012
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
           RUSA_MODEL_NAME: rusa-ai
-          RUSA_MODEL_API_KEY: ci-model-key
-          RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
+          RUSA_MODEL_API_KEY: ci-model-gateway-key-123456789012345678901234567890
+          RUSA_AUDIT_HMAC_KEY: ci-audit-hmac-key-12345678901234567890123456789012
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
-          RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
           RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
@@ -213,7 +213,7 @@ jobs:
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
         run: |
-          touch .env
+          python -m rusa_agents.production_preflight
           docker compose -f docker-compose.production.yml config --quiet
       - name: Validate CPU-only Compose configuration
         env:
