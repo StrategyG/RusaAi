@@ -63,6 +63,11 @@ CREATE INDEX IF NOT EXISTS idx_rusa_policy_decisions_resource
     ON public.rusa_policy_decisions(tenant_id, resource_ref, evaluated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rusa_policy_decisions_actor
     ON public.rusa_policy_decisions(tenant_id, actor, evaluated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rusa_policy_decisions_identical_denial
+    ON public.rusa_policy_decisions(
+        tenant_id, action, resource_ref, policy_id, policy_version, input_sha256
+    )
+    WHERE outcome = 'deny';
 
 CREATE TABLE IF NOT EXISTS public.rusa_human_approvals (
     tenant_id TEXT NOT NULL CHECK (length(tenant_id) BETWEEN 1 AND 128),
