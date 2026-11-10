@@ -13,7 +13,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 _SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$"
 _AGENT_ID_PATTERN = r"^[a-z][a-z0-9_.-]{1,127}$"
