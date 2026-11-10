@@ -40,8 +40,8 @@ from .deploy import (
 from .operate_monitor import (
     DependencyStatus,
     MonitorAgentExecutor,
-    MonitorPolicy,
     MonitoringRecordWriter,
+    MonitorPolicy,
     MonitorRunner,
     OperateActionPolicy,
     OperateAgentExecutor,
