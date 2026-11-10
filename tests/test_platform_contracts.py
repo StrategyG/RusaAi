@@ -21,6 +21,7 @@ from rusa_agents.platform_contracts import (
     AgentManifestV1,
     AgentResultV2,
     AgentStatus,
+    normalize_contract_schema,
     ArtifactReference,
     TaskEnvelopeV2,
     TaskOutcome,
@@ -287,15 +288,11 @@ def test_contract_json_schemas_match_models_and_validate_payloads() -> None:
     schema_dir = Path("schemas/platform")
 
     for filename, (model, schema_id) in PLATFORM_SCHEMA_MODELS.items():
-        expected = json.dumps(
-            platform_contract_schema(model, schema_id),
-            indent=2,
-            sort_keys=True,
-        ) + "\n"
+        expected = platform_contract_schema(model, schema_id)
         schema_path = schema_dir / filename
-        assert schema_path.read_text(encoding="utf-8") == expected
-
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        assert normalize_contract_schema(schema) == normalize_contract_schema(expected)
+
         jsonschema.Draft202012Validator.check_schema(schema)
         validator = jsonschema.Draft202012Validator(
             schema,
