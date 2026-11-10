@@ -123,6 +123,7 @@
     }
   },
   "required": [
+    "schema_version",
     "task_id",
     "workflow_id",
     "tenant_id",
