@@ -1051,7 +1051,7 @@ class DeployAgentExecutor:
                 "passed": rollback.passed,
                 "rollback_plan_ref": rollback_plan_ref,
                 "previous_artifact_digest": rollback.previous_artifact_digest,
-                undefined
+                "completed_at": rollback_completed_at,
             },
             "status": "passed" if passed else "failed",
             "created_at": _timestamp(),
