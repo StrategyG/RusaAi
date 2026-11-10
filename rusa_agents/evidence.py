@@ -164,7 +164,7 @@ class PostgresEvidenceStore:
                 raise EvidenceValidationError("QA evidence is stale or has a future timestamp")
             row = conn.execute(
                 """
-                SELECT evidence_id, producer_id, producer_version,
+                SELECT evidence_id, kind, producer_id, producer_version,
                        subject_digest, subject_commit, test_profile, occurred_at
                 FROM public.rusa_evidence_records
                 WHERE tenant_id=%s AND uri=%s AND sha256=%s
@@ -174,12 +174,13 @@ class PostgresEvidenceStore:
             if row is None:
                 raise EvidenceValidationError("QA evidence reference is not present in the immutable evidence store")
             if (
-                row[1] != reference.producer_id
-                or row[2] != reference.producer_version
-                or row[3] != expected_digest
-                or row[4] != expected_commit
-                or row[5] != verdict.test_profile
-                or row[6] != occurred_at
+                row[1] != reference.kind
+                or row[2] != reference.producer_id
+                or row[3] != reference.producer_version
+                or row[4] != expected_digest
+                or row[5] != expected_commit
+                or row[6] != verdict.test_profile
+                or row[7] != occurred_at
             ):
                 raise EvidenceValidationError("stored evidence provenance does not match the QA verdict")
             evidence_ids.append(str(row[0]))
