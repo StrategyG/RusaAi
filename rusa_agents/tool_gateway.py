@@ -442,6 +442,25 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge"},
         )
 
+    def execute_authorized(
+        self,
+        action: dict[str, Any],
+        role: WorkerRole,
+        manifest,
+        authorization_context,
+    ) -> ToolResult:
+        """Platform v2 path: require a task grant and deterministic policy before legacy tools."""
+        from .capability_auth import authorize_tool_invocation
+
+        if not isinstance(action, dict) or action.get("name") != authorization_context.tool_name:
+            raise ToolDenied("Tool action does not match its authorization context")
+        try:
+            authorize_tool_invocation(manifest, authorization_context)
+        except PermissionError as exc:
+            TOOL_EXECUTIONS.labels(str(action.get("name", "unknown"))[:64], "denied").inc()
+            raise ToolDenied(str(exc)) from exc
+        return self.execute(action, role)
+
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
         if not isinstance(action, dict):
             raise ToolDenied("Tool action must be an object")
