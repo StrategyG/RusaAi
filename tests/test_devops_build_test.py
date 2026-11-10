@@ -18,7 +18,6 @@ from rusa_agents.devops.build_test import (
 )
 from rusa_agents.devops.specialists import ExecutionLease
 
-
 REGISTRY_HOST = "registry.example"
 SOURCE_COMMIT = "a" * 40
 ARTIFACT_DIGEST = "sha256:" + "b" * 64
