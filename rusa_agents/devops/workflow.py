@@ -14,7 +14,6 @@ from .contracts import (
     AgentTask,
     AgentTaskStatus,
     ArtifactReference,
-    AuditRecordedPayload,
     EventType,
     TaskAcceptedPayload,
     TaskCompletedPayload,
