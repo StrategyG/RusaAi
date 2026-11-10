@@ -207,55 +207,67 @@ BEGIN
 END;
 $rusa$;
 
+DROP POLICY IF EXISTS rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs;
 CREATE POLICY rusa_workflow_runs_api_tenant ON public.rusa_workflow_runs
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_runs_worker_tenant ON public.rusa_workflow_runs;
 CREATE POLICY rusa_workflow_runs_worker_tenant ON public.rusa_workflow_runs
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+DROP POLICY IF EXISTS rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks;
 CREATE POLICY rusa_workflow_tasks_api_tenant ON public.rusa_workflow_tasks
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_tasks_worker_queue ON public.rusa_workflow_tasks;
 CREATE POLICY rusa_workflow_tasks_worker_queue ON public.rusa_workflow_tasks
     FOR ALL TO rusa_worker_runtime
     USING (true)
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS rusa_workflow_dependencies_api_tenant ON public.rusa_workflow_dependencies;
 CREATE POLICY rusa_workflow_dependencies_api_tenant ON public.rusa_workflow_dependencies
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_dependencies_worker_tenant ON public.rusa_workflow_dependencies;
 CREATE POLICY rusa_workflow_dependencies_worker_tenant ON public.rusa_workflow_dependencies
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+DROP POLICY IF EXISTS rusa_workflow_events_api_tenant ON public.rusa_workflow_events;
 CREATE POLICY rusa_workflow_events_api_tenant ON public.rusa_workflow_events
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_events_worker_tenant ON public.rusa_workflow_events;
 CREATE POLICY rusa_workflow_events_worker_tenant ON public.rusa_workflow_events
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
 
+DROP POLICY IF EXISTS rusa_workflow_outbox_api_tenant ON public.rusa_workflow_outbox;
 CREATE POLICY rusa_workflow_outbox_api_tenant ON public.rusa_workflow_outbox
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_outbox_worker_relay ON public.rusa_workflow_outbox;
 CREATE POLICY rusa_workflow_outbox_worker_relay ON public.rusa_workflow_outbox
     FOR ALL TO rusa_worker_runtime
     USING (true)
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS rusa_workflow_inbox_api_tenant ON public.rusa_workflow_inbox;
 CREATE POLICY rusa_workflow_inbox_api_tenant ON public.rusa_workflow_inbox
     FOR ALL TO rusa_api_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
     WITH CHECK (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''));
+DROP POLICY IF EXISTS rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox;
 CREATE POLICY rusa_workflow_inbox_worker_tenant ON public.rusa_workflow_inbox
     FOR ALL TO rusa_worker_runtime
     USING (tenant_id = NULLIF(current_setting('rusa.tenant_id', true), ''))
@@ -269,9 +281,11 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION public.rusa_workflow_event_immutable() FROM PUBLIC;
+DROP TRIGGER IF EXISTS trg_rusa_workflow_events_immutable ON public.rusa_workflow_events;
 CREATE TRIGGER trg_rusa_workflow_events_immutable
     BEFORE UPDATE OR DELETE ON public.rusa_workflow_events
     FOR EACH ROW EXECUTE FUNCTION public.rusa_workflow_event_immutable();
+DROP TRIGGER IF EXISTS trg_rusa_workflow_events_no_truncate ON public.rusa_workflow_events;
 CREATE TRIGGER trg_rusa_workflow_events_no_truncate
     BEFORE TRUNCATE ON public.rusa_workflow_events
     FOR EACH STATEMENT EXECUTE FUNCTION public.rusa_workflow_event_immutable();
