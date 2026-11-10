@@ -50,6 +50,8 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
+      - name: Verify generated platform contract schemas
+        run: python scripts/export_platform_contract_schemas.py --check
       - name: Lint
         run: ruff check rusa_agents rusa_knowledge rusa_mcp tests llm-project/serve
       - name: Security static analysis

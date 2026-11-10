@@ -46,7 +46,7 @@ The All Agents catalogue names Supreme Orchestrator, System Architect, Planner, 
 
 The eight Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agents in the Agentic DevOps lifecycle document are displayed as architecture targets. Security Guard is represented as a cross-cutting design control; the current API's security worker role is not silently renamed to that lifecycle identity. They are not represented as live runtime agents until the corresponding worker registrations, APIs, and execution evidence exist. The source documents also use Supreme Orchestrator, Executive Orchestrator, and DevOps Orchestrator terminology; the UI deliberately does not alias these identities without an explicit architecture decision.
 
-The API supports the awaiting_approval state and an explicit retry after human review, but it does not currently expose an approve/reject endpoint. The UI therefore never marks a task approved. An authorized human must complete the review through the configured governance process before an operator uses retry.
+The current AICode API supports the awaiting_approval state and an explicit retry after human review, but it does not expose an approve/reject endpoint. The Platform Core 2.0 branch adds a backend-only PostgreSQL approval service with exact action/resource/artifact binding and one-time consumption; it is not yet wired into the API or Control Center. The UI therefore never marks a task approved. An authorized human must complete the review through the configured governance process before an operator uses retry.
 
 The API has no external WebSocket status stream. The UI polls the tenant-scoped task list every ten seconds and refreshes details on demand. A future event-stream integration should follow the ADR cursor/reconnect contract.
 
@@ -63,3 +63,9 @@ Open http://localhost:3000. Configure a tenant API key with the appropriate task
 ## Production
 
 Build and publish an immutable web image, set RUSA_WEB_IMAGE to its digest, and set RUSA_WEB_SESSION_SECRET using a secret manager. The production Compose web service binds to loopback and joins only the internal RUSA network. Place an authenticated TLS reverse proxy in front of it before exposing the UI to users. The repository README continues to state that RUSA-AI is not production-certified; adding this UI does not change that certification status.
+
+## Capability status source
+
+The maintained [Agent Capability Status Matrix](AGENT_CAPABILITY_MATRIX.md) is the source of truth for current runtime roles, partially represented shared agents, and planned DevOps/domain capabilities. UI labels must use that distinction. Only a versioned, validated, active registry entry with passing execution and health evidence may be labelled as an active platform agent. The current six AICode worker roles remain labelled as AICode runtime roles.
+
+Canonical orchestrator names and communication choices are defined in [ADR-PLATFORM-001/002](ADR-PLATFORM-001-002.md). Supreme Orchestrator is a target global coordinator; AICodeOrchestrator remains the current coding implementation; DevOps Orchestrator is a target domain coordinator. PostgreSQL remains the current durable queue. RabbitMQ, Kafka, gRPC, and WebSocket remain deferred options.

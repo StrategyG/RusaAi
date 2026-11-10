@@ -1,17 +1,42 @@
 import hashlib
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
+
+from rusa_agents.approvals import ApprovalError, PostgresHumanApprovalService
+from rusa_agents.evidence import EvidenceValidationError, PostgresEvidenceStore
+from rusa_agents.platform_contracts import (
+    AgentDomain,
+    AgentHealthSnapshot,
+    AgentManifestV1,
+    AgentStatus,
+    EvidenceReference,
+    RuntimeBinding,
+    RuntimeKind,
+    ValidationVerdictPayloadV2,
+    WorkflowEventV2,
+)
+from rusa_agents.policy import RiskLevel
+from rusa_agents.policy_engine import (
+    DeterministicPolicyEngine,
+    PolicyDecisionService,
+    PolicyRequest,
+    PostgresPolicyDecisionStore,
+)
+from rusa_agents.registry import AgentRegistryError, PostgresAgentRegistry
+from rusa_agents.workflow_graph import WorkflowGraph, WorkflowRunSpec, WorkflowTaskSpec
+from rusa_agents.workflow_store import PostgresWorkflowStore, WorkflowConflictError
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
 
 
 def connect():
-    import psycopg
     return psycopg.connect(DSN)
 
 
@@ -20,8 +45,6 @@ def apply_database_migrations():
     if not DSN:
         pytest.skip("PostgreSQL integration DSN is not configured")
     migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    import psycopg
-
     with psycopg.connect(DSN, autocommit=True) as conn:
         for migration_name in (
             "001_aicode_core.sql",
@@ -30,6 +53,11 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            # 007 and 009 add vector-backed knowledge schemas; this PostgreSQL service
+            # image does not bundle pgvector. Platform Core migrations are independent.
+            "008_aicode_task_list_audit.sql",
+            "010_platform_workflow_core.sql",
+            "011_platform_governance_registry.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -369,3 +397,428 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
+    PostgresWorkflowStore(DSN).initialize()
+
+    now = datetime.now(timezone.utc)
+    tenant_a = "platform-core-" + uuid4().hex
+    tenant_b = "platform-core-" + uuid4().hex
+    workflow_id = "workflow-" + uuid4().hex
+    run_a = "run-" + uuid4().hex
+    run_b = "run-" + uuid4().hex
+
+    with connect() as admin:
+        for tenant, run_id in ((tenant_a, run_a), (tenant_b, run_b)):
+            admin.execute(
+                """
+                INSERT INTO public.rusa_workflow_runs(
+                    tenant_id, workflow_id, run_id, domain, objective,
+                    state, deadline_at, budget, created_by
+                )
+                VALUES (%s, %s, %s, 'software_engineering', 'RLS integration test',
+                        'running', %s, '{}'::jsonb, 'pytest')
+                """,
+                (tenant, workflow_id + "-" + tenant, run_id, now + timedelta(minutes=10)),
+            )
+
+    event = WorkflowEventV2(
+        tenant_id=tenant_a,
+        workflow_id=workflow_id + "-" + tenant_a,
+        run_id=run_a,
+        correlation_id=workflow_id,
+        traceparent="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        event_type="workflow.created",
+        producer_id="rusa.test",
+        producer_version="1.0.0",
+        sequence=1,
+        occurred_at=now,
+        payload={"test": "tenant-scoped event and outbox atomicity"},
+    )
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_a)
+        assert PostgresWorkflowStore._append_event(conn, event) is True
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_workflow_outbox WHERE tenant_id=%s",
+            (tenant_a,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_workflow_runs WHERE tenant_id=%s",
+            (tenant_a,),
+        ).fetchone()[0] == 1
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    """
+                    INSERT INTO public.rusa_workflow_runs(
+                        tenant_id, workflow_id, run_id, domain, objective,
+                        state, deadline_at, budget, created_by
+                    )
+                    VALUES (%s, %s, %s, 'software_engineering', 'cross-tenant write',
+                            'queued', %s, '{}'::jsonb, 'pytest')
+                    """,
+                    (tenant_b, "cross-" + uuid4().hex, "cross-" + uuid4().hex,
+                     now + timedelta(minutes=10)),
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
+                    (event.message_id,),
+                )
+
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_b)
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_runs WHERE run_id=%s",
+            (run_a,),
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_events WHERE message_id=%s",
+            (event.message_id,),
+        ).fetchone() is None
+
+    # The trusted scheduler role may see work across tenants; event reads remain scoped.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_a)
+        visible = {
+            row[0] for row in conn.execute(
+                "SELECT tenant_id FROM public.rusa_workflow_runs WHERE run_id = ANY(%s)",
+                ([run_a, run_b],),
+            ).fetchall()
+        }
+        assert visible == {tenant_a, tenant_b}
+        assert conn.execute(
+            "SELECT 1 FROM public.rusa_workflow_events WHERE message_id=%s",
+            (event.message_id,),
+        ).fetchone() is not None
+
+    # Table owners still cannot rewrite immutable event facts.
+    with connect() as admin:
+        with pytest.raises(psycopg.errors.RaiseException):
+            with admin.transaction():
+                admin.execute(
+                    "UPDATE public.rusa_workflow_events SET event_type='tampered' WHERE message_id=%s",
+                    (event.message_id,),
+                )
+
+
+def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
+    now = datetime.now(timezone.utc)
+    tenant_id = "platform-services-" + uuid4().hex
+    workflow_id = "workflow-" + uuid4().hex
+    run_id = "run-" + uuid4().hex
+    task_id = "task-" + uuid4().hex
+    artifact_digest = "sha256:" + "a" * 64
+    artifact_commit = "b" * 40
+
+    run = WorkflowRunSpec(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        domain="software_engineering",
+        objective="Exercise platform governance persistence",
+        deadline_at=now + timedelta(hours=1),
+        created_by="test:owner",
+        budget={"max_parallel_tasks": 1},
+    )
+    task = WorkflowTaskSpec(
+        task_id=task_id,
+        domain="software_engineering",
+        agent_id="rusa_test_agent",
+        agent_version="1.0.0",
+        capability="repo.read",
+        deadline_at=now + timedelta(minutes=30),
+    )
+    workflow_store = PostgresWorkflowStore(DSN)
+    workflow_store.create_workflow(run, WorkflowGraph(run, (task,)))
+    workflow_store.start_run(tenant_id, run_id)
+    lease = workflow_store.claim_ready_tasks("worker:approval", limit=1)[0]
+    assert lease["task_id"] == task_id
+
+    manifest = AgentManifestV1(
+        agent_id="rusa_test_agent",
+        domain=AgentDomain.SOFTWARE_ENGINEERING,
+        version="1.0.0",
+        status=AgentStatus.DRAFT,
+        capabilities=["repo.read"],
+        input_schema_ref="schema://rusa/test/input.v1",
+        output_schema_ref="schema://rusa/test/output.v1",
+        runtime_binding=RuntimeBinding(
+            kind=RuntimeKind.PYTHON_CALLABLE,
+            target="tests.fake_agents:ReadAgent",
+        ),
+        tool_allowlist=["list_files"],
+        tenant_scope={"mode": "tenant"},
+        resource_scope={"include_patterns": ["workspace://*"]},
+        policy_profile="test-policy",
+        evaluation_profile="test-evaluation",
+        health=AgentHealthSnapshot(status="healthy", checked_at=now),
+        owner="platform-integration-tests",
+        created_at=now,
+        updated_at=now,
+    )
+    registry = PostgresAgentRegistry(
+        DSN,
+        runtime_resolver=lambda *_: True,
+        schema_resolver=lambda *_: True,
+        policy_resolver=lambda *_: True,
+    )
+    registry.register(tenant_id, manifest, actor="test:admin")
+    validated = registry.validate(
+        tenant_id, manifest.agent_id, manifest.version, actor="test:admin"
+    )
+    assert validated.status == AgentStatus.VALIDATED
+    active = registry.activate(tenant_id, manifest.agent_id, manifest.version, actor="test:admin")
+    assert active.status == AgentStatus.ACTIVE
+    runnable = registry.assert_runnable(
+        tenant_id, manifest.agent_id, manifest.version, "repo.read"
+    )
+    assert runnable.status == AgentStatus.ACTIVE
+    assert registry.select(tenant_id, "repo.read").agent_id == manifest.agent_id
+    with pytest.raises(AgentRegistryError, match="different immutable content"):
+        registry.register(
+            tenant_id,
+            manifest.model_copy(update={"tool_allowlist": ["list_files", "write_file"]}),
+            actor="test:admin",
+        )
+
+    engine = DeterministicPolicyEngine(
+        policy_id="test-policy",
+        policy_version="1",
+        allowed_actions={"tool.invoke:list_files"},
+    )
+    policy_service = PolicyDecisionService(engine, PostgresPolicyDecisionStore(DSN))
+    allowed = policy_service.evaluate(PolicyRequest(
+        tenant_id=tenant_id,
+        authenticated_tenant_id=tenant_id,
+        actor=manifest.agent_id,
+        action="tool.invoke:list_files",
+        resource_ref="workspace://src",
+        policy_id="test-policy",
+        policy_version="1",
+        risk=RiskLevel.LOW,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+    ))
+    assert allowed.outcome == "allow"
+    denial_request = PolicyRequest(
+        tenant_id=tenant_id,
+        authenticated_tenant_id=tenant_id,
+        actor=manifest.agent_id,
+        action="tool.invoke:write_file",
+        resource_ref="workspace://src/main.py",
+        policy_id="test-policy",
+        policy_version="1",
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+    )
+    first_denial = policy_service.evaluate(denial_request)
+    second_denial = policy_service.evaluate(denial_request)
+    assert first_denial.outcome == "deny"
+    assert second_denial.decision_id == first_denial.decision_id
+
+    approvals = PostgresHumanApprovalService(
+        DSN,
+        approver_authorizer=lambda actor, _tenant, _action, _resource: actor == "human:approver",
+        consumer_authorizer=lambda actor, _tenant, _action, _resource: actor == "agent:executor",
+    )
+    requested = approvals.request(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        requested_by="agent:requester",
+        action="release.promote",
+        resource_ref="artifact://release/candidate",
+        reason="Promote the exact QA-verified candidate",
+        policy_id="release-policy",
+        policy_version="3",
+        expires_at=now + timedelta(minutes=10),
+        artifact_digest=artifact_digest,
+    )
+    with pytest.raises(PermissionError, match="cannot approve their own"):
+        approvals.decide(
+            tenant_id, requested["approval_id"],
+            actor="agent:requester", decision="approved",
+        )
+
+    paused_version = workflow_store.await_approval_task(
+        tenant_id,
+        task_id,
+        lease["worker_id"],
+        lease["lease_epoch"],
+        lease["state_version"],
+        approval_id=requested["approval_id"],
+        reason="Wait for the human release approval",
+    )
+    with pytest.raises(WorkflowConflictError, match="live, consumed approval"):
+        workflow_store.resume_approved_task(
+            tenant_id,
+            task_id,
+            requested["approval_id"],
+            expected_state_version=paused_version,
+        )
+
+    assert approvals.decide(
+        tenant_id, requested["approval_id"],
+        actor="human:approver", decision="approved",
+    )["status"] == "approved"
+    consume_args = {
+        "actor": "agent:executor",
+        "action": "release.promote",
+        "resource_ref": "artifact://release/candidate",
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "task_id": task_id,
+        "artifact_digest": artifact_digest,
+    }
+    assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is True
+    assert approvals.consume(tenant_id, requested["approval_id"], **consume_args) is False
+    resumed_version = workflow_store.resume_approved_task(
+        tenant_id,
+        task_id,
+        requested["approval_id"],
+        expected_state_version=paused_version,
+    )
+    resumed = workflow_store.claim_ready_tasks("worker:approval-resumed", limit=1)
+    assert len(resumed) == 1
+    assert resumed[0]["task_id"] == task_id
+    assert resumed[0]["attempt"] == 2
+    assert resumed[0]["state_version"] > resumed_version
+    with pytest.raises(ApprovalError, match="different action"):
+        approvals.consume(
+            tenant_id, requested["approval_id"],
+            **{**consume_args, "action": "release.deploy"},
+        )
+
+    evidence_store = PostgresEvidenceStore(DSN)
+    evidence_ref = EvidenceReference(
+        uri="artifact://evidence/" + uuid4().hex,
+        sha256="sha256:" + "c" * 64,
+        kind="test_report",
+        producer_id="rusa_test_agent",
+        producer_version="1.0.0",
+        subject_digest=artifact_digest,
+        subject_commit=artifact_commit,
+        test_profile="ci-full",
+        occurred_at=now,
+    )
+    evidence_id = evidence_store.record(
+        tenant_id,
+        evidence_ref,
+        subject_commit=artifact_commit,
+        test_profile="ci-full",
+        metadata={"workflow_id": workflow_id, "source": "pytest"},
+    )
+    verdict = ValidationVerdictPayloadV2(
+        verdict="passed",
+        subject_digest=artifact_digest,
+        commit_sha=artifact_commit,
+        producer_id="rusa_qa_agent",
+        producer_version="1.0.0",
+        test_profile="ci-full",
+        evidence_refs=[evidence_ref],
+        evaluated_at=now,
+        summary="All required CI checks passed for the exact artifact.",
+    )
+    assert evidence_store.verify_verdict(
+        tenant_id, verdict,
+        expected_digest=artifact_digest,
+        expected_commit=artifact_commit,
+    ) == [evidence_id]
+    wrong_kind_ref = evidence_ref.model_copy(update={"kind": "build_log"})
+    wrong_kind_verdict = verdict.model_copy(update={"evidence_refs": [wrong_kind_ref]})
+    with pytest.raises(EvidenceValidationError, match="provenance"):
+        evidence_store.verify_verdict(
+            tenant_id, wrong_kind_verdict,
+            expected_digest=artifact_digest,
+            expected_commit=artifact_commit,
+        )
+    with pytest.raises(EvidenceValidationError, match="different provenance"):
+        evidence_store.record(
+            tenant_id,
+            evidence_ref,
+            subject_commit=artifact_commit,
+            test_profile="ci-full",
+            metadata={"workflow_id": workflow_id, "source": "tampered"},
+        )
+    assert evidence_store.verify_and_publish_verdict(
+        tenant_id=tenant_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        attempt=1,
+        verdict=verdict,
+        expected_digest=artifact_digest,
+        expected_commit=artifact_commit,
+    ) == [evidence_id]
+
+    with connect() as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_agent_registry_events WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 3
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_policy_decisions WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_approval_consumptions WHERE tenant_id=%s",
+            (tenant_id,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            """
+            SELECT count(*) FROM public.rusa_workflow_events
+            WHERE tenant_id=%s AND event_type='validation.verdict'
+            """,
+            (tenant_id,),
+        ).fetchone()[0] == 1
+
+    # The API role sees only the authenticated tenant's governance records.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_id)
+        for table in (
+            "rusa_agent_registry",
+            "rusa_agent_registry_events",
+            "rusa_policy_decisions",
+            "rusa_human_approvals",
+            "rusa_approval_consumptions",
+            "rusa_evidence_records",
+        ):
+            assert conn.execute(
+                f"SELECT count(*) FROM public.{table}"
+            ).fetchone()[0] > 0
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_policy_decisions SET reason_code='tampered'"
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_evidence_records SET kind='tampered'"
+                )
+
+    # Workers may read tenant-scoped approval/evidence data, but cannot mutate registry or approvals.
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_worker_runtime", tenant_id)
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_human_approvals"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT count(*) FROM public.rusa_evidence_records"
+        ).fetchone()[0] == 1
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_human_approvals SET status='rejected'"
+                )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute(
+                    "UPDATE public.rusa_agent_registry SET status='revoked'"
+                )
