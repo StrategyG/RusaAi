@@ -23,7 +23,12 @@
       ]
     },
     "stage": {
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
+        null,
         "plan",
         "code",
         "build",
@@ -88,6 +93,20 @@
         ]
       },
       "then": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "plan",
+              "code",
+              "build",
+              "test",
+              "release",
+              "deploy",
+              "operate",
+              "monitor"
+            ]
+          }
+        },
         "required": [
           "stage"
         ]
@@ -109,10 +128,10 @@
         ]
       },
       "then": {
-        "not": {
-          "required": [
-            "stage"
-          ]
+        "properties": {
+          "stage": {
+            "const": null
+          }
         }
       }
     }
