@@ -159,11 +159,6 @@ class SLOAlert:
     def fingerprint(self) -> str:
         return alert_fingerprint(self.tenant_id, self.service_id, self.environment, self.rule_id)
 
-    @property
-    def incident_ref(self) -> str:
-        return ""
-
-
 class PostgresClosedLoopStore:
     """Tenant-scoped durable incident lifecycle and kill-switch state."""
 
@@ -277,6 +272,24 @@ class PostgresClosedLoopStore:
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             for alert in alerts:
+                observed_at = _timestamp(alert.observed_at)
+                message_fingerprint = hashlib.sha256(
+                    _json({
+                        "incident_fingerprint": alert.fingerprint,
+                        "observed_at": observed_at,
+                        "severity": alert.severity,
+                        "summary": alert.summary,
+                        "evidence_ref": alert.evidence_ref,
+                        "metric_name": alert.metric_name,
+                        "operator": alert.operator,
+                        "threshold": float(alert.threshold),
+                        "observed_value": (
+                            float(alert.observed_value) if alert.observed_value is not None else None
+                        ),
+                        "correlation_id": alert.correlation_id,
+                        "workflow_id": alert.workflow_id,
+                    }).encode("utf-8")
+                ).hexdigest()
                 receipt = conn.execute(
                     """
                     INSERT INTO public.rusa_closed_loop_inbox(
@@ -286,7 +299,7 @@ class PostgresClosedLoopStore:
                     ON CONFLICT (tenant_id, consumer_name, message_id) DO NOTHING
                     RETURNING message_id
                     """,
-                    (tenant_id, alert.message_id, alert.fingerprint),
+                    (tenant_id, alert.message_id, message_fingerprint),
                 ).fetchone()
                 if receipt is None:
                     prior = conn.execute(
@@ -297,7 +310,7 @@ class PostgresClosedLoopStore:
                         """,
                         (tenant_id, alert.message_id),
                     ).fetchone()
-                    if prior is None or prior[0] != alert.fingerprint or not prior[1]:
+                    if prior is None or prior[0] != message_fingerprint or not prior[1]:
                         raise ClosedLoopConflictError("alert message_id was reused with different content")
                     incident = self._incident_select(conn, tenant_id, prior[1])
                     if incident is None:
@@ -311,7 +324,6 @@ class PostgresClosedLoopStore:
                     continue
 
                 incident_id = str(uuid4())
-                observed_at = _timestamp(alert.observed_at)
                 metadata = {
                     "metric_name": alert.metric_name,
                     "operator": alert.operator,
@@ -434,7 +446,6 @@ class PostgresClosedLoopStore:
             or parsed.fragment
             or parsed.username
             or parsed.password
-            or parsed.port is not None
             or parsed.path.count("/") != 1
         ):
             raise ValueError("incident_ref must be tenant-bound incident:// URI")
@@ -593,7 +604,11 @@ class PostgresClosedLoopStore:
         _safe_text(reason_code, "reason_code", 128)
         _safe_text(actor, "actor", 128)
         _safe_text(message_id, "message_id", 128)
-        if isinstance(expected_version, bool) or expected_version < 0:
+        if (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 0
+        ):
             raise ValueError("expected_version must be a non-negative integer")
         fingerprint = hashlib.sha256(
             f"{scope}|{enabled}|{reason_code}|{expected_version}".encode()
@@ -752,15 +767,19 @@ class WorkflowExecutionGuard:
     ) -> dict[str, float]:
         if isinstance(estimated_tokens, bool) or not isinstance(estimated_tokens, int) or estimated_tokens < 1:
             raise ValueError("estimated_tokens must be a positive integer")
-        if type(estimated_cost_usd) not in {int, float} or not math.isfinite(float(estimated_cost_usd)) or estimated_cost_usd <= 0:
-            raise ValueError("estimated_cost_usd must be positive and finite")
+        if type(estimated_cost_usd) not in {int, float} or not math.isfinite(float(estimated_cost_usd)) or estimated_cost_usd < 0:
+            raise ValueError("estimated_cost_usd must be non-negative and finite")
         self.closed_loop_store.assert_action_enabled(tenant_id, "model.invoke")
         try:
             token_budget = self.workflow_store.consume_budget(
                 tenant_id, run_id, "tokens", estimated_tokens
             )
-            cost_budget = self.workflow_store.consume_budget(
-                tenant_id, run_id, "cost_usd", estimated_cost_usd
+            cost_budget = (
+                self.workflow_store.consume_budget(
+                    tenant_id, run_id, "cost_usd", estimated_cost_usd
+                )
+                if estimated_cost_usd > 0
+                else {"consumed": 0.0}
             )
         except Exception as exc:
             raise ExecutionBudgetExceeded(
