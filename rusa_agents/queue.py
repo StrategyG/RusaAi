@@ -292,19 +292,25 @@ class PostgresTaskQueue:
         max_attempts: int = 3,
         priority: int = 0,
         *,
+        queue_name: str = "aicode",
         audit_actor: str | None = None,
     ) -> bool:
+        self._validate_queue_name(queue_name)
         if not tenant_id or not task_id or max_attempts < 1:
             raise ValueError("tenant_id, task_id, and positive max_attempts are required")
         self._require_policy_audit_actor(audit_actor)
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             row = conn.execute("""
-                INSERT INTO aicode_jobs(task_id, tenant_id, payload, max_attempts, priority)
-                VALUES (%s, %s, %s::jsonb, %s, %s)
+                INSERT INTO aicode_jobs(
+                    task_id, tenant_id, queue_name, payload, max_attempts, priority
+                )
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s)
                 ON CONFLICT (tenant_id, task_id) DO NOTHING
                 RETURNING id
-            """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
+            """, (
+                task_id, tenant_id, queue_name, json.dumps(payload), max_attempts, priority
+            )).fetchone()
             self._record_policy_event(
                 conn, tenant_id, task_id, audit_actor, "task.create",
                 "allow" if row is not None else "deny",
@@ -320,10 +326,11 @@ class PostgresTaskQueue:
         max_attempts: int = 3,
         priority: int = 0,
         *,
+        queue_name: str = "aicode",
         audit_actor: str | None = None,
     ) -> tuple[str, bool, str]:
         """Create once per tenant/key; identical retries return the original task ID and state."""
-        import re
+        self._validate_queue_name(queue_name)
 
         if (
             not isinstance(idempotency_key, str)
@@ -348,14 +355,14 @@ class PostgresTaskQueue:
             inserted = conn.execute(
                 """
                 INSERT INTO aicode_jobs(
-                    task_id, tenant_id, payload, max_attempts, priority, idempotency_key
+                    task_id, tenant_id, queue_name, payload, max_attempts, priority, idempotency_key
                 )
-                VALUES (%s, %s, %s::jsonb, %s, %s, %s)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 RETURNING task_id::text, status
                 """,
                 (
-                    task_id, tenant_id, json.dumps(payload, ensure_ascii=False),
+                    task_id, tenant_id, queue_name, json.dumps(payload, ensure_ascii=False),
                     max_attempts, priority, idempotency_key,
                 ),
             ).fetchone()
@@ -367,7 +374,7 @@ class PostgresTaskQueue:
 
             existing = conn.execute(
                 """
-                SELECT task_id::text, payload, status
+                SELECT task_id::text, payload, status, queue_name
                 FROM aicode_jobs
                 WHERE tenant_id=%s AND idempotency_key=%s
                 FOR UPDATE
@@ -379,6 +386,13 @@ class PostgresTaskQueue:
                     conn, tenant_id, task_id, audit_actor, "task.create", "deny"
                 )
                 raise IdempotencyConflictError("Task identifier conflicts with an existing task")
+            if existing[3] != queue_name:
+                self._record_policy_event(
+                    conn, tenant_id, str(existing[0]), audit_actor, "task.create", "deny"
+                )
+                raise IdempotencyConflictError(
+                    "Idempotency-Key was already used by a different queue"
+                )
             existing_payload = existing[1] if isinstance(existing[1], dict) else json.loads(existing[1])
             if comparable(existing_payload) != comparable(payload):
                 self._record_policy_event(
