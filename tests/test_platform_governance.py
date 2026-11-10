@@ -324,6 +324,32 @@ def test_capability_authorization_requires_exact_task_and_manifest_policy_bindin
         )
 
 
+def test_capability_authorization_rejects_stale_health_and_policy_decisions():
+    stale_health = manifest(
+        health={
+            "status": AgentHealthStatus.HEALTHY,
+            "checked_at": NOW - timedelta(minutes=6),
+        }
+    )
+    with pytest.raises(CapabilityDenied, match="health snapshot is stale"):
+        authorize_tool_invocation(stale_health, authorization_context(), now=NOW)
+
+    stale_decision = policy_decision(evaluated_at=NOW - timedelta(minutes=6))
+    with pytest.raises(CapabilityDenied, match="policy"):
+        authorize_tool_invocation(
+            manifest(),
+            authorization_context(policy_decision=stale_decision),
+            now=NOW,
+        )
+
+    with pytest.raises(CapabilityDenied, match="policy"):
+        authorize_tool_invocation(
+            manifest(),
+            authorization_context(policy_version="2"),
+            now=NOW,
+        )
+
+
 def test_capability_authorization_rejects_unbounded_manifest_or_task_resource_scope():
     with pytest.raises(CapabilityDenied, match="no explicit include patterns"):
         authorize_tool_invocation(
