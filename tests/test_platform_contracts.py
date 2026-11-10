@@ -189,6 +189,11 @@ def test_task_envelope_validates_trace_context_and_budget() -> None:
         TaskEnvelopeV2.model_validate(payload)
 
     payload = _task_payload()
+    payload["traceparent"] = "00-" + "0" * 32 + "-" + "1" * 16 + "-01"
+    with pytest.raises(ValidationError, match="non-zero trace"):
+        TaskEnvelopeV2.model_validate(payload)
+
+    payload = _task_payload()
     payload["budget"] = {"max_execution_seconds": 0, "max_tool_calls": 100}
     with pytest.raises(ValidationError):
         TaskEnvelopeV2.model_validate(payload)
