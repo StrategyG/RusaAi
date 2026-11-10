@@ -46,7 +46,7 @@ from .specialists import (
 
 _SHA256_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _RELEASE_VERSION_RE = re.compile(
-    r"^(?:v)?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-rc\\.[1-9][0-9]*)?$"
+    r"^(?:v)?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-rc\.[1-9][0-9]*)?$"
 )
 _TARGET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SERVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
