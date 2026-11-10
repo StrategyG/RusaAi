@@ -1,17 +1,41 @@
 import hashlib
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
+
+from rusa_agents.approvals import ApprovalError, PostgresHumanApprovalService
+from rusa_agents.evidence import EvidenceValidationError, PostgresEvidenceStore
+from rusa_agents.platform_contracts import (
+    AgentDomain,
+    AgentHealthSnapshot,
+    AgentManifestV1,
+    AgentStatus,
+    EvidenceReference,
+    RuntimeBinding,
+    RuntimeKind,
+    ValidationVerdictPayloadV2,
+)
+from rusa_agents.policy import RiskLevel
+from rusa_agents.policy_engine import (
+    DeterministicPolicyEngine,
+    PolicyDecisionService,
+    PolicyRequest,
+    PostgresPolicyDecisionStore,
+)
+from rusa_agents.registry import AgentRegistryError, PostgresAgentRegistry
+from rusa_agents.workflow_graph import WorkflowGraph, WorkflowRunSpec, WorkflowTaskSpec
+from rusa_agents.workflow_store import PostgresWorkflowStore
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
 
 
 def connect():
-    import psycopg
     return psycopg.connect(DSN)
 
 
@@ -20,8 +44,6 @@ def apply_database_migrations():
     if not DSN:
         pytest.skip("PostgreSQL integration DSN is not configured")
     migration_root = Path(__file__).resolve().parents[1] / "migrations"
-    import psycopg
-
     with psycopg.connect(DSN, autocommit=True) as conn:
         for migration_name in (
             "001_aicode_core.sql",
@@ -489,40 +511,6 @@ def test_platform_core_migrations_enable_forced_rls_and_atomic_event_outbox():
 
 
 def test_platform_registry_policy_approval_and_evidence_services_are_enforced():
-    from datetime import datetime, timedelta, timezone
-
-    import psycopg
-
-    from rusa_agents.approvals import (
-        ApprovalError,
-        PostgresHumanApprovalService,
-    )
-    from rusa_agents.evidence import EvidenceValidationError, PostgresEvidenceStore
-    from rusa_agents.platform_contracts import (
-        AgentDomain,
-        AgentHealthSnapshot,
-        AgentManifestV1,
-        AgentStatus,
-        EvidenceReference,
-        RuntimeBinding,
-        RuntimeKind,
-        ValidationVerdictPayloadV2,
-    )
-    from rusa_agents.policy import RiskLevel
-    from rusa_agents.policy_engine import (
-        DeterministicPolicyEngine,
-        PolicyDecisionService,
-        PolicyRequest,
-        PostgresPolicyDecisionStore,
-    )
-    from rusa_agents.registry import AgentRegistryError, PostgresAgentRegistry
-    from rusa_agents.workflow_graph import (
-        WorkflowGraph,
-        WorkflowRunSpec,
-        WorkflowTaskSpec,
-    )
-    from rusa_agents.workflow_store import PostgresWorkflowStore
-
     now = datetime.now(timezone.utc)
     tenant_id = "platform-services-" + uuid4().hex
     workflow_id = "workflow-" + uuid4().hex
