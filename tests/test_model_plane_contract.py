@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 import pytest
 import yaml
-from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 
 ROOT = Path(__file__).resolve().parents[1] / "contracts" / "model_plane" / "v0.1.0"
