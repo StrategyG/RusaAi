@@ -242,9 +242,10 @@ _POLICIES = {
                 "release.prepare",
                 "manifest.write",
                 "sbom.read",
+                "evidence.write",
             }
         ),
-        write_scope_prefixes=("release/", "manifests/"),
+        write_scope_prefixes=("release/", "manifests/", "evidence/"),
     ),
     DEPLOY_AGENT: AgentPolicy(
         agent_id=DEPLOY_AGENT,
@@ -256,6 +257,7 @@ _POLICIES = {
                 "deployment.execute",
                 "health.read",
                 "runbook.read",
+                "evidence.write",
             }
         ),
         write_scope_prefixes=("deployments/", "evidence/"),

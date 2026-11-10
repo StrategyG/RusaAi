@@ -335,6 +335,7 @@ class DevOpsDryRunOrchestrator:
         build_evidence_ref: str | None,
         test_evidence_ref: str | None,
         release_manifest_ref: str | None,
+        release_evidence_ref: str | None,
         environment: str,
     ) -> dict[str, Any]:
         if stage == "plan":
@@ -366,15 +367,23 @@ class DevOpsDryRunOrchestrator:
             return {
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
+                "build_evidence_ref": build_evidence_ref
+                or f"evidence://dry-run/build/{workflow_id}",
                 "test_evidence_ref": test_evidence_ref or f"evidence://dry-run/tests/{workflow_id}",
                 "sbom_ref": f"artifact://dry-run/sbom/{workflow_id}",
+                "release_metadata_ref": f"artifact://dry-run/release-metadata/{workflow_id}",
+                "rollback_plan_ref": f"artifact://dry-run/rollback-plan/{workflow_id}",
+                "service": service,
             }
         if stage == "deploy":
             return {
                 "release_manifest_ref": release_manifest_ref or f"artifact://dry-run/release/{workflow_id}",
+                "release_evidence_ref": release_evidence_ref
+                or f"evidence://dry-run/release/{workflow_id}",
                 "environment": environment,
                 "commit_sha": commit_sha,
                 "artifact_digest": artifact_digest,
+                "service": service,
             }
         if stage == "operate":
             return {
@@ -412,6 +421,7 @@ class DevOpsDryRunOrchestrator:
         plan_ref: str | None = None
         test_evidence_ref: str | None = None
         release_manifest_ref: str | None = None
+        release_evidence_ref: str | None = None
         monitor_event: dict[str, Any] | None = None
 
         for stage in STAGES:
@@ -457,6 +467,7 @@ class DevOpsDryRunOrchestrator:
                 ),
                 test_evidence_ref=test_evidence_ref,
                 release_manifest_ref=release_manifest_ref,
+                release_evidence_ref=release_evidence_ref,
                 environment=self.environment,
             )
             approval_required = stage in {"release", "deploy"}
@@ -631,6 +642,7 @@ class DevOpsDryRunOrchestrator:
                 test_evidence_ref = result["output"]["evidence_refs"][0]
             if stage == "release":
                 release_manifest_ref = result["output"]["artifact_refs"][0]
+                release_evidence_ref = result["output"]["evidence_refs"][0]
 
             security_input = dict(task_input)
             security_input["evidence_refs"] = list(result["output"]["evidence_refs"])

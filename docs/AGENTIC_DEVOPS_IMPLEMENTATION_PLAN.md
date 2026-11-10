@@ -158,11 +158,17 @@ rotation, queue/topic permissions, DLQ monitoring, and worker-fleet integration.
 - Test Agent accepts only named test suites from an offline test plan. Required suites must pass; required skipped suites and any failed suite block release.
 - Test reports and attestations are immutable, tenant-scoped, and signed by the independent Test Agent identity. A passing result is bound to the exact source commit and artifact digest.
 
+**Phase 4D (this increment) implements Release and staging deployment adapters:**
+
+- Release Agent verifies detached-signed Build, SBOM, and independent Test evidence; checks the exact tenant, workflow, source commit, artifact digest, test report digest, release checklist, migration compatibility, and rollback plan.
+- Release Agent prepares an immutable release manifest, changelog/readiness report, deployment notes, known issues, and rollback notes. It requests human release approval when the task policy requires it and never publishes an official release.
+- Deploy Agent accepts only an approved or policy-exempt signed release candidate, an allowlisted service, and the configured staging target. Production is explicitly blocked.
+- Deployment network destinations are intersected with a host-side allowlist. The injected adapter performs staging deployment, health checks, smoke tests, and a pre-approved rollback rehearsal.
+- Deployment records and detached-signed evidence bind the deployed release to its exact manifest, commit, digest, target, health checks, and rollback rehearsal.
+
 **Remaining Phase 4 work:**
 
-- Provision and harden the actual BuildKit and isolated test-runner adapters; CI currently validates the adapters with deterministic fakes.
-- Verify signed build, SBOM, and test evidence in a Release Agent and produce an immutable release candidate.
-- Add staging-only Deploy integration and rollback rehearsal.
+- Provision production Release/Deploy approval and deployment adapters, staging target configuration, and workload key provisioning/rotation.
 - Integrate Operate, Monitor, and Security Guard with allowlisted services and telemetry.
 - Provision production worker pools, heartbeat loops, and live child-task orchestration.
 

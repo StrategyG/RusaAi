@@ -138,20 +138,59 @@ commit/digest binding, and QA independence. A production rollout still needs
 the actual isolated builder/test services, workload key provisioning and
 rotation, durable worker heartbeat integration, and Release Agent verification.
 
-## Explicitly not completed by Phase 4C
+## Phase 4D — Release and staging deployment
 
-- Release Agent verification of signed Build, SBOM, and Test evidence.
-- Signed release-candidate publication and staging-only deployment.
-- Deploy, Operate, Monitor, and Security Guard stage handlers.
-- Production BuildKit/test service provisioning, worker-pool provisioning, and live child-task orchestration.
+### Release Agent
+
+- Requires signed Build and SBOM attestations plus a signed PASS from the
+  independent Test Agent. It re-verifies the exact tenant, workflow, commit,
+  immutable artifact digest, SBOM digest, and test-report digest.
+- Requires a content-addressed release metadata artifact containing a
+  semantic version, changelog, deployment notes, migration compatibility,
+  known issues, rollback notes, and a release checklist.
+- Blocks any failed required checklist item or incompatible migration.
+- Verifies the referenced rollback plan is immutable and service-bound.
+- Produces a content-addressed release manifest and readiness report, then
+  signs a release attestation with the Release Agent workload identity.
+- Returns `needs_approval` with an approval-request reference when release
+  approval is required but not yet supplied. It never publishes an official
+  release or bypasses repository approval policy.
+
+### Deploy Agent
+
+- Requires a signed Release Agent attestation and the exact immutable release
+  manifest. It checks the manifest digest, tenant, workflow, commit, artifact,
+  service, and approval status before any deployment side effect.
+- Is restricted to the host-configured staging target and service allowlist.
+  Production is explicitly rejected by this Phase 4D executor.
+- Requires network access to be explicitly scoped to host-allowlisted staging
+  destinations; credentials and raw secrets remain inside the deployment
+  adapter/secret manager.
+- Requires a separately approved rollback plan and performs staging deploy,
+  health checks, smoke tests, and rollback rehearsal through injected host
+  adapters.
+- Stores a deployment record and signs deployment evidence. A failed health,
+  smoke, or rollback gate prevents the Operate handoff.
+
+### Execution adapter boundary
+
+Release and deployment signing, approval verification, and staging actions
+are injected host adapters. Tests use deterministic fakes; production still
+needs real approval service integration, staging target provisioning,
+deployment/health/rollback adapters, workload key provisioning and rotation,
+and live worker orchestration.
+
+## Explicitly not completed by Phase 4D
+
+- Production Release/Deploy adapter provisioning and production deployment.
+- Operate, Monitor, and Security Guard service integrations.
+- Production worker-pool provisioning, heartbeat loops, and live child-task orchestration.
 
 ## Next increments
 
-- **4D — Release and staging:** verify signed Build, SBOM, and independent QA
-  evidence; produce an immutable signed release candidate; and deploy only to
-  an approved staging target with health checks and rollback rehearsal.
-- **4E — remaining specialists:** integrate Deploy, Operate, Monitor, and
-  Security Guard against allowlisted services and telemetry.
+- **4E — remaining specialists:** integrate Operate, Monitor, and Security
+  Guard against allowlisted services and telemetry, including incident
+  context, SLOs, and policy-gated runbook actions.
 
 The Phase 4 exit criterion remains a staging workflow that produces a signed
 release candidate whose tests and provenance match the exact source revision.

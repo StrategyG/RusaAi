@@ -29,6 +29,7 @@ from .build_test import (
     _load_json_artifact,
     _signed_evidence,
     _validate_oci_reference,
+    _validate_registry_hosts,
     _validate_sbom,
     _validate_time_window,
     _verified_evidence,
@@ -190,31 +191,6 @@ _RELEASE_METADATA_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "allOf": [
-        {
-            "if": {
-                "properties": {
-                    "release_checklist": {
-                        "items": {"properties": {"required": {"const": True}}, "required": ["required"]}
-                    }
-                },
-                "required": ["release_checklist"],
-            },
-            "then": {
-                "properties": {
-                    "release_checklist": {
-                        "items": {
-                            "if": {
-                                "properties": {"required": {"const": True}},
-                                "required": ["required"],
-                            },
-                            "then": {"properties": {"status": {"const": "passed"}}},
-                        }
-                    }
-                }
-            },
-        }
-    ],
 }
 
 _ROLLBACK_PLAN_SCHEMA: dict[str, Any] = {
@@ -292,13 +268,16 @@ async def _verify_approval(
     _validate_approval_reference(reference)
     if verifier is None or not callable(getattr(verifier, "verify", None)):
         return False
-    return await verifier.verify(
-        reference=reference,
-        scope=scope,
-        tenant_id=task["tenant_id"],
-        workflow_id=task["workflow_id"],
-        resource_ref=resource_ref,
-    )
+    try:
+        return bool(await verifier.verify(
+            reference=reference,
+            scope=scope,
+            tenant_id=task["tenant_id"],
+            workflow_id=task["workflow_id"],
+            resource_ref=resource_ref,
+        ))
+    except Exception:
+        return False
 
 
 def _release_metadata(
@@ -311,6 +290,8 @@ def _release_metadata(
     checklist_ids = [item["id"] for item in metadata["release_checklist"]]
     if len(checklist_ids) != len(set(checklist_ids)):
         raise ValueError("release checklist contains duplicate item IDs")
+    if any(item["required"] and item["status"] != "passed" for item in metadata["release_checklist"]):
+        raise ValueError("a required release checklist item has not passed")
     return metadata
 
 
@@ -455,11 +436,7 @@ class ReleaseAgentExecutor:
         self.signer = signer
         self.verifier = verifier
         self.approval_verifier = approval_verifier
-        self.allowed_registry_hosts = frozenset(
-            host.strip().lower() for host in allowed_registry_hosts if isinstance(host, str)
-        )
-        if not self.allowed_registry_hosts:
-            raise ValueError("Release Agent requires an approved OCI registry host")
+        self.allowed_registry_hosts = _validate_registry_hosts(allowed_registry_hosts)
 
     async def execute(
         self,
@@ -541,7 +518,7 @@ class ReleaseAgentExecutor:
                     task=task,
                     resource_ref=task["input"]["release_metadata_ref"],
                 )
-            except (ValueError, TypeError):
+            except Exception:
                 approved = False
             if not approved:
                 return _failure(
@@ -558,6 +535,7 @@ class ReleaseAgentExecutor:
             approved = True
         else:
             approved = False
+        approval_status = "approved" if approved and approval_ref else "not_required" if approved else "pending_approval"
 
         _checkpoint(checkpoint)
         rollback_plan_ref = task["input"]["rollback_plan_ref"]
@@ -590,7 +568,7 @@ class ReleaseAgentExecutor:
             "rollback_notes": metadata["rollback_notes"],
             "rollback_plan_ref": rollback_plan_ref,
             "release_checklist": metadata["release_checklist"],
-            "approval_status": "approved" if approved else "pending_approval",
+            "approval_status": approval_status,
             "approval_ref": approval_ref if approved else None,
             "created_at": _timestamp(),
             "policy_version": task["audit"]["policy_version"],
@@ -785,7 +763,7 @@ class DeployAgentExecutor:
         if (
             not constraints["network_access"]
             or not destinations
-            or not set(destinations).issubset(self.allowed_network_destinations)
+            or not {item.strip().lower() for item in destinations}.issubset(self.allowed_network_destinations)
         ):
             return _failure(
                 task,
@@ -797,59 +775,6 @@ class DeployAgentExecutor:
                 source_commit=source_commit,
                 artifact_digest=artifact_digest,
             )
-        approval_required = constraints["approval_required"]
-        approval_ref = constraints.get("approval_ref")
-        if approval_required and "deploy" not in constraints.get("approval_scope", []):
-            return _failure(
-                task,
-                started_at=started,
-                code="deploy.approval_scope_missing",
-                message="Deployment approval is required but the task does not carry the deploy approval scope.",
-                status="blocked",
-                failure_category="",
-                source_commit=source_commit,
-                artifact_digest=artifact_digest,
-            )
-        if approval_required and approval_ref is None:
-            return SpecialistOutcome(
-                result=_result(
-                    task,
-                    status="needs_approval",
-                    summary="Staging deployment is prepared but waiting for the required deployment approval.",
-                    artifact_refs=[],
-                    evidence_refs=[],
-                    findings=[],
-                    started_at=started,
-                    approval_ref=_approval_request_ref(task, "deploy"),
-                    source_commit=source_commit,
-                    artifact_digest=artifact_digest,
-                ),
-                failure_category="",
-                side_effect="NONE",
-            )
-        if approval_ref is not None:
-            try:
-                approved = await _verify_approval(
-                    self.approval_verifier,
-                    reference=approval_ref,
-                    scope="deploy",
-                    task=task,
-                    resource_ref=task_input["release_manifest_ref"],
-                )
-            except (ValueError, TypeError):
-                approved = False
-            if not approved:
-                return _failure(
-                    task,
-                    started_at=started,
-                    code="deploy.approval_invalid",
-                    message="The supplied deployment approval could not be verified for this release manifest and staging target.",
-                    status="blocked",
-                    failure_category="",
-                    source_commit=source_commit,
-                    artifact_digest=artifact_digest,
-                )
-
         try:
             release_payload = _verified_evidence(
                 self.artifact_store,
@@ -879,6 +804,7 @@ class DeployAgentExecutor:
                 or manifest.get("source_commit") != source_commit
                 or manifest.get("artifact_digest") != artifact_digest
                 or manifest.get("approval_status") not in {"approved", "not_required"}
+                or manifest.get("approval_ref") != release_payload.get("approval_ref")
                 or manifest.get("service") != service
                 or release_payload.get("service") != service
             ):
@@ -917,6 +843,54 @@ class DeployAgentExecutor:
                 started_at=started,
                 code="deploy.release_evidence_invalid",
                 message="Deploy Agent could not verify the signed release candidate, exact artifact, approved rollback plan, or staging target.",
+                status="blocked",
+                failure_category="",
+                source_commit=source_commit,
+                artifact_digest=artifact_digest,
+            )
+
+        approval_required = constraints["approval_required"]
+        approval_ref = constraints.get("approval_ref")
+        if approval_required and "deploy" not in constraints.get("approval_scope", []):
+            return _failure(
+                task,
+                started_at=started,
+                code="deploy.approval_scope_missing",
+                message="Deployment approval is required but the task does not carry the deploy approval scope.",
+                status="blocked",
+                failure_category="",
+                source_commit=source_commit,
+                artifact_digest=artifact_digest,
+            )
+        if approval_required and approval_ref is None:
+            return SpecialistOutcome(
+                result=_result(
+                    task,
+                    status="needs_approval",
+                    summary="Staging deployment is prepared but waiting for the required deployment approval.",
+                    artifact_refs=[],
+                    evidence_refs=[],
+                    findings=[],
+                    started_at=started,
+                    approval_ref=_approval_request_ref(task, "deploy"),
+                    source_commit=source_commit,
+                    artifact_digest=artifact_digest,
+                ),
+                failure_category="",
+                side_effect="NONE",
+            )
+        if approval_ref is not None and not await _verify_approval(
+            self.approval_verifier,
+            reference=approval_ref,
+            scope="deploy",
+            task=task,
+            resource_ref=task_input["release_manifest_ref"],
+        ):
+            return _failure(
+                task,
+                started_at=started,
+                code="deploy.approval_invalid",
+                message="The supplied deployment approval could not be verified for this release manifest and staging target.",
                 status="blocked",
                 failure_category="",
                 source_commit=source_commit,
@@ -971,8 +945,7 @@ class DeployAgentExecutor:
             )
             if not isinstance(health, HealthCheckResult) or health.deployment_id != deployed.deployment_id:
                 raise ValueError("health adapter returned a result for a different deployment")
-            _timestamp(_now())
-            _validate_time_window(health.checked_at, health.checked_at)
+            health_checked_at, _ = _validate_time_window(health.checked_at, health.checked_at)
             names = [check.name for check in health.checks]
             if (
                 not health.checks
@@ -998,7 +971,7 @@ class DeployAgentExecutor:
                 or rollback.rollback_plan_ref != rollback_plan_ref
             ):
                 raise ValueError("rollback rehearsal evidence does not match the deployed release")
-            _validate_time_window(rollback.completed_at, rollback.completed_at)
+            rollback_completed_at, _ = _validate_time_window(rollback.completed_at, rollback.completed_at)
             if rollback.previous_artifact_digest is not None and not _SHA256_RE.fullmatch(
                 rollback.previous_artifact_digest
             ):
@@ -1072,13 +1045,13 @@ class DeployAgentExecutor:
                 "healthy": health.healthy,
                 "smoke_tests_passed": health.smoke_tests_passed,
                 "checks": [asdict(check) for check in health.checks],
-                "checked_at": _timestamp(datetime.fromisoformat(str(health.checked_at).replace("Z", "+00:00")) if isinstance(health.checked_at, str) else health.checked_at),
+                "checked_at": health_checked_at,
             },
             "rollback_rehearsal": {
                 "passed": rollback.passed,
                 "rollback_plan_ref": rollback_plan_ref,
                 "previous_artifact_digest": rollback.previous_artifact_digest,
-                "completed_at": _timestamp(datetime.fromisoformat(str(rollback.completed_at).replace("Z", "+00:00")) if isinstance(rollback.completed_at, str) else rollback.completed_at),
+                undefined
             },
             "status": "passed" if passed else "failed",
             "created_at": _timestamp(),
