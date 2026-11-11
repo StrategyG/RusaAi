@@ -4,6 +4,7 @@ import pytest
 
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
+    InferenceDeadlineTimeout,
     InferenceQueueFull,
     InferenceQueueTimeout,
 )
@@ -156,3 +157,49 @@ def test_admission_metrics_track_active_waiting_and_queue_latency():
 
     asyncio.run(scenario())
     assert sample_value("rusa_inference_queue_wait_seconds_count") >= wait_count_before + 2
+
+
+
+def test_request_deadline_shortens_queue_wait_and_cleans_waiter():
+    async def scenario():
+        controller = InferenceAdmissionController(
+            max_active=1, max_waiting=1, queue_timeout=1
+        )
+        await controller.acquire()
+
+        with pytest.raises(InferenceDeadlineTimeout):
+            await controller.acquire(timeout_seconds=0.02)
+
+        assert controller.active_count == 1
+        assert controller.waiting_count == 0
+        await controller.release()
+
+    asyncio.run(scenario())
+
+
+def test_queue_timeout_remains_distinct_when_it_precedes_request_deadline():
+    async def scenario():
+        controller = InferenceAdmissionController(
+            max_active=1, max_waiting=1, queue_timeout=0.1
+        )
+        await controller.acquire()
+
+        with pytest.raises(InferenceQueueTimeout):
+            await controller.acquire(timeout_seconds=1.0)
+
+        assert controller.active_count == 1
+        assert controller.waiting_count == 0
+        await controller.release()
+
+    asyncio.run(scenario())
+
+
+def test_expired_request_deadline_is_rejected_before_queueing():
+    async def scenario():
+        controller = InferenceAdmissionController(max_active=1, max_waiting=1)
+        with pytest.raises(InferenceDeadlineTimeout):
+            await controller.acquire(timeout_seconds=0)
+        assert controller.active_count == 0
+        assert controller.waiting_count == 0
+
+    asyncio.run(scenario())
