@@ -718,17 +718,26 @@ class PostgresInferenceAdmissionController:
             INFERENCE_ACTIVE_GENERATIONS.dec()
 
     async def close(self) -> None:
-        """Cancel locally owned requests and release their leases during shutdown."""
+        """Cancel locally owned requests and let their request tasks release leases."""
         for heartbeat in list(self._heartbeat_tasks.values()):
             heartbeat.cancel()
         if self._heartbeat_tasks:
             await asyncio.gather(*self._heartbeat_tasks.values(), return_exceptions=True)
         self._heartbeat_tasks.clear()
 
+        current_task = asyncio.current_task()
+        owner_tasks = [
+            task
+            for task in self._owner_tasks.values()
+            if task is not current_task and not task.done()
+        ]
+        for owner_task in owner_tasks:
+            owner_task.cancel()
+        if owner_tasks:
+            await asyncio.gather(*owner_tasks, return_exceptions=True)
+
+        # A task that could not complete its finally block is cleaned up here.
         for request_id, owner_id in list(self._owner_ids.items()):
-            owner_task = self._owner_tasks.get(request_id)
-            if owner_task is not None and not owner_task.done():
-                owner_task.cancel()
             try:
                 await asyncio.to_thread(
                     self._withdraw, request_id, owner_id, "cancelled"
