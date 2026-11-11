@@ -7,7 +7,6 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-
 from app import _await_with_deadline, app, set_inference_provider
 from fastapi.testclient import TestClient
 
