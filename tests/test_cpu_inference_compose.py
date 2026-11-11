@@ -11,6 +11,8 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     worker = compose.split("  worker:\n", 1)[1].split("\n  llama-cpp:\n", 1)[0]
 
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in api
+    assert 'RUSA_LOCAL_MODEL_PATH: ""' in api
+    assert 'RUSA_MODEL_PATH: ""' in api
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in worker
     assert "RUSA_MODEL_API_KEY: \"\"" in api
     assert "RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health" in api
@@ -18,7 +20,12 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "api:\n        condition: service_healthy" in worker
     assert "${RUSA_MAX_PARALLEL_WORKERS:-1}" in worker
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
-    assert "${RUSA_MAX_WAITING_INFERENCES:-4}" in compose
+    assert "${RUSA_MAX_WAITING_INFERENCES:-3}" in compose
+    assert "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}" in compose
+    assert '"128"' in model
+    assert '"64"' in model
+    assert '"2"' in model
+    assert "--threads-http" in model
     assert "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}" in model
     assert "    ports:" not in model
     assert '      - --n-gpu-layers\n      - "0"' in model

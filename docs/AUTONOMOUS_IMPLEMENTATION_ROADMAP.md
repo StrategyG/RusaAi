@@ -1,7 +1,16 @@
-# RUSA-AI autonomous implementation roadmap
+# RusaAi autonomous implementation roadmap
 
 This document separates the current repository implementation from the broader agent specifications supplied for RUSA-AI.
 
+
+## Relationship to the v2.0 neural core
+
+The Qwen3-4B QLoRA configuration is a separate legacy experiment for the
+six-role AICode worker JSON action contract. It is not the RusaAi-Edge-1.54B
+neural core and does not satisfy the v2.0 requirement for a non-Qwen
+foundation checkpoint. The core checkpoint and tokenizer remain unselected;
+the core artifact is not built, training has not started, and no device
+benchmark is available. See docs/architecture/IMPLEMENTATION_ALIGNMENT.md.
 ## Implemented baseline in this repository
 
 - `AICodeOrchestrator` coordinates the existing Analyst, Architect, Developer, Debugger, Tester, and Security workers.

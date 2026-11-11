@@ -24,6 +24,11 @@ from starlette.background import BackgroundTask
 from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
+from rusa_agents.inference_admission import (
+    InferenceAdmissionController,
+    InferenceQueueFull,
+    InferenceQueueTimeout,
+)
 from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
@@ -82,47 +87,6 @@ class LocalModelInferenceProvider:
         await self.backend.close()
 
 
-class InferenceAdmissionController:
-    """Bound active inference and the number/time of requests waiting for capacity."""
-
-    def __init__(self, max_active: int, max_waiting: int, queue_timeout: float):
-        if not 1 <= max_active <= 256 or not 0 <= max_waiting <= 4096:
-            raise ValueError("Inference admission limits are outside the allowed range")
-        if not 0.1 <= queue_timeout <= 120:
-            raise ValueError("Inference queue timeout must be between 0.1 and 120 seconds")
-        self._semaphore = asyncio.Semaphore(max_active)
-        self._lock = asyncio.Lock()
-        self._max_waiting = max_waiting
-        self._queue_timeout = queue_timeout
-        self._waiting = 0
-
-    async def acquire(self) -> None:
-        async with self._lock:
-            if self._semaphore.locked() and self._waiting >= self._max_waiting:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Inference capacity is full; retry later",
-                    headers={"Retry-After": "2"},
-                )
-            self._waiting += 1
-        try:
-            await asyncio.wait_for(
-                self._semaphore.acquire(),
-                timeout=self._queue_timeout,
-            )
-        except asyncio.TimeoutError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Timed out waiting for inference capacity",
-                headers={"Retry-After": "2"},
-            ) from exc
-        finally:
-            async with self._lock:
-                self._waiting -= 1
-
-    def release(self) -> None:
-        self._semaphore.release()
-
 
 def _model_timeout_seconds() -> float:
     raw_value = os.getenv("RUSA_MODEL_TIMEOUT_SECONDS") or os.getenv(
@@ -138,12 +102,29 @@ def _model_timeout_seconds() -> float:
 
 def _new_inference_admission_controller() -> InferenceAdmissionController:
     try:
-        max_active = int(os.getenv("RUSA_MAX_CONCURRENT_INFERENCES", "8"))
-        max_waiting = int(os.getenv("RUSA_MAX_WAITING_INFERENCES", "32"))
-        queue_timeout = float(os.getenv("RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS", "10"))
+        max_active = int(os.getenv("RUSA_MAX_CONCURRENT_INFERENCES", "1"))
+        max_waiting = int(os.getenv("RUSA_MAX_WAITING_INFERENCES", "3"))
+        queue_timeout = float(os.getenv("RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS", "60"))
     except ValueError as exc:
         raise RuntimeError("Inference admission settings must be numeric") from exc
     return InferenceAdmissionController(max_active, max_waiting, queue_timeout)
+
+
+async def _acquire_inference_slot(controller: InferenceAdmissionController) -> None:
+    try:
+        await controller.acquire()
+    except InferenceQueueFull as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Inference capacity is full; retry later",
+            headers={"Retry-After": "2"},
+        ) from exc
+    except InferenceQueueTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Timed out waiting for inference capacity",
+            headers={"Retry-After": "2"},
+        ) from exc
 
 
 inference_provider: InferenceProvider | None = None
@@ -229,7 +210,7 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
-app.state.inference_admission = InferenceAdmissionController(8, 32, 10.0)
+app.state.inference_admission = InferenceAdmissionController(1, 3, 60.0)
 
 
 def _request_body_limit() -> int:
@@ -287,7 +268,7 @@ class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(
-        default_factory=lambda: os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
+        default_factory=lambda: os.getenv("RUSA_MODEL_NAME", "rusaai-edge-1.54b"),
         min_length=1,
         max_length=128,
     )
@@ -678,10 +659,10 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     messages = [message.model_dump() for message in request.messages]
     controller = getattr(http_request.app.state, "inference_admission", None)
     if controller is None:
-        controller = InferenceAdmissionController(8, 32, 10.0)
+        controller = InferenceAdmissionController(1, 3, 60.0)
 
     if not request.stream:
-        await controller.acquire()
+        await _acquire_inference_slot(controller)
         try:
             output = await provider.complete(
                 messages,
@@ -698,7 +679,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 status_code=502, detail="Inference backend request failed"
             ) from None
         finally:
-            controller.release()
+            await controller.release()
 
         return ChatCompletionResponse(
             id=f"rusa-chatcmpl-{uuid4().hex}",
@@ -719,16 +700,16 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             status_code=501,
             detail="The configured inference provider does not support streaming",
         )
-    await controller.acquire()
+    await _acquire_inference_slot(controller)
     completion_id = f"rusa-chatcmpl-{uuid4().hex}"
     created = int(time.time())
     released = False
 
-    def release_stream_slot() -> None:
+    async def release_stream_slot() -> None:
         nonlocal released
         if not released:
             released = True
-            controller.release()
+            await controller.release()
 
     async def event_stream():
         finish_reason: str | None = None
@@ -814,7 +795,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             })
             yield _sse("[DONE]")
         finally:
-            release_stream_slot()
+            await release_stream_slot()
 
     return StreamingResponse(
         event_stream(),

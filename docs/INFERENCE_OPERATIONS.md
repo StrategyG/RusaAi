@@ -2,7 +2,7 @@
 
 ## Release boundary
 
-This runbook applies to the local model serving API. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RUSA-AI product. Do not promote a release without evidence for the exact commit, model manifest digest, container digest, hardware, and deployment configuration.
+This runbook applies to the local model serving API. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RUSA-AI product. Do not promote a release without evidence for the exact commit, model manifest digest, container digest, hardware, and deployment configuration. The v2.0 RusaAi-Edge checkpoint is still unselected; using this model ID in an API request does not establish that the target artifact exists.
 
 ## 1. Artifact intake
 
@@ -43,7 +43,7 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | RUSA_API_KEY | Service API credential | Secret manager; 48+ random bytes |
 | RUSA_MODEL_PATH or RUSA_LOCAL_MODEL_PATH | Mounted model directory | /models |
 | RUSA_MODEL_MANIFEST_SHA256 | Pinned artifact manifest digest | Exact SHA-256 from manifest generator |
-| RUSA_MODEL_NAME | OpenAI API model identifier | rusa-ai-v1 |
+| RUSA_MODEL_NAME | OpenAI API model identifier | rusaai-edge-1.54b |
 | RUSA_INFERENCE_BACKEND | Backend selection | vllm after validation |
 | RUSA_MAX_MODEL_LEN | Maximum prompt + output context | Never above verified model limit |
 | RUSA_GENERATION_TIMEOUT_SECONDS | Per-generation timeout | 180; tune to workload |
@@ -77,7 +77,7 @@ If any readiness check fails, keep the instance out of the load balancer. The AP
     curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
+      -d '{"model":"rusaai-edge-1.54b","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
 
     curl --no-buffer http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \

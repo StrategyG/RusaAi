@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-The repository now has an initial SFT/QLoRA pipeline targeting the existing AICode `AutonomousCodeWorker` contract. This is a **training implementation**, not a claim that RUSA-AI weights have already been trained, benchmarked, or production-certified.
+The repository now has an initial SFT/QLoRA pipeline targeting the existing AICode `AutonomousCodeWorker` contract. This is a **training implementation**, not a claim that RUSA-AI weights have already been trained, benchmarked, or production-certified. The checked-in Qwen3-4B candidate is a separate legacy worker-contract experiment, not the RusaAi-Edge-1.54B core; v2.0 requires a non-Qwen foundation checkpoint, which remains unselected.
 
 The first candidate is `Qwen/Qwen3-4B-Instruct-2507` (Apache-2.0). Its model card describes a 4.0B-parameter causal LM, multilingual capability, coding/tool-use improvements, and a native 262,144-token context. The initial fine-tuning window is deliberately capped at 4,096 tokens to control memory and keep the agent task context bounded. The model revision is pinned in `llm-project/configs/training.yaml`.
 

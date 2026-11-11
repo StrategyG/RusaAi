@@ -1,0 +1,100 @@
+"""FIFO admission control for a bounded shared CPU inference slot."""
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+
+
+class InferenceQueueFull(RuntimeError):
+    """Raised when the bounded inference waiting queue has no free position."""
+
+
+class InferenceQueueTimeout(TimeoutError):
+    """Raised when a request cannot obtain an inference slot before its deadline."""
+
+
+class InferenceAdmissionController:
+    """Reserve active slots fairly and bound the number of waiting requests.
+
+    The active count includes slots handed to waiters but not yet resumed. This
+    prevents a timeout/cancellation race from leaking or double-releasing a slot.
+    """
+
+    def __init__(
+        self,
+        max_active: int = 1,
+        max_waiting: int = 3,
+        queue_timeout: float = 60.0,
+    ) -> None:
+        if not 1 <= max_active <= 256 or not 0 <= max_waiting <= 4096:
+            raise ValueError("Inference admission limits are outside the allowed range")
+        if not 0.1 <= queue_timeout <= 120:
+            raise ValueError("Inference queue timeout must be between 0.1 and 120 seconds")
+        self._max_active = max_active
+        self._max_waiting = max_waiting
+        self._queue_timeout = queue_timeout
+        self._active = 0
+        self._waiters: deque[asyncio.Future[None]] = deque()
+        self._lock = asyncio.Lock()
+
+    @property
+    def active_count(self) -> int:
+        return self._active
+
+    @property
+    def waiting_count(self) -> int:
+        return len(self._waiters)
+
+    async def acquire(self) -> None:
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            if self._active < self._max_active and not self._waiters:
+                self._active += 1
+                return
+            if len(self._waiters) >= self._max_waiting:
+                raise InferenceQueueFull("Inference capacity is full; retry later")
+            waiter: asyncio.Future[None] = loop.create_future()
+            self._waiters.append(waiter)
+
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(waiter),
+                timeout=self._queue_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            await self._withdraw(waiter)
+            raise InferenceQueueTimeout(
+                "Timed out waiting for inference capacity"
+            ) from exc
+        except BaseException:
+            await self._withdraw(waiter)
+            raise
+
+    async def release(self) -> None:
+        async with self._lock:
+            if self._active <= 0:
+                raise RuntimeError("Cannot release an inference slot that is not held")
+            self._release_locked()
+
+    async def _withdraw(self, waiter: asyncio.Future[None]) -> None:
+        async with self._lock:
+            try:
+                self._waiters.remove(waiter)
+            except ValueError:
+                # The slot was already handed to this waiter. Return it so the
+                # next queued request can proceed, even if this task was cancelled.
+                if waiter.done() and not waiter.cancelled():
+                    self._release_locked()
+            else:
+                if not waiter.done():
+                    waiter.cancel()
+
+    def _release_locked(self) -> None:
+        while self._waiters:
+            waiter = self._waiters.popleft()
+            if waiter.done():
+                continue
+            # Keep the active count unchanged: this slot is transferred FIFO.
+            waiter.set_result(None)
+            return
+        self._active -= 1

@@ -90,7 +90,7 @@ class OpenAICompatibleProvider:
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.base_url = (base_url or os.getenv("RUSA_MODEL_BASE_URL", "")).rstrip("/")
-        self.model = model or os.getenv("RUSA_MODEL_NAME", "rusa-ai")
+        self.model = model or os.getenv("RUSA_MODEL_NAME", "rusaai-edge-1.54b")
         self.api_key = api_key or os.getenv("RUSA_MODEL_API_KEY")
         self.timeout_seconds = _provider_timeout(timeout_seconds)
         self.max_retries = max_retries
@@ -184,7 +184,7 @@ class OpenAIChatInferenceProvider:
     def __init__(
         self,
         base_url: str,
-        default_model: str = "rusa-ai",
+        default_model: str = "rusaai-edge-1.54b",
         api_key: str | None = None,
         timeout_seconds: float = 120.0,
         max_response_bytes: int | None = None,
