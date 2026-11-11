@@ -77,6 +77,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0, immutable commit
+        with:
+          node-version: "22"
+      - name: Resolve web lockfile and validate frontend
+        working-directory: web
+        env:
+          RUSA_API_BASE_URL: http://127.0.0.1:8000
+          RUSA_WEB_SESSION_SECRET: ci-only-session-secret-change-this-value-123456789
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+          npm run typecheck
       - name: Build API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
@@ -114,6 +127,8 @@ jobs:
           PY
       - name: Build isolated knowledge MCP image
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
+      - name: Build web application image
+        run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
       - name: Install Trivy
@@ -128,6 +143,7 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-web:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
@@ -189,6 +205,7 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-web:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
