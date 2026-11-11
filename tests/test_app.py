@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from app import app, set_inference_provider
 from fastapi.testclient import TestClient
 
-from rusa_agents.inference_admission import InferenceAdmissionController
+from rusa_agents.inference_admission import (
+    InferenceAdmissionController,
+    InferenceDeadlineTimeout,
+)
 from rusa_agents.providers import InferenceStreamEvent
 
 client = TestClient(app)
@@ -607,7 +610,7 @@ def test_chat_completions_enforces_generation_deadline_and_releases_slot(monkeyp
 
         async def complete(self, messages, **parameters):
             try:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
             except asyncio.CancelledError:
                 self.cancelled = True
                 raise
@@ -632,7 +635,7 @@ def test_chat_completions_enforces_generation_deadline_and_releases_slot(monkeyp
             json={
                 "model": "rusaai-cpu-smoke-test",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "deadline_ms": 25,
+                "deadline_ms": 100,
             },
         )
     finally:
@@ -683,7 +686,7 @@ def test_chat_completions_stream_emits_timeout_and_releases_slot(monkeypatch):
             json={
                 "model": "rusaai-cpu-smoke-test",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "deadline_ms": 60,
+                "deadline_ms": 200,
                 "stream": True,
             },
         )
@@ -709,3 +712,47 @@ def test_chat_completion_deadline_ms_is_bounded():
             },
         )
         assert response.status_code == 422
+
+
+
+def test_chat_completions_queue_deadline_returns_gateway_timeout(monkeypatch):
+    class ExpiredAdmission:
+        async def acquire(self, *, timeout_seconds=None):
+            assert timeout_seconds is not None
+            raise InferenceDeadlineTimeout("request deadline expired")
+
+        async def release(self):
+            raise AssertionError("a slot was never acquired")
+
+    class MustNotGenerate:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("provider must not run after admission deadline")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    monkeypatch.setattr(app.state, "inference_admission", ExpiredAdmission(), raising=False)
+    set_inference_provider(MustNotGenerate())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "deadline_ms": 100,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Inference request deadline exceeded"
