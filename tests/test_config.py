@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import pytest
 
 from rusa_agents.config import RuntimeConfig
@@ -39,6 +42,25 @@ def set_worker_environment(monkeypatch):
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    worker_key = "w" * 48
+    worker_key_digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        json.dumps({
+            worker_key_digest: {
+                "subject": "rusa-worker-tenant-a",
+                "tenant_id": "tenant-a",
+                "roles": ["developer"],
+            }
+        }),
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_BASE_URL", "https://api.internal/v1"
+    )
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": worker_key})
+    )
 
 
 def test_production_api_accepts_dedicated_tls_database_role(monkeypatch):
@@ -159,10 +181,30 @@ def test_production_api_rejects_missing_model_gateway_token(monkeypatch):
         RuntimeConfig.from_env().validate_api()
 
 
-def test_production_worker_rejects_placeholder_model_gateway_token(monkeypatch):
+def test_production_worker_does_not_receive_model_gateway_secret(monkeypatch):
     set_worker_environment(monkeypatch)
-    monkeypatch.setenv("RUSA_MODEL_API_KEY", "replace-with-model-token")
-    with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_missing_tenant_inference_credential(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}")
+    with pytest.raises(RuntimeError, match="missing tenant tenant-a"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_inference_key_not_bound_to_tenant(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "x" * 48}))
+    with pytest.raises(RuntimeError, match="tenant-bound inference principal"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_requires_tls_api_gateway(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_BASE_URL", "http://api:8000/v1")
+    with pytest.raises(RuntimeError, match="RUSA_WORKER_INFERENCE_BASE_URL"):
         RuntimeConfig.from_env().validate_worker()
 
 
