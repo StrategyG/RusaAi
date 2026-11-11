@@ -201,6 +201,16 @@ def test_production_worker_rejects_inference_key_not_bound_to_tenant(monkeypatch
         RuntimeConfig.from_env().validate_worker()
 
 
+def test_production_worker_rejects_unknown_inference_key_tenants(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS",
+        json.dumps({"tenant-a": "w" * 48, "tenant-b": "x" * 48}),
+    )
+    with pytest.raises(RuntimeError, match="outside RUSA_TENANT_REPOSITORIES"):
+        RuntimeConfig.from_env().validate_worker()
+
+
 def test_production_worker_requires_tls_api_gateway(monkeypatch):
     set_worker_environment(monkeypatch)
     monkeypatch.setenv("RUSA_WORKER_INFERENCE_BASE_URL", "http://api:8000/v1")
