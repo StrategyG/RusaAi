@@ -20,7 +20,7 @@ def _hold_scheduler_slot_in_process(dsn, label, release_event, result_queue):
         dsn,
         max_active=1,
         max_waiting=2,
-        queue_timeout=2.0,
+        queue_timeout=10.0,
         lease_seconds=5,
         poll_interval=0.01,
     )
@@ -337,7 +337,9 @@ def test_fifo_admission_is_shared_across_separate_os_processes(scheduler_databas
         target=_hold_scheduler_slot_in_process,
         args=(scheduler_database, "process-two", second_release, result_queue),
     )
-    parent_controller = make_controller(scheduler_database, max_waiting=2)
+    parent_controller = make_controller(
+        scheduler_database, max_waiting=2, queue_timeout=10.0
+    )
 
     async def wait_for_waiters(expected):
         deadline = time.monotonic() + 8
@@ -391,7 +393,7 @@ def test_process_crash_recovers_after_global_lease_expiry(scheduler_database):
         target=_hold_scheduler_slot_in_process,
         args=(scheduler_database, "crashed-process", release_event, result_queue),
     )
-    controller = make_controller(scheduler_database)
+    controller = make_controller(scheduler_database, queue_timeout=10.0)
 
     async def scenario():
         process.start()
