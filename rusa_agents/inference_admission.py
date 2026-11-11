@@ -66,7 +66,10 @@ class InferenceAdmissionController:
             raise InferenceQueueTimeout(
                 "Timed out waiting for inference capacity"
             ) from exc
-        except BaseException:
+        except asyncio.CancelledError:
+            await self._withdraw(waiter)
+            raise
+        except Exception:
             await self._withdraw(waiter)
             raise
 
