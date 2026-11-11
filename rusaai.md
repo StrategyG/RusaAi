@@ -430,8 +430,8 @@ Sebuah komponen disebut:
 
 - Repository: https://github.com/StrategyG/RusaAi
 - Architecture PR #107: https://github.com/StrategyG/RusaAi/pull/107
-- Worker API gateway PR #108: https://github.com/StrategyG/RusaAi/pull/108
-- PostgreSQL admission PR #109: https://github.com/StrategyG/RusaAi/pull/109
+- Worker API gateway predecessor PR #108 (superseded by consolidated PR #109): https://github.com/StrategyG/RusaAi/pull/108
+- Consolidated worker gateway + PostgreSQL admission PR #109: https://github.com/StrategyG/RusaAi/pull/109
 - CI Run #4228 (deadline implementation snapshot): https://github.com/StrategyG/RusaAi/actions/runs/43095281714
 - Implementation alignment: `docs/architecture/IMPLEMENTATION_ALIGNMENT.md`
 - Autonomous implementation mapping: `docs/AUTONOMOUS_IMPLEMENTATION_ROADMAP.md`
@@ -483,7 +483,9 @@ Baseline CI passed at the architecture snapshot; re-check the latest exact PR he
 
 **IMPLEMENTED IN CPU COMPOSE PROFILE — pending CI and staging verification**
 
-Branch: feat/shared-api-inference-gateway (stacked on PR #107)
+Implementation branch: feat/shared-api-inference-gateway (predecessor PR #108)
+
+The worker gateway and durable scheduler are consolidated in PR #109, which targets PR #107 directly so its CI validates the complete R2/R2.1 change set.
 
 - [x] Route CPU-profile worker inference through the OpenAI-compatible API instead of calling llama.cpp directly.
 - [x] Reuse the API's shared admission controller for API and worker generation requests.
@@ -499,7 +501,7 @@ Branch: feat/shared-api-inference-gateway (stacked on PR #107)
 
 **IMPLEMENTED — pending exact-head CI and production staging verification**
 
-Branch: feat/postgres-inference-admission (stacked on PR #108)
+Branch: feat/postgres-inference-admission (PR #109, consolidated directly on PR #107)
 
 - [x] Add migration 010 with global scheduler configuration, request history, and active slot tables.
 - [x] Use a PostgreSQL advisory transaction lock to serialize FIFO enqueue/claim/release across API replicas.
