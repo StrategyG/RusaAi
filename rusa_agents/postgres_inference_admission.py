@@ -237,6 +237,22 @@ class PostgresInferenceAdmissionController:
                     """,
                     (self.max_active,),
                 )
+                if not production:
+                    active_excess = conn.execute(
+                        """
+                        SELECT count(*) FROM public.rusa_inference_admission_slots
+                        WHERE slot_id >= %s AND active_request_id IS NOT NULL
+                        """,
+                        (self.max_active,),
+                    ).fetchone()[0]
+                    if active_excess:
+                        raise RuntimeError(
+                            "Cannot reduce development max_active while excess slots are active"
+                        )
+                    conn.execute(
+                        "DELETE FROM public.rusa_inference_admission_slots WHERE slot_id >= %s",
+                        (self.max_active,),
+                    )
                 configured_slots = conn.execute(
                     """
                     SELECT count(*) FROM public.rusa_inference_admission_slots
