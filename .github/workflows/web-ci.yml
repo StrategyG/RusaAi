@@ -39,7 +39,7 @@ jobs:
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
           npm ci --ignore-scripts --no-audit --no-fund
       - name: Upload resolved web dependency lockfile
-        uses: actions/upload-artifact@cf430e030dd5b5ab0b93f22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-package-lock-${{ github.sha }}
           path: web/package-lock.json
