@@ -233,6 +233,8 @@ class OpenAICompatibleProvider:
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            response_format={"type": "json_object"} if self.gateway_mode else None,
+            deadline_ms=self.gateway_deadline_ms if self.gateway_mode else None,
         ):
             yield event
 
@@ -264,6 +266,7 @@ class OpenAIChatInferenceProvider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
         return headers
 
     async def check_ready(self) -> bool:
@@ -285,6 +288,7 @@ class OpenAIChatInferenceProvider:
         top_p: float = 0.9,
         max_tokens: int = 1024,
         response_format: dict[str, str] | None = None,
+        deadline_ms: int | None = None,
     ) -> str:
         payload = {
             "model": model or self.default_model,
@@ -296,6 +300,8 @@ class OpenAIChatInferenceProvider:
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if deadline_ms is not None:
+            payload["deadline_ms"] = deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
@@ -325,6 +331,7 @@ class OpenAIChatInferenceProvider:
         top_p: float = 0.9,
         max_tokens: int = 1024,
         response_format: dict[str, str] | None = None,
+        deadline_ms: int | None = None,
     ) -> AsyncIterator[InferenceStreamEvent]:
         """Stream bounded OpenAI-compatible SSE deltas without buffering the full response."""
         payload = {
@@ -338,6 +345,8 @@ class OpenAIChatInferenceProvider:
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if deadline_ms is not None:
+            payload["deadline_ms"] = deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
