@@ -33,9 +33,18 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - name: Install web dependencies
+      - name: Resolve and validate the committed web dependency lockfile
         working-directory: web
-        run: npm install --no-audit --no-fund
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Upload resolved web dependency lockfile
+        uses: actions/upload-artifact@cf430e030dd5b5ab0b93f22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-package-lock-${{ github.sha }}
+          path: web/package-lock.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Audit production web dependencies
         working-directory: web
         run: npm audit --omit=dev --audit-level=high
