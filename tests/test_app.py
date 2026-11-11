@@ -1,10 +1,14 @@
 import asyncio
 import hashlib
+import inspect
 import json
+import time
 import uuid
 from types import SimpleNamespace
 
-from app import app, set_inference_provider
+from app import _await_with_deadline, app, set_inference_provider
+import pytest
+
 from fastapi.testclient import TestClient
 
 from rusa_agents.inference_admission import (
@@ -756,3 +760,23 @@ def test_chat_completions_queue_deadline_returns_gateway_timeout(monkeypatch):
 
     assert response.status_code == 504
     assert response.json()["detail"] == "Inference request deadline exceeded"
+
+
+
+def test_expired_generation_deadline_closes_unstarted_coroutine():
+    async def scenario():
+        started = False
+
+        async def generation():
+            nonlocal started
+            started = True
+            return "too late"
+
+        pending = generation()
+        with pytest.raises(InferenceDeadlineTimeout):
+            await _await_with_deadline(pending, time.monotonic() - 1)
+
+        assert started is False
+        assert inspect.getcoroutinestate(pending) == inspect.CORO_CLOSED
+
+    asyncio.run(scenario())
