@@ -780,3 +780,30 @@ def test_expired_generation_deadline_closes_unstarted_coroutine():
         assert inspect.getcoroutinestate(pending) == inspect.CORO_CLOSED
 
     asyncio.run(scenario())
+
+
+
+def test_cancelled_request_cancels_provider_coroutine():
+    async def scenario():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def generation():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        request = asyncio.create_task(
+            _await_with_deadline(generation(), time.monotonic() + 10)
+        )
+        await started.wait()
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+        assert cancelled.is_set()
+
+    asyncio.run(scenario())
