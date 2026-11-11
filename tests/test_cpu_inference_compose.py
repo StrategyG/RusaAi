@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -21,7 +23,8 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "${RUSA_MAX_PARALLEL_WORKERS:-1}" in worker
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
     assert "${RUSA_MAX_WAITING_INFERENCES:-3}" in compose
-    assert "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}" in compose
+    assert "${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}" in compose
+    assert "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}" not in compose
     assert "${RUSA_MODEL_NAME:-rusa-cpu}" not in compose
     assert '"128"' in model
     assert '"64"' in model
@@ -32,3 +35,45 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert '      - --n-gpu-layers\n      - "0"' in model
     assert "--no-webui" not in model
     assert '      - "8080"' in model
+
+
+
+def _memory_limit_mib(value: str) -> int:
+    normalized = value.strip().lower()
+    if normalized.endswith("g"):
+        return int(float(normalized[:-1]) * 1024)
+    if normalized.endswith("m"):
+        return int(float(normalized[:-1]))
+    raise AssertionError(f"Unsupported Compose memory unit: {value}")
+
+
+def test_8gb_compose_profile_bounds_all_service_memory_and_waiting_work():
+    cpu = yaml.safe_load((ROOT / "docker-compose.cpu.yml").read_text(encoding="utf-8"))
+    overlay = yaml.safe_load(
+        (ROOT / "docker-compose.cpu-8gb.yml").read_text(encoding="utf-8")
+    )
+    services = overlay["services"]
+
+    assert set(services) == {"postgres", "api", "worker", "web", "llama-cpp"}
+    assert services["postgres"]["mem_limit"] == "384m"
+    assert services["api"]["mem_limit"] == "512m"
+    assert services["worker"]["mem_limit"] == "768m"
+    assert services["web"]["mem_limit"] == "384m"
+    assert services["llama-cpp"]["mem_limit"] == "${RUSA_MODEL_MEMORY_LIMIT:-3g}"
+
+    total_cap_mib = sum(
+        _memory_limit_mib(
+            services[name]["mem_limit"] if name != "llama-cpp" else "3g"
+        )
+        for name in services
+    )
+    assert total_cap_mib == 5 * 1024
+    assert services["api"]["environment"]["RUSA_MAX_WAITING_INFERENCES"] == (
+        "${RUSA_MAX_WAITING_INFERENCES:-1}"
+    )
+    assert services["worker"]["environment"]["RUSA_MAX_PARALLEL_WORKERS"] == (
+        "${RUSA_MAX_PARALLEL_WORKERS:-1}"
+    )
+    assert cpu["services"]["api"]["environment"]["RUSA_MAX_CONCURRENT_INFERENCES"] == (
+        "${RUSA_MAX_CONCURRENT_INFERENCES:-1}"
+    )
