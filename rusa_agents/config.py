@@ -305,6 +305,11 @@ class RuntimeConfig:
                 "RUSA_WORKER_INFERENCE_API_KEYS must map tenant IDs to non-empty API keys"
             )
         else:
+            unknown_worker_tenants = set(worker_keys) - set(self.tenant_repositories)
+            if unknown_worker_tenants:
+                missing.append(
+                    "RUSA_WORKER_INFERENCE_API_KEYS contains tenants outside RUSA_TENANT_REPOSITORIES"
+                )
             for tenant in self.tenant_repositories:
                 worker_key = worker_keys.get(tenant)
                 if worker_key is None:
