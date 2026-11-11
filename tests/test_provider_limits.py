@@ -367,3 +367,45 @@ def test_worker_gateway_does_not_retry_deadline_or_capacity_responses(monkeypatc
         asyncio.run(provider.complete(system_prompt="system", user_prompt="task"))
 
     assert calls == 1
+
+
+
+def test_worker_gateway_stream_uses_tenant_auth_deadline_and_json_mode(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "45000")
+    captured = {}
+
+    def handler(request):
+        captured["headers"] = request.headers
+        captured["payload"] = json.loads(request.content)
+        body = (
+            b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            b"data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body,
+            request=request,
+        )
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+    ).for_tenant("tenant-a")
+
+    async def collect():
+        return [event async for event in provider.stream(
+            [{"role": "user", "content": "Return JSON"}]
+        )]
+
+    events = asyncio.run(collect())
+
+    assert events[0].content == "{}"
+    assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
+    assert captured["payload"]["deadline_ms"] == 45000
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
