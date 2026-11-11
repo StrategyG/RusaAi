@@ -170,7 +170,7 @@ async def _await_with_deadline(awaitable: Any, deadline_at: float | None) -> Any
 
 
 async def _acquire_inference_slot(
-    controller: InferenceAdmissionController,
+    controller: InferenceAdmissionController | PostgresInferenceAdmissionController,
     deadline_at: float | None = None,
 ) -> None:
     try:
