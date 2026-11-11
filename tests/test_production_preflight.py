@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import yaml
+
 from rusa_agents.production_preflight import validate_production_environment
 
 
@@ -37,7 +41,7 @@ def _set_valid_environment(monkeypatch):
     monkeypatch.setenv("RUSA_WORKSPACE_ROOT", "/srv/rusa/workspaces")
     monkeypatch.setenv("RUSA_GIT_MIRROR_ROOT", "/srv/rusa/mirrors")
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
     monkeypatch.setenv("RUSA_WEB_SESSION_SECRET", "w" * 48)
 
@@ -62,3 +66,17 @@ def test_production_preflight_rejects_image_from_unapproved_registry_path(monkey
     )
     errors = validate_production_environment()
     assert any("RUSA_WEB_IMAGE" in error for error in errors)
+
+
+
+def test_ci_production_preflight_sets_production_environment():
+    workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            if step.get("name") == "Validate production Compose configuration":
+                assert step.get("env", {}).get("ENVIRONMENT") == "production"
+                return
+
+    raise AssertionError("production Compose validation step is missing from CI")
