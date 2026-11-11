@@ -2,6 +2,10 @@
   "name": "rusa-ai-control-center",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
