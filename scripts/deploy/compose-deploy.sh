@@ -67,6 +67,10 @@ docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_
 [[ "$old_web_image" =~ $WEB_PATTERN ]] || { echo "Current web image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
 
+docker_cli() {
+  DOCKER_HOST="unix://$docker_socket" docker "$@"
+}
+
 docker_security_options="$(docker_cli info --format '{{json .SecurityOptions}}')" || {
   echo "Cannot query the configured Docker daemon through RUSA_DOCKER_SOCKET." >&2
   exit 69
@@ -97,10 +101,6 @@ awk -F= -v api="$api_image" -v worker="$worker_image" -v sandbox="$sandbox_image
 ' "$env_file" > "$tmp_env"
 chmod 600 "$tmp_env"
 mv -- "$tmp_env" "$env_file"
-
-docker_cli() {
-  DOCKER_HOST="unix://$docker_socket" docker "$@"
-}
 
 compose() {
   DOCKER_HOST="unix://$docker_socket" docker compose --env-file "$env_file" -f "$compose_file" "$@"
