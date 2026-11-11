@@ -22,6 +22,7 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
     assert "${RUSA_MAX_WAITING_INFERENCES:-3}" in compose
     assert "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}" in compose
+    assert "${RUSA_MODEL_NAME:-rusa-cpu}" not in compose
     assert '"128"' in model
     assert '"64"' in model
     assert '"2"' in model

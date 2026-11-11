@@ -56,7 +56,7 @@ services:
       - --n-gpu-layers
       - "0"
       - --alias
-      - "${RUSA_MODEL_NAME:-rusa-cpu}"
+      - "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}"
     volumes:
       - "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}:/models/model.gguf:ro"
     expose:
