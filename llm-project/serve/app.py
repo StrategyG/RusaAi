@@ -29,7 +29,13 @@ from rusa_agents.inference_admission import (
     InferenceQueueFull,
     InferenceQueueTimeout,
 )
-from rusa_agents.metrics import API_REQUEST_DURATION, API_REQUESTS
+from rusa_agents.metrics import (
+    API_REQUEST_DURATION,
+    API_REQUESTS,
+    INFERENCE_GENERATION_DURATION_SECONDS,
+    INFERENCE_PROVIDER_ERRORS,
+    INFERENCE_TIME_TO_FIRST_TOKEN_SECONDS,
+)
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
@@ -589,10 +595,12 @@ async def readiness_check():
     if inference_provider is None:
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
     try:
-        await inference_provider.check_ready()
+        provider_ready = await inference_provider.check_ready()
     except Exception:
         logger.exception("Inference readiness probe failed")
         raise HTTPException(status_code=503, detail="Inference backend is unavailable") from None
+    if provider_ready is not True:
+        raise HTTPException(status_code=503, detail="Inference backend is not ready")
 
     config = getattr(app.state, "config", None)
     if config is None:
@@ -663,6 +671,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
 
     if not request.stream:
         await _acquire_inference_slot(controller)
+        generation_started = time.perf_counter()
         try:
             output = await provider.complete(
                 messages,
@@ -674,11 +683,15 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         except HTTPException:
             raise
         except Exception:
+            INFERENCE_PROVIDER_ERRORS.labels(mode="completion").inc()
             logger.exception("Inference backend request failed")
             raise HTTPException(
                 status_code=502, detail="Inference backend request failed"
             ) from None
         finally:
+            INFERENCE_GENERATION_DURATION_SECONDS.labels(mode="completion").observe(
+                time.perf_counter() - generation_started
+            )
             await controller.release()
 
         return ChatCompletionResponse(
@@ -703,15 +716,21 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     await _acquire_inference_slot(controller)
     completion_id = f"rusa-chatcmpl-{uuid4().hex}"
     created = int(time.time())
+    generation_started = time.perf_counter()
+    first_token_recorded = False
     released = False
 
     async def release_stream_slot() -> None:
         nonlocal released
         if not released:
             released = True
+            INFERENCE_GENERATION_DURATION_SECONDS.labels(mode="stream").observe(
+                time.perf_counter() - generation_started
+            )
             await controller.release()
 
     async def event_stream():
+        nonlocal first_token_recorded
         finish_reason: str | None = None
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
@@ -731,6 +750,11 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 max_tokens=request.max_tokens,
             ):
                 if event.content:
+                    if not first_token_recorded:
+                        INFERENCE_TIME_TO_FIRST_TOKEN_SECONDS.observe(
+                            time.perf_counter() - generation_started
+                        )
+                        first_token_recorded = True
                     yield _sse({
                         "id": completion_id,
                         "object": "chat.completion.chunk",
@@ -783,6 +807,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         except asyncio.CancelledError:
             raise
         except Exception:
+            INFERENCE_PROVIDER_ERRORS.labels(mode="stream").inc()
             logger.exception(
                 "Streaming inference failed request_id=%s",
                 getattr(http_request.state, "request_id", "unknown"),
