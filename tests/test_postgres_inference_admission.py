@@ -233,3 +233,65 @@ def test_request_deadline_is_classified_separately_from_queue_timeout(scheduler_
         await controller.release()
 
     asyncio.run(scenario())
+
+
+
+def test_production_api_runtime_can_use_scheduler_but_worker_runtime_cannot(
+    scheduler_database, monkeypatch
+):
+    api_login = "rusa_admission_api_" + uuid4().hex[:8]
+    worker_login = "rusa_admission_worker_" + uuid4().hex[:8]
+    api_password = "api-" + uuid4().hex
+    worker_password = "worker-" + uuid4().hex
+    from psycopg import sql
+
+    with psycopg.connect(scheduler_database) as admin:
+        for login, password, group in (
+            (api_login, api_password, "rusa_api_runtime"),
+            (worker_login, worker_password, "rusa_worker_runtime"),
+        ):
+            admin.execute(
+                sql.SQL(
+                    "CREATE ROLE {} LOGIN INHERIT NOSUPERUSER NOBYPASSRLS "
+                    "NOCREATEDB NOCREATEROLE PASSWORD {}"
+                ).format(sql.Identifier(login), sql.Literal(password))
+            )
+            admin.execute(
+                sql.SQL("GRANT {} TO {} WITH ADMIN FALSE, INHERIT TRUE, SET TRUE").format(
+                    sql.Identifier(group), sql.Identifier(login)
+                )
+            )
+
+    api_dsn = psycopg.conninfo.make_conninfo(
+        scheduler_database, user=api_login, password=api_password
+    )
+    worker_dsn = psycopg.conninfo.make_conninfo(
+        scheduler_database, user=worker_login, password=worker_password
+    )
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    controller = PostgresInferenceAdmissionController(
+        api_dsn,
+        max_active=1,
+        max_waiting=3,
+        queue_timeout=2.0,
+        lease_seconds=5,
+    )
+    controller.initialize()
+
+    with psycopg.connect(worker_dsn) as worker:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            worker.execute("SELECT * FROM public.rusa_inference_admission_requests")
+
+    with psycopg.connect(scheduler_database) as admin:
+        admin.execute(
+            sql.SQL("REVOKE rusa_api_runtime, rusa_worker_runtime FROM {}").format(
+                sql.Identifier(api_login)
+            )
+        )
+        admin.execute(
+            sql.SQL("REVOKE rusa_api_runtime, rusa_worker_runtime FROM {}").format(
+                sql.Identifier(worker_login)
+            )
+        )
+        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(api_login)))
+        admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(worker_login)))
