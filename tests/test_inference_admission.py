@@ -118,3 +118,41 @@ def test_invalid_admission_limits_are_rejected():
         InferenceAdmissionController(max_waiting=-1)
     with pytest.raises(ValueError):
         InferenceAdmissionController(queue_timeout=0)
+
+
+
+def test_admission_metrics_track_active_waiting_and_queue_latency():
+    from prometheus_client import REGISTRY
+
+    def sample_value(name):
+        for metric in REGISTRY.collect():
+            for sample in metric.samples:
+                if sample.name == name:
+                    return sample.value
+        return 0
+
+    active_before = sample_value("rusa_inference_active_generations")
+    waiting_before = sample_value("rusa_inference_waiting_requests")
+    wait_count_before = sample_value("rusa_inference_queue_wait_seconds_count")
+
+    async def scenario():
+        controller = InferenceAdmissionController(
+            max_active=1, max_waiting=1, queue_timeout=1
+        )
+        await controller.acquire()
+        assert sample_value("rusa_inference_active_generations") == active_before + 1
+
+        waiter = asyncio.create_task(controller.acquire())
+        await asyncio.sleep(0)
+        assert sample_value("rusa_inference_waiting_requests") == waiting_before + 1
+
+        await controller.release()
+        await waiter
+        assert sample_value("rusa_inference_waiting_requests") == waiting_before
+        assert sample_value("rusa_inference_active_generations") == active_before + 1
+
+        await controller.release()
+        assert sample_value("rusa_inference_active_generations") == active_before
+
+    asyncio.run(scenario())
+    assert sample_value("rusa_inference_queue_wait_seconds_count") >= wait_count_before + 2
