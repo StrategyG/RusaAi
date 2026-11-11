@@ -16,11 +16,17 @@ from typing import Any
 
 import jsonschema
 
-_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "certification"
+_SOURCE_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas" / "certification"
+_PACKAGE_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 _SCHEMA_FILES = {
     "release_manifest": "release-manifest.schema.json",
     "production_certification": "production-certification.schema.json",
 }
+_SCHEMA_DIR = (
+    _SOURCE_SCHEMA_DIR
+    if all((_SOURCE_SCHEMA_DIR / filename).is_file() for filename in _SCHEMA_FILES.values())
+    else _PACKAGE_SCHEMA_DIR
+)
 _REQUIRED_ARTIFACTS = frozenset({"api", "worker", "sandbox", "web"})
 _REQUIRED_SIGNOFFS = frozenset(
     {"platform", "security", "sre", "qa", "data_governance", "finops", "process_owner"}

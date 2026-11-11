@@ -49,6 +49,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Validate certification schemas in the installed wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_dir="$(mktemp -d)"
+          venv_dir="$(mktemp -d)"
+          trap 'rm -rf "$wheel_dir" "$venv_dir"' EXIT
+          python -m pip wheel --no-deps --wheel-dir "$wheel_dir" .
+          python -m venv "$venv_dir"
+          "$venv_dir/bin/python" -m pip install --no-deps "$wheel_dir"/rusa_ai-*.whl
+          "$venv_dir/bin/python" -m pip install "jsonschema>=4.17,<5"
+          (
+            cd "$RUNNER_TEMP"
+            "$venv_dir/bin/python" - <<'PY'
+          from rusa_agents.certification.contracts import _validator
+
+          _validator("release_manifest")
+          _validator("production_certification")
+          PY
+            "$venv_dir/bin/rusa-certify" --help >/dev/null
+          )
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Lint
