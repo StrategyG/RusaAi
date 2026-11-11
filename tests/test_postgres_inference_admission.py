@@ -1,5 +1,7 @@
 import asyncio
+import multiprocessing
 import os
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,6 +13,28 @@ from rusa_agents.inference_admission import (
     InferenceQueueFull,
 )
 from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionController
+
+def _hold_scheduler_slot_in_process(dsn, label, release_event, result_queue):
+    os.environ["ENVIRONMENT"] = "development"
+    controller = PostgresInferenceAdmissionController(
+        dsn,
+        max_active=1,
+        max_waiting=2,
+        queue_timeout=2.0,
+        lease_seconds=5,
+        poll_interval=0.01,
+    )
+    controller.initialize()
+
+    async def run():
+        await controller.acquire()
+        request_id = str(next(iter(controller._owner_ids)))
+        result_queue.put((label, request_id))
+        await asyncio.to_thread(release_event.wait)
+        await controller.release()
+
+    asyncio.run(run())
+
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(
@@ -297,3 +321,104 @@ def test_production_api_runtime_can_use_scheduler_but_worker_runtime_cannot(
         )
         admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(api_login)))
         admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(worker_login)))
+
+
+
+def test_fifo_admission_is_shared_across_separate_os_processes(scheduler_database):
+    context = multiprocessing.get_context("spawn")
+    first_release = context.Event()
+    second_release = context.Event()
+    result_queue = context.Queue()
+    first_process = context.Process(
+        target=_hold_scheduler_slot_in_process,
+        args=(scheduler_database, "process-one", first_release, result_queue),
+    )
+    second_process = context.Process(
+        target=_hold_scheduler_slot_in_process,
+        args=(scheduler_database, "process-two", second_release, result_queue),
+    )
+    parent_controller = make_controller(scheduler_database, max_waiting=2)
+
+    async def wait_for_waiters(expected):
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            with psycopg.connect(scheduler_database) as conn:
+                count = conn.execute(
+                    "SELECT count(*) FROM rusa_inference_admission_requests WHERE status='waiting'"
+                ).fetchone()[0]
+            if count >= expected:
+                return
+            await asyncio.sleep(0.02)
+        raise AssertionError(f"Expected {expected} PostgreSQL scheduler waiters")
+
+    async def scenario():
+        await parent_controller.acquire()
+        first_process.start()
+        await wait_for_waiters(1)
+        second_process.start()
+        await wait_for_waiters(2)
+        await parent_controller.release()
+
+        first_label, _ = await asyncio.to_thread(result_queue.get, True, 10)
+        assert first_label == "process-one"
+        first_release.set()
+        second_label, _ = await asyncio.to_thread(result_queue.get, True, 10)
+        assert second_label == "process-two"
+        second_release.set()
+
+    try:
+        asyncio.run(scenario())
+        first_process.join(timeout=8)
+        second_process.join(timeout=8)
+        assert first_process.exitcode == 0
+        assert second_process.exitcode == 0
+    finally:
+        first_release.set()
+        second_release.set()
+        for process in (first_process, second_process):
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=3)
+        result_queue.close()
+        result_queue.join_thread()
+
+
+def test_process_crash_recovers_after_global_lease_expiry(scheduler_database):
+    context = multiprocessing.get_context("spawn")
+    release_event = context.Event()
+    result_queue = context.Queue()
+    process = context.Process(
+        target=_hold_scheduler_slot_in_process,
+        args=(scheduler_database, "crashed-process", release_event, result_queue),
+    )
+    controller = make_controller(scheduler_database)
+
+    async def scenario():
+        process.start()
+        label, old_request_id = await asyncio.to_thread(result_queue.get, True, 10)
+        assert label == "crashed-process"
+        process.terminate()
+        process.join(timeout=3)
+        assert process.exitcode is not None
+
+        # The lease is five seconds; wait beyond its expiry because the process
+        # and its heartbeat are now gone, then let a new API process reclaim it.
+        await asyncio.sleep(5.5)
+        await controller.acquire()
+        with psycopg.connect(scheduler_database) as conn:
+            old_status = conn.execute(
+                "SELECT status FROM rusa_inference_admission_requests WHERE request_id=%s",
+                (old_request_id,),
+            ).fetchone()[0]
+        assert old_status == "expired"
+        await controller.release()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release_event.set()
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=3)
+        result_queue.close()
+        result_queue.join_thread()
