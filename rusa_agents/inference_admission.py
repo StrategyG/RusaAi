@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
+
+from .metrics import (
+    INFERENCE_ACTIVE_GENERATIONS,
+    INFERENCE_QUEUE_REJECTIONS,
+    INFERENCE_QUEUE_WAIT_SECONDS,
+    INFERENCE_WAITING_REQUESTS,
+)
 
 
 class InferenceQueueFull(RuntimeError):
@@ -47,26 +55,36 @@ class InferenceAdmissionController:
 
     async def acquire(self) -> None:
         loop = asyncio.get_running_loop()
+        queued_at = time.monotonic()
         async with self._lock:
             if self._active < self._max_active and not self._waiters:
                 self._active += 1
+                INFERENCE_ACTIVE_GENERATIONS.inc()
+                INFERENCE_QUEUE_WAIT_SECONDS.observe(0.0)
                 return
             if len(self._waiters) >= self._max_waiting:
+                INFERENCE_QUEUE_REJECTIONS.labels(reason="full").inc()
                 raise InferenceQueueFull("Inference capacity is full; retry later")
             waiter: asyncio.Future[None] = loop.create_future()
             self._waiters.append(waiter)
+            INFERENCE_WAITING_REQUESTS.inc()
 
         try:
             await asyncio.wait_for(
                 asyncio.shield(waiter),
                 timeout=self._queue_timeout,
             )
+            INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
         except asyncio.TimeoutError as exc:
+            INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
+            INFERENCE_QUEUE_REJECTIONS.labels(reason="timeout").inc()
             await self._withdraw(waiter)
             raise InferenceQueueTimeout(
                 "Timed out waiting for inference capacity"
             ) from exc
         except asyncio.CancelledError:
+            INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
+            INFERENCE_QUEUE_REJECTIONS.labels(reason="cancelled").inc()
             await self._withdraw(waiter)
             raise
         except Exception:
@@ -89,15 +107,18 @@ class InferenceAdmissionController:
                 if waiter.done() and not waiter.cancelled():
                     self._release_locked()
             else:
+                INFERENCE_WAITING_REQUESTS.dec()
                 if not waiter.done():
                     waiter.cancel()
 
     def _release_locked(self) -> None:
         while self._waiters:
             waiter = self._waiters.popleft()
+            INFERENCE_WAITING_REQUESTS.dec()
             if waiter.done():
                 continue
             # Keep the active count unchanged: this slot is transferred FIFO.
             waiter.set_result(None)
             return
         self._active -= 1
+        INFERENCE_ACTIVE_GENERATIONS.dec()
