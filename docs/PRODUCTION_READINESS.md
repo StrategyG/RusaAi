@@ -26,10 +26,17 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Verification boundary
 
-The primary CI job has previously passed compile, lint, Bandit, and unit tests on
-commit `7ed80f0801651165cd634b95dcd993a6c85b9484`. Subsequent commits added
-RAG/MCP packaging, queue idempotency, race tests, and further CI changes; those
-changes must be judged only by the latest workflow run on the exact PR head.
+The PR #106 hardening candidate at commit
+`1ea96fb789749fbae15d620334ce6e49d3453342` passed the exact-head CI checks on
+2026-11-11:
+
+- [Core build, tests, image scans, and production/CPU Compose validation](https://github.com/StrategyG/RusaAi/actions/runs/42937488691) — PASS.
+- [Web build](https://github.com/StrategyG/RusaAi/actions/runs/42937488360) — PASS.
+
+The successful checks include compile, lint, Bandit, unit tests, RAG/MCP
+integration, API/worker/sandbox/RAG-MCP image builds, production preflight,
+and CPU-only Compose validation. This is evidence for that exact PR head only;
+it is not staging or production certification.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -40,12 +47,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Pending latest run |
+| Integration CI | All jobs green on PR #106 head `1ea96fb789749fbae15d620334ce6e49d3453342`; [core run](https://github.com/StrategyG/RusaAi/actions/runs/42937488691), [web run](https://github.com/StrategyG/RusaAi/actions/runs/42937488360) | PASS for this exact candidate head |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated CI tests PASS on PR #106 head; live crash/recovery and staging load evidence still required |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
@@ -93,9 +100,9 @@ The preflight validates configuration and digest syntax only. It does not verify
 | Signed release pipeline | PR #53 remains open; its described release images cover API, worker, and sandbox | Complete the release workflow and bind the web image to the same signed manifest/provenance policy |
 | Certification CLI | PR #72 remains open; PR #71 contract layer is merged | Review and integrate the CLI and its exact-manifest evaluation path |
 | Web dependency reproducibility | CI resolves a lockfile artifact; no committed `web/package-lock.json` exists | Commit the lockfile and use `npm ci` in CI and Docker builds |
-| Vulnerability disposition | Current blocking Trivy gate ignores unfixed findings | Fix or formally approve every remaining CRITICAL/HIGH finding against the exact image digest |
+| Vulnerability disposition | Trivy report on PR #106 head recorded 103 HIGH in API, 112 HIGH in sandbox, 111 HIGH in worker, and 103 HIGH in RAG/MCP images; 0 CRITICAL. The blocking step uses `--ignore-unfixed`, so unfixable findings do not fail CI. The report includes util-linux CVEs `CVE-2026-76642`, `CVE-2026-78408`, `CVE-2026-78409`, and `CVE-2026-78410` on Debian 13.7 package `2.41.5-0+deb13u1`. | Reduce findings where fixes exist; produce a signed, per-image-digest disposition/exception for every remaining HIGH finding before release. Check current Debian status in the [Debian util-linux tracker](https://security-tracker.debian.org/tracker/source-package/util-linux). |
 | Agentic DevOps lifecycle | PRs #99 and #100 remain drafts | Complete review, integration, live worker-pool and staging evidence |
-| RusaModels integration | PR #103 remains draft and describes a v0.1.0-draft contract | Finalize and implement the model-plane contract before relying on it in production |
+| RusaModels integration | RusaAi PR #103 remains a draft model-plane contract; RusaModels PR #11 is a separate production-hardening candidate and its CI is still under validation | Finalize the versioned model-plane contract, review both PRs, and run authenticated RusaAi-to-RusaModels staging integration tests |
 | Operational certification | No live tenant-isolation, sandbox adversarial, backup/restore, load/soak, or model-quality evidence was supplied | Run the required staging exercises and obtain operator sign-off |
 
 Do not describe the full RUSA AI product as production-ready until the applicable gates above have objective evidence and human approval.
