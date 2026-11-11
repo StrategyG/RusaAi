@@ -171,7 +171,7 @@ class RuntimeConfig:
             errors.append(f"{variable} must use sslmode=require, verify-ca, or verify-full")
         return errors
 
-    def _validate_tenants_and_model(self) -> list[str]:
+    def _validate_tenants_and_model(self, *, require_model_api_key: bool = True) -> list[str]:
         errors: list[str] = []
         if not self.tenant_repositories:
             errors.append("RUSA_TENANT_REPOSITORIES is required")
@@ -198,7 +198,7 @@ class RuntimeConfig:
                 errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
             if self._looks_placeholder(model_url.hostname):
                 errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
-        if self.environment == "production":
+        if self.environment == "production" and require_model_api_key:
             if not self.model_api_key:
                 errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
             elif (
@@ -268,9 +268,9 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
-        missing.extend(self._validate_tenants_and_model())
+        missing.extend(self._validate_tenants_and_model(require_model_api_key=False))
 
-        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
+        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower
         if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             missing.append("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
         elif gateway_value not in {"1", "true", "yes", "on"}:
