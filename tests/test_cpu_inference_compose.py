@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -11,6 +13,8 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     worker = compose.split("  worker:\n", 1)[1].split("\n  llama-cpp:\n", 1)[0]
 
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in api
+    assert 'RUSA_LOCAL_MODEL_PATH: ""' in api
+    assert 'RUSA_MODEL_PATH: ""' in api
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" in worker
     assert "RUSA_MODEL_API_KEY: \"\"" in api
     assert "RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health" in api
@@ -18,9 +22,67 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert "api:\n        condition: service_healthy" in worker
     assert "${RUSA_MAX_PARALLEL_WORKERS:-1}" in worker
     assert "${RUSA_MAX_CONCURRENT_INFERENCES:-1}" in compose
-    assert "${RUSA_MAX_WAITING_INFERENCES:-4}" in compose
+    assert "${RUSA_MAX_WAITING_INFERENCES:-3}" in compose
+    assert "${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}" in compose
+    assert "${RUSA_MODEL_NAME:-rusaai-edge-1.54b}" not in compose
+    assert "${RUSA_MODEL_NAME:-rusa-cpu}" not in compose
+    assert '"128"' in model
+    assert '"64"' in model
+    assert '"2"' in model
+    assert "--threads-http" in model
     assert "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}" in model
     assert "    ports:" not in model
     assert '      - --n-gpu-layers\n      - "0"' in model
     assert "--no-webui" not in model
     assert '      - "8080"' in model
+
+
+
+def _memory_limit_mib(value: str) -> int:
+    normalized = value.strip().lower()
+    if normalized.endswith("g"):
+        return int(float(normalized[:-1]) * 1024)
+    if normalized.endswith("m"):
+        return int(float(normalized[:-1]))
+    raise AssertionError(f"Unsupported Compose memory unit: {value}")
+
+
+def test_8gb_compose_profile_bounds_all_service_memory_and_waiting_work():
+    cpu = yaml.safe_load((ROOT / "docker-compose.cpu.yml").read_text(encoding="utf-8"))
+    overlay = yaml.safe_load(
+        (ROOT / "docker-compose.cpu-8gb.yml").read_text(encoding="utf-8")
+    )
+    services = overlay["services"]
+
+    assert set(services) == {"postgres", "api", "worker", "web", "llama-cpp"}
+    assert services["postgres"]["mem_limit"] == "384m"
+    assert services["api"]["mem_limit"] == "512m"
+    assert services["worker"]["mem_limit"] == "768m"
+    assert services["web"]["mem_limit"] == "384m"
+    assert services["llama-cpp"]["mem_limit"] == "${RUSA_MODEL_MEMORY_LIMIT:-3g}"
+
+    total_cap_mib = sum(
+        _memory_limit_mib(
+            services[name]["mem_limit"] if name != "llama-cpp" else "3g"
+        )
+        for name in services
+    )
+    assert total_cap_mib == 5 * 1024
+    assert services["api"]["environment"]["RUSA_MAX_WAITING_INFERENCES"] == (
+        "${RUSA_MAX_WAITING_INFERENCES:-1}"
+    )
+    assert services["worker"]["environment"]["RUSA_MAX_PARALLEL_WORKERS"] == (
+        "${RUSA_MAX_PARALLEL_WORKERS:-1}"
+    )
+    env_values = {}
+    for line in (ROOT / ".env.cpu-8gb.example").read_text(encoding="utf-8").splitlines():
+        if line and not line.lstrip().startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            env_values[key] = value
+    assert env_values["RUSA_CPU_THREADS"] == "2"
+    assert env_values["RUSA_MODEL_MEMORY_LIMIT"] == "3g"
+    assert env_values["RUSA_MODEL_CPU_LIMIT"] == "2.0"
+    assert env_values["RUSA_MAX_WAITING_INFERENCES"] == "1"
+    assert cpu["services"]["api"]["environment"]["RUSA_MAX_CONCURRENT_INFERENCES"] == (
+        "${RUSA_MAX_CONCURRENT_INFERENCES:-1}"
+    )

@@ -164,3 +164,9 @@ def test_production_worker_rejects_placeholder_model_gateway_token(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "replace-with-model-token")
     with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
         RuntimeConfig.from_env().validate_worker()
+
+
+
+def test_default_model_name_uses_safe_smoke_alias_until_checkpoint_is_approved(monkeypatch):
+    monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
+    assert RuntimeConfig.from_env().model_name == "rusaai-cpu-smoke-test"

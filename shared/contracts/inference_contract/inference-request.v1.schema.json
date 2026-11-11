@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusaai.local/shared/contracts/inference_contract/inference-request.v1.schema.json",
+  "title": "RusaAi Inference Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "task_id",
+    "agent_id",
+    "model_id",
+    "capability_profile",
+    "reasoning_mode",
+    "context",
+    "generation",
+    "constraints"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "request_id": { "type": "string", "pattern": "^REQ-[A-Za-z0-9._-]{1,124}$" },
+    "task_id": { "type": "string", "pattern": "^TASK-[A-Za-z0-9._-]{1,124}$" },
+    "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+    "model_id": { "enum": ["rusaai-edge-1.54b", "rusaai-edge-derived"] },
+    "capability_profile": { "enum": ["CARBON", "ASTRA"] },
+    "reasoning_mode": { "enum": ["QUICK", "STANDARD", "DEEP", "MAX"] },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system_context", "project_context", "retrieved_evidence"],
+      "properties": {
+        "system_context": { "type": "array", "items": { "type": "object" } },
+        "project_context": { "type": "array", "items": { "type": "object" } },
+        "retrieved_evidence": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_output_tokens"],
+      "properties": {
+        "max_output_tokens": { "type": "integer", "minimum": 1, "maximum": 8192 }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deadline_ms", "gpu_offload"],
+      "properties": {
+        "deadline_ms": { "type": "integer", "minimum": 1 },
+        "gpu_offload": { "const": false }
+      }
+    }
+  }
+}

@@ -1,43 +1,51 @@
-project_name: llm-project
-status: planned
+project_name: RusaAi
+project_id: rusaai
+status: design_only
 
 model:
-  name: opus-5.5-blueprint
-  type: decoder-only-transformer
+  model_id: rusaai-edge-1.54b
+  name: RusaAi-Edge-1.54B
+  version: 0.1.0-design
+  status: target_architecture_only
   architecture:
-    layers: 96
-    hidden_size: 12288
-    attention_heads: 96
-    kv_heads: 8
-    context_window: 1000000
+    family: dense_decoder_only_transformer
+    normalization_layout: pre_norm
+    layers: 32
+    hidden_size: 2048
+    query_heads: 16
+    kv_heads: 4
+    head_dimension: 128
+    gqa_ratio: 4
+    ffn: swiglu
+    ffn_intermediate_size: 5632
+    vocab_size: 48000
+    tied_embeddings: true
     positional_encoding: rope
-    normalization: rmsnorm
-    activation: swiglu
-  moe:
-    enabled: true
-    num_experts: 64
-    experts_per_token: 2
-  modalities:
-    - text
-    - image
-
-training:
-  objective: next_token_prediction
-  precision: bf16
-  pipeline:
-    - pretraining
-    - supervised_fine_tuning
-    - rlhf_rlaif
-    - reasoning_rl
-    - safety_alignment
-
-inference:
+    optional_context_extension: yarn_style_after_evaluation
+    rms_norm_epsilon: 1.0e-5
+    linear_bias: false
+    initial_dropout: 0.0
+    moe_enabled: false
+    target_parameters: 1541277696
   quantization:
-    - int8
-    - fp8
-  speculative_decoding: true
-  tool_use: true
+    deployment_target: Q4_K_M
+    status: target_only
+  ownership:
+    strategy: product_model
+    required_foundation_checkpoint_family: non_qwen
+    checkpoint_status: NOT_SELECTED
+    tokenizer_status: NOT_SELECTED
+    artifact_status: NOT_BUILT
+    training_status: NOT_STARTED
+    benchmark_status: NOT_TESTED
 
-notes:
-  - This config is a target blueprint and not a verified production configuration.
-  - Model, dataset, benchmark, and deployment evidence must be recorded before claiming verification.
+parameter_reference:
+  attention_parameters_per_layer: 10485760
+  swiglu_parameters_per_layer: 34603008
+  embedding_parameters: 98304000
+  normalization_parameters: 133120
+  total_parameters: 1541277696
+
+research_path:
+  from_scratch_parameter_target: 100100000
+  note: "Separate research path; not a substitute for the 1.54B product model."

@@ -145,7 +145,7 @@ class RuntimeConfig:
             git_mirror_root=os.getenv("RUSA_GIT_MIRROR_ROOT"),
             github_token=os.getenv("RUSA_GITHUB_TOKEN"),
             model_base_url=os.getenv("RUSA_MODEL_BASE_URL"),
-            model_name=os.getenv("RUSA_MODEL_NAME", "rusa-ai"),
+            model_name=os.getenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test"),
             tenant_repositories=tenant_repositories,
             model_api_key=os.getenv("RUSA_MODEL_API_KEY"),
             aicode_enabled=aicode_enabled,

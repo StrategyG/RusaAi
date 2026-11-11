@@ -1,0 +1,29 @@
+# Conservative resource overlay for the rusa-edge-8 (8-GB) Docker profile.
+# Apply after docker-compose.yml and docker-compose.cpu.yml.
+# The configured container memory ceilings total 5 GiB; this is not a
+# reservation and does not replace runtime checks for >=2 GiB free host RAM.
+
+services:
+  postgres:
+    mem_limit: 384m
+    cpus: 0.25
+
+  api:
+    mem_limit: 512m
+    cpus: 0.50
+    environment:
+      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-1}
+
+  worker:
+    mem_limit: 768m
+    cpus: 0.75
+    environment:
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
+
+  web:
+    mem_limit: 384m
+    cpus: 0.25
+
+  llama-cpp:
+    mem_limit: ${RUSA_MODEL_MEMORY_LIMIT:-3g}
+    cpus: ${RUSA_MODEL_CPU_LIMIT:-2.0}

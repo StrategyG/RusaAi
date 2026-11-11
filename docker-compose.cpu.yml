@@ -2,9 +2,11 @@ services:
   api:
     environment:
       RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1
-      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-cpu}
+      RUSA_LOCAL_MODEL_PATH: ""
+      RUSA_MODEL_PATH: ""
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
       RUSA_MAX_CONCURRENT_INFERENCES: ${RUSA_MAX_CONCURRENT_INFERENCES:-1}
-      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-4}
+      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-3}
       RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
       RUSA_MODEL_API_KEY: ""
@@ -18,7 +20,7 @@ services:
   worker:
     environment:
       RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1
-      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-cpu}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
       RUSA_MODEL_API_KEY: ""
       RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
     depends_on:
@@ -43,12 +45,18 @@ services:
       - "${RUSA_CPU_THREADS:-4}"
       - --threads-batch
       - "${RUSA_CPU_THREADS:-4}"
+      - --batch-size
+      - "128"
+      - --ubatch-size
+      - "64"
+      - --threads-http
+      - "2"
       - --parallel
       - "${RUSA_MODEL_PARALLEL:-1}"
       - --n-gpu-layers
       - "0"
       - --alias
-      - "${RUSA_MODEL_NAME:-rusa-cpu}"
+      - "${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}"
     volumes:
       - "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}:/models/model.gguf:ro"
     expose:

@@ -5,7 +5,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Also validate stacked feature PRs; the PR base branch controls this filter.
+    branches: [main, "feat/**"]
   workflow_dispatch:
 
 permissions:
@@ -193,7 +194,11 @@ jobs:
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
-          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]},"505fbe649bb91c2ac82c88de83b3fe6c21a506f6b449e4525becd450bfea18e7":{"subject":"ci-worker-tenant-ci","tenant_id":"tenant-ci","roles":["developer"]}}'
+          RUSA_WORKER_INFERENCE_BASE_URL: https://api-gateway.internal/v1
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"tenant-ci":"ci-worker-inference-secret-tenant-ci-000000000000000000000000"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
+          RUSA_INTERNAL_CA_BUNDLE: /tmp/rusa-internal-ca.crt
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
@@ -222,15 +227,17 @@ jobs:
           RUSA_GGUF_MODEL_PATH: /srv/rusa/models/model.gguf
           RUSA_GGUF_MODEL_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
           LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
-          RUSA_MODEL_NAME: rusa-cpu
+          RUSA_MODEL_NAME: rusaai-cpu-smoke-test
           RUSA_MODEL_CONTEXT: "4096"
           RUSA_CPU_THREADS: "4"
           RUSA_MODEL_PARALLEL: "1"
           RUSA_MODEL_MEMORY_LIMIT: 8g
           RUSA_MODEL_CPU_LIMIT: "4.0"
           RUSA_MAX_CONCURRENT_INFERENCES: "1"
-          RUSA_MAX_WAITING_INFERENCES: "4"
+          RUSA_MAX_WAITING_INFERENCES: "3"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"development":"local-dev-key"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
           RUSA_GENERATION_TIMEOUT_SECONDS: "300"
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
@@ -239,6 +246,31 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.yml -f docker-compose.cpu.yml config --quiet
+      - name: Validate 8-GB CPU Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
+          RUSA_GGUF_MODEL_PATH: /srv/rusa/models/model.gguf
+          RUSA_GGUF_MODEL_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
+          LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
+          RUSA_MODEL_NAME: rusaai-cpu-smoke-test
+          RUSA_MODEL_CONTEXT: "4096"
+          RUSA_CPU_THREADS: "2"
+          RUSA_MODEL_PARALLEL: "1"
+          RUSA_MODEL_MEMORY_LIMIT: 3g
+          RUSA_MODEL_CPU_LIMIT: "2.0"
+          RUSA_MAX_CONCURRENT_INFERENCES: "1"
+          RUSA_MAX_WAITING_INFERENCES: "1"
+          RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
+          RUSA_GENERATION_TIMEOUT_SECONDS: "300"
+          RUSA_MAX_PARALLEL_WORKERS: "1"
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+        run: |
+          touch .env
+          docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml config --quiet
 
   rag-mcp:
     name: RAG and MCP integration tests
