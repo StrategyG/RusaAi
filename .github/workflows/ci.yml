@@ -5,7 +5,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Validate both release PRs and stacked feature branches.
+    branches: [main, "feat/**"]
   workflow_dispatch:
 
 permissions:
