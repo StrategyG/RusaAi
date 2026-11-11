@@ -84,7 +84,14 @@ services:
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
-      RUSA_API_KEYS_JSON: "{}"
+      # Digest registry contains tenant-bound principals; raw worker keys are
+      # separately injected from the production secret manager.
+      RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
+      RUSA_WORKER_INFERENCE_GATEWAY: "true"
+      RUSA_WORKER_INFERENCE_BASE_URL: ${RUSA_WORKER_INFERENCE_BASE_URL:?Set the HTTPS worker-facing API gateway URL}
+      RUSA_WORKER_INFERENCE_API_KEYS: ${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference secrets}
+      RUSA_WORKER_INFERENCE_DEADLINE_MS: ${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}
+      SSL_CERT_FILE: ${RUSA_INTERNAL_CA_BUNDLE:?Set the CA bundle for the internal API gateway}
       RUSA_METRICS_API_KEY: ""
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
