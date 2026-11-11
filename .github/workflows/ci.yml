@@ -5,7 +5,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Also validate stacked feature PRs; the PR base branch controls this filter.
+    branches: [main, "feat/**"]
   workflow_dispatch:
 
 permissions:
