@@ -67,10 +67,10 @@ def test_blueprint_rejects_model_identity_and_reference_parameter_drift():
         replace(ProjectBlueprint().model, target_parameters=1).validate()
 
 
-def test_blueprint_rejects_moe_and_parameter_drift():
+def test_blueprint_rejects_moe_and_layer_drift():
     with pytest.raises(ValueError, match="MoE"):
         replace(ProjectBlueprint().model, moe_enabled=True).validate()
-    with pytest.raises(ValueError, match="parameter count"):
+    with pytest.raises(ValueError, match="layers"):
         replace(ProjectBlueprint().model, layers=31).validate()
 
 
