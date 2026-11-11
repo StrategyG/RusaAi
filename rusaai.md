@@ -454,7 +454,7 @@ Sebuah komponen disebut:
 
 **IMPLEMENTED — pending CI verification**
 
-Branch: feat/inference-deadline-propagation
+Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 
 - [x] Add optional deadline_ms (1–3,600,000 ms) to the OpenAI-compatible chat request.
 - [x] Apply the request budget to FIFO admission wait without replacing the configured queue timeout.
@@ -471,4 +471,4 @@ Branch: feat/inference-deadline-propagation
 - [ ] Replace separate API admission and worker direct model calls with one durable cross-process scheduler.
 - [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior.
 
-**Verification status:** implementation is committed to a separate branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
+**Verification status:** implementation is committed to the architecture PR branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
