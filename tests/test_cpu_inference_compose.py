@@ -12,6 +12,19 @@ def test_base_compose_does_not_share_api_model_secret_with_worker():
     assert worker_environment["RUSA_MODEL_API_KEY"] == "${RUSA_WORKER_MODEL_API_KEY:-}"
 
 
+def test_production_worker_uses_tenant_scoped_https_api_gateway():
+    compose = yaml.safe_load(
+        (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
+    )
+    worker_environment = compose["services"]["worker"]["environment"]
+
+    assert worker_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "true"
+    assert "https://" in worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"]
+    assert "RUSA_WORKER_INFERENCE_API_KEYS" in worker_environment
+    assert "RUSA_API_KEYS_JSON" in worker_environment
+    assert "SSL_CERT_FILE" in worker_environment
+
+
 def test_cpu_compose_routes_api_to_private_gguf_server():
     compose = (ROOT / "docker-compose.cpu.yml").read_text(encoding="utf-8")
     model = compose.split("  llama-cpp:\n", 1)[1]
