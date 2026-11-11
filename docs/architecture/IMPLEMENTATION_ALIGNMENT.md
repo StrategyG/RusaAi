@@ -99,11 +99,15 @@ rusa-cpu-16 (16-GB) profile starts with at most three waiting API requests. The 
 increase context or background work without device-specific measurement.
 
 The API-side admission queue does not yet arbitrate globally across API and
-worker processes. The worker still calls the private llama.cpp endpoint
-directly; the llama.cpp server's single parallel slot is therefore the final
-cross-process active-generation guard. A single shared cross-process queue
-and unified deadline propagation remain open Model Plane work. Do not claim
-global FIFO fairness between API and worker callers.
+worker processes. The API now accepts an optional request-level deadline_ms
+budget and enforces it across API queue admission and generation; non-streaming
+requests return HTTP 504 on expiry, while an already-started stream emits an
+SSE timeout event and terminates. This deadline is local to the API request
+path. The worker still calls the private llama.cpp endpoint directly; the
+llama.cpp server's single parallel slot is therefore the final cross-process
+active-generation guard. A single shared cross-process queue and deadline
+propagation to worker/model-server callers remain open Model Plane work. Do
+not claim global FIFO fairness between API and worker callers.
 
 Context starts at 4K for a checkpoint that supports the v2.0 target; an
 audited checkpoint with a lower native limit must use that lower limit.
@@ -165,8 +169,11 @@ inference. This Compose overlay is not an Android deployment implementation.
 ## Verification boundary for this change
 
 The repository changes add fail-closed readiness handling when the inference
-provider explicitly reports not-ready, low-cardinality Prometheus metrics for
-API admission/generation, and regression tests for both behaviors. They also
+provider explicitly reports not-ready, low-cardinality Prometheus metrics for API admission/generation and request
+deadline expiry, and regression tests for these behaviors. Optional API
+request deadlines now bound queue admission and non-streaming/streaming
+generation while preserving 429 for ordinary queue overload and 504 for
+request-deadline expiry. They also
 add exact reference-dimension validation (including
 tests for parameter-equivalent head drift), preserve safe `.env.*.example`
 templates in isolated sandbox snapshots without copying real dotenv files,
