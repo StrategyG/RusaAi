@@ -32,6 +32,17 @@ EOF
   cat > "$dir/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${DOCKER_HOST:-}" != "unix:///run/user/1001/docker.sock" ]]; then
+  echo "Docker operation did not use the configured rootless daemon." >&2
+  exit 91
+fi
+if [[ "${1:-}" == "login" ]]; then
+  [[ "${2:-}" == "ghcr.io" ]] || exit 92
+  token="$(cat)"
+  [[ "$token" == "ci-test-token" ]] || exit 93
+  echo "Login Succeeded"
+  exit 0
+fi
 if [[ "${1:-}" == "inspect" ]]; then
   if [[ "${RUSA_TEST_FAIL_NEW_IMAGE:-0}" == "1" ]] && grep -q '^RUSA_API_IMAGE=.*sha256:bbbbbbbb' .env; then
     printf 'unhealthy\n'
