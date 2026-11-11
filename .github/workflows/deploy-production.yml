@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       api_digest:
-        description: "API image digest from release-manifest.txt (sha256:...)"
+        description: "API image digest from release-manifest.json (sha256:...)"
         required: true
         type: string
       worker_digest:
-        description: "Worker image digest from release-manifest.txt (sha256:...)"
+        description: "Worker image digest from release-manifest.json (sha256:...)"
         required: true
         type: string
       sandbox_digest:
