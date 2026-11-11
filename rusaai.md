@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.4.0"
+version: "1.5.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -448,6 +448,7 @@ Sebuah komponen disebut:
 | 1.2.0 | 2026-11-12 | Mencatat readiness fail-closed dan API inference telemetry; menandai batas metrics process-local serta pekerjaan observability worker/model yang tersisa. |
 | 1.3.0 | 2026-11-12 | Menambahkan log implementasi R1: deadline API untuk queue dan generation, pembatalan completion/stream, metrik deadline, regression tests, serta daftar pekerjaan cross-process yang masih terbuka. |
 | 1.4.0 | 2026-11-12 | Memperkuat lifecycle cancellation: coroutine tertutup saat deadline sudah habis, request cancellation menghentikan provider sebelum slot dilepas, dan regression tests ditambahkan. |
+| 1.5.0 | 2026-11-12 | Menambahkan shared API inference path untuk worker CPU, kredensial per tenant, deadline gateway, JSON response format, dan mencegah retry yang dapat menggandakan generasi. Scheduler durable lintas proses masih terbuka. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -475,3 +476,28 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 - [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior.
 
 **Verification status:** implementation is committed to the architecture PR branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
+
+### R2 — Shared API admission path for CPU worker inference
+
+**IMPLEMENTED IN CPU COMPOSE PROFILE — pending CI and staging verification**
+
+Branch: feat/shared-api-inference-gateway (stacked on PR #107)
+
+- [x] Route CPU-profile worker inference through the OpenAI-compatible API instead of calling llama.cpp directly.
+- [x] Reuse the API's bounded FIFO admission controller for API and worker generation requests.
+- [x] Use per-tenant worker API credentials; validate the worker key digest against the API principal's tenant and inference-capable role in production.
+- [x] Fail closed when a task tenant has no configured worker inference credential.
+- [x] Propagate a bounded worker request deadline to the API gateway.
+- [x] Forward and validate JSON-object response formatting end to end.
+- [x] Disable automatic retries for worker gateway requests so a 429/504 or transport failure cannot silently duplicate a generation.
+- [x] Remove the worker's direct llama.cpp URL from the CPU Compose overlay and document the private HTTP route as development/staging only.
+- [x] Keep the model gateway secret out of the worker's production configuration requirements.
+
+**Remaining R2 work**
+
+- [ ] Replace process-local FIFO admission with a durable PostgreSQL-backed scheduler shared across API replicas and worker processes.
+- [ ] Add concurrency tests across independent API/worker processes, including queue fairness, cancellation, duplicate submission, restart, crash recovery, and slot handoff.
+- [ ] Add a production TLS endpoint for the worker-facing API gateway and verify certificate validation in staging.
+- [ ] Add model-server/host RAM, TTFT, tokens/sec, queue wait, and active/waiting telemetry to the same request trace.
+
+**Limit:** the CPU Compose profile now shares the API-process queue, but it is not yet a durable cross-process scheduler. Keep one API replica per model endpoint until the durable scheduler and multi-process acceptance tests are complete.
