@@ -90,5 +90,9 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Production worker gateway credentials must be tenant-specific, at least 32 bytes,
   stored in the secret manager, and SHA-256-bound to matching inference-capable
   principals in RUSA_API_KEYS_JSON. The worker must fail closed for missing mappings.
+- Production Compose requires `RUSA_WORKER_INFERENCE_BASE_URL` to point to a
+  trusted HTTPS API gateway and mounts `RUSA_INTERNAL_CA_BUNDLE` into the worker.
+  The operator must provide and verify the TLS endpoint/certificate chain; the
+  Compose overlay does not create that proxy itself.
 - Do not describe the complete product as production-ready until every applicable
   release gate has objective evidence and human approval.
