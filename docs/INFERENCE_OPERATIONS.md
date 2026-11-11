@@ -81,6 +81,7 @@ For the CPU Compose profile, the API is the only component that connects to llam
 - Set `RUSA_WORKER_INFERENCE_API_KEYS` to a tenant-to-secret mapping. Keep raw keys in the secret manager; each key's SHA-256 digest must resolve to a principal in `RUSA_API_KEYS_JSON` with the same tenant and an inference-capable role.
 - Set `RUSA_WORKER_INFERENCE_DEADLINE_MS` to a bounded request budget. The API enforces that budget across queue wait and generation.
 - The worker provider sends `X-API-Key` and a JSON-object response-format requirement. The API validates the request and forwards the response format to the model backend.
+- The worker gateway does not automatically retry HTTP capacity/deadline errors or transport failures; this avoids duplicate model generations. Task-level retry remains controlled by the durable queue and its idempotency policy.
 - The baseline is single API process per model endpoint. Multiple API replicas do not share FIFO state; llama.cpp `--parallel 1` is only a final active-generation guard.
 
 The local CPU Compose route uses private-network HTTP for development/staging only. Do not copy that URL into production configuration.
