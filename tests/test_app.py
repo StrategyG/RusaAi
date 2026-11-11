@@ -575,3 +575,21 @@ def test_aicode_task_list_rejects_unknown_status(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert response.status_code == 422
+
+
+
+def test_readiness_fails_closed_when_provider_reports_not_ready():
+    class NotReadyInferenceProvider:
+        async def check_ready(self):
+            return False
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("A not-ready provider must not generate")
+
+    set_inference_provider(NotReadyInferenceProvider())
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Inference backend is not ready"
+    finally:
+        set_inference_provider(None)
