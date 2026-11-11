@@ -45,12 +45,33 @@ The optional runtime can load a compatible, externally supplied, locally mounted
 model artifact after manifest verification. Real-model throughput and quality
 remain unmeasured until a specific checkpoint and target hardware are supplied.
 
+## Foundation checkpoint decision
+
+The v2.0 `RusaAi-Edge-1.54B` definition is an architecture reference target;
+it is not evidence that a compatible checkpoint exists. The Training Engine's
+product identity remains `rusaai-edge-derived` with status
+`CHECKPOINT_CANDIDATE_PENDING_AUDIT`.
+
+`BhinekaIntiLabs/bhineka-gpt` is recorded in
+`documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md` as
+`PILOT_ONLY`, not as a production dependency. Its published model card reports
+556,269,696 parameters and 2,048-token context, declares Apache-2.0 metadata,
+and warns that the custom architecture may require `trust_remote_code=True`.
+The model-card validation is CUDA language-modeling loss, not CPU or
+instruction-following certification. The immutable revision, artifact hashes,
+lineage/license/data audit, custom-code review, CPU GGUF benchmark, and safety
+evaluation remain open.
+
+The historical Qwen3-4B CPU v1.0 profile is not silently restored. A production
+release still requires a compatible non-Qwen checkpoint and its complete
+release manifest.
+
 ## Release gates still open
 
 | Gate | Evidence required | Status |
 |---|---|---|
 | Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | PR #107 passed; PR #108 Docker gate and PR #109 full CI pending |
-| Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
+| Local model artifact | Approved non-Qwen model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no production checkpoint; Bhineka-GPT is PILOT_ONLY pending audit |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
