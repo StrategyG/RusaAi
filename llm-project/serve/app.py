@@ -131,8 +131,15 @@ async def _await_with_deadline(awaitable: Any, deadline_at: float | None) -> Any
     """Await work until the request deadline and cancel it when the budget expires."""
     if deadline_at is None:
         return await awaitable
-    remaining = _remaining_deadline_seconds(deadline_at)
+    # Schedule first so an already-expired deadline can cancel and close the
+    # newly-created coroutine instead of leaving it un-awaited.
     task = asyncio.ensure_future(awaitable)
+    try:
+        remaining = _remaining_deadline_seconds(deadline_at)
+    except InferenceDeadlineTimeout:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
     done, _ = await asyncio.wait({task}, timeout=remaining)
     if task not in done:
         task.cancel()
