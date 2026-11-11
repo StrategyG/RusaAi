@@ -26,6 +26,7 @@ ON CONFLICT (singleton_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.rusa_inference_admission_requests (
     request_id UUID PRIMARY KEY,
+    owner_id UUID NOT NULL,
     status TEXT NOT NULL CHECK (
         status IN ('waiting', 'active', 'released', 'cancelled', 'timed_out', 'expired')
     ),
