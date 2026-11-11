@@ -29,6 +29,11 @@ INFERENCE_QUEUE_REJECTIONS = Counter(
     "Inference requests rejected before generation",
     ("reason",),
 )
+INFERENCE_REQUEST_DEADLINES = Counter(
+    "rusa_inference_deadline_exceeded_total",
+    "Inference request deadlines exceeded by processing phase",
+    ("phase",),
+)
 INFERENCE_GENERATION_DURATION_SECONDS = Histogram(
     "rusa_inference_generation_duration_seconds",
     "Inference generation duration in seconds",
