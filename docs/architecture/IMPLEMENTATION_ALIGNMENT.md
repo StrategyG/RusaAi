@@ -139,9 +139,12 @@ inference. This Compose overlay is not an Android deployment implementation.
   and native image/audio model path are not established by this repository.
 - Linux Docker CPU deployment is represented. Windows 11 and Android ARM64
   deployment targets have not been validated here.
-- Existing Prometheus metrics cover API requests and AICode workers. Queue
-  wait, model memory, TTFT, and token-throughput instrumentation still need
-  implementation and device benchmarks.
+- Prometheus metrics cover API requests and AICode workers. API inference
+  admission now exports active generations, waiting requests, queue latency,
+  and queue rejections; API generation exports completion/stream duration,
+  time-to-first-token for streams, and provider errors. These are process-local
+  API metrics, not a shared API/worker scheduler. Model RAM, minimum host free
+  RAM, CPU utilization, token throughput, and device benchmarks remain open.
 
 ## Change-control rules
 
@@ -161,7 +164,10 @@ inference. This Compose overlay is not an Android deployment implementation.
 
 ## Verification boundary for this change
 
-The repository changes add exact reference-dimension validation (including
+The repository changes add fail-closed readiness handling when the inference
+provider explicitly reports not-ready, low-cardinality Prometheus metrics for
+API admission/generation, and regression tests for both behaviors. They also
+add exact reference-dimension validation (including
 tests for parameter-equivalent head drift), preserve safe `.env.*.example`
 templates in isolated sandbox snapshots without copying real dotenv files,
 add a bounded 8-GB Compose overlay, and use a smoke-test model alias until
