@@ -18,6 +18,7 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     )
     worker_environment = compose["services"]["worker"]["environment"]
 
+    assert worker_environment["RUSA_MODEL_API_KEY"] == ""
     assert worker_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "true"
     assert "https://" in worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"]
     assert "RUSA_WORKER_INFERENCE_API_KEYS" in worker_environment
