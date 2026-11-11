@@ -36,6 +36,14 @@ if [[ "${DOCKER_HOST:-}" != "unix:///run/user/1001/docker.sock" ]]; then
   echo "Docker command did not use the configured rootless socket: ${DOCKER_HOST:-unset}" >&2
   exit 91
 fi
+if [[ "${1:-}" == "info" ]]; then
+  if [[ "${RUSA_TEST_ROOTLESS:-1}" == "1" ]]; then
+    printf '["name=rootless"]\n'
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
 if [[ "${1:-}" == "inspect" ]]; then
   if [[ "${RUSA_TEST_FAIL_NEW_IMAGE:-0}" == "1" ]] && grep -q '^RUSA_API_IMAGE=.*sha256:bbbbbbbb' .env; then
     printf 'unhealthy\n'
@@ -63,7 +71,7 @@ DOCKER
 }
 
 run_deploy() {
-  local dir="$1" fail_new="$2" api="$3" worker="$4" sandbox="$5" web="$6"
+  local dir="$1" fail_new="$2" api="$3" worker="$4" sandbox="$5" web="$6" rootless="${7:-1}"
   (
     cd "$dir"
     PATH="$dir/bin:$PATH" \
@@ -72,6 +80,7 @@ run_deploy() {
     RUSA_DEPLOY_LOCK_FILE=.deploy.lock \
     RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS=60 \
     RUSA_TEST_FAIL_NEW_IMAGE="$fail_new" \
+    RUSA_TEST_ROOTLESS="$rootless" \
     "$deploy_script" "$api" "$worker" "$sandbox" "$web"
   )
 }
@@ -128,3 +137,12 @@ if run_deploy "$failure_dir" 0 "ghcr.io/strategyg/rusa-ai-api:latest" "$new_work
   exit 1
 fi
 echo "PASS: mutable image tags are rejected before deployment"
+not_rootless_dir="$tmp_root/not-rootless"
+make_case "$not_rootless_dir"
+if run_deploy "$not_rootless_dir" 0 "$new_api" "$new_worker" "$new_sandbox" "$new_web" 0; then
+  echo "Deployment must reject a non-rootless Docker daemon." >&2
+  exit 1
+fi
+grep -Fx "RUSA_API_IMAGE=$old_api" "$not_rootless_dir/.env" >/dev/null
+echo "PASS: deployment is blocked when the configured Docker daemon is not rootless"
+

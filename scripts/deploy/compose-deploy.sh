@@ -67,6 +67,15 @@ docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_
 [[ "$old_web_image" =~ $WEB_PATTERN ]] || { echo "Current web image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
 
+docker_security_options="$(docker_cli info --format '{{json .SecurityOptions}}')" || {
+  echo "Cannot query the configured Docker daemon through RUSA_DOCKER_SOCKET." >&2
+  exit 69
+}
+[[ "$docker_security_options" == *rootless* ]] || {
+  echo "The configured Docker socket must belong to a rootless Docker daemon." >&2
+  exit 69
+}
+
 tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
 cp -p -- "$env_file" "${env_file}.previous"
