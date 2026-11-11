@@ -72,6 +72,43 @@ The OpenAI-compatible /v1/chat/completions request accepts an optional integer d
 - The CPU Compose profile routes autonomous worker requests through the same API endpoint with a tenant-scoped API key and a configured worker inference deadline. This shares the API-process admission controller and removes the worker's direct llama.cpp bypass for that profile.
 - The admission queue is still process-local, not durable or shared across multiple API replicas. Keep one API replica per model endpoint until the PostgreSQL-backed cross-process scheduler and its crash/restart tests are implemented.
 
+### Durable PostgreSQL admission scheduler
+
+When `RUSA_API_DATABASE_URL` is configured, the API uses the PostgreSQL-backed
+scheduler instead of the in-memory admission controller. All API replicas that
+serve the same model endpoint therefore share one FIFO queue and one set of
+active-generation slots.
+
+- Apply `migrations/010_inference_admission.sql` after migrations 001-009 before
+  deploying the API. The migration grants access only to `rusa_api_runtime`;
+  the worker runtime receives no direct scheduler-table access.
+- The scheduler persists request IDs, state, queue expiry, slot ownership, and
+  lease expiry only. It does not store prompts, completions, or tenant payloads.
+- The migration defaults are one active slot, three waiting requests, a 60-second
+  queue timeout, and a 30-second lease. The database config row
+  `rusa_inference_admission_config` must match
+  `RUSA_MAX_CONCURRENT_INFERENCES`,
+  `RUSA_MAX_WAITING_INFERENCES`,
+  `RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS`, and
+  `RUSA_INFERENCE_LEASE_SECONDS` on every API replica. Startup fails closed if
+  they differ.
+- To change the active slot count, update the config row during a maintenance
+  window and provision exactly one row per slot in
+  `rusa_inference_admission_slots` before restarting API replicas. Do not
+  increase `max_active` beyond the model server's tested capacity.
+- Active requests renew their lease every third of the lease interval. If an API
+  process crashes, a later request reclaims an expired slot. If a live process
+  cannot renew its lease, the associated generation task is cancelled.
+- Waiting requests are claimed in database FIFO order. Queue-full, queue-timeout,
+  request-deadline, cancellation, and stale-lease states are recorded separately.
+- The API readiness/startup path checks the migration, database role privileges,
+  scheduler configuration, and slot rows. Missing schema or privilege errors
+  prevent the API from starting.
+
+For a 16-GB CPU profile, the default scheduler row is one active and three
+waiting. For an 8-GB profile, set `max_waiting=1` in both the database config
+row and the environment. Keep the same settings across all replicas.
+
 ### Worker-to-API inference gateway
 
 For the CPU Compose profile, the API is the only component that connects to llama.cpp. The autonomous worker connects to the API's OpenAI-compatible endpoint and supplies the API key mapped to the current task tenant. The worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
