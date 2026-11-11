@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.3.0"
+version: "1.4.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -447,6 +447,7 @@ Sebuah komponen disebut:
 | 1.1.0 | 2026-11-12 | Dipersempit menjadi roadmap engineering repository RusaAi: modul, API, contracts, scheduler, agents, DB/RAG/MCP, security, deployment, CI/CD, dan release. |
 | 1.2.0 | 2026-11-12 | Mencatat readiness fail-closed dan API inference telemetry; menandai batas metrics process-local serta pekerjaan observability worker/model yang tersisa. |
 | 1.3.0 | 2026-11-12 | Menambahkan log implementasi R1: deadline API untuk queue dan generation, pembatalan completion/stream, metrik deadline, regression tests, serta daftar pekerjaan cross-process yang masih terbuka. |
+| 1.4.0 | 2026-11-12 | Memperkuat lifecycle cancellation: coroutine tertutup saat deadline sudah habis, request cancellation menghentikan provider sebelum slot dilepas, dan regression tests ditambahkan. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -461,7 +462,9 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 - [x] Return HTTP 504 when the request deadline expires before generation or during non-streaming generation.
 - [x] Emit an SSE timeout_error followed by [DONE] when a streaming request expires after the response starts.
 - [x] Cancel the in-flight provider coroutine and release the active inference slot on deadline expiry.
-- [x] Add low-cardinality deadline metrics by phase and regression tests for queue timeout classification, completion cancellation, streaming cancellation, and request validation.
+- [x] Cancel and await provider work when the request task itself is cancelled, before releasing its admission slot.
+- [x] Close a generation coroutine cleanly if the request deadline has already expired before it starts.
+- [x] Add low-cardinality deadline metrics by phase and regression tests for queue timeout classification, deadline expiry, request cancellation, streaming cancellation, and request validation.
 - [x] Document the HTTP/SSE behavior and explicitly state that the deadline is API-process scoped.
 
 ### Remaining R1/R2 work
