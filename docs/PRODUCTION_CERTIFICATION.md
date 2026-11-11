@@ -51,9 +51,12 @@ The manifest requires API, worker, sandbox, and web artifacts under the reposito
 ### Vulnerability disposition
 
 - Any Critical finding blocks the release.
-- High findings block unless every High finding has an individual, approved,
-  unexpired exception with an owner, rationale, approval reference, approver,
-  and approval timestamp.
+- The current release-manifest builder blocks every High finding. It emits no
+  vulnerability exceptions and does not accept an operator-supplied exception
+  file. A release therefore requires zero Critical and zero High findings.
+- The schema can represent individually approved, unexpired High exceptions,
+  but that path remains disabled until a trusted approval-system integration
+  cryptographically verifies the approval reference and approver identity.
 - Medium and Low findings remain visible in the manifest for triage.
 - A `BLOCKED` disposition is never certifiable.
 
@@ -158,13 +161,15 @@ measure RPO/RTO, run a staging soak test, or configure GitHub branch protection
 or environment reviewers. Those are operational evidence and repository-owner
 controls, not schema operations.
 
-The manifest schema is a new JSON contract. The detached manifest signature is carried in the certification record and signs the exact manifest bytes; it is not embedded in the payload it signs. The currently proposed release
-workflow in PR #53 emits a text `release-manifest.txt`; a follow-up integration
-must emit this JSON contract and verify/sign the manifest itself. The ERG-06
-schema and evaluator proposed in PR #60 remain the detailed staging evidence
-and threshold gate; this contract does not replace them. PRs #53, #54, and #60
-were open when this contract was authored, so their code must not be treated as
-part of `main` until merged and revalidated.
+The manifest schema is a new JSON contract. The detached manifest signature is carried in the certification record and signs the exact manifest bytes; it is not embedded in the payload it signs. PR #106 adds a tag-triggered `.github/workflows/release.yml` candidate that
+builds four immutable images, signs image digests, publishes GitHub SLSA
+provenance, scans the exact digests, emits this JSON manifest, and signs the
+manifest bytes. The workflow is not active on `main` until PR #106 is reviewed
+and merged; it is not a production release until a protected annotated tag
+runs the complete pipeline successfully. The deployment workflow verifies
+the manifest signature, image signatures, provenance, source commit, and SBOM
+bytes before deployment. The ERG-06 schema and evaluator remain the detailed
+staging evidence and threshold gate; this contract does not replace them.
 
 ## 9. Tests
 

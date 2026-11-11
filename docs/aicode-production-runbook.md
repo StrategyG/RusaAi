@@ -72,28 +72,48 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build the API, worker, web, and isolated sandbox images from the reviewed commit. API, worker, and sandbox image names follow the production certification contract; the web image is an additional deployment artifact:
+The signed release workflow is the supported production image publisher. It is
+triggered only by an annotated semantic tag (for example `v1.2.3`) that points
+to a commit reachable from `main`. It first runs the reusable Core CI and Web
+CI workflows against that exact tag commit. It then:
 
-```bash
-docker build -t ghcr.io/strategyg/rusa-ai-api:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/strategyg/rusa-ai-worker:RELEASE .
-docker build -f web/Dockerfile -t ghcr.io/strategyg/rusa-ai-web:RELEASE web
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/strategyg/rusa-ai-sandbox:RELEASE .
-docker push ghcr.io/strategyg/rusa-ai-api:RELEASE
-docker push ghcr.io/strategyg/rusa-ai-worker:RELEASE
-docker push ghcr.io/strategyg/rusa-ai-web:RELEASE
-docker push ghcr.io/strategyg/rusa-ai-sandbox:RELEASE
-```
+1. Builds API, worker, web, and isolated sandbox images.
+2. Pushes them to the repository-owned GHCR namespace.
+3. Signs each immutable image digest with keyless Cosign.
+4. Publishes GitHub SLSA provenance for each exact image digest.
+5. Generates a Trivy vulnerability report and CycloneDX SBOM for each digest.
+6. Blocks publication of the release manifest if any Critical or High finding
+   exists. The current builder does not accept vulnerability exceptions.
+7. Builds and schema-validates `release-manifest.json`, verifies the image
+   signatures and provenance, signs the exact manifest bytes, and attaches the
+   manifest, signature bundle, SBOMs, scan reports, Trivy DB metadata, and the
+   exact Web CI lockfile artifact to the GitHub Release.
 
-Resolve each image digest from the registry. Use the lowercase owner namespace `ghcr.io/strategyg`; the API, worker, and sandbox references must match the certification contract. Configure `RUSA_API_IMAGE`, `RUSA_WORKER_IMAGE`, and `RUSA_WEB_IMAGE` with their respective immutable references, and configure `RUSA_SANDBOX_IMAGE` as:
+Do not push production tags from unreviewed commits. Protect semantic release
+tags with a GitHub tag ruleset, restrict tag creation to release maintainers,
+and require the production GitHub Environment to have independent reviewers.
+The release workflow being present on a branch is not evidence of a published
+or certified release.
+
+The resulting image references must use the lowercase owner namespace and
+immutable digests:
 
 ```text
+ghcr.io/strategyg/rusa-ai-api@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-worker@sha256:REGISTRY_DIGEST
 ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-web@sha256:REGISTRY_DIGEST
 ```
 
-The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon. The current certification manifest covers API, worker, and sandbox images; the web image still needs equivalent signature/provenance coverage before it can be treated as a certified production artifact.
+The release manifest is the authoritative source for these digests. The
+deployment workflow accepts only a release tag; it downloads and verifies the
+signed manifest, checks the source commit, validates SBOM bytes, verifies all
+image signatures and SLSA provenance, and derives the four image digests from
+the verified manifest. Do not pass manually copied digest values to deployment.
 
-The CI workflows build the API, worker, web, and sandbox images but do not publish them to a registry automatically; publishing remains a controlled release operation. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
+The current Web CI generates the lockfile artifact for the exact commit and the
+release workflow reuses it. Commit a reviewed `web/package-lock.json` to the
+repository before claiming fully source-reproducible frontend dependencies.
 
 ## 6. Prepare Git mirrors and storage
 

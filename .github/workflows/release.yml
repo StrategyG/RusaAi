@@ -91,6 +91,11 @@ jobs:
         with:
           cosign-release: v2.6.0
 
+      - name: Set up an isolated Buildx container builder
+        uses: docker/setup-buildx-action@bf8388060db527dff14f48b6a5fdbe70763c1213 # 2026-11-05
+        with:
+          driver: docker-container
+
       - name: Build and push the four production images by release tag
         id: images
         shell: bash
