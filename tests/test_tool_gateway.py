@@ -45,6 +45,11 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
     workspace.mkdir()
     (workspace / "src.py").write_text("print('safe')")
     (workspace / ".env").write_text("SECRET=never-copy")
+    (workspace / ".env.local").write_text("SECRET=never-copy")
+    (workspace / ".env.production").write_text("SECRET=never-copy")
+    (workspace / ".env.example").write_text("SAFE_TEMPLATE=example")
+    (workspace / ".env.cpu.example").write_text("SAFE_TEMPLATE=cpu")
+    (workspace / ".env.cpu-8gb.example").write_text("SAFE_TEMPLATE=cpu-8gb")
     (workspace / ".git").mkdir()
     (workspace / ".git" / "config").write_text("credential=private")
     (workspace / "private.pem").write_text("PRIVATE KEY")
@@ -67,6 +72,11 @@ def test_sandbox_uses_snapshot_without_git_or_secret_files(tmp_path, monkeypatch
         assert (snapshot_path / "src.py").stat().st_mode & 0o777 == 0o444
         assert (snapshot_path / "src.py").is_file()
         assert not (snapshot_path / ".env").exists()
+        assert not (snapshot_path / ".env.local").exists()
+        assert not (snapshot_path / ".env.production").exists()
+        assert (snapshot_path / ".env.example").read_text() == "SAFE_TEMPLATE=example"
+        assert (snapshot_path / ".env.cpu.example").read_text() == "SAFE_TEMPLATE=cpu"
+        assert (snapshot_path / ".env.cpu-8gb.example").read_text() == "SAFE_TEMPLATE=cpu-8gb"
         assert not (snapshot_path / ".git").exists()
         assert not (snapshot_path / "private.pem").exists()
         assert not (snapshot_path / "id_rsa").exists()

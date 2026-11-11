@@ -4,10 +4,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+REFERENCE_MODEL_ID = "rusaai-edge-1.54b"
+REFERENCE_MODEL_NAME = "RusaAi-Edge-1.54B"
+REFERENCE_PARAMETER_COUNT = 1_541_277_696
+REFERENCE_DIMENSIONS = {
+    "layers": 32,
+    "hidden_size": 2048,
+    "query_heads": 16,
+    "kv_heads": 4,
+    "ffn_intermediate_size": 5632,
+    "vocab_size": 48000,
+}
+
+
 @dataclass(frozen=True)
 class ModelSpec:
-    model_id: str = "rusaai-edge-1.54b"
-    name: str = "RusaAi-Edge-1.54B"
+    model_id: str = REFERENCE_MODEL_ID
+    name: str = REFERENCE_MODEL_NAME
     architecture: str = "dense_decoder_only_transformer"
     normalization_layout: str = "pre_norm"
     layers: int = 32
@@ -23,7 +36,7 @@ class ModelSpec:
     linear_bias: bool = False
     dropout: float = 0.0
     moe_enabled: bool = False
-    target_parameters: int = 1_541_277_696
+    target_parameters: int = REFERENCE_PARAMETER_COUNT
 
     @property
     def head_dimension(self) -> int:
@@ -62,6 +75,18 @@ class ModelSpec:
         }
         if any(value <= 0 for value in positive.values()):
             raise ValueError("All model dimensions must be positive")
+        if self.model_id != REFERENCE_MODEL_ID or self.name != REFERENCE_MODEL_NAME:
+            raise ValueError("Model identity must match the RusaAi-Edge v2.0 reference target")
+        for field_name, expected in REFERENCE_DIMENSIONS.items():
+            actual = getattr(self, field_name)
+            if actual != expected:
+                raise ValueError(
+                    f"{field_name} must equal the RusaAi-Edge v2.0 reference value {expected}"
+                )
+        if self.target_parameters != REFERENCE_PARAMETER_COUNT:
+            raise ValueError(
+                "target_parameters must equal the RusaAi-Edge v2.0 reference parameter count"
+            )
         if self.hidden_size % self.query_heads:
             raise ValueError("hidden_size must be divisible by query_heads")
         if self.query_heads % self.kv_heads:
@@ -78,9 +103,9 @@ class ModelSpec:
             raise ValueError("RusaAi-Edge V1 requires tied embeddings, no bias, and zero dropout")
         if self.moe_enabled:
             raise ValueError("MoE is not used in RusaAi-Edge Core V1")
-        if self.parameter_count != self.target_parameters:
+        if self.parameter_count != REFERENCE_PARAMETER_COUNT:
             raise ValueError(
-                "Model dimensions do not match the RusaAi-Edge V1 target parameter count"
+                "Model dimensions do not match the RusaAi-Edge v2.0 reference parameter count"
             )
 
 

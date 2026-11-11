@@ -51,6 +51,22 @@ def test_blueprint_does_not_claim_model_artifacts_or_training_exist():
     assert blueprint.benchmark_status == "NOT_TESTED"
 
 
+def test_blueprint_rejects_head_drift_even_when_parameter_count_is_unchanged():
+    baseline = ProjectBlueprint().model
+    alternative = replace(baseline, query_heads=32, kv_heads=8)
+
+    assert alternative.parameter_count == baseline.parameter_count
+    with pytest.raises(ValueError, match="query_heads"):
+        alternative.validate()
+
+
+def test_blueprint_rejects_model_identity_and_reference_parameter_drift():
+    with pytest.raises(ValueError, match="Model identity"):
+        replace(ProjectBlueprint().model, model_id="rusaai-edge-derived").validate()
+    with pytest.raises(ValueError, match="target_parameters"):
+        replace(ProjectBlueprint().model, target_parameters=1).validate()
+
+
 def test_blueprint_rejects_moe_and_parameter_drift():
     with pytest.raises(ValueError, match="MoE"):
         replace(ProjectBlueprint().model, moe_enabled=True).validate()
@@ -62,6 +78,12 @@ def test_model_yaml_matches_the_reference_parameter_breakdown():
     config = yaml.safe_load((ROOT / "llm-project/configs/model.yaml").read_text(encoding="utf-8"))
     assert config["model"]["model_id"] == "rusaai-edge-1.54b"
     assert config["model"]["architecture"]["family"] == "dense_decoder_only_transformer"
+    assert config["model"]["architecture"]["layers"] == 32
+    assert config["model"]["architecture"]["hidden_size"] == 2048
+    assert config["model"]["architecture"]["query_heads"] == 16
+    assert config["model"]["architecture"]["kv_heads"] == 4
+    assert config["model"]["architecture"]["ffn_intermediate_size"] == 5632
+    assert config["model"]["architecture"]["vocab_size"] == 48000
     assert config["model"]["architecture"]["moe_enabled"] is False
     assert config["model"]["architecture"]["target_parameters"] == 1_541_277_696
     assert config["parameter_reference"] == {
