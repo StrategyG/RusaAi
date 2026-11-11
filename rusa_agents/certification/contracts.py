@@ -21,7 +21,7 @@ _SCHEMA_FILES = {
     "release_manifest": "release-manifest.schema.json",
     "production_certification": "production-certification.schema.json",
 }
-_REQUIRED_ARTIFACTS = frozenset({"api", "worker", "sandbox"})
+_REQUIRED_ARTIFACTS = frozenset({"api", "worker", "sandbox", "web"})
 _REQUIRED_SIGNOFFS = frozenset(
     {"platform", "security", "sre", "qa", "data_governance", "finops", "process_owner"}
 )

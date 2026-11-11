@@ -14,7 +14,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "const": "1.1"
     },
     "release_id": {
       "type": "string",
@@ -29,7 +29,7 @@
     },
     "artifacts": {
       "type": "array",
-      "minItems": 3,
+      "minItems": 4,
       "items": {
         "$ref": "#/$defs/artifact"
       },
@@ -63,6 +63,18 @@
             "properties": {
               "name": {
                 "const": "sandbox"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "name": {
+                "const": "web"
               }
             },
             "required": [
@@ -282,7 +294,8 @@
             "api",
             "worker",
             "sandbox",
-            "rag_mcp"
+            "rag_mcp",
+            "web"
           ]
         },
         "image": {

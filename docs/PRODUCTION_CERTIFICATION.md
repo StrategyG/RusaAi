@@ -1,6 +1,6 @@
 # RUSA-AI Production Certification Contract
 
-**Contract version:** 1.0  
+**Contract version:** 1.1  
 **Initial implementation:** PR #71  
 **Decision model:** evidence-bound `PASS`, `HOLD`, or `FAIL`
 
@@ -22,7 +22,7 @@ It also contributes evidence to the ERG-06 gate before Phase 6 promotion.
 ## 2. Contract files
 
 - `schemas/certification/release-manifest.schema.json` defines a release
-  manifest for the API, worker, and sandbox OCI images.
+  manifest for the API, worker, sandbox, and web OCI images.
 - `schemas/certification/production-certification.schema.json` defines the
   staging evidence references and seven accountable owner sign-offs required
   for a production-promotion decision.
@@ -45,7 +45,7 @@ The release manifest binds:
    database time, severity counts, disposition, and any approved High finding
    exceptions.
 
-The manifest requires API, worker, and sandbox artifacts under the repository-owned GHCR namespace. SBOM and vulnerability scan subjects must match the exact image digest. Scanner database timestamps cannot post-date the scan. Additional
+The manifest requires API, worker, sandbox, and web artifacts under the repository-owned GHCR namespace. SBOM and vulnerability scan subjects must match the exact image digest. Scanner database timestamps cannot post-date the scan. Additional
 `rag_mcp` artifacts may be recorded. Artifact names must be unique.
 
 ### Vulnerability disposition
