@@ -8,7 +8,7 @@ def test_database_migrations_have_unique_monotonic_versions():
 
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -56,3 +56,18 @@ def test_sql_migration_dollar_quote_delimiters_are_balanced():
         assert not re.search(r"(?m)^\\s*\\$\\s*;", sql), (
             f"{migration.name} contains a malformed single-dollar terminator"
         )
+
+
+
+def test_inference_admission_migration_is_api_runtime_scoped():
+    migration = Path("migrations/010_inference_admission.sql").read_text(encoding="utf-8")
+
+    assert "rusa_inference_admission_config" in migration
+    assert "rusa_inference_admission_requests" in migration
+    assert "rusa_inference_admission_slots" in migration
+    assert "queue_expires_at" in migration
+    assert "lease_expires_at" in migration
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE" in migration
+    assert "TO rusa_api_runtime" in migration
+    assert "rusa_worker_runtime" in migration
+    assert "No prompt or completion data" in migration or "no tenant payload" in migration
