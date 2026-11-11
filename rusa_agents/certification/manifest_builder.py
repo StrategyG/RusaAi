@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from rusa_agents.certification.artifact_verification import verify_cosign_image_signature
-from rusa_agents.certification.contracts import CertificationContractError, validate_release_manifest
+from rusa_agents.certification.contracts import validate_release_manifest
 from rusa_agents.certification.provenance_verification import verify_github_slsa_provenance
 
 REQUIRED_ARTIFACTS = ("api", "worker", "sandbox", "web")
