@@ -1,6 +1,8 @@
 import asyncio
 import os
 from pathlib import Path
+from uuid import uuid4
+
 import psycopg
 import pytest
 
