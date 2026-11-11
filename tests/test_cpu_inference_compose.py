@@ -20,7 +20,10 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
 
     assert worker_environment["RUSA_MODEL_API_KEY"] == ""
     assert worker_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "true"
-    assert "https://" in worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"]
+    assert worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"].startswith(
+        "${RUSA_WORKER_INFERENCE_BASE_URL:?"
+    )
+    assert "HTTPS" in worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"]
     assert "RUSA_WORKER_INFERENCE_API_KEYS" in worker_environment
     assert "RUSA_API_KEYS_JSON" in worker_environment
     assert worker_environment["SSL_CERT_FILE"] == "/run/secrets/rusa-internal-ca.crt"
