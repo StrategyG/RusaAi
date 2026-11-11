@@ -19,6 +19,10 @@ on:
       - "docker-compose.yml"
       - "docker-compose.production.yml"
       - ".github/workflows/web-ci.yml"
+      - "tests/test_deploy_scripts.sh"
+      - "scripts/deploy/**"
+      - ".github/workflows/deploy-production.yml"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:

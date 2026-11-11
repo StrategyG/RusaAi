@@ -65,7 +65,7 @@ jobs:
       - name: Install actionlint
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Validate GitHub Actions workflows
-        run: "$(go env GOPATH)/bin/actionlint" -color
+        run: '"$(go env GOPATH)/bin/actionlint" -color'
       - name: Validate deployment scripts
         run: |
           bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
