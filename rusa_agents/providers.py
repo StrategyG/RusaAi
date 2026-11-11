@@ -89,22 +89,75 @@ class OpenAICompatibleProvider:
         max_response_bytes: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
-        self.base_url = (base_url or os.getenv("RUSA_MODEL_BASE_URL", "")).rstrip("/")
+        self.base_url = (
+            base_url
+            or os.getenv("RUSA_WORKER_INFERENCE_BASE_URL")
+            or os.getenv("RUSA_MODEL_BASE_URL", "")
+        ).rstrip("/")
         self.model = model or os.getenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test")
         self.api_key = api_key or os.getenv("RUSA_MODEL_API_KEY")
         self.timeout_seconds = _provider_timeout(timeout_seconds)
         self.max_retries = max_retries
         self.max_response_bytes = _response_limit(max_response_bytes)
         self.transport = transport
+        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
+        if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ValueError("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
+        self.gateway_mode = gateway_value in {"1", "true", "yes", "on"}
+        try:
+            tenant_keys = json.loads(os.getenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("RUSA_WORKER_INFERENCE_API_KEYS must be a JSON object") from exc
+        if not isinstance(tenant_keys, dict) or any(
+            not isinstance(tenant, str)
+            or not tenant.strip()
+            or not isinstance(key, str)
+            or not key.strip()
+            for tenant, key in tenant_keys.items()
+        ):
+            raise ValueError(
+                "RUSA_WORKER_INFERENCE_API_KEYS must map tenant IDs to non-empty API keys"
+            )
+        self.tenant_api_keys = tenant_keys
+        try:
+            self.gateway_deadline_ms = int(
+                os.getenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "270000")
+            )
+        except ValueError as exc:
+            raise ValueError("RUSA_WORKER_INFERENCE_DEADLINE_MS must be an integer") from exc
+        if not 1 <= self.gateway_deadline_ms <= 3_600_000:
+            raise ValueError(
+                "RUSA_WORKER_INFERENCE_DEADLINE_MS must be between 1 and 3600000"
+            )
         if max_retries < 0:
             raise ValueError("Provider timeout must be positive and max_retries cannot be negative")
         if not self.base_url:
             raise ValueError("RUSA_MODEL_BASE_URL must point to an OpenAI-compatible chat endpoint")
 
+    def for_tenant(self, tenant_id: str) -> OpenAICompatibleProvider:
+        """Return a tenant-scoped gateway client without changing the worker contract."""
+        if not self.gateway_mode:
+            return self
+        api_key = self.tenant_api_keys.get(tenant_id)
+        if not api_key:
+            raise PermissionError(
+                f"No worker inference credential is configured for tenant {tenant_id!r}"
+            )
+        return OpenAICompatibleProvider(
+            base_url=self.base_url,
+            model=self.model,
+            api_key=api_key,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            max_response_bytes=self.max_response_bytes,
+            transport=self.transport,
+        )
+
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -115,6 +168,8 @@ class OpenAICompatibleProvider:
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
+        if self.gateway_mode:
+            payload["deadline_ms"] = self.gateway_deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
@@ -225,6 +280,7 @@ class OpenAIChatInferenceProvider:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 1024,
+        response_format: dict[str, str] | None = None,
     ) -> str:
         payload = {
             "model": model or self.default_model,
@@ -234,6 +290,8 @@ class OpenAIChatInferenceProvider:
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
@@ -262,6 +320,7 @@ class OpenAIChatInferenceProvider:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 1024,
+        response_format: dict[str, str] | None = None,
     ) -> AsyncIterator[InferenceStreamEvent]:
         """Stream bounded OpenAI-compatible SSE deltas without buffering the full response."""
         payload = {
@@ -273,6 +332,8 @@ class OpenAIChatInferenceProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
