@@ -638,6 +638,7 @@ class PostgresInferenceAdmissionController:
                     if current_status == "active":
                         break
                     if current_status == "timed_out":
+                        INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
                         if deadline_limited:
                             INFERENCE_QUEUE_REJECTIONS.labels(reason="deadline").inc()
                             raise InferenceDeadlineTimeout(
@@ -667,6 +668,7 @@ class PostgresInferenceAdmissionController:
                         )
                     await asyncio.sleep(min(self.poll_interval, remaining))
             except asyncio.CancelledError:
+                INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
                 cleanup = asyncio.create_task(
                     asyncio.to_thread(self._withdraw, request_id, owner_id, "cancelled")
                 )
@@ -716,13 +718,14 @@ class PostgresInferenceAdmissionController:
             INFERENCE_ACTIVE_GENERATIONS.dec()
 
     async def close(self) -> None:
-        """Cancel locally owned requests and leave their leases safe to expire."""
-        request_ids = list(self._owner_ids.items())
-        for request_id, heartbeat in list(self._heartbeat_tasks.items()):
+        """Cancel locally owned requests and release their leases during shutdown."""
+        for heartbeat in list(self._heartbeat_tasks.values()):
             heartbeat.cancel()
         if self._heartbeat_tasks:
             await asyncio.gather(*self._heartbeat_tasks.values(), return_exceptions=True)
-        for request_id, owner_id in request_ids:
+        self._heartbeat_tasks.clear()
+
+        for request_id, owner_id in list(self._owner_ids.items()):
             owner_task = self._owner_tasks.get(request_id)
             if owner_task is not None and not owner_task.done():
                 owner_task.cancel()
@@ -732,8 +735,7 @@ class PostgresInferenceAdmissionController:
                 )
             except Exception:
                 logger.exception("Failed to release inference slot during shutdown")
-            self._owner_ids.pop(request_id, None)
+            if self._owner_ids.pop(request_id, None) is not None:
+                self._local_active = max(0, self._local_active - 1)
+                INFERENCE_ACTIVE_GENERATIONS.dec()
             self._owner_tasks.pop(request_id, None)
-            self._local_active = max(0, self._local_active - 1)
-            INFERENCE_ACTIVE_GENERATIONS.dec()
-        self._heartbeat_tasks.clear()
