@@ -342,3 +342,28 @@ def test_model_provider_forwards_validated_json_response_format():
 
     assert result == '{"ok": true}'
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+
+def test_worker_gateway_does_not_retry_deadline_or_capacity_responses(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(504, json={"detail": "deadline exceeded"}, request=request)
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+        max_retries=2,
+    ).for_tenant("tenant-a")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(provider.complete(system_prompt="system", user_prompt="task"))
+
+    assert calls == 1
