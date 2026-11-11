@@ -50,12 +50,24 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | RUSA_MAX_CONCURRENT_INFERENCES | Active API generations | 1 on the CPU-first baseline |
 | RUSA_MAX_WAITING_INFERENCES | Bounded waiting API requests | 3 on 16-GB; 1 on 8-GB |
 | RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 60 |
+| Request body deadline_ms | Optional end-to-end API request budget, including admission wait and generation | Omit to use queue/provider timeouts; otherwise 1–3600000 ms |
 | RUSA_MAX_NUM_SEQS | vLLM maximum active sequences | 16 |
 | RUSA_MAX_NUM_BATCHED_TOKENS | vLLM batch token budget | 8192 |
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
 | RUSA_GPU_MEMORY_UTILIZATION | vLLM GPU memory target | 0.90 |
 
 Values above are initial configuration examples, not capacity guarantees. Measure the exact checkpoint on the target host. The Compose startup grace period defaults to 30 minutes because loading large local weights occurs before the API starts serving; increase RUSA_START_PERIOD for larger artifacts.
+
+### Request deadline behavior
+
+The OpenAI-compatible /v1/chat/completions request accepts an optional integer deadline_ms from 1 to 3,600,000. The budget starts when the API handler begins processing the validated request and covers both inference-slot admission and generation.
+
+- If the deadline expires while waiting for a slot, the API returns HTTP 504 and removes the waiter from the FIFO queue.
+- If a non-streaming generation exceeds the remaining budget, the API cancels the provider coroutine, releases its slot, and returns HTTP 504.
+- If streaming has already started, the API emits an SSE timeout_error event followed by data: [DONE]; it cancels the pending provider iteration and releases the slot.
+- If deadline_ms is omitted, the existing queue timeout and provider timeout behavior remains unchanged.
+- A queue-capacity rejection remains HTTP 429. A queue timeout that occurs before the request deadline also remains HTTP 429.
+- This is API-process deadline enforcement. It does not yet provide a durable cross-process scheduler or propagate the same deadline to the autonomous worker's direct model-server path.
 
 ## 4. Startup and health checks
 
