@@ -1,0 +1,405 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+api_image="${1:-}"
+worker_image="${2:-}"
+sandbox_image="${3:-}"
+web_image="${4:-}"
+
+readonly API_PATTERN='^ghcr\.io/strategyg/rusa-ai-api@sha256:[0-9a-f]{64}$'
+readonly WORKER_PATTERN='^ghcr\.io/strategyg/rusa-ai-worker@sha256:[0-9a-f]{64}$'
+readonly SANDBOX_PATTERN='^ghcr\.io/strategyg/rusa-ai-sandbox@sha256:[0-9a-f]{64}
+
+[[ "$api_image" =~ $API_PATTERN ]] || { echo "API image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$worker_image" =~ $WORKER_PATTERN ]] || { echo "Worker image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Sandbox image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$web_image" =~ $WEB_PATTERN ]] || { echo "Web image must be an immutable approved GHCR digest." >&2; exit 64; }
+
+compose_file="${RUSA_COMPOSE_FILE:-docker-compose.production.yml}"
+env_file="${RUSA_ENV_FILE:-.env}"
+lock_file="${RUSA_DEPLOY_LOCK_FILE:-.rusa-deploy.lock}"
+health_timeout="${RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
+
+[[ -f "$compose_file" ]] || { echo "Production Compose file is missing: $compose_file" >&2; exit 66; }
+[[ -f "$env_file" ]] || { echo "Production environment file is missing: $env_file" >&2; exit 66; }
+[[ "$health_timeout" =~ ^[0-9]+$ ]] && (( health_timeout >= 60 && health_timeout <= 1800 )) || {
+  echo "RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS must be between 60 and 1800." >&2
+  exit 64
+}
+
+if [[ "${RUSA_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+  command -v flock >/dev/null 2>&1 || { echo "flock is required for serialized deployments." >&2; exit 69; }
+  exec 9>"$lock_file"
+  flock -n 9 || { echo "Another RUSA-AI deployment or rollback is in progress." >&2; exit 75; }
+fi
+
+get_env_value() {
+  local key="$1"
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      value = $0
+      count++
+    }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
+  ' "$env_file"
+}
+
+aicode_enabled="$(get_env_value RUSA_AICODE_ENABLED)" || { echo "Exactly one RUSA_AICODE_ENABLED setting must exist in .env." >&2; exit 64; }
+case "${aicode_enabled,,}" in
+  false|0|no) ;;
+  *) echo "Disable AICode and drain active tasks before deploying or rolling back." >&2; exit 64 ;;
+esac
+
+old_api_image="$(get_env_value RUSA_API_IMAGE)" || { echo "Exactly one RUSA_API_IMAGE must exist in .env." >&2; exit 64; }
+old_worker_image="$(get_env_value RUSA_WORKER_IMAGE)" || { echo "Exactly one RUSA_WORKER_IMAGE must exist in .env." >&2; exit 64; }
+old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
+old_web_image="$(get_env_value RUSA_WEB_IMAGE)" || { echo "Exactly one RUSA_WEB_IMAGE must exist in .env." >&2; exit 64; }
+docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+
+[[ "$old_api_image" =~ $API_PATTERN ]] || { echo "Current API image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_worker_image" =~ $WORKER_PATTERN ]] || { echo "Current worker image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Current sandbox image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_web_image" =~ $WEB_PATTERN ]] || { echo "Current web image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
+
+tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
+trap 'rm -f "$tmp_env"' EXIT
+cp -p -- "$env_file" "${env_file}.previous"
+chmod 600 "${env_file}.previous"
+
+awk -F= -v api="$api_image" -v worker="$worker_image" -v sandbox="$sandbox_image" -v web="$web_image" '
+  BEGIN { api_count = 0; worker_count = 0; sandbox_count = 0; web_count = 0 }
+  $1 == "RUSA_API_IMAGE" { api_count++; print "RUSA_API_IMAGE=" api; next }
+  $1 == "RUSA_WORKER_IMAGE" { worker_count++; print "RUSA_WORKER_IMAGE=" worker; next }
+  $1 == "RUSA_SANDBOX_IMAGE" { sandbox_count++; print "RUSA_SANDBOX_IMAGE=" sandbox; next }
+  $1 == "RUSA_WEB_IMAGE" { web_count++; print "RUSA_WEB_IMAGE=" web; next }
+  { print }
+  END {
+    if (api_count != 1 || worker_count != 1 || sandbox_count != 1 || web_count != 1) {
+      print "Production .env must contain exactly one API, worker, sandbox, and web image setting." > "/dev/stderr"
+      exit 42
+    }
+  }
+' "$env_file" > "$tmp_env"
+chmod 600 "$tmp_env"
+mv -- "$tmp_env" "$env_file"
+
+compose() {
+  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+}
+
+wait_for_health() {
+  local deadline=$((SECONDS + health_timeout))
+  local api_id worker_id web_id api_state worker_state web_state
+  while (( SECONDS < deadline )); do
+    api_id="$(compose ps -q api 2>/dev/null || true)"
+    worker_id="$(compose ps -q worker 2>/dev/null || true)"
+    web_id="$(compose ps -q web 2>/dev/null || true)"
+    if [[ -n "$api_id" && -n "$worker_id" && -n "$web_id" ]]; then
+      api_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
+      worker_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id" 2>/dev/null || echo missing)"
+      web_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$web_id" 2>/dev/null || echo missing)"
+      if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" && "$web_state" == "healthy" ]]; then
+        return 0
+      fi
+      if [[ "$api_state" == "unhealthy" || "$api_state" == "exited" || "$api_state" == "dead" ||
+            "$worker_state" == "unhealthy" || "$worker_state" == "exited" || "$worker_state" == "dead" ||
+            "$web_state" == "unhealthy" || "$web_state" == "exited" || "$web_state" == "dead" ]]; then
+        echo "A production container entered a terminal or unhealthy state (API=$api_state, worker=$worker_state, web=$web_state)." >&2
+        return 1
+      fi
+    fi
+    sleep 5
+  done
+  echo "Timed out waiting for healthy API, worker, and web containers." >&2
+  return 1
+}
+
+apply_release() {
+  local next_api="$1" next_worker="$2" next_sandbox="$3" next_web="$4"
+  compose config --quiet || return 1
+  compose pull api worker web || return 1
+  DOCKER_HOST="unix://$docker_socket" docker pull "$next_sandbox" || return 1
+  compose up -d --no-build api worker web || return 1
+  wait_for_health
+}
+
+if apply_release "$api_image" "$worker_image" "$sandbox_image" "$web_image"; then
+  echo "RUSA-AI deployment is healthy."
+  echo "Previous immutable image digests are retained in ${env_file}.previous."
+  exit 0
+fi
+
+echo "Candidate deployment failed; restoring the previous immutable image digests." >&2
+cp -p -- "${env_file}.previous" "$env_file"
+chmod 600 "$env_file"
+if apply_release "$old_api_image" "$old_worker_image" "$old_sandbox_image" "$old_web_image"; then
+  echo "Automatic rollback restored the previous healthy API and worker." >&2
+  exit 1
+fi
+
+echo "CRITICAL: automatic rollback failed. Keep task intake disabled and intervene manually." >&2
+exit 2
+
+readonly WEB_PATTERN='^ghcr\.io/strategyg/rusa-ai-web@sha256:[0-9a-f]{64}
+
+[[ "$api_image" =~ $API_PATTERN ]] || { echo "API image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$worker_image" =~ $WORKER_PATTERN ]] || { echo "Worker image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Sandbox image must be an immutable approved GHCR digest." >&2; exit 64; }
+
+compose_file="${RUSA_COMPOSE_FILE:-docker-compose.production.yml}"
+env_file="${RUSA_ENV_FILE:-.env}"
+lock_file="${RUSA_DEPLOY_LOCK_FILE:-.rusa-deploy.lock}"
+health_timeout="${RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
+
+[[ -f "$compose_file" ]] || { echo "Production Compose file is missing: $compose_file" >&2; exit 66; }
+[[ -f "$env_file" ]] || { echo "Production environment file is missing: $env_file" >&2; exit 66; }
+[[ "$health_timeout" =~ ^[0-9]+$ ]] && (( health_timeout >= 60 && health_timeout <= 1800 )) || {
+  echo "RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS must be between 60 and 1800." >&2
+  exit 64
+}
+
+if [[ "${RUSA_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+  command -v flock >/dev/null 2>&1 || { echo "flock is required for serialized deployments." >&2; exit 69; }
+  exec 9>"$lock_file"
+  flock -n 9 || { echo "Another RUSA-AI deployment or rollback is in progress." >&2; exit 75; }
+fi
+
+get_env_value() {
+  local key="$1"
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      value = $0
+      count++
+    }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
+  ' "$env_file"
+}
+
+aicode_enabled="$(get_env_value RUSA_AICODE_ENABLED)" || { echo "Exactly one RUSA_AICODE_ENABLED setting must exist in .env." >&2; exit 64; }
+case "${aicode_enabled,,}" in
+  false|0|no) ;;
+  *) echo "Disable AICode and drain active tasks before deploying or rolling back." >&2; exit 64 ;;
+esac
+
+old_api_image="$(get_env_value RUSA_API_IMAGE)" || { echo "Exactly one RUSA_API_IMAGE must exist in .env." >&2; exit 64; }
+old_worker_image="$(get_env_value RUSA_WORKER_IMAGE)" || { echo "Exactly one RUSA_WORKER_IMAGE must exist in .env." >&2; exit 64; }
+old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
+docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+
+[[ "$old_api_image" =~ $API_PATTERN ]] || { echo "Current API image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_worker_image" =~ $WORKER_PATTERN ]] || { echo "Current worker image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Current sandbox image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
+
+tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
+trap 'rm -f "$tmp_env"' EXIT
+cp -p -- "$env_file" "${env_file}.previous"
+chmod 600 "${env_file}.previous"
+
+awk -F= -v api="$api_image" -v worker="$worker_image" -v sandbox="$sandbox_image" '
+  BEGIN { api_count = 0; worker_count = 0; sandbox_count = 0 }
+  $1 == "RUSA_API_IMAGE" { api_count++; print "RUSA_API_IMAGE=" api; next }
+  $1 == "RUSA_WORKER_IMAGE" { worker_count++; print "RUSA_WORKER_IMAGE=" worker; next }
+  $1 == "RUSA_SANDBOX_IMAGE" { sandbox_count++; print "RUSA_SANDBOX_IMAGE=" sandbox; next }
+  { print }
+  END {
+    if (api_count != 1 || worker_count != 1 || sandbox_count != 1) {
+      print "Production .env must contain exactly one API, worker, and sandbox image setting." > "/dev/stderr"
+      exit 42
+    }
+  }
+' "$env_file" > "$tmp_env"
+chmod 600 "$tmp_env"
+mv -- "$tmp_env" "$env_file"
+
+compose() {
+  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+}
+
+wait_for_health() {
+  local deadline=$((SECONDS + health_timeout))
+  local api_id worker_id api_state worker_state
+  while (( SECONDS < deadline )); do
+    api_id="$(compose ps -q api 2>/dev/null || true)"
+    worker_id="$(compose ps -q worker 2>/dev/null || true)"
+    if [[ -n "$api_id" && -n "$worker_id" ]]; then
+      api_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
+      worker_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id" 2>/dev/null || echo missing)"
+      if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" ]]; then
+        return 0
+      fi
+      if [[ "$api_state" == "unhealthy" || "$api_state" == "exited" || "$api_state" == "dead" ||
+            "$worker_state" == "unhealthy" || "$worker_state" == "exited" || "$worker_state" == "dead" ]]; then
+        echo "A production container entered a terminal or unhealthy state (API=$api_state, worker=$worker_state)." >&2
+        return 1
+      fi
+    fi
+    sleep 5
+  done
+  echo "Timed out waiting for healthy API and worker containers." >&2
+  return 1
+}
+
+apply_release() {
+  local next_api="$1" next_worker="$2" next_sandbox="$3"
+  compose config --quiet || return 1
+  compose pull api worker || return 1
+  DOCKER_HOST="unix://$docker_socket" docker pull "$next_sandbox" || return 1
+  compose up -d --no-build api worker || return 1
+  wait_for_health
+}
+
+if apply_release "$api_image" "$worker_image" "$sandbox_image"; then
+  echo "RUSA-AI deployment is healthy."
+  echo "Previous immutable image digests are retained in ${env_file}.previous."
+  exit 0
+fi
+
+echo "Candidate deployment failed; restoring the previous immutable image digests." >&2
+cp -p -- "${env_file}.previous" "$env_file"
+chmod 600 "$env_file"
+if apply_release "$old_api_image" "$old_worker_image" "$old_sandbox_image"; then
+  echo "Automatic rollback restored the previous healthy API and worker." >&2
+  exit 1
+fi
+
+echo "CRITICAL: automatic rollback failed. Keep task intake disabled and intervene manually." >&2
+exit 2
+
+
+[[ "$api_image" =~ $API_PATTERN ]] || { echo "API image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$worker_image" =~ $WORKER_PATTERN ]] || { echo "Worker image must be an immutable approved GHCR digest." >&2; exit 64; }
+[[ "$sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Sandbox image must be an immutable approved GHCR digest." >&2; exit 64; }
+
+compose_file="${RUSA_COMPOSE_FILE:-docker-compose.production.yml}"
+env_file="${RUSA_ENV_FILE:-.env}"
+lock_file="${RUSA_DEPLOY_LOCK_FILE:-.rusa-deploy.lock}"
+health_timeout="${RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
+
+[[ -f "$compose_file" ]] || { echo "Production Compose file is missing: $compose_file" >&2; exit 66; }
+[[ -f "$env_file" ]] || { echo "Production environment file is missing: $env_file" >&2; exit 66; }
+[[ "$health_timeout" =~ ^[0-9]+$ ]] && (( health_timeout >= 60 && health_timeout <= 1800 )) || {
+  echo "RUSA_DEPLOY_HEALTH_TIMEOUT_SECONDS must be between 60 and 1800." >&2
+  exit 64
+}
+
+if [[ "${RUSA_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+  command -v flock >/dev/null 2>&1 || { echo "flock is required for serialized deployments." >&2; exit 69; }
+  exec 9>"$lock_file"
+  flock -n 9 || { echo "Another RUSA-AI deployment or rollback is in progress." >&2; exit 75; }
+fi
+
+get_env_value() {
+  local key="$1"
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      value = $0
+      count++
+    }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
+  ' "$env_file"
+}
+
+aicode_enabled="$(get_env_value RUSA_AICODE_ENABLED)" || { echo "Exactly one RUSA_AICODE_ENABLED setting must exist in .env." >&2; exit 64; }
+case "${aicode_enabled,,}" in
+  false|0|no) ;;
+  *) echo "Disable AICode and drain active tasks before deploying or rolling back." >&2; exit 64 ;;
+esac
+
+old_api_image="$(get_env_value RUSA_API_IMAGE)" || { echo "Exactly one RUSA_API_IMAGE must exist in .env." >&2; exit 64; }
+old_worker_image="$(get_env_value RUSA_WORKER_IMAGE)" || { echo "Exactly one RUSA_WORKER_IMAGE must exist in .env." >&2; exit 64; }
+old_sandbox_image="$(get_env_value RUSA_SANDBOX_IMAGE)" || { echo "Exactly one RUSA_SANDBOX_IMAGE must exist in .env." >&2; exit 64; }
+docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_DOCKER_SOCKET must exist in .env." >&2; exit 64; }
+
+[[ "$old_api_image" =~ $API_PATTERN ]] || { echo "Current API image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_worker_image" =~ $WORKER_PATTERN ]] || { echo "Current worker image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$old_sandbox_image" =~ $SANDBOX_PATTERN ]] || { echo "Current sandbox image is not a digest-pinned rollback target." >&2; exit 64; }
+[[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
+
+tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
+trap 'rm -f "$tmp_env"' EXIT
+cp -p -- "$env_file" "${env_file}.previous"
+chmod 600 "${env_file}.previous"
+
+awk -F= -v api="$api_image" -v worker="$worker_image" -v sandbox="$sandbox_image" '
+  BEGIN { api_count = 0; worker_count = 0; sandbox_count = 0 }
+  $1 == "RUSA_API_IMAGE" { api_count++; print "RUSA_API_IMAGE=" api; next }
+  $1 == "RUSA_WORKER_IMAGE" { worker_count++; print "RUSA_WORKER_IMAGE=" worker; next }
+  $1 == "RUSA_SANDBOX_IMAGE" { sandbox_count++; print "RUSA_SANDBOX_IMAGE=" sandbox; next }
+  { print }
+  END {
+    if (api_count != 1 || worker_count != 1 || sandbox_count != 1) {
+      print "Production .env must contain exactly one API, worker, and sandbox image setting." > "/dev/stderr"
+      exit 42
+    }
+  }
+' "$env_file" > "$tmp_env"
+chmod 600 "$tmp_env"
+mv -- "$tmp_env" "$env_file"
+
+compose() {
+  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+}
+
+wait_for_health() {
+  local deadline=$((SECONDS + health_timeout))
+  local api_id worker_id api_state worker_state
+  while (( SECONDS < deadline )); do
+    api_id="$(compose ps -q api 2>/dev/null || true)"
+    worker_id="$(compose ps -q worker 2>/dev/null || true)"
+    if [[ -n "$api_id" && -n "$worker_id" ]]; then
+      api_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
+      worker_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id" 2>/dev/null || echo missing)"
+      if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" ]]; then
+        return 0
+      fi
+      if [[ "$api_state" == "unhealthy" || "$api_state" == "exited" || "$api_state" == "dead" ||
+            "$worker_state" == "unhealthy" || "$worker_state" == "exited" || "$worker_state" == "dead" ]]; then
+        echo "A production container entered a terminal or unhealthy state (API=$api_state, worker=$worker_state)." >&2
+        return 1
+      fi
+    fi
+    sleep 5
+  done
+  echo "Timed out waiting for healthy API and worker containers." >&2
+  return 1
+}
+
+apply_release() {
+  local next_api="$1" next_worker="$2" next_sandbox="$3"
+  compose config --quiet || return 1
+  compose pull api worker || return 1
+  DOCKER_HOST="unix://$docker_socket" docker pull "$next_sandbox" || return 1
+  compose up -d --no-build api worker || return 1
+  wait_for_health
+}
+
+if apply_release "$api_image" "$worker_image" "$sandbox_image"; then
+  echo "RUSA-AI deployment is healthy."
+  echo "Previous immutable image digests are retained in ${env_file}.previous."
+  exit 0
+fi
+
+echo "Candidate deployment failed; restoring the previous immutable image digests." >&2
+cp -p -- "${env_file}.previous" "$env_file"
+chmod 600 "$env_file"
+if apply_release "$old_api_image" "$old_worker_image" "$old_sandbox_image"; then
+  echo "Automatic rollback restored the previous healthy API and worker." >&2
+  exit 1
+fi
+
+echo "CRITICAL: automatic rollback failed. Keep task intake disabled and intervene manually." >&2
+exit 2

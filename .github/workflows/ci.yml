@@ -7,6 +7,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -61,6 +62,14 @@ jobs:
             --eval-file llm-project/data/curated/eval.jsonl
       - name: Tests
         run: python -m pytest -q
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate GitHub Actions workflows
+        run: "$(go env GOPATH)/bin/actionlint" -color
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
+          bash tests/test_deploy_scripts.sh
 
   docker-build:
     name: Build, test, and scan production images
@@ -289,3 +298,26 @@ jobs:
             tests/test_mcp_client.py \
             tests/test_mcp_server.py \
             tests/test_mcp_server_security.py
+  release-gate:
+    name: Release Gate
+    if: always()
+    needs:
+      - test
+      - docker-build
+      - rag-mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release check to pass
+        env:
+          TEST_RESULT: \${{ needs.test.result }}
+          IMAGE_RESULT: \${{ needs['docker-build'].result }}
+          RAG_MCP_RESULT: \${{ needs['rag-mcp'].result }}
+        run: |
+          printf 'Test, lint, and security: %s\n' "$TEST_RESULT"
+          printf 'Build, test, and scan production images: %s\n' "$IMAGE_RESULT"
+          printf 'RAG and MCP integration tests: %s\n' "$RAG_MCP_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$IMAGE_RESULT" != "success" || "$RAG_MCP_RESULT" != "success" ]]; then
+            echo "Release Gate failed: every required job must succeed on this exact commit." >&2
+            exit 1
+          fi

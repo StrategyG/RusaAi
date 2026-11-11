@@ -205,11 +205,16 @@ export RUSA_WEB_IMAGE=ghcr.io/strategyg/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
 export RUSA_SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_IMAGE_DIGEST
 python -m rusa_agents.production_preflight
 docker compose -f docker-compose.production.yml config
-docker compose -f docker-compose.production.yml pull
-docker compose -f docker-compose.production.yml up -d
+./scripts/deploy/compose-deploy.sh \
+  ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST \
+  ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST \
+  ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST \
+  ghcr.io/strategyg/rusa-ai-web@sha256:WEB_DIGEST
 docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs --tail=200 api worker
+docker compose -f docker-compose.production.yml logs --tail=200 api worker web
 ```
+
+The production deploy script requires all four image references to be immutable GHCR digests. It snapshots the previous environment file, serializes deployment with a lock, updates API, worker, web, and sandbox images, checks API/worker/web health, and restores the previous image set automatically if the candidate is unhealthy. Use `scripts/deploy/compose-rollback.sh` for a manual rollback. Keep `RUSA_AICODE_ENABLED=false` until all release gates and operator approvals are complete.
 
 The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, uses explicit environment allowlists so the API, worker, and web containers do not inherit unrelated secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing. The Python preflight checks image repository paths and digest syntax; it is not a substitute for the release workflow's Cosign and provenance verification.
 
