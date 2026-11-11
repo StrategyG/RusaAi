@@ -58,13 +58,15 @@ Snapshot terakhir yang diverifikasi saat dokumen ini diperbarui:
 | Default branch | `main` |
 | `main` commit | `31a2bb74aaccaa6d3f5c8b1f0379df6c5d4bda7d` |
 | Working branch | `feat/architecture-v2-cpu-first-alignment` |
-| Branch head | `5ecaf9cd90837ff5c30b75440d3b06452a9ee19b` |
+| Implementation branch | `feat/inference-deadline-propagation` |
+| PR #107 head at implementation snapshot | `bf0485bc034f75b6919a3548a20604918ce694c2` |
 | Pull request | [#107](https://github.com/StrategyG/RusaAi/pull/107) — open, belum merge |
-| CI run terbaru pada snapshot | [Run #4221](https://github.com/StrategyG/RusaAi/actions/runs/43071904195) |
-| Status Run #4221 | Dua job selesai sukses; image/sandbox job masih berjalan saat pemeriksaan |
-| `main` | Tidak diubah oleh roadmap ini |
+| CI run for implementation snapshot | [Run #4228](https://github.com/StrategyG/RusaAi/actions/runs/43095281714) |
+| Status Run #4228 | Queued saat snapshot dibuat; belum ada hasil test untuk deadline changes |
+| Previous baseline CI | [Run #4227](https://github.com/StrategyG/RusaAi/actions/runs/43075276779) — success pada commit sebelum deadline changes |
+| `main` | Tidak diubah |
 
-Status CI bersifat per-commit. Periksa ulang GitHub Actions sebelum menyatakan PR lulus atau merge. Run #4220 pada commit sebelumnya lulus, tetapi itu bukan pengganti hasil Run #4221 pada head terbaru.
+Status CI bersifat per-commit. Run #4227 tidak memverifikasi perubahan deadline yang masuk setelahnya. Periksa run terbaru pada PR #107 sebelum menyatakan perubahan lulus atau siap merge.
 
 ## 4. Peta struktur repository dan ownership
 
@@ -428,7 +430,7 @@ Sebuah komponen disebut:
 
 - Repository: https://github.com/StrategyG/RusaAi
 - Architecture PR #107: https://github.com/StrategyG/RusaAi/pull/107
-- CI Run #4221: https://github.com/StrategyG/RusaAi/actions/runs/43071904195
+- CI Run #4228 (deadline implementation snapshot): https://github.com/StrategyG/RusaAi/actions/runs/43095281714
 - Implementation alignment: `docs/architecture/IMPLEMENTATION_ALIGNMENT.md`
 - Autonomous implementation mapping: `docs/AUTONOMOUS_IMPLEMENTATION_ROADMAP.md`
 - CPU operations: `docs/CPU_INFERENCE_OPERATIONS.md`
