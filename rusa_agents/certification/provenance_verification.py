@@ -42,6 +42,17 @@ def verify_github_slsa_provenance(
         raise ValueError("repository must use owner/name form")
     if not signer_workflow.strip() or not certificate_identity.strip():
         raise ValueError("signer_workflow and certificate_identity must not be empty")
+    workflow_parts = signer_workflow.split("/")
+    if workflow_parts[0] == "github.com":
+        workflow_parts = workflow_parts[1:]
+    if (
+        len(workflow_parts) < 5
+        or workflow_parts[2:4] != [".github", "workflows"]
+        or not workflow_parts[-1].endswith((".yml", ".yaml"))
+    ):
+        raise ValueError(
+            "signer_workflow must use owner/repository/.github/workflows/<file>.yml form"
+        )
     if not _SOURCE_DIGEST_RE.fullmatch(source_digest):
         raise ValueError("source_digest must be a 40- or 64-character lowercase Git commit SHA")
     if not oidc_issuer.startswith("https://"):

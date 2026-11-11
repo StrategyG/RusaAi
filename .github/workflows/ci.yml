@@ -7,6 +7,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call: {}
 
 permissions:
   contents: read
@@ -48,6 +49,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Validate certification schemas in the installed wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_dir="$(mktemp -d)"
+          venv_dir="$(mktemp -d)"
+          trap 'rm -rf "$wheel_dir" "$venv_dir"' EXIT
+          python -m pip wheel --no-deps --wheel-dir "$wheel_dir" .
+          python -m venv "$venv_dir"
+          "$venv_dir/bin/python" -m pip install --no-deps "$wheel_dir"/rusa_ai-*.whl
+          "$venv_dir/bin/python" -m pip install "jsonschema>=4.17,<5"
+          (
+            cd "$RUNNER_TEMP"
+            "$venv_dir/bin/python" - <<'PY'
+          from rusa_agents.certification.contracts import _validator
+
+          _validator("release_manifest")
+          _validator("production_certification")
+          PY
+            "$venv_dir/bin/rusa-certify" --help >/dev/null
+          )
       - name: Compile
         run: python -m compileall -q rusa_agents rusa_knowledge rusa_mcp llm-project/serve tests
       - name: Lint
@@ -61,6 +83,14 @@ jobs:
             --eval-file llm-project/data/curated/eval.jsonl
       - name: Tests
         run: python -m pytest -q
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate GitHub Actions workflows
+        run: '"$(go env GOPATH)/bin/actionlint" -color'
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
+          bash tests/test_deploy_scripts.sh
 
   docker-build:
     name: Build, test, and scan production images
@@ -68,6 +98,19 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0, immutable commit
+        with:
+          node-version: "22"
+      - name: Resolve web lockfile and validate frontend
+        working-directory: web
+        env:
+          RUSA_API_BASE_URL: http://127.0.0.1:8000
+          RUSA_WEB_SESSION_SECRET: ci-only-session-secret-change-this-value-123456789
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+          npm run typecheck
       - name: Build API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
       - name: Build isolated agent sandbox image
@@ -79,7 +122,7 @@ jobs:
           docker run --rm --entrypoint python "rusa-ai-agent-sandbox:${{ github.sha }}" -c '
           import importlib.metadata as metadata
           import sys
-          print("sys.path:", *sys.path, sep="\\n  ")
+          print("sys.path:", *sys.path, sep="\n  ")
           for dist in metadata.distributions():
               if (dist.metadata.get("Name") or "").lower() == "setuptools":
                   print("setuptools distribution:", dist.version, "metadata:", dist._path)
@@ -105,6 +148,8 @@ jobs:
           PY
       - name: Build isolated knowledge MCP image
         run: docker build --pull -f Dockerfile.rag-mcp -t rusa-ai-rag-mcp:${{ github.sha }} .
+      - name: Build web application image
+        run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
       - name: Build autonomous worker image
         run: docker build --pull --build-arg RUSA_INSTALL_RAG=1 -f Dockerfile.worker -t rusa-ai-worker:${{ github.sha }} .
       - name: Install Trivy
@@ -119,6 +164,7 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-web:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             echo "::group::Vulnerability report: ${image}"
@@ -180,6 +226,7 @@ jobs:
           for image in \
             "rusa-ai:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
+            "rusa-ai-web:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
             trivy image --scanners vuln --exit-code 1 --ignore-unfixed \
@@ -187,21 +234,22 @@ jobs:
           done
       - name: Validate production Compose configuration
         env:
-          RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WEB_IMAGE: example.invalid/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
-          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
+          ENVIRONMENT: production
+          RUSA_API_IMAGE: ghcr.io/strategyg/rusa-ai-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_IMAGE: ghcr.io/strategyg/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WEB_SESSION_SECRET: ci-web-session-secret-123456789012345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
-          RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_METRICS_API_KEY: ci-metrics-key-12345678901234567890123456789012
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
-          RUSA_MODEL_BASE_URL: https://model.internal/v1
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
           RUSA_MODEL_NAME: rusa-ai
-          RUSA_MODEL_API_KEY: ci-model-key
-          RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
+          RUSA_MODEL_API_KEY: ci-model-gateway-key-123456789012345678901234567890
+          RUSA_AUDIT_HMAC_KEY: ci-audit-hmac-key-12345678901234567890123456789012
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
-          RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
           RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
@@ -213,7 +261,7 @@ jobs:
           RUSA_MAX_REPAIR_CYCLES: "2"
           RUSA_METRICS_PORT: "9100"
         run: |
-          touch .env
+          python -m rusa_agents.production_preflight
           docker compose -f docker-compose.production.yml config --quiet
       - name: Validate CPU-only Compose configuration
         env:
@@ -288,3 +336,26 @@ jobs:
             tests/test_mcp_client.py \
             tests/test_mcp_server.py \
             tests/test_mcp_server_security.py
+  release-gate:
+    name: Release Gate
+    if: always()
+    needs:
+      - test
+      - docker-build
+      - rag-mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every release check to pass
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          IMAGE_RESULT: ${{ needs['docker-build'].result }}
+          RAG_MCP_RESULT: ${{ needs['rag-mcp'].result }}
+        run: |
+          printf 'Test, lint, and security: %s\n' "$TEST_RESULT"
+          printf 'Build, test, and scan production images: %s\n' "$IMAGE_RESULT"
+          printf 'RAG and MCP integration tests: %s\n' "$RAG_MCP_RESULT"
+          if [[ "$TEST_RESULT" != "success" || "$IMAGE_RESULT" != "success" || "$RAG_MCP_RESULT" != "success" ]]; then
+            echo "Release Gate failed: every required job must succeed on this exact commit." >&2
+            exit 1
+          fi

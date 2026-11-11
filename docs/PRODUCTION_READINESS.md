@@ -26,10 +26,12 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Verification boundary
 
-The primary CI job has previously passed compile, lint, Bandit, and unit tests on
-commit `7ed80f0801651165cd634b95dcd993a6c85b9484`. Subsequent commits added
-RAG/MCP packaging, queue idempotency, race tests, and further CI changes; those
-changes must be judged only by the latest workflow run on the exact PR head.
+CI status is commit-specific. For PR #106, use only the latest Core CI
+and Web CI runs attached to the current PR head. A green run from an earlier
+commit is historical evidence and does not validate a later candidate. The
+signed release workflow must also complete on a protected annotated semantic
+tag before its images or manifest can be treated as release evidence. Passing
+CI or publishing a signed manifest is not staging or production certification.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -40,12 +42,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | Pending latest run |
+| Integration CI | Latest Core CI and Web CI runs attached to the exact current PR #106 head | Must pass on the current head; earlier runs are historical only |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests must pass on the current PR head; live crash/recovery and staging load evidence still required |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
@@ -71,3 +73,31 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
   evaluation datasets.
 - Do not describe the complete product as production-ready until every applicable
   release gate has objective evidence and human approval.
+
+
+## Production hardening candidate — PR #106
+
+The current hardening candidate adds the following code-level controls:
+
+- Production API and worker PostgreSQL DSNs require `sslmode=verify-full`.
+- Production Compose no longer bulk-injects `.env` into API and worker containers; each service receives an explicit environment allowlist.
+- `python -m rusa_agents.production_preflight` validates runtime configuration, the web session secret, and exact repository-owned GHCR image references pinned by SHA-256 digest.
+- Web CI audits production dependencies and scans the final web container for CRITICAL/HIGH vulnerabilities.
+- Regression tests cover TLS identity verification, service-secret separation, and immutable image references.
+
+The preflight validates configuration and digest syntax only. It does not verify Cosign signatures, SLSA provenance, SBOM contents, deployment state, or external infrastructure.
+
+## Additional production gates observed on 2026-11-11
+
+| Gate | Current evidence | Required action |
+|---|---|---|
+| Main branch governance | `main` reports `protected=false`; no repository rulesets were returned | Configure required reviews/status checks and block force-push/deletion |
+| Signed release pipeline | PR #106 now contains a tag-triggered release workflow for API, worker, sandbox, and web, plus manifest-gated deployment. PR remains draft/unmerged and the workflow has not been proven by a real signed release. | Merge only after exact-head CI passes; create a protected annotated semantic tag; verify all four image signatures, SLSA attestations, SBOMs, and the signed manifest from the resulting release. |
+| Certification CLI | PR #72 remains open; PR #71 contract layer is merged | Review and integrate the CLI and its exact-manifest evaluation path |
+| Web dependency reproducibility | Web CI resolves and uploads a lockfile artifact; the signed release workflow reuses and publishes that exact artifact. No committed `web/package-lock.json` exists. | Commit a reviewed lockfile to source control; retain `npm ci` in CI and Docker builds. |
+| Vulnerability disposition | The release workflow scans the exact pushed image digests and blocks every Critical or High finding. The manifest builder currently emits no High exceptions. Previous PR #106 CI reports recorded large High counts on Debian util-linux packages. | Reduce each production image to zero Critical and zero High findings before release. Do not bypass the release gate with `--ignore-unfixed`; implement a trusted approval workflow before any exception policy is enabled. Recheck current Debian status in the [Debian util-linux tracker](https://security-tracker.debian.org/tracker/source-package/util-linux). |
+| Agentic DevOps lifecycle | PRs #99 and #100 remain drafts | Complete review, integration, live worker-pool and staging evidence |
+| RusaModels integration | RusaAi PR #103 remains a draft model-plane contract; RusaModels PR #11 is a separate production-hardening candidate and its CI is still under validation | Finalize the versioned model-plane contract, review both PRs, and run authenticated RusaAi-to-RusaModels staging integration tests |
+| Operational certification | No live tenant-isolation, sandbox adversarial, backup/restore, load/soak, or model-quality evidence was supplied | Run the required staging exercises and obtain operator sign-off |
+
+Do not describe the full RUSA AI product as production-ready until the applicable gates above have objective evidence and human approval.

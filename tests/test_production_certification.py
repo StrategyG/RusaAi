@@ -18,6 +18,7 @@ ARTIFACT_DIGESTS = {
     "api": "sha256:" + "1" * 64,
     "worker": "sha256:" + "2" * 64,
     "sandbox": "sha256:" + "3" * 64,
+    "web": "sha256:" + "7" * 64,
 }
 
 
@@ -66,7 +67,7 @@ def release_manifest() -> dict[str, object]:
             }
         )
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "release_id": "v1.0.0",
         "created_at": "2026-11-08T10:30:00Z",
         "source": {

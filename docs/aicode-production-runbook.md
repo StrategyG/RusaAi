@@ -72,26 +72,48 @@ The coding endpoint receives repository files and task context. Confirm data res
 
 ## 5. Build and publish immutable images
 
-Build all three images from the reviewed commit:
+The signed release workflow is the supported production image publisher. It is
+triggered only by an annotated semantic tag (for example `v1.2.3`) that points
+to a commit reachable from `main`. It first runs the reusable Core CI and Web
+CI workflows against that exact tag commit. It then:
 
-```bash
-docker build -t ghcr.io/ORG/rusa-ai:RELEASE .
-docker build -f Dockerfile.worker -t ghcr.io/ORG/rusa-aicode-worker:RELEASE .
-docker build -f Dockerfile.agent-sandbox -t ghcr.io/ORG/rusa-aicode-sandbox:RELEASE .
-docker push ghcr.io/ORG/rusa-ai:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-worker:RELEASE
-docker push ghcr.io/ORG/rusa-aicode-sandbox:RELEASE
-```
+1. Builds API, worker, web, and isolated sandbox images.
+2. Pushes them to the repository-owned GHCR namespace.
+3. Signs each immutable image digest with keyless Cosign.
+4. Publishes GitHub SLSA provenance for each exact image digest.
+5. Generates a Trivy vulnerability report and CycloneDX SBOM for each digest.
+6. Blocks publication of the release manifest if any Critical or High finding
+   exists. The current builder does not accept vulnerability exceptions.
+7. Builds and schema-validates `release-manifest.json`, verifies the image
+   signatures and provenance, signs the exact manifest bytes, and attaches the
+   manifest, signature bundle, SBOMs, scan reports, Trivy DB metadata, and the
+   exact Web CI lockfile artifact to the GitHub Release.
 
-Resolve the sandbox digest from the registry and configure `RUSA_SANDBOX_IMAGE` as an immutable reference:
+Do not push production tags from unreviewed commits. Protect semantic release
+tags with a GitHub tag ruleset, restrict tag creation to release maintainers,
+and require the production GitHub Environment to have independent reviewers.
+The release workflow being present on a branch is not evidence of a published
+or certified release.
+
+The resulting image references must use the lowercase owner namespace and
+immutable digests:
 
 ```text
-ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-api@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-worker@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
+ghcr.io/strategyg/rusa-ai-web@sha256:REGISTRY_DIGEST
 ```
 
-The worker refuses a mutable sandbox tag in production. Pull the exact digest into the dedicated rootless Docker daemon. Do not assume an image in the rootful Docker daemon is available to the rootless daemon.
+The release manifest is the authoritative source for these digests. The
+deployment workflow accepts only a release tag; it downloads and verifies the
+signed manifest, checks the source commit, validates SBOM bytes, verifies all
+image signatures and SLSA provenance, and derives the four image digests from
+the verified manifest. Do not pass manually copied digest values to deployment.
 
-The current CI builds images but does not publish them to a registry automatically. Pin base images and third-party build actions to reviewed immutable digests in the release pipeline.
+The current Web CI generates the lockfile artifact for the exact commit and the
+release workflow reuses it. Commit a reviewed `web/package-lock.json` to the
+repository before claiming fully source-reproducible frontend dependencies.
 
 ## 6. Prepare Git mirrors and storage
 
@@ -116,7 +138,7 @@ Mount the workspace root at the same absolute host path inside the worker contai
 
 ## 7. Production environment
 
-Copy `.env.example` to a secret-managed environment file. Do not commit the production file.
+Copy `.env.example` to a secret-managed environment file. Do not commit the production file, and restrict it to the deployment operator (for example, mode `0600`). Remove or comment out the development-only `RUSA_API_KEYS`, `RUSA_API_KEY`, `RUSA_DATABASE_URL`, and `POSTGRES_PASSWORD` entries; production uses hashed tenant keys and separate API/worker DSNs. The production Compose file reads this file for variable interpolation only; it deliberately does not use Compose `env_file`. The preflight loads the same `.env` file without overriding values already supplied by the deployment environment. Only the explicit per-service environment allowlists in `docker-compose.production.yml` are passed into containers.
 
 API settings:
 
@@ -127,8 +149,9 @@ RUSA_API_DATABASE_URL=postgresql://rusa_api_login:REDACTED@DB_HOST:5432/rusa?ssl
 RUSA_API_KEYS_JSON='{"<64-character-sha256-digest>":{"subject":"service-acme","tenant_id":"tenant-acme","roles":["tenant_admin"]}}'
 RUSA_METRICS_API_KEY=LONG_RANDOM_OPERATOR_ONLY_KEY_AT_LEAST_32_BYTES
 RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
-RUSA_MODEL_BASE_URL=https://MODEL_HOST/v1
+RUSA_MODEL_BASE_URL=https://MODEL_HOST/openai/v1
 RUSA_MODEL_NAME=rusa-ai
+RUSA_MODEL_API_KEY=AT_LEAST_32_RANDOM_MODEL_GATEWAY_KEY_BYTES
 RUSA_RATE_LIMIT_CHAT_PER_MINUTE=60
 RUSA_RATE_LIMIT_TASKS_PER_MINUTE=10
 RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE=120
@@ -142,7 +165,18 @@ RUSA_AUDIT_HMAC_KEY=AT_LEAST_32_RANDOM_UTF8_BYTES
 RUSA_WORKSPACE_ROOT=/var/lib/rusa/workspaces
 RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
-RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
+RUSA_SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox@sha256:REGISTRY_DIGEST
+RUSA_TENANT_REPOSITORIES={"tenant-acme":["StrategyG/RusaAi"]}
+RUSA_MODEL_BASE_URL=https://MODEL_HOST/openai/v1
+RUSA_MODEL_NAME=rusa-ai
+RUSA_MODEL_API_KEY=AT_LEAST_32_RANDOM_MODEL_GATEWAY_KEY_BYTES
+RUSA_EMBEDDING_BASE_URL=https://MODEL_HOST/openai/v1
+RUSA_EMBEDDING_MODEL=rusa-embedding-small
+RUSA_EMBEDDING_API_KEY=EMBEDDING_PROVIDER_KEY_OR_EMPTY_FOR_MODEL_GATEWAY
+RUSA_EMBEDDING_DIMENSIONS=384
+RUSA_EMBEDDING_INPUT_TYPE_ENABLED=true
+RUSA_EMBEDDING_TIMEOUT=120
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker
 RUSA_TASK_TIMEOUT_SECONDS=3600
 RUSA_CI_TIMEOUT_SECONDS=900
 RUSA_CI_POLL_SECONDS=15
@@ -150,6 +184,12 @@ RUSA_METRICS_PORT=9100
 RUSA_METRICS_BIND=0.0.0.0
 RUSA_DOCKER_SOCKET=/run/user/1001/docker.sock
 RUSA_DOCKER_GID=1001
+```
+
+Web settings:
+
+```dotenv
+RUSA_WEB_SESSION_SECRET=AT_LEAST_32_RANDOM_WEB_SESSION_SECRET_BYTES
 ```
 
 The worker also requires `DOCKER_HOST=unix:///run/docker.sock`, supplied by Compose when the rootless socket is mounted. Set the socket path and group ID to actual host values.
@@ -176,19 +216,27 @@ docker compose up -d
 docker compose --profile worker up -d --build
 ```
 
-For production, set the API and worker image references to immutable registry digests in the deployment environment, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then validate and deploy the external-database stack:
+For production, set the API, worker, and web image references to immutable registry digests, set the sandbox image digest, keep `RUSA_AICODE_ENABLED=false` for the initial rollout, then run the fail-closed environment preflight and validate the external-database stack:
 
 ```bash
-export RUSA_API_IMAGE=ghcr.io/ORG/rusa-ai@sha256:API_IMAGE_DIGEST
-export RUSA_WORKER_IMAGE=ghcr.io/ORG/rusa-aicode-worker@sha256:WORKER_IMAGE_DIGEST
+export RUSA_API_IMAGE=ghcr.io/strategyg/rusa-ai-api@sha256:API_IMAGE_DIGEST
+export RUSA_WORKER_IMAGE=ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_IMAGE_DIGEST
+export RUSA_WEB_IMAGE=ghcr.io/strategyg/rusa-ai-web@sha256:WEB_IMAGE_DIGEST
+export RUSA_SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_IMAGE_DIGEST
+python -m rusa_agents.production_preflight
 docker compose -f docker-compose.production.yml config
-docker compose -f docker-compose.production.yml pull
-docker compose -f docker-compose.production.yml up -d
+./scripts/deploy/compose-deploy.sh \
+  ghcr.io/strategyg/rusa-ai-api@sha256:API_DIGEST \
+  ghcr.io/strategyg/rusa-ai-worker@sha256:WORKER_DIGEST \
+  ghcr.io/strategyg/rusa-ai-sandbox@sha256:SANDBOX_DIGEST \
+  ghcr.io/strategyg/rusa-ai-web@sha256:WEB_DIGEST
 docker compose -f docker-compose.production.yml ps
-docker compose -f docker-compose.production.yml logs --tail=200 api worker
+docker compose -f docker-compose.production.yml logs --tail=200 api worker web
 ```
 
-The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, blanks the opposite service's DSN and privileged secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing.
+The production deploy script requires all four image references to be immutable GHCR digests. It snapshots the previous environment file, serializes deployment with a lock, updates API, worker, web, and sandbox images, checks API/worker/web health, and restores the previous image set automatically if the candidate is unhealthy. Use `scripts/deploy/compose-rollback.sh` for a manual rollback. Keep `RUSA_AICODE_ENABLED=false` until all release gates and operator approvals are complete.
+
+The production Compose file has no local PostgreSQL service. It requires separate managed TLS DSNs for API and worker, uses explicit environment allowlists so the API, worker, and web containers do not inherit unrelated secrets, requires the dedicated rootless Docker socket, and fails configuration if image/socket/workspace settings are missing. The Python preflight checks image repository paths and digest syntax; it is not a substitute for the release workflow's Cosign and provenance verification.
 
 API and worker containers run non-root, read-only root filesystems, dropped capabilities, no-new-privileges, and resource limits. The worker temporary filesystem permits execution because Git's short-lived askpass helper must be executable; keep that container isolated.
 

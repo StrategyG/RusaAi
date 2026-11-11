@@ -1,6 +1,6 @@
 # RUSA-AI Production Certification Contract
 
-**Contract version:** 1.0  
+**Contract version:** 1.1  
 **Initial implementation:** PR #71  
 **Decision model:** evidence-bound `PASS`, `HOLD`, or `FAIL`
 
@@ -22,7 +22,7 @@ It also contributes evidence to the ERG-06 gate before Phase 6 promotion.
 ## 2. Contract files
 
 - `schemas/certification/release-manifest.schema.json` defines a release
-  manifest for the API, worker, and sandbox OCI images.
+  manifest for the API, worker, sandbox, and web OCI images.
 - `schemas/certification/production-certification.schema.json` defines the
   staging evidence references and seven accountable owner sign-offs required
   for a production-promotion decision.
@@ -45,15 +45,18 @@ The release manifest binds:
    database time, severity counts, disposition, and any approved High finding
    exceptions.
 
-The manifest requires API, worker, and sandbox artifacts under the repository-owned GHCR namespace. SBOM and vulnerability scan subjects must match the exact image digest. Scanner database timestamps cannot post-date the scan. Additional
+The manifest requires API, worker, sandbox, and web artifacts under the repository-owned GHCR namespace. SBOM and vulnerability scan subjects must match the exact image digest. Scanner database timestamps cannot post-date the scan. Additional
 `rag_mcp` artifacts may be recorded. Artifact names must be unique.
 
 ### Vulnerability disposition
 
 - Any Critical finding blocks the release.
-- High findings block unless every High finding has an individual, approved,
-  unexpired exception with an owner, rationale, approval reference, approver,
-  and approval timestamp.
+- The current release-manifest builder blocks every High finding. It emits no
+  vulnerability exceptions and does not accept an operator-supplied exception
+  file. A release therefore requires zero Critical and zero High findings.
+- The schema can represent individually approved, unexpired High exceptions,
+  but that path remains disabled until a trusted approval-system integration
+  cryptographically verifies the approval reference and approver identity.
 - Medium and Low findings remain visible in the manifest for triage.
 - A `BLOCKED` disposition is never certifiable.
 
@@ -91,6 +94,30 @@ are platform, security, SRE, QA, data governance, FinOps, and process owner.
 
 A FAIL takes precedence over HOLD. No status is inferred from a green CI run alone.
 
+## 7. Certification CLI
+
+Install the package with its production dependencies, then use either the console
+entry point or the Python module entry point:
+
+```bash
+rusa-certify validate-release-manifest \
+  --manifest release-manifest.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA"
+
+rusa-certify evaluate \
+  --record production-certification.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA" \
+  --manifest-digest "sha256:<exact-manifest-digest>"
+```
+
+The manifest command validates schema and source/artifact bindings and prints the
+SHA-256 digest of the exact manifest bytes. The evaluate command returns distinct
+exit codes for PASS, HOLD, FAIL, and invalid input. The CLI does not replace
+Cosign/SLSA verification or human approval; those must be completed by trusted
+release/deployment controls before their results are recorded in the evidence.
+
 ## 6. Validation API
 
 ```python
@@ -119,7 +146,7 @@ result = evaluate_production_certification(
 The evaluator is deterministic when an explicit timezone-aware `now` value
 is supplied. It returns a report with status and blockers; it does not deploy.
 
-## 7. Trust boundary and limitations
+## 8. Trust boundary and limitations
 
 Schema validation is not cryptographic verification. The Python validator
 checks that verification claims and evidence references are present and
@@ -134,15 +161,17 @@ measure RPO/RTO, run a staging soak test, or configure GitHub branch protection
 or environment reviewers. Those are operational evidence and repository-owner
 controls, not schema operations.
 
-The manifest schema is a new JSON contract. The detached manifest signature is carried in the certification record and signs the exact manifest bytes; it is not embedded in the payload it signs. The currently proposed release
-workflow in PR #53 emits a text `release-manifest.txt`; a follow-up integration
-must emit this JSON contract and verify/sign the manifest itself. The ERG-06
-schema and evaluator proposed in PR #60 remain the detailed staging evidence
-and threshold gate; this contract does not replace them. PRs #53, #54, and #60
-were open when this contract was authored, so their code must not be treated as
-part of `main` until merged and revalidated.
+The manifest schema is a new JSON contract. The detached manifest signature is carried in the certification record and signs the exact manifest bytes; it is not embedded in the payload it signs. PR #106 adds a tag-triggered `.github/workflows/release.yml` candidate that
+builds four immutable images, signs image digests, publishes GitHub SLSA
+provenance, scans the exact digests, emits this JSON manifest, and signs the
+manifest bytes. The workflow is not active on `main` until PR #106 is reviewed
+and merged; it is not a production release until a protected annotated tag
+runs the complete pipeline successfully. The deployment workflow verifies
+the manifest signature, image signatures, provenance, source commit, and SBOM
+bytes before deployment. The ERG-06 schema and evaluator remain the detailed
+staging evidence and threshold gate; this contract does not replace them.
 
-## 8. Tests
+## 9. Tests
 
 Run the focused tests:
 
