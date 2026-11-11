@@ -183,7 +183,11 @@ class OpenAICompatibleProvider:
                         headers=headers,
                         json=payload,
                     ) as response:
-                        if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries:
+                        if (
+                            not self.gateway_mode
+                            and response.status_code in {429, 500, 502, 503, 504}
+                            and attempt < self.max_retries
+                        ):
                             retry = True
                         else:
                             response.raise_for_status()
@@ -199,7 +203,7 @@ class OpenAICompatibleProvider:
                         raise RuntimeError("Model provider returned an empty or non-text response")
                     return content
                 except (httpx.TimeoutException, httpx.TransportError):
-                    if attempt >= self.max_retries:
+                    if self.gateway_mode or attempt >= self.max_retries:
                         raise
                     await asyncio.sleep(min(2 ** attempt, 8))
         raise RuntimeError("Model provider request failed")
