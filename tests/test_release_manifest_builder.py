@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from rusa_agents.certification import manifest_builder
+from rusa_agents.certification.contracts import CertificationContractError
 
 NOW = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
 COMMIT = "a" * 40
@@ -113,7 +114,7 @@ def test_manifest_builder_binds_four_verified_images_and_sboms(tmp_path, monkeyp
 
 def test_manifest_builder_blocks_unapproved_high_findings(tmp_path, monkeypatch):
     _mock_verifiers(monkeypatch)
-    with pytest.raises(manifest_builder.CertificationContractError, match="BLOCKED"):
+    with pytest.raises(CertificationContractError, match="BLOCKED"):
         _build(tmp_path, _artifact_inputs(tmp_path, high=True))
 
 
