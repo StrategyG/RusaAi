@@ -65,6 +65,7 @@ The OpenAI-compatible /v1/chat/completions request accepts an optional integer d
 
 - If the deadline expires while waiting for a slot, the API returns HTTP 504 and removes the waiter from the FIFO queue.
 - If a non-streaming generation exceeds the remaining budget, the API cancels the provider coroutine, releases its slot, and returns HTTP 504.
+- If the request task is cancelled (for example, after client disconnect), the API cancels and awaits the provider coroutine before its admission slot is released.
 - If streaming has already started, the API emits an SSE timeout_error event followed by data: [DONE]; it cancels the pending provider iteration and releases the slot.
 - If deadline_ms is omitted, the existing queue timeout and provider timeout behavior remains unchanged.
 - A queue-capacity rejection remains HTTP 429. A queue timeout that occurs before the request deadline also remains HTTP 429.
