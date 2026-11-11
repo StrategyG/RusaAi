@@ -18,7 +18,11 @@ class InferenceQueueFull(RuntimeError):
 
 
 class InferenceQueueTimeout(TimeoutError):
-    """Raised when a request cannot obtain an inference slot before its deadline."""
+    """Raised when a request cannot obtain an inference slot before queue timeout."""
+
+
+class InferenceDeadlineTimeout(TimeoutError):
+    """Raised when a request-level deadline expires before inference admission."""
 
 
 class InferenceAdmissionController:
@@ -53,7 +57,20 @@ class InferenceAdmissionController:
     def waiting_count(self) -> int:
         return len(self._waiters)
 
-    async def acquire(self) -> None:
+    async def acquire(self, *, timeout_seconds: float | None = None) -> None:
+        """Acquire a slot, optionally bounded by an earlier request deadline."""
+        deadline_limited = (
+            timeout_seconds is not None and timeout_seconds <= self._queue_timeout
+        )
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            INFERENCE_QUEUE_REJECTIONS.labels(reason="deadline").inc()
+            raise InferenceDeadlineTimeout("Inference request deadline expired")
+
+        wait_timeout = (
+            self._queue_timeout
+            if timeout_seconds is None
+            else min(self._queue_timeout, timeout_seconds)
+        )
         loop = asyncio.get_running_loop()
         queued_at = time.monotonic()
         async with self._lock:
@@ -72,13 +89,18 @@ class InferenceAdmissionController:
         try:
             await asyncio.wait_for(
                 asyncio.shield(waiter),
-                timeout=self._queue_timeout,
+                timeout=wait_timeout,
             )
             INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
         except asyncio.TimeoutError as exc:
             INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
-            INFERENCE_QUEUE_REJECTIONS.labels(reason="timeout").inc()
             await self._withdraw(waiter)
+            if deadline_limited:
+                INFERENCE_QUEUE_REJECTIONS.labels(reason="deadline").inc()
+                raise InferenceDeadlineTimeout(
+                    "Inference request deadline expired while waiting for capacity"
+                ) from exc
+            INFERENCE_QUEUE_REJECTIONS.labels(reason="timeout").inc()
             raise InferenceQueueTimeout(
                 "Timed out waiting for inference capacity"
             ) from exc
