@@ -26,17 +26,12 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Verification boundary
 
-The PR #106 hardening candidate at commit
-`1ea96fb789749fbae15d620334ce6e49d3453342` passed the exact-head CI checks on
-2026-11-11:
-
-- [Core build, tests, image scans, and production/CPU Compose validation](https://github.com/StrategyG/RusaAi/actions/runs/42937488691) — PASS.
-- [Web build](https://github.com/StrategyG/RusaAi/actions/runs/42937488360) — PASS.
-
-The successful checks include compile, lint, Bandit, unit tests, RAG/MCP
-integration, API/worker/sandbox/RAG-MCP image builds, production preflight,
-and CPU-only Compose validation. This is evidence for that exact PR head only;
-it is not staging or production certification.
+CI status is commit-specific. For PR #106, use only the latest Core CI
+and Web CI runs attached to the current PR head. A green run from an earlier
+commit is historical evidence and does not validate a later candidate. The
+signed release workflow must also complete on a protected annotated semantic
+tag before its images or manifest can be treated as release evidence. Passing
+CI or publishing a signed manifest is not staging or production certification.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -47,12 +42,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on PR #106 head `1ea96fb789749fbae15d620334ce6e49d3453342`; [core run](https://github.com/StrategyG/RusaAi/actions/runs/42937488691), [web run](https://github.com/StrategyG/RusaAi/actions/runs/42937488360) | PASS for this exact candidate head |
+| Integration CI | Latest Core CI and Web CI runs attached to the exact current PR #106 head | Must pass on the current head; earlier runs are historical only |
 | Local model artifact | Approved model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no artifact supplied |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated CI tests PASS on PR #106 head; live crash/recovery and staging load evidence still required |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests must pass on the current PR head; live crash/recovery and staging load evidence still required |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |

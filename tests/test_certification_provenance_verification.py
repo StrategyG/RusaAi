@@ -113,6 +113,7 @@ def test_slsa_verification_fails_closed_when_gh_is_missing(
         ("image", "ghcr.io/example/image@sha256:" + "a" * 64, "without a digest"),
         ("repository", "StrategyG", "owner/name"),
         ("signer_workflow", " ", "must not be empty"),
+        ("signer_workflow", ".github/workflows/release.yml", "owner/repository/.github/workflows"),
         ("source_digest", "bad", "40- or 64-character lowercase Git commit SHA"),
         ("certificate_identity", " ", "must not be empty"),
         ("oidc_issuer", "http://issuer.example", "HTTPS"),

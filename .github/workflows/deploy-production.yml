@@ -57,7 +57,7 @@ jobs:
             echo "Release tag must be annotated." >&2
             exit 1
           }
-          git fetch origin main --no-tags --depth=1
+          git fetch origin main --no-tags
           SOURCE_SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main || {
             echo "Release tag does not point to a commit reachable from main." >&2
@@ -180,7 +180,7 @@ jobs:
               "$image@$digest"
             gh attestation verify "oci://$image@$digest" \
               --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow ".github/workflows/release.yml" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
               --source-digest "$SOURCE_SHA" \
               --cert-identity "$expected_identity" \
               --cert-oidc-issuer "$OIDC_ISSUER" \

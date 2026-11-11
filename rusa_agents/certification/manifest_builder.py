@@ -219,7 +219,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-ref", required=True)
     parser.add_argument("--workflow-run-id", required=True, type=int)
     parser.add_argument("--workflow-path", default=".github/workflows/release.yml")
-    parser.add_argument("--signer-workflow", default=".github/workflows/release.yml")
+    parser.add_argument(
+        "--signer-workflow",
+        help="qualified signer workflow: owner/repository/.github/workflows/release.yml",
+    )
     parser.add_argument("--certificate-identity", required=True)
     parser.add_argument("--oidc-issuer", default=DEFAULT_OIDC_ISSUER)
     parser.add_argument("--trivy-db-metadata", required=True)
@@ -255,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             source_ref=args.source_ref,
             workflow_run_id=args.workflow_run_id,
             workflow_path=args.workflow_path,
-            signer_workflow=args.signer_workflow,
+            signer_workflow=args.signer_workflow or f"{args.repository}/.github/workflows/release.yml",
             certificate_identity=args.certificate_identity,
             oidc_issuer=args.oidc_issuer,
             trivy_db_metadata=args.trivy_db_metadata,

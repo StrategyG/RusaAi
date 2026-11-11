@@ -64,7 +64,7 @@ jobs:
             echo "Release tags must be annotated tags." >&2
             exit 1
           }
-          git fetch origin main --no-tags --depth=1
+          git fetch origin main --no-tags
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
             echo "Release tag must point to a commit reachable from main." >&2
             exit 1
@@ -138,7 +138,7 @@ jobs:
           build_and_push worker "$WORKER_IMAGE" Dockerfile.worker . "$RUNNER_TEMP/worker-metadata.json" \
             --build-arg RUSA_INSTALL_RAG=1
           build_and_push sandbox "$SANDBOX_IMAGE" Dockerfile.agent-sandbox . "$RUNNER_TEMP/sandbox-metadata.json"
-          build_and_push web "$WEB_IMAGE" Dockerfile web "$RUNNER_TEMP/web-metadata.json"
+          build_and_push web "$WEB_IMAGE" web/Dockerfile web "$RUNNER_TEMP/web-metadata.json"
 
       - name: Sign all immutable image digests with keyless Cosign
         env:
@@ -255,7 +255,7 @@ jobs:
             --source-ref "$GITHUB_REF" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-path ".github/workflows/release.yml" \
-            --signer-workflow ".github/workflows/release.yml" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --certificate-identity "$certificate_identity" \
             --oidc-issuer "$OIDC_ISSUER" \
             --trivy-db-metadata trivy-db-metadata.json \

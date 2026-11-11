@@ -87,7 +87,7 @@ def _build(tmp_path: Path, artifacts: dict[str, dict[str, str]]) -> dict[str, ob
         source_ref="refs/tags/v1.1.0",
         workflow_run_id=123456,
         workflow_path=".github/workflows/release.yml",
-        signer_workflow=".github/workflows/release.yml",
+        signer_workflow=f"{OWNER_REPOSITORY}/.github/workflows/release.yml",
         certificate_identity=IDENTITY,
         oidc_issuer=ISSUER,
         trivy_db_metadata=db_metadata,
@@ -130,7 +130,7 @@ def test_manifest_builder_requires_trivy_database_timestamp(tmp_path, monkeypatc
             source_ref="refs/tags/v1.1.0",
             workflow_run_id=123456,
             workflow_path=".github/workflows/release.yml",
-            signer_workflow=".github/workflows/release.yml",
+            signer_workflow=f"{OWNER_REPOSITORY}/.github/workflows/release.yml",
             certificate_identity=IDENTITY,
             oidc_issuer=ISSUER,
             trivy_db_metadata=db_metadata,
@@ -138,3 +138,65 @@ def test_manifest_builder_requires_trivy_database_timestamp(tmp_path, monkeypatc
             artifacts=artifacts,
             now=NOW,
         )
+
+def test_manifest_builder_cli_defaults_to_repository_qualified_signer_workflow(
+    tmp_path, monkeypatch, capsys
+):
+    captured: dict[str, object] = {}
+
+    def fake_build(**kwargs: object) -> dict[str, str]:
+        captured.update(kwargs)
+        return {"schema_version": "test"}
+
+    monkeypatch.setattr(manifest_builder, "build_release_manifest", fake_build)
+    output = tmp_path / "release-manifest.json"
+    result = manifest_builder.main(
+        [
+            "--repository",
+            OWNER_REPOSITORY,
+            "--commit-sha",
+            COMMIT,
+            "--release-id",
+            "v1.1.0",
+            "--source-ref",
+            "refs/tags/v1.1.0",
+            "--workflow-run-id",
+            "123456",
+            "--certificate-identity",
+            IDENTITY,
+            "--trivy-db-metadata",
+            "unused.json",
+            "--sbom-base-uri",
+            "https://github.com/StrategyG/RusaAi/releases/download/v1.1.0",
+            "--artifact",
+            "api",
+            "ghcr.io/strategyg/rusa-ai-api",
+            "sha256:" + "1" * 64,
+            "unused-scan.json",
+            "unused-sbom.json",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert result == 0
+    assert captured["signer_workflow"] == f"{OWNER_REPOSITORY}/.github/workflows/release.yml"
+    assert output.is_file()
+    assert capsys.readouterr().out
+
+
+def test_release_workflow_uses_the_web_dockerfile_and_qualified_signer_identity():
+    repository_root = Path(__file__).resolve().parents[1]
+    release_workflow = (repository_root / ".github/workflows/release.yml").read_text(
+        encoding="utf-8"
+    )
+    deploy_workflow = (repository_root / ".github/workflows/deploy-production.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'build_and_push web "$WEB_IMAGE" web/Dockerfile web ' in release_workflow
+    qualified_signer = '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"'
+    assert qualified_signer in release_workflow
+    assert qualified_signer in deploy_workflow
+    assert "--no-tags --depth=1" not in release_workflow
+    assert "--no-tags --depth=1" not in deploy_workflow
