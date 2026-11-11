@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.6.0"
+version: "1.7.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -452,6 +452,7 @@ Sebuah komponen disebut:
 | 1.4.0 | 2026-11-12 | Memperkuat lifecycle cancellation: coroutine tertutup saat deadline sudah habis, request cancellation menghentikan provider sebelum slot dilepas, dan regression tests ditambahkan. |
 | 1.5.0 | 2026-11-12 | Menambahkan shared API inference path untuk worker CPU, kredensial per tenant, deadline gateway, JSON response format, dan mencegah retry yang dapat menggandakan generasi. Scheduler durable lintas proses masih terbuka. |
 | 1.6.0 | 2026-11-12 | Menambahkan PostgreSQL-backed FIFO scheduler, slot leases, heartbeat, stale-owner fencing, crash recovery, migration 010, dan integration tests untuk admission lintas controller. |
+| 1.7.0 | 2026-11-12 | Mencatat keputusan foundation checkpoint sebagai PILOT_ONLY; memisahkan target arsitektur 1.541B dari identitas produk sementara dan menegaskan belum ada artifact produksi yang disetujui. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -517,8 +518,23 @@ Branch: feat/postgres-inference-admission (PR #109, consolidated directly on PR 
 **Remaining R2.1 work**
 
 - [ ] Pass exact-head CI including the new PostgreSQL integration tests and isolated Docker/sandbox/Trivy checks.
-- [ ] Add multi-process (not only independent controller instance) acceptance tests and staging crash/restart drills.
+- [x] Add separate-OS-process FIFO and process-crash lease-recovery integration tests.
+- [ ] Run production staging crash/restart and failover drills.
 - [ ] Add production TLS endpoint for the worker-facing API gateway and verify certificate validation in staging.
 - [ ] Add model-server/host RAM, TTFT, tokens/sec, queue wait, and active/waiting telemetry to the same request trace.
 
 **Limit:** durable queue/slot state is now shared through PostgreSQL, but production staging, multi-process acceptance evidence, TLS deployment, and model/hardware performance certification are still required.
+
+
+### R3 — Foundation checkpoint and model artifact gate
+
+**DECISION RECORDED — PILOT_ONLY; no production checkpoint approved**
+
+- Product identity remains `rusaai-edge-derived` with status `CHECKPOINT_CANDIDATE_PENDING_AUDIT`.
+- `rusaai-edge-1.54b` remains the 1.541B architecture reference target, not an assertion that a compatible checkpoint exists.
+- `BhinekaIntiLabs/bhineka-gpt` is recorded only as an 8-GB pilot candidate: 556,269,696 parameters and 2K published context. The model card declares Apache-2.0 metadata but warns that custom `bhineka` code may require `trust_remote_code=True`.
+- No immutable revision, artifact SHA-256, lineage approval, full license/data audit, CPU benchmark, instruction-following evaluation, or safety certification is recorded.
+- The candidate is not a production dependency and does not replace the 1.541B architecture target.
+- Decision record: `documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md`.
+
+The historical Qwen3-4B CPU v1.0 baseline is not silently restored; v2.0 requires a compatible non-Qwen checkpoint.
