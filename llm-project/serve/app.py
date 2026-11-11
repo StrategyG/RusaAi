@@ -38,6 +38,7 @@ from rusa_agents.metrics import (
     INFERENCE_REQUEST_DEADLINES,
     INFERENCE_TIME_TO_FIRST_TOKEN_SECONDS,
 )
+from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionController
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
@@ -108,13 +109,26 @@ def _model_timeout_seconds() -> float:
         raise RuntimeError("Model timeout must be between 1 and 3600 seconds")
     return timeout
 
-def _new_inference_admission_controller() -> InferenceAdmissionController:
+def _new_inference_admission_controller(
+    database_url: str | None = None,
+) -> InferenceAdmissionController | PostgresInferenceAdmissionController:
     try:
         max_active = int(os.getenv("RUSA_MAX_CONCURRENT_INFERENCES", "1"))
         max_waiting = int(os.getenv("RUSA_MAX_WAITING_INFERENCES", "3"))
         queue_timeout = float(os.getenv("RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS", "60"))
+        lease_seconds = int(os.getenv("RUSA_INFERENCE_LEASE_SECONDS", "30"))
     except ValueError as exc:
         raise RuntimeError("Inference admission settings must be numeric") from exc
+    if database_url:
+        controller = PostgresInferenceAdmissionController(
+            database_url,
+            max_active=max_active,
+            max_waiting=max_waiting,
+            queue_timeout=queue_timeout,
+            lease_seconds=lease_seconds,
+        )
+        controller.initialize()
+        return controller
     return InferenceAdmissionController(max_active, max_waiting, queue_timeout)
 
 
@@ -200,7 +214,9 @@ async def lifespan(application: FastAPI):
     application.state.queue = None
     application.state.rate_limiter = None
     application.state.task_policy_audit = None
-    application.state.inference_admission = _new_inference_admission_controller()
+    application.state.inference_admission = _new_inference_admission_controller(
+        config.api_database_url
+    )
     local_backend = None
     try:
         local_model_path = os.getenv("RUSA_LOCAL_MODEL_PATH") or os.getenv("RUSA_MODEL_PATH")
@@ -255,6 +271,9 @@ async def lifespan(application: FastAPI):
         yield
 
     finally:
+        admission_controller = application.state.inference_admission
+        if isinstance(admission_controller, PostgresInferenceAdmissionController):
+            await admission_controller.close()
         if local_backend is not None:
             await local_backend.close()
         set_inference_provider(None)
