@@ -109,6 +109,29 @@ For a 16-GB CPU profile, the default scheduler row is one active and three
 waiting. For an 8-GB profile, set `max_waiting=1` in both the database config
 row and the environment. Keep the same settings across all replicas.
 
+For example, changing to two active slots and one waiting request requires a
+maintenance window with API traffic drained, then a database-owner transaction
+such as:
+
+```sql
+BEGIN;
+UPDATE public.rusa_inference_admission_config
+SET max_active = 2,
+    max_waiting = 1,
+    queue_timeout_ms = 60000,
+    lease_seconds = 30,
+    updated_at = clock_timestamp()
+WHERE singleton_id = 1;
+INSERT INTO public.rusa_inference_admission_slots(slot_id)
+SELECT generate_series(0, 1)::smallint
+ON CONFLICT (slot_id) DO NOTHING;
+COMMIT;
+```
+
+Set the same values in the environment before starting the API replicas. Only
+increase active slots after the model backend has passed a concurrency and
+memory-capacity test for that target hardware.
+
 ### Worker-to-API inference gateway
 
 For the CPU Compose profile, the API is the only component that connects to llama.cpp. The autonomous worker connects to the API's OpenAI-compatible endpoint and supplies the API key mapped to the current task tenant. The worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
