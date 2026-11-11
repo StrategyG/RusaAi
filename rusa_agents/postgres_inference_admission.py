@@ -237,6 +237,18 @@ class PostgresInferenceAdmissionController:
                     """,
                     (self.max_active,),
                 )
+                configured_slots = conn.execute(
+                    """
+                    SELECT count(*) FROM public.rusa_inference_admission_slots
+                    WHERE slot_id < %s
+                    """,
+                    (self.max_active,),
+                ).fetchone()[0]
+                if configured_slots != self.max_active:
+                    raise RuntimeError(
+                        "Inference scheduler slot rows do not match max_active; "
+                        "provision the missing slots before starting API replicas"
+                    )
                 excess = conn.execute(
                     """
                     SELECT count(*) FROM public.rusa_inference_admission_slots
