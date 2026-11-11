@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.5.0"
+version: "1.6.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -430,6 +430,8 @@ Sebuah komponen disebut:
 
 - Repository: https://github.com/StrategyG/RusaAi
 - Architecture PR #107: https://github.com/StrategyG/RusaAi/pull/107
+- Worker API gateway PR #108: https://github.com/StrategyG/RusaAi/pull/108
+- PostgreSQL admission PR #109: https://github.com/StrategyG/RusaAi/pull/109
 - CI Run #4228 (deadline implementation snapshot): https://github.com/StrategyG/RusaAi/actions/runs/43095281714
 - Implementation alignment: `docs/architecture/IMPLEMENTATION_ALIGNMENT.md`
 - Autonomous implementation mapping: `docs/AUTONOMOUS_IMPLEMENTATION_ROADMAP.md`
@@ -449,6 +451,7 @@ Sebuah komponen disebut:
 | 1.3.0 | 2026-11-12 | Menambahkan log implementasi R1: deadline API untuk queue dan generation, pembatalan completion/stream, metrik deadline, regression tests, serta daftar pekerjaan cross-process yang masih terbuka. |
 | 1.4.0 | 2026-11-12 | Memperkuat lifecycle cancellation: coroutine tertutup saat deadline sudah habis, request cancellation menghentikan provider sebelum slot dilepas, dan regression tests ditambahkan. |
 | 1.5.0 | 2026-11-12 | Menambahkan shared API inference path untuk worker CPU, kredensial per tenant, deadline gateway, JSON response format, dan mencegah retry yang dapat menggandakan generasi. Scheduler durable lintas proses masih terbuka. |
+| 1.6.0 | 2026-11-12 | Menambahkan PostgreSQL-backed FIFO scheduler, slot leases, heartbeat, stale-owner fencing, crash recovery, migration 010, dan integration tests untuk admission lintas controller. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -458,6 +461,8 @@ Sebuah komponen disebut:
 
 Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 
+Baseline CI passed at the architecture snapshot; re-check the latest exact PR head after CI workflow trigger changes before marking this section VERIFIED.
+
 - [x] Add optional deadline_ms (1–3,600,000 ms) to the OpenAI-compatible chat request.
 - [x] Apply the request budget to FIFO admission wait without replacing the configured queue timeout.
 - [x] Return HTTP 504 when the request deadline expires before generation or during non-streaming generation.
@@ -466,13 +471,11 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 - [x] Cancel and await provider work when the request task itself is cancelled, before releasing its admission slot.
 - [x] Close a generation coroutine cleanly if the request deadline has already expired before it starts.
 - [x] Add low-cardinality deadline metrics by phase and regression tests for queue timeout classification, deadline expiry, request cancellation, streaming cancellation, and request validation.
-- [x] Document the HTTP/SSE behavior and explicitly state that the deadline is API-process scoped.
+- [x] Document the HTTP/SSE behavior and apply the same deadline budget to the PostgreSQL-backed shared admission queue when the API database is configured.
 
 ### Remaining R1/R2 work
 
 - [ ] Integrate the full versioned inference envelope with the API/provider and validate model identity, context, evidence, usage, and structured error semantics.
-- [ ] Replace the API-process admission controller with a durable PostgreSQL-backed scheduler shared across API replicas and worker processes.
-- [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior and safe slot handoff.
 
 **Verification status:** implementation is committed to the architecture PR branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
 
@@ -483,7 +486,7 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 Branch: feat/shared-api-inference-gateway (stacked on PR #107)
 
 - [x] Route CPU-profile worker inference through the OpenAI-compatible API instead of calling llama.cpp directly.
-- [x] Reuse the API's bounded FIFO admission controller for API and worker generation requests.
+- [x] Reuse the API's shared admission controller for API and worker generation requests.
 - [x] Use per-tenant worker API credentials; validate the worker key digest against the API principal's tenant and inference-capable role in production.
 - [x] Fail closed when a task tenant has no configured worker inference credential.
 - [x] Propagate a bounded worker request deadline to the API gateway.
@@ -492,11 +495,28 @@ Branch: feat/shared-api-inference-gateway (stacked on PR #107)
 - [x] Remove the worker's direct llama.cpp URL from the CPU Compose overlay and document the private HTTP route as development/staging only.
 - [x] Keep the model gateway secret out of the worker's production configuration requirements.
 
-**Remaining R2 work**
+**R2.1 — Durable PostgreSQL inference admission**
 
-- [ ] Replace process-local FIFO admission with a durable PostgreSQL-backed scheduler shared across API replicas and worker processes.
-- [ ] Add concurrency tests across independent API/worker processes, including queue fairness, cancellation, duplicate submission, restart, crash recovery, and slot handoff.
-- [ ] Add a production TLS endpoint for the worker-facing API gateway and verify certificate validation in staging.
+**IMPLEMENTED — pending exact-head CI and production staging verification**
+
+Branch: feat/postgres-inference-admission (stacked on PR #108)
+
+- [x] Add migration 010 with global scheduler configuration, request history, and active slot tables.
+- [x] Use a PostgreSQL advisory transaction lock to serialize FIFO enqueue/claim/release across API replicas.
+- [x] Enforce a globally bounded waiting queue and a configured active slot count.
+- [x] Renew active slot leases; reclaim expired slots after process loss.
+- [x] Cancel the generation task if the API process cannot renew its slot lease.
+- [x] Fence stale releases so an expired owner cannot release a slot now held by a newer request.
+- [x] Restrict scheduler table privileges to the API runtime role; the worker has no direct database access to scheduler state.
+- [x] Fail API startup if migration 010, required privileges, scheduler settings, or configured slot rows are missing or inconsistent.
+- [x] Add PostgreSQL integration tests for FIFO across independent controller instances, global queue capacity, cancellation cleanup, deadline classification, stale lease recovery, and stale-owner release.
+- [x] Document database migration order and the cluster-wide scheduler configuration contract.
+
+**Remaining R2.1 work**
+
+- [ ] Pass exact-head CI including the new PostgreSQL integration tests and isolated Docker/sandbox/Trivy checks.
+- [ ] Add multi-process (not only independent controller instance) acceptance tests and staging crash/restart drills.
+- [ ] Add production TLS endpoint for the worker-facing API gateway and verify certificate validation in staging.
 - [ ] Add model-server/host RAM, TTFT, tokens/sec, queue wait, and active/waiting telemetry to the same request trace.
 
-**Limit:** the CPU Compose profile now shares the API-process queue, but it is not yet a durable cross-process scheduler. Keep one API replica per model endpoint until the durable scheduler and multi-process acceptance tests are complete.
+**Limit:** durable queue/slot state is now shared through PostgreSQL, but production staging, multi-process acceptance evidence, TLS deployment, and model/hardware performance certification are still required.
