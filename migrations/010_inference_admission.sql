@@ -15,13 +15,14 @@ CREATE TABLE IF NOT EXISTS public.rusa_inference_admission_config (
     singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
     max_active SMALLINT NOT NULL CHECK (max_active BETWEEN 1 AND 256),
     max_waiting INTEGER NOT NULL CHECK (max_waiting BETWEEN 0 AND 1024),
+    queue_timeout_ms INTEGER NOT NULL CHECK (queue_timeout_ms BETWEEN 100 AND 120000),
     lease_seconds INTEGER NOT NULL CHECK (lease_seconds BETWEEN 5 AND 3600),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 
 INSERT INTO public.rusa_inference_admission_config
-    (singleton_id, max_active, max_waiting, lease_seconds)
-VALUES (1, 1, 3, 30)
+    (singleton_id, max_active, max_waiting, queue_timeout_ms, lease_seconds)
+VALUES (1, 1, 3, 60000, 30)
 ON CONFLICT (singleton_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS public.rusa_inference_admission_requests (
