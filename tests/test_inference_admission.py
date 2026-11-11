@@ -74,14 +74,24 @@ def test_cancelled_waiter_does_not_leak_queue_capacity():
     asyncio.run(scenario())
 
 
-def test_cancelled_waiter_after_slot_handoff_returns_the_slot():
+def test_cancelled_request_after_slot_handoff_releases_the_slot():
     async def scenario():
         controller = InferenceAdmissionController(max_active=1, max_waiting=1, queue_timeout=1)
         await controller.acquire()
-        waiting = asyncio.create_task(controller.acquire())
-        await asyncio.sleep(0)
+        started = asyncio.Event()
 
+        async def request():
+            await controller.acquire()
+            try:
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                await controller.release()
+
+        waiting = asyncio.create_task(request())
+        await asyncio.sleep(0)
         await controller.release()
+        await started.wait()
         waiting.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiting
