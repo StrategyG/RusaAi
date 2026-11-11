@@ -1,8 +1,6 @@
 import asyncio
 import os
 from pathlib import Path
-from uuid import UUID
-
 import psycopg
 import pytest
 
@@ -159,8 +157,6 @@ def test_expired_owner_lease_is_reclaimed_without_releasing_new_owner(scheduler_
     async def scenario():
         await first_controller.acquire()
         old_request_id = next(iter(first_controller._owner_ids))
-        old_owner_id = first_controller._owner_ids[old_request_id]
-
         heartbeat = first_controller._heartbeat_tasks.pop(old_request_id)
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)
