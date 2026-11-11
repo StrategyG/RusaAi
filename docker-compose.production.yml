@@ -84,6 +84,7 @@ services:
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
+      RUSA_MODEL_API_KEY: ""
       # Digest registry contains tenant-bound principals; raw worker keys are
       # separately injected from the production secret manager.
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
