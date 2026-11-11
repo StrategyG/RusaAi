@@ -270,7 +270,7 @@ class RuntimeConfig:
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
         missing.extend(self._validate_tenants_and_model(require_model_api_key=False))
 
-        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower
+        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
         if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             missing.append("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
         elif gateway_value not in {"1", "true", "yes", "on"}:
