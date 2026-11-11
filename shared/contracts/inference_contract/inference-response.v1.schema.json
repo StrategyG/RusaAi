@@ -12,15 +12,13 @@
     "status",
     "output",
     "evidence",
-    "usage",
-    "performance",
     "verification"
   ],
   "properties": {
     "schema_version": { "const": "1.0" },
     "request_id": { "type": "string", "pattern": "^REQ-[A-Za-z0-9._-]{1,124}$" },
     "task_id": { "type": "string", "pattern": "^TASK-[A-Za-z0-9._-]{1,124}$" },
-    "model_id": { "const": "rusaai-edge-1.54b" },
+    "model_id": { "enum": ["rusaai-edge-1.54b", "rusaai-edge-derived"] },
     "status": { "enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"] },
     "output": { "type": "object" },
     "evidence": { "type": "array", "items": { "type": "object" } },
@@ -53,5 +51,16 @@
         "orm_status": { "enum": ["PENDING", "PASSED", "FAILED", "NOT_APPLICABLE"] }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "COMPLETED" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["usage", "performance"]
+      }
+    }
+  ]
 }

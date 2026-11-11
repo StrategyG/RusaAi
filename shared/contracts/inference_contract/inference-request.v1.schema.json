@@ -21,7 +21,7 @@
     "request_id": { "type": "string", "pattern": "^REQ-[A-Za-z0-9._-]{1,124}$" },
     "task_id": { "type": "string", "pattern": "^TASK-[A-Za-z0-9._-]{1,124}$" },
     "agent_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
-    "model_id": { "const": "rusaai-edge-1.54b" },
+    "model_id": { "enum": ["rusaai-edge-1.54b", "rusaai-edge-derived"] },
     "capability_profile": { "enum": ["CARBON", "ASTRA"] },
     "reasoning_mode": { "enum": ["QUICK", "STANDARD", "DEEP", "MAX"] },
     "context": {
