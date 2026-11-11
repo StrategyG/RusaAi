@@ -115,6 +115,7 @@ For the CPU Compose profile, the API is the only component that connects to llam
 
 - Set `RUSA_WORKER_INFERENCE_GATEWAY=true`.
 - Set `RUSA_WORKER_INFERENCE_BASE_URL` to the API gateway URL. Production requires credential-free HTTPS with certificate validation.
+- Mount the internal CA bundle read-only into the worker and set `SSL_CERT_FILE` to the in-container bundle path. The production Compose overlay requires `RUSA_INTERNAL_CA_BUNDLE` as the host-side source path.
 - Set `RUSA_WORKER_INFERENCE_API_KEYS` to a tenant-to-secret mapping. Keep raw keys in the secret manager; each key's SHA-256 digest must resolve to a principal in `RUSA_API_KEYS_JSON` with the same tenant and an inference-capable role.
 - Set `RUSA_WORKER_INFERENCE_DEADLINE_MS` to a bounded request budget. The API enforces that budget across queue wait and generation.
 - The worker provider sends `X-API-Key` and a JSON-object response-format requirement. The API validates the request and forwards the response format to the model backend.
