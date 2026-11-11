@@ -6,9 +6,9 @@ import time
 import uuid
 from types import SimpleNamespace
 
-from app import _await_with_deadline, app, set_inference_provider
 import pytest
 
+from app import _await_with_deadline, app, set_inference_provider
 from fastapi.testclient import TestClient
 
 from rusa_agents.inference_admission import (
