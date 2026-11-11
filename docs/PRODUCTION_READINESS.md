@@ -12,6 +12,7 @@ for the exact commit and checks that ran; it is not a production approval.
 - Local model artifact manifest and SHA-256 verification; production local loading
   requires an externally pinned manifest digest.
 - Bounded generation/streaming adapters, API admission control, and backend shutdown.
+- CPU Compose worker inference routed through the API gateway with per-tenant API credentials, request deadlines, JSON response-format forwarding, and no automatic gateway retries (PR #108; CI/staging verification pending).
 - Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
   fencing of stale acknowledgements, cancellation/completion race protection,
   and retry limits.
@@ -45,7 +46,8 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
-| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
+| Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Existing task-queue tests; latest integration CI must be rechecked |
+| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | CPU Compose API gateway routing implemented in PR #108; API queue remains process-local, durable scheduler not implemented |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
@@ -69,5 +71,11 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
 - Do not commit model weights, credentials, tenant bearer tokens, or private
   evaluation datasets.
+- The CPU Compose profile routes worker inference through the API gateway. This
+  shares admission only within the single API process; keep one API replica per
+  model endpoint until a durable cross-process scheduler is implemented and tested.
+- Production worker gateway credentials must be tenant-specific, at least 32 bytes,
+  stored in the secret manager, and SHA-256-bound to matching inference-capable
+  principals in RUSA_API_KEYS_JSON. The worker must fail closed for missing mappings.
 - Do not describe the complete product as production-ready until every applicable
   release gate has objective evidence and human approval.
