@@ -48,29 +48,44 @@ From the repository root:
 cp .env.example .env
 ```
 
-Merge the values in `.env.cpu.example` into `.env` without overwriting existing secrets. Set `RUSA_GGUF_MODEL_PATH` to the absolute path of the verified GGUF file and `RUSA_GGUF_MODEL_SHA256` to its approved checksum. Run `python scripts/verify_gguf_model.py` before starting Compose. Review the CPU thread count, memory limit, context size, and model name before deployment. For rusa-edge-8 (8-GB), merge `.env.cpu-8gb.example` after `.env.cpu.example`; it reduces the API waiting queue to one request. Keep at least 2 GiB free for the operating system and other services, and lower the llama.cpp container memory cap if the host requires it.
+Merge the values in `.env.cpu.example` into `.env` without overwriting existing secrets. Set `RUSA_GGUF_MODEL_PATH` to the absolute path of the verified GGUF file and `RUSA_GGUF_MODEL_SHA256` to its approved checksum. Run `python scripts/verify_gguf_model.py` before starting Compose.
+
+The sample alias is deliberately `rusaai-cpu-smoke-test`: the RusaAi-Edge checkpoint and tokenizer have not been selected and no approved RusaAi-Edge GGUF exists. Do not label an arbitrary or temporary GGUF as `rusaai-edge-1.54b`. Reserve that ID for an audited non-Qwen checkpoint whose actual architecture matches the complete v2.0 reference dimensions. If the approved checkpoint differs, use `rusaai-edge-derived` and the checkpoint's actual context/configuration; the Training Engine v1.0's provisional 556.3M candidate documents a 2K context and is not yet approved.
+
+For `rusa-edge-8` (8-GB), merge `.env.cpu-8gb.example` after `.env.cpu.example` and add `docker-compose.cpu-8gb.yml` as the last Compose file. The 8-GB overlay caps the maximum combined container memory at 5 GiB (model 3 GiB, worker 768 MiB, API 512 MiB, web 384 MiB, PostgreSQL 384 MiB) and reduces the API waiting queue to one request. These are conservative resource ceilings, not a measured fit or a guarantee of free host RAM. Verify at least 2 GiB of actual free physical RAM during model load and representative inference; reduce background work or stop accepting new tasks if the reserve is breached.
 
 Validate the resolved Compose configuration:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml config
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml config
 ```
 
-For the API, PostgreSQL, web control center, and CPU model server only, run:
+For the 16-GB CPU profile, run the API, PostgreSQL, web control center, and CPU model server:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
 ```
 
-For the complete autonomous coding/DevOps workflow, enable the existing worker profile:
+For the 8-GB profile, append the resource overlay:
 
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml up --build -d
+```
+
+For the complete autonomous coding/DevOps workflow, enable the existing worker profile. Use the matching file set for the device profile:
+
+```bash
+# 16-GB
 docker compose --profile worker -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+
+# 8-GB
+docker compose --profile worker -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml up --build -d
 ```
 
 The worker profile requires the dedicated rootless Docker socket, workspace and Git mirror paths from `.env.example`, plus the agent sandbox image built on that same rootless Docker daemon. For example, after loading the `.env` values in your shell, build the sandbox with `DOCKER_HOST="unix://${RUSA_DOCKER_SOCKET}" docker build -f Dockerfile.agent-sandbox -t "${RUSA_SANDBOX_IMAGE}" .`. Do not expose or mount the host's rootful Docker socket into the worker.
 
-The CPU override configures both API Gateway and Worker to use `http://llama-cpp:8080/v1`, clears any inherited remote model API key and local Transformers model path, and sets worker parallelism to one by default. API admission is FIFO with one active request and at most three waiting requests for the 16-GB profile. The worker still bypasses the API admission queue; llama.cpp `--parallel 1` enforces the shared active-generation limit at the server. The API readiness probe uses llama.cpp's `/health` endpoint, which remains unavailable while the model is loading; the worker waits until the API is healthy before starting. This HTTP override is for development and staging only. Production API and Worker configuration validation continues to require credential-free HTTPS; do not bypass that control. A production CPU deployment must place llama.cpp behind a trusted TLS model endpoint, preserve certificate validation, and restrict network access to that endpoint. The llama.cpp service in this development/staging profile has no published host port, is attached only to the private Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU. Without `--profile worker`, the API and model are available but autonomous background task execution is not started.
+The CPU override configures both API Gateway and Worker to use `http://llama-cpp:8080/v1`, clears any inherited remote model API key and local Transformers model path, and sets worker parallelism to one by default. API admission is FIFO with one active request and at most three waiting requests for the 16-GB profile. The 8-GB overlay changes the API waiting limit to one and applies per-service memory/CPU ceilings. The worker still bypasses the API admission queue; llama.cpp `--parallel 1` enforces the shared active-generation limit at the server. The API readiness probe uses llama.cpp's `/health` endpoint, which remains unavailable while the model is loading; the worker waits until the API is healthy before starting. This HTTP override is for development and staging only. Production API and Worker configuration validation continues to require credential-free HTTPS; do not bypass that control. A production CPU deployment must place llama.cpp behind a trusted TLS model endpoint, preserve certificate validation, and restrict network access to that endpoint. The llama.cpp service in this development/staging profile has no published host port, is attached only to the private Compose network, and mounts the GGUF file read-only. `--n-gpu-layers 0` explicitly keeps inference on CPU. Without `--profile worker`, the API and model are available but autonomous background task execution is not started.
 
 ## 4. Initial CPU tuning
 
@@ -101,7 +116,7 @@ Send a development smoke-test request (the sample `.env.example` maps `local-dev
 curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
   -H 'X-API-Key: local-dev-key' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"rusaai-edge-1.54b","messages":[{"role":"user","content":"Jelaskan fungsi utama RUSA-AI secara singkat."}],"temperature":0,"max_tokens":128}'
+  -d '{"model":"rusaai-cpu-smoke-test","messages":[{"role":"user","content":"Jelaskan fungsi utama RUSA-AI secara singkat."}],"temperature":0,"max_tokens":128}'
 ```
 
 For production, use a tenant-bound API key from the secret manager; do not use the development key. Also test streaming, cancellation, long prompts, output limits, and queue saturation against the actual model server.
@@ -139,7 +154,11 @@ The supplied `docker-compose.cpu.yml` override uses plain HTTP between container
 To stop the CPU model stack, use the same Compose file pair:
 
 ```bash
+# 16-GB
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml down
+
+# 8-GB
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml down
 ```
 
 The GPTQ quantization pipeline remains a separate GPU-only workflow. CPU inference does not quantize models in this deployment; it loads a pre-quantized GGUF artifact. If the selected model is too large for RAM or too slow on the available CPU, choose a smaller compatible GGUF model or move inference to a separately approved model host. Do not silently fall back to an external provider.

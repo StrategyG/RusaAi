@@ -47,6 +47,26 @@ tokenizer are not selected; weights and GGUF artifacts are not built; training
 has not started; and no device benchmark has been run. The 100.1M-parameter
 from-scratch path is a separate research path, not the 1.54B product model.
 
+### Source-version reconciliation
+
+The older `RUSA_AI_CPU_Deployment_Configuration_v1.0.md` describes a
+Qwen3-4B / 8K profile. It is a legacy deployment specification and is not the
+v2.0 neural-core identity; it must not be combined with the v2.0 non-Qwen
+checkpoint requirement or labeled as RusaAi-Edge.
+
+The separate `RusaAi_Training_Engine_v1.0.md` keeps the product checkpoint
+pending audit and uses `rusaai-edge-derived` until a compatible non-Qwen
+checkpoint is selected. Its provisional 556.3M candidate documents a 2K
+context and is not an approved production dependency. If that candidate is
+evaluated, use its actual architecture and 2K context limit until independent
+context validation; do not force the 1.54B reference dimensions or 4K profile
+onto it.
+
+Accordingly, `rusaai-edge-1.54b` identifies only the exact v2.0 reference
+architecture. The CPU sample deployment uses `rusaai-cpu-smoke-test` for
+transport testing. A selected checkpoint that differs from the reference
+must use the derived identity and its verified configuration.
+
 The existing Qwen3-4B QLoRA configuration is retained as a separate legacy
 AICode worker-contract experiment. It is not the RusaAi-Edge neural core, is
 not evidence of a non-Qwen foundation checkpoint, and must not be promoted as
@@ -85,11 +105,21 @@ cross-process active-generation guard. A single shared cross-process queue
 and unified deadline propagation remain open Model Plane work. Do not claim
 global FIFO fairness between API and worker callers.
 
-Context starts at 4K. An 8K context is allowed only after memory validation
-on the target device. Q8_0 KV-cache quantization remains optional and must be
-checked against the selected llama.cpp build and model. CPU threads should be
-chosen from physical-core availability and benchmarked; the checked-in value
-of four is an initial profile, not a performance claim.
+Context starts at 4K for a checkpoint that supports the v2.0 target; an
+audited checkpoint with a lower native limit must use that lower limit.
+An 8K context is allowed only after memory validation on the target device.
+Q8_0 KV-cache quantization remains optional and must be checked against the
+selected llama.cpp build and model. CPU threads should be chosen from
+physical-core availability and benchmarked; the checked-in value of four is
+an initial profile, not a performance claim.
+
+The 8-GB Docker profile now has a separate `docker-compose.cpu-8gb.yml`
+overlay. Its maximum configured service memory ceilings total 5 GiB
+(model 3 GiB, worker 768 MiB, API 512 MiB, web 384 MiB, PostgreSQL 384 MiB),
+with one waiting API request. These are conservative hard limits, not a
+measured fit or a host-memory reservation. The host must still demonstrate at
+least 2 GiB of free physical RAM during model loading and representative
+inference. This Compose overlay is not an Android deployment implementation.
 
 ## Agent, memory, verification, and deployment status
 
@@ -130,9 +160,11 @@ of four is an initial profile, not a performance claim.
 
 ## Verification boundary for this change
 
-The repository changes add an exact design blueprint, parameter-count
-assertions, versioned inference schemas, and cancellation-safe API admission
-control. They do not select or build a model checkpoint, run training, produce
-a GGUF artifact, certify a deployment, implement all agents, or complete the
-cross-process scheduler. Those items remain blocked on their stated evidence
-and implementation work.
+The repository changes add exact reference-dimension validation (including
+tests for parameter-equivalent head drift), preserve safe `.env.*.example`
+templates in isolated sandbox snapshots without copying real dotenv files,
+add a bounded 8-GB Compose overlay, and use a smoke-test model alias until
+checkpoint approval. They do not select or build a model checkpoint, run
+training, produce an approved GGUF artifact, certify a deployment, implement
+all agents, or complete the cross-process scheduler. Those items remain
+blocked on their stated evidence and implementation work.
