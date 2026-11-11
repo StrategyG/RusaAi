@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.1.0"
+version: "1.2.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -97,14 +97,14 @@ Status di bawah mengikuti implementation alignment dan file yang ada pada branch
 | FastAPI inference gateway | Tersedia | Hubungkan shared inference schema, model registry lookup, deadline, dan error semantics |
 | AICode orchestration | Enam specialist worker roles tersedia | General-purpose ten-agent orchestration dan role registry belum lengkap |
 | Durable task queue | PostgreSQL task/lease, retry, idempotency, tenant controls tersedia | Perlu end-to-end DAG/deadline/cancellation/recovery validation |
-| Inference admission | FIFO bounded queue pada API tersedia | Belum menjadi shared cross-process queue untuk API dan worker |
+| Inference admission | FIFO bounded API queue; active/waiting gauge, queue latency, dan rejection metrics tersedia | Masih process-local; belum menjadi shared cross-process queue untuk API dan worker |
 | llama.cpp CPU | Compose integration dan satu server slot tersedia | Artifact selection/manifest gate dan device acceptance tetap diperlukan |
 | Model artifact verification | GGUF verifier dan manifest scripts tersedia | Pin provenance/revision/digest ke runtime deployment dan registry lifecycle |
 | Inference contracts | Versioned request/response JSON Schema tersedia | Belum sepenuhnya wired ke public endpoint dan worker |
 | Knowledge/RAG | Tenant-scoped ingestion/retrieval dan evaluation tersedia | Lifecycle memory lima kategori dan end-to-end evidence/citation QA belum lengkap |
 | MCP | Read-only knowledge MCP tersedia | Uji permission, token lifecycle, audit, rate limit, dan recovery |
 | Tool security | Policy, allowlist, sandbox, audit foundations tersedia | Adversarial tenant isolation, prompt injection, network/filesystem restrictions, approval gates |
-| Observability | API/worker metrics tersedia | Queue wait, TTFT, tokens/sec, model RAM, saturation, error budget |
+| Observability | API/worker metrics; API inference active/waiting, queue latency/rejections, generation duration, stream TTFT, provider errors | Model RAM, minimum host free RAM, CPU utilization, token throughput, saturation/error budget, serta worker-to-model telemetry |
 | Deployment | Linux Docker/CPU profiles tersedia | Compose acceptance, host RAM check, backup/restore, Windows/Android evidence |
 | CI/CD | Lint, tests, security, image build/scan workflow tersedia | Pastikan isolated test dan seluruh image/compose checks lulus di head PR |
 | Release readiness | Dokumen readiness/certification tersedia | Staging soak, recovery drill, operator approval, signed release evidence |
@@ -183,7 +183,8 @@ Pekerjaan:
 - [ ] Tetapkan FIFO/priority policy, bounded waiting, queue timeout, deadline, cancellation, dan idempotency.
 - [ ] Pastikan satu active generation untuk baseline CPU.
 - [ ] Tangani worker crash, caller disconnect, lease expiry, duplicate submit, dan slot handoff race.
-- [ ] Instrument queue wait, active/waiting count, timeout, rejection, TTFT, dan generation throughput.
+- [x] Instrument API queue wait, active/waiting count, timeout/rejection, stream TTFT, generation duration, dan provider errors.
+- [ ] Extend inference telemetry to worker-to-model calls and add model RAM, CPU utilization, and tokens/second measurements.
 
 Exit criteria:
 - API dan worker memakai scheduler yang sama.
@@ -289,7 +290,7 @@ Exit criteria:
 
 ### Fase R6 — Runtime operations, observability, dan CPU Compose
 
-**Prioritas: P1 · Status: PARTIAL**
+**Prioritas: P1 · Status: PARTIAL — API inference telemetry baseline implemented**
 
 Path utama:
 - `docker-compose.yml`
@@ -442,3 +443,4 @@ Sebuah komponen disebut:
 |---|---|---|
 | 1.0.0 | 2026-11-12 | Roadmap awal mencakup keseluruhan proyek dan ekosistem. |
 | 1.1.0 | 2026-11-12 | Dipersempit menjadi roadmap engineering repository RusaAi: modul, API, contracts, scheduler, agents, DB/RAG/MCP, security, deployment, CI/CD, dan release. |
+| 1.2.0 | 2026-11-12 | Mencatat readiness fail-closed dan API inference telemetry; menandai batas metrics process-local serta pekerjaan observability worker/model yang tersisa. |
