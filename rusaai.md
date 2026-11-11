@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.2.0"
+version: "1.3.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -444,3 +444,29 @@ Sebuah komponen disebut:
 | 1.0.0 | 2026-11-12 | Roadmap awal mencakup keseluruhan proyek dan ekosistem. |
 | 1.1.0 | 2026-11-12 | Dipersempit menjadi roadmap engineering repository RusaAi: modul, API, contracts, scheduler, agents, DB/RAG/MCP, security, deployment, CI/CD, dan release. |
 | 1.2.0 | 2026-11-12 | Mencatat readiness fail-closed dan API inference telemetry; menandai batas metrics process-local serta pekerjaan observability worker/model yang tersisa. |
+| 1.3.0 | 2026-11-12 | Menambahkan log implementasi R1: deadline API untuk queue dan generation, pembatalan completion/stream, metrik deadline, regression tests, serta daftar pekerjaan cross-process yang masih terbuka. |
+
+## 11. Implementation progress — 2026-11-12
+
+### R1 — API deadline enforcement
+
+**IMPLEMENTED — pending CI verification**
+
+Branch: feat/inference-deadline-propagation
+
+- [x] Add optional deadline_ms (1–3,600,000 ms) to the OpenAI-compatible chat request.
+- [x] Apply the request budget to FIFO admission wait without replacing the configured queue timeout.
+- [x] Return HTTP 504 when the request deadline expires before generation or during non-streaming generation.
+- [x] Emit an SSE timeout_error followed by [DONE] when a streaming request expires after the response starts.
+- [x] Cancel the in-flight provider coroutine and release the active inference slot on deadline expiry.
+- [x] Add low-cardinality deadline metrics by phase and regression tests for queue timeout classification, completion cancellation, streaming cancellation, and request validation.
+- [x] Document the HTTP/SSE behavior and explicitly state that the deadline is API-process scoped.
+
+### Remaining R1/R2 work
+
+- [ ] Integrate the full versioned inference envelope with the API/provider and validate model identity, context, evidence, usage, and structured error semantics.
+- [ ] Propagate deadline and cancellation through autonomous worker requests.
+- [ ] Replace separate API admission and worker direct model calls with one durable cross-process scheduler.
+- [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior.
+
+**Verification status:** implementation is committed to a separate branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
