@@ -22,7 +22,11 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     assert "https://" in worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"]
     assert "RUSA_WORKER_INFERENCE_API_KEYS" in worker_environment
     assert "RUSA_API_KEYS_JSON" in worker_environment
-    assert "SSL_CERT_FILE" in worker_environment
+    assert worker_environment["SSL_CERT_FILE"] == "/run/secrets/rusa-internal-ca.crt"
+    assert any(
+        "/run/secrets/rusa-internal-ca.crt:ro" in volume
+        for volume in compose["services"]["worker"]["volumes"]
+    )
 
 
 def test_cpu_compose_routes_api_to_private_gguf_server():
