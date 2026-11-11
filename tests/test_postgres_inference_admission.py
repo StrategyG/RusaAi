@@ -14,6 +14,7 @@ from rusa_agents.inference_admission import (
 )
 from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionController
 
+
 def _hold_scheduler_slot_in_process(dsn, label, release_event, result_queue):
     os.environ["ENVIRONMENT"] = "development"
     controller = PostgresInferenceAdmissionController(
