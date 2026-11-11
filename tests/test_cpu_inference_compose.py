@@ -74,6 +74,15 @@ def test_8gb_compose_profile_bounds_all_service_memory_and_waiting_work():
     assert services["worker"]["environment"]["RUSA_MAX_PARALLEL_WORKERS"] == (
         "${RUSA_MAX_PARALLEL_WORKERS:-1}"
     )
+    env_values = {}
+    for line in (ROOT / ".env.cpu-8gb.example").read_text(encoding="utf-8").splitlines():
+        if line and not line.lstrip().startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            env_values[key] = value
+    assert env_values["RUSA_CPU_THREADS"] == "2"
+    assert env_values["RUSA_MODEL_MEMORY_LIMIT"] == "3g"
+    assert env_values["RUSA_MODEL_CPU_LIMIT"] == "2.0"
+    assert env_values["RUSA_MAX_WAITING_INFERENCES"] == "1"
     assert cpu["services"]["api"]["environment"]["RUSA_MAX_CONCURRENT_INFERENCES"] == (
         "${RUSA_MAX_CONCURRENT_INFERENCES:-1}"
     )

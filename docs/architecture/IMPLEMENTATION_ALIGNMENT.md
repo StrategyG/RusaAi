@@ -116,8 +116,9 @@ an initial profile, not a performance claim.
 The 8-GB Docker profile now has a separate `docker-compose.cpu-8gb.yml`
 overlay. Its maximum configured service memory ceilings total 5 GiB
 (model 3 GiB, worker 768 MiB, API 512 MiB, web 384 MiB, PostgreSQL 384 MiB),
-with one waiting API request. These are conservative hard limits, not a
-measured fit or a host-memory reservation. The host must still demonstrate at
+with one waiting API request and a two-CPU/two-thread model-server starting
+limit. These are conservative hard limits, not a measured fit or a
+host-memory reservation. The host must still demonstrate at
 least 2 GiB of free physical RAM during model loading and representative
 inference. This Compose overlay is not an Android deployment implementation.
 

@@ -248,7 +248,7 @@ jobs:
           LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
           RUSA_MODEL_NAME: rusaai-cpu-smoke-test
           RUSA_MODEL_CONTEXT: "4096"
-          RUSA_CPU_THREADS: "4"
+          RUSA_CPU_THREADS: "2"
           RUSA_MODEL_PARALLEL: "1"
           RUSA_MODEL_MEMORY_LIMIT: 3g
           RUSA_MODEL_CPU_LIMIT: "2.0"

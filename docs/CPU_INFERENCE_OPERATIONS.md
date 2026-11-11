@@ -52,7 +52,7 @@ Merge the values in `.env.cpu.example` into `.env` without overwriting existing 
 
 The sample alias is deliberately `rusaai-cpu-smoke-test`: the RusaAi-Edge checkpoint and tokenizer have not been selected and no approved RusaAi-Edge GGUF exists. Do not label an arbitrary or temporary GGUF as `rusaai-edge-1.54b`. Reserve that ID for an audited non-Qwen checkpoint whose actual architecture matches the complete v2.0 reference dimensions. If the approved checkpoint differs, use `rusaai-edge-derived` and the checkpoint's actual context/configuration; the Training Engine v1.0's provisional 556.3M candidate documents a 2K context and is not yet approved.
 
-For `rusa-edge-8` (8-GB), merge `.env.cpu-8gb.example` after `.env.cpu.example` and add `docker-compose.cpu-8gb.yml` as the last Compose file. The 8-GB overlay caps the maximum combined container memory at 5 GiB (model 3 GiB, worker 768 MiB, API 512 MiB, web 384 MiB, PostgreSQL 384 MiB) and reduces the API waiting queue to one request. These are conservative resource ceilings, not a measured fit or a guarantee of free host RAM. Verify at least 2 GiB of actual free physical RAM during model load and representative inference; reduce background work or stop accepting new tasks if the reserve is breached.
+For `rusa-edge-8` (8-GB), merge `.env.cpu-8gb.example` after `.env.cpu.example` and add `docker-compose.cpu-8gb.yml` as the last Compose file. The 8-GB overlay caps the maximum combined container memory at 5 GiB (model 3 GiB, worker 768 MiB, API 512 MiB, web 384 MiB, PostgreSQL 384 MiB), caps llama.cpp at 2 CPUs with two generation/batch threads, and reduces the API waiting queue to one request. These are conservative resource ceilings, not a measured fit or a guarantee of free host RAM. Verify at least 2 GiB of actual free physical RAM during model load and representative inference; reduce background work or stop accepting new tasks if the reserve is breached.
 
 Validate the resolved Compose configuration:
 
@@ -91,7 +91,7 @@ The CPU override configures both API Gateway and Worker to use `http://llama-cpp
 
 | Setting | Conservative starting value | Guidance |
 |---|---:|---|
-| CPU threads | 4 | Start near the number of physical cores available to the model container; benchmark rather than assuming all logical CPUs improve throughput. |
+| CPU threads | 4 (16-GB); 2 (8-GB overlay) | Conservative starting values; verify physical cores and benchmark before increasing. |
 | Batch / ubatch | 128 / 64 | Conservative v2.0 starting values; benchmark prompt-processing latency and memory. |
 | HTTP threads | 2 | Initial llama.cpp HTTP worker setting. |
 | Context size | 4096 | Reduce to 2048 if memory is constrained; never exceed the model's supported context. |
