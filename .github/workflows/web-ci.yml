@@ -8,6 +8,10 @@ on:
       - "docker-compose.yml"
       - "docker-compose.production.yml"
       - ".github/workflows/web-ci.yml"
+      - "tests/test_deploy_scripts.sh"
+      - "scripts/deploy/**"
+      - ".github/workflows/deploy-production.yml"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
     paths:
@@ -59,6 +63,13 @@ jobs:
         run: npm run build
       - name: Build web container
         run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate workflow and deployment scripts
+        run: |
+          "$(go env GOPATH)/bin/actionlint" -color
+          bash -n scripts/deploy/compose-deploy.sh scripts/deploy/compose-rollback.sh tests/test_deploy_scripts.sh
+          bash tests/test_deploy_scripts.sh
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0
         with:

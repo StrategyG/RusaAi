@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-  workflow_call:
+  workflow_call: {}
 
 permissions:
   contents: read
@@ -88,7 +88,7 @@ jobs:
           docker run --rm --entrypoint python "rusa-ai-agent-sandbox:${{ github.sha }}" -c '
           import importlib.metadata as metadata
           import sys
-          print("sys.path:", *sys.path, sep="\\n  ")
+          print("sys.path:", *sys.path, sep="\n  ")
           for dist in metadata.distributions():
               if (dist.metadata.get("Name") or "").lower() == "setuptools":
                   print("setuptools distribution:", dist.version, "metadata:", dist._path)
