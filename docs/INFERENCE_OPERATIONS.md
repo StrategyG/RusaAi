@@ -50,13 +50,14 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | RUSA_MAX_CONCURRENT_INFERENCES | Active API generations | 1 on the CPU-first baseline |
 | RUSA_MAX_WAITING_INFERENCES | Bounded waiting API requests | 3 on 16-GB; 1 on 8-GB |
 | RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 60 |
-| Request body deadline_ms | Optional end-to-end API request budget, including admission wait and generation | Omit to use queue/provider timeouts; otherwise 1–3600000 ms |
 | RUSA_MAX_NUM_SEQS | vLLM maximum active sequences | 16 |
 | RUSA_MAX_NUM_BATCHED_TOKENS | vLLM batch token budget | 8192 |
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
 | RUSA_GPU_MEMORY_UTILIZATION | vLLM GPU memory target | 0.90 |
 
 Values above are initial configuration examples, not capacity guarantees. Measure the exact checkpoint on the target host. The Compose startup grace period defaults to 30 minutes because loading large local weights occurs before the API starts serving; increase RUSA_START_PERIOD for larger artifacts.
+
+The OpenAI-compatible chat request also accepts an optional body field deadline_ms (1–3,600,000 ms); this is a per-request budget, not an environment variable.
 
 ### Request deadline behavior
 
