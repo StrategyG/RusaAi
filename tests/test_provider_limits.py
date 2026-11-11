@@ -272,3 +272,73 @@ def test_inference_provider_treats_model_loading_as_not_ready():
 
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(provider.check_ready())
+
+
+def test_worker_provider_routes_requests_with_tenant_scoped_gateway_credentials(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "45000")
+    captured = {}
+
+    def handler(request):
+        captured["headers"] = request.headers
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"done": true}'}}]},
+            request=request,
+        )
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    tenant_provider = provider.for_tenant("tenant-a")
+    result = asyncio.run(
+        tenant_provider.complete(system_prompt="system", user_prompt="task")
+    )
+
+    assert result == '{"done": true}'
+    assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
+    assert captured["headers"]["Authorization"] == "Bearer tenant-a-secret"
+    assert captured["payload"]["deadline_ms"] == 45000
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_worker_provider_fails_closed_without_tenant_gateway_credential(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    provider = OpenAICompatibleProvider(base_url="https://api.internal/v1")
+
+    with pytest.raises(PermissionError, match="tenant-b"):
+        provider.for_tenant("tenant-b")
+
+
+def test_model_provider_forwards_validated_json_response_format():
+    captured = {}
+
+    def handler(request):
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"ok": true}'}}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.internal/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    result = asyncio.run(
+        provider.complete(
+            [{"role": "user", "content": "Return JSON"}],
+            response_format={"type": "json_object"},
+        )
+    )
+
+    assert result == '{"ok": true}'
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
