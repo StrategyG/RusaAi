@@ -67,6 +67,11 @@ docker_socket="$(get_env_value RUSA_DOCKER_SOCKET)" || { echo "Exactly one RUSA_
 [[ "$old_web_image" =~ $WEB_PATTERN ]] || { echo "Current web image is not a digest-pinned rollback target." >&2; exit 64; }
 [[ "$docker_socket" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "RUSA_DOCKER_SOCKET must be a safe absolute Unix-socket path." >&2; exit 64; }
 
+# All host-side Docker operations must use the same dedicated rootless daemon mounted into the worker.
+docker_cli() {
+  DOCKER_HOST="unix://$docker_socket" docker "$@"
+}
+
 tmp_env="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$tmp_env"' EXIT
 cp -p -- "$env_file" "${env_file}.previous"
@@ -90,7 +95,7 @@ chmod 600 "$tmp_env"
 mv -- "$tmp_env" "$env_file"
 
 compose() {
-  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+  docker_cli compose --env-file "$env_file" -f "$compose_file" "$@"
 }
 
 wait_for_health() {
@@ -101,7 +106,7 @@ wait_for_health() {
     worker_id="$(compose ps -q worker 2>/dev/null || true)"
     web_id="$(compose ps -q web 2>/dev/null || true)"
     if [[ -n "$api_id" && -n "$worker_id" && -n "$web_id" ]]; then
-      api_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
+      api_state="$(docker_cli inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_id" 2>/dev/null || echo missing)"
       worker_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id" 2>/dev/null || echo missing)"
       web_state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$web_id" 2>/dev/null || echo missing)"
       if [[ "$api_state" == "healthy" && "$worker_state" == "healthy" && "$web_state" == "healthy" ]]; then
@@ -124,7 +129,7 @@ apply_release() {
   local next_api="$1" next_worker="$2" next_sandbox="$3" next_web="$4"
   compose config --quiet || return 1
   compose pull api worker web || return 1
-  DOCKER_HOST="unix://$docker_socket" docker pull "$next_sandbox" || return 1
+  docker_cli pull "$next_sandbox" || return 1
   compose up -d --no-build api worker web || return 1
   wait_for_health
 }
