@@ -2,7 +2,7 @@
 
 ## Release boundary
 
-This runbook applies to the local model serving API. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RUSA-AI product. Do not promote a release without evidence for the exact commit, model manifest digest, container digest, hardware, and deployment configuration. The v2.0 RusaAi-Edge checkpoint is still unselected; using this model ID in an API request does not establish that the target artifact exists.
+This runbook applies to the local model serving API. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RUSA-AI product. Do not promote a release without evidence for the exact commit, model manifest digest, container digest, hardware, and deployment configuration. The v2.0 RusaAi-Edge checkpoint is still unselected; using a model ID in an API request does not establish that the target artifact exists. The sample configuration uses `rusaai-cpu-smoke-test`. Reserve `rusaai-edge-1.54b` for an audited checkpoint matching the exact v2.0 reference dimensions; use `rusaai-edge-derived` when the selected non-Qwen checkpoint differs.
 
 ## 1. Artifact intake
 
@@ -43,13 +43,13 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 | RUSA_API_KEY | Service API credential | Secret manager; 48+ random bytes |
 | RUSA_MODEL_PATH or RUSA_LOCAL_MODEL_PATH | Mounted model directory | /models |
 | RUSA_MODEL_MANIFEST_SHA256 | Pinned artifact manifest digest | Exact SHA-256 from manifest generator |
-| RUSA_MODEL_NAME | OpenAI API model identifier | rusaai-edge-1.54b |
+| RUSA_MODEL_NAME | OpenAI API model identifier | rusaai-cpu-smoke-test until an approved artifact is configured |
 | RUSA_INFERENCE_BACKEND | Backend selection | vllm after validation |
 | RUSA_MAX_MODEL_LEN | Maximum prompt + output context | Never above verified model limit |
 | RUSA_GENERATION_TIMEOUT_SECONDS | Per-generation timeout | 180; tune to workload |
-| RUSA_MAX_CONCURRENT_REQUESTS | Active API generation admission | 8; tune per backend |
-| RUSA_MAX_QUEUED_REQUESTS | Bounded waiting queue | 32 |
-| RUSA_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 10 |
+| RUSA_MAX_CONCURRENT_INFERENCES | Active API generations | 1 on the CPU-first baseline |
+| RUSA_MAX_WAITING_INFERENCES | Bounded waiting API requests | 3 on 16-GB; 1 on 8-GB |
+| RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 60 |
 | RUSA_MAX_NUM_SEQS | vLLM maximum active sequences | 16 |
 | RUSA_MAX_NUM_BATCHED_TOKENS | vLLM batch token budget | 8192 |
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
@@ -77,12 +77,12 @@ If any readiness check fails, keep the instance out of the load balancer. The AP
     curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"model":"rusaai-edge-1.54b","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
+      -d '{"model":"rusaai-cpu-smoke-test","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
 
     curl --no-buffer http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"Jelaskan energi terbarukan."}],"temperature":0,"max_tokens":128,"stream":true}'
+      -d '{"model":"rusaai-cpu-smoke-test","messages":[{"role":"user","content":"Jelaskan energi terbarukan."}],"temperature":0,"max_tokens":128,"stream":true}'
 
 ## 6. Reproducible benchmark
 

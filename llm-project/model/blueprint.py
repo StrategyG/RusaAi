@@ -92,15 +92,15 @@ class ModelSpec:
         if self.query_heads % self.kv_heads:
             raise ValueError("query_heads must be divisible by kv_heads")
         if self.architecture != "dense_decoder_only_transformer":
-            raise ValueError("RusaAi-Edge V1 must use a dense decoder-only Transformer")
+            raise ValueError("RusaAi-Edge v2.0 must use a dense decoder-only Transformer")
         if self.normalization_layout != "pre_norm" or self.ffn != "swiglu":
-            raise ValueError("RusaAi-Edge V1 requires Pre-Norm and SwiGLU")
+            raise ValueError("RusaAi-Edge v2.0 requires Pre-Norm and SwiGLU")
         if self.positional_encoding != "rope":
-            raise ValueError("RusaAi-Edge V1 baseline requires RoPE")
+            raise ValueError("RusaAi-Edge v2.0 baseline requires RoPE")
         if self.rms_norm_epsilon != 1e-5:
-            raise ValueError("RusaAi-Edge V1 requires RMSNorm epsilon 1e-5")
+            raise ValueError("RusaAi-Edge v2.0 requires RMSNorm epsilon 1e-5")
         if not self.tied_embeddings or self.linear_bias or self.dropout != 0.0:
-            raise ValueError("RusaAi-Edge V1 requires tied embeddings, no bias, and zero dropout")
+            raise ValueError("RusaAi-Edge v2.0 requires tied embeddings, no bias, and zero dropout")
         if self.moe_enabled:
             raise ValueError("MoE is not used in RusaAi-Edge Core V1")
         if self.parameter_count != REFERENCE_PARAMETER_COUNT:

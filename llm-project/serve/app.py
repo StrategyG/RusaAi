@@ -268,7 +268,7 @@ class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(
-        default_factory=lambda: os.getenv("RUSA_MODEL_NAME", "rusaai-edge-1.54b"),
+        default_factory=lambda: os.getenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test"),
         min_length=1,
         max_length=128,
     )
