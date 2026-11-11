@@ -26,6 +26,7 @@ from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
+    InferenceDeadlineTimeout,
     InferenceQueueFull,
     InferenceQueueTimeout,
 )
@@ -34,6 +35,7 @@ from rusa_agents.metrics import (
     API_REQUESTS,
     INFERENCE_GENERATION_DURATION_SECONDS,
     INFERENCE_PROVIDER_ERRORS,
+    INFERENCE_REQUEST_DEADLINES,
     INFERENCE_TIME_TO_FIRST_TOKEN_SECONDS,
 )
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
@@ -116,9 +118,43 @@ def _new_inference_admission_controller() -> InferenceAdmissionController:
     return InferenceAdmissionController(max_active, max_waiting, queue_timeout)
 
 
-async def _acquire_inference_slot(controller: InferenceAdmissionController) -> None:
+def _remaining_deadline_seconds(deadline_at: float | None) -> float | None:
+    if deadline_at is None:
+        return None
+    remaining = deadline_at - time.monotonic()
+    if remaining <= 0:
+        raise InferenceDeadlineTimeout("Inference request deadline expired")
+    return remaining
+
+
+async def _await_with_deadline(awaitable: Any, deadline_at: float | None) -> Any:
+    """Await work until the request deadline and cancel it when the budget expires."""
+    if deadline_at is None:
+        return await awaitable
+    remaining = _remaining_deadline_seconds(deadline_at)
+    task = asyncio.ensure_future(awaitable)
+    done, _ = await asyncio.wait({task}, timeout=remaining)
+    if task not in done:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise InferenceDeadlineTimeout("Inference request deadline exceeded")
+    return task.result()
+
+
+async def _acquire_inference_slot(
+    controller: InferenceAdmissionController,
+    deadline_at: float | None = None,
+) -> None:
     try:
-        await controller.acquire()
+        await controller.acquire(
+            timeout_seconds=_remaining_deadline_seconds(deadline_at)
+        )
+    except InferenceDeadlineTimeout as exc:
+        INFERENCE_REQUEST_DEADLINES.labels(phase="queue").inc()
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Inference request deadline exceeded",
+        ) from exc
     except InferenceQueueFull as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -282,6 +318,7 @@ class ChatCompletionRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
     max_tokens: int = Field(default=1024, ge=1, le=4096)
+    deadline_ms: int | None = Field(default=None, ge=1, le=3_600_000)
     stream: bool = False
 
 
@@ -643,6 +680,21 @@ def _sse(data: dict[str, Any] | str) -> str:
     return f"data: {payload}\n\n"
 
 
+async def _iter_stream_with_deadline(events: Any, deadline_at: float | None):
+    iterator = events.__aiter__()
+    try:
+        while True:
+            try:
+                event = await _await_with_deadline(iterator.__anext__(), deadline_at)
+            except StopAsyncIteration:
+                break
+            yield event
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await close()
+
+
 @app.get("/v1/models", dependencies=[Depends(verify_api_key)])
 def list_models():
     config = getattr(app.state, "config", None) or RuntimeConfig.from_env()
@@ -665,21 +717,35 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         raise HTTPException(status_code=503, detail="Inference backend is not configured")
     model_name = _configured_model_name(request, http_request)
     messages = [message.model_dump() for message in request.messages]
+    deadline_at = (
+        time.monotonic() + request.deadline_ms / 1000
+        if request.deadline_ms is not None
+        else None
+    )
     controller = getattr(http_request.app.state, "inference_admission", None)
     if controller is None:
         controller = InferenceAdmissionController(1, 3, 60.0)
 
     if not request.stream:
-        await _acquire_inference_slot(controller)
+        await _acquire_inference_slot(controller, deadline_at)
         generation_started = time.perf_counter()
         try:
-            output = await provider.complete(
-                messages,
-                model=model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                max_tokens=request.max_tokens,
+            output = await _await_with_deadline(
+                provider.complete(
+                    messages,
+                    model=model_name,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    max_tokens=request.max_tokens,
+                ),
+                deadline_at,
             )
+        except InferenceDeadlineTimeout:
+            INFERENCE_REQUEST_DEADLINES.labels(phase="generation").inc()
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Inference request deadline exceeded",
+            ) from None
         except HTTPException:
             raise
         except Exception:
@@ -713,7 +779,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             status_code=501,
             detail="The configured inference provider does not support streaming",
         )
-    await _acquire_inference_slot(controller)
+    await _acquire_inference_slot(controller, deadline_at)
     completion_id = f"rusa-chatcmpl-{uuid4().hex}"
     created = int(time.time())
     generation_started = time.perf_counter()
@@ -742,12 +808,15 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 "model": model_name,
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             })
-            async for event in stream_method(
-                messages,
-                model=model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                max_tokens=request.max_tokens,
+            async for event in _iter_stream_with_deadline(
+                stream_method(
+                    messages,
+                    model=model_name,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    max_tokens=request.max_tokens,
+                ),
+                deadline_at,
             ):
                 if event.content:
                     if not first_token_recorded:
@@ -803,6 +872,15 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                             "total_tokens": prompt + completion,
                         },
                     })
+            yield _sse("[DONE]")
+        except InferenceDeadlineTimeout:
+            INFERENCE_REQUEST_DEADLINES.labels(phase="stream").inc()
+            yield _sse({
+                "error": {
+                    "message": "Inference request deadline exceeded",
+                    "type": "timeout_error",
+                }
+            })
             yield _sse("[DONE]")
         except asyncio.CancelledError:
             raise
