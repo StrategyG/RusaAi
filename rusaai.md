@@ -471,9 +471,8 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 ### Remaining R1/R2 work
 
 - [ ] Integrate the full versioned inference envelope with the API/provider and validate model identity, context, evidence, usage, and structured error semantics.
-- [ ] Propagate deadline and cancellation through autonomous worker requests.
-- [ ] Replace separate API admission and worker direct model calls with one durable cross-process scheduler.
-- [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior.
+- [ ] Replace the API-process admission controller with a durable PostgreSQL-backed scheduler shared across API replicas and worker processes.
+- [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior and safe slot handoff.
 
 **Verification status:** implementation is committed to the architecture PR branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
 
