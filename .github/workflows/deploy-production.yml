@@ -26,6 +26,8 @@ jobs:
       attestations: read
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
+      WORKFLOW_REF: ${{ github.ref }}
+      WORKFLOW_REF_PROTECTED: ${{ github.ref_protected }}
       OIDC_ISSUER: https://token.actions.githubusercontent.com
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -39,6 +41,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$WORKFLOW_REF" == "refs/heads/main" ]] || {
+            echo "Production deployment workflow must be dispatched from main." >&2
+            exit 1
+          }
+          [[ "$WORKFLOW_REF_PROTECTED" == "true" ]] || {
+            echo "The main branch must be protected before production deployment." >&2
+            exit 1
+          }
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "Release tag must use vMAJOR.MINOR.PATCH." >&2
             exit 1
