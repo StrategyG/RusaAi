@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 rusa-knowledge = "rusa_knowledge.cli:main"
+rusa-certify = "rusa_agents.certification.cli:main"
 
 [project.optional-dependencies]
 dev = [

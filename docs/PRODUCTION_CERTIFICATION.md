@@ -91,6 +91,30 @@ are platform, security, SRE, QA, data governance, FinOps, and process owner.
 
 A FAIL takes precedence over HOLD. No status is inferred from a green CI run alone.
 
+## 7. Certification CLI
+
+Install the package with its production dependencies, then use either the console
+entry point or the Python module entry point:
+
+```bash
+rusa-certify validate-release-manifest \
+  --manifest release-manifest.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA"
+
+rusa-certify evaluate \
+  --record production-certification.json \
+  --repository StrategyG/RusaAi \
+  --commit-sha "$GITHUB_SHA" \
+  --manifest-digest "sha256:<exact-manifest-digest>"
+```
+
+The manifest command validates schema and source/artifact bindings and prints the
+SHA-256 digest of the exact manifest bytes. The evaluate command returns distinct
+exit codes for PASS, HOLD, FAIL, and invalid input. The CLI does not replace
+Cosign/SLSA verification or human approval; those must be completed by trusted
+release/deployment controls before their results are recorded in the evidence.
+
 ## 6. Validation API
 
 ```python
@@ -119,7 +143,7 @@ result = evaluate_production_certification(
 The evaluator is deterministic when an explicit timezone-aware `now` value
 is supplied. It returns a report with status and blockers; it does not deploy.
 
-## 7. Trust boundary and limitations
+## 8. Trust boundary and limitations
 
 Schema validation is not cryptographic verification. The Python validator
 checks that verification claims and evidence references are present and
@@ -142,7 +166,7 @@ and threshold gate; this contract does not replace them. PRs #53, #54, and #60
 were open when this contract was authored, so their code must not be treated as
 part of `main` until merged and revalidated.
 
-## 8. Tests
+## 9. Tests
 
 Run the focused tests:
 
