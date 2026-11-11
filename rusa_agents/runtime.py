@@ -101,6 +101,12 @@ class AICodeRuntime:
     async def _build_orchestrator(
         self, task: CodingTask, tenant_id: str
     ) -> tuple[AICodeOrchestrator, str]:
+        tenant_provider_factory = getattr(self.provider, "for_tenant", None)
+        tenant_provider = (
+            tenant_provider_factory(tenant_id)
+            if callable(tenant_provider_factory)
+            else self.provider
+        )
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
@@ -112,7 +118,7 @@ class AICodeRuntime:
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
         )
         workers = [
-            AutonomousCodeWorker(role, self.provider, gateway)
+            AutonomousCodeWorker(role, tenant_provider, gateway)
             for role in AICodeOrchestrator.PIPELINE
         ]
         return (
