@@ -7,26 +7,11 @@ on:
         description: "Signed semantic release tag, for example v1.2.3"
         required: true
         type: string
-      api_digest:
-        description: "API image digest from release-manifest.json (sha256:...)"
-        required: true
-        type: string
-      worker_digest:
-        description: "Worker image digest from release-manifest.json (sha256:...)"
-        required: true
-        type: string
-      sandbox_digest:
-        description: "Sandbox image digest from release-manifest.json (sha256:...)"
-        required: true
-        type: string
-      web_digest:
-        description: "Web image digest from release-manifest.json (sha256:...)"
-        required: true
-        type: string
 
 permissions:
   contents: read
   packages: read
+  attestations: read
 
 jobs:
   deploy:
@@ -38,75 +23,167 @@ jobs:
     permissions:
       contents: read
       packages: read
+      attestations: read
+    env:
+      RELEASE_TAG: \${{ inputs.release_tag }}
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      GH_TOKEN: \${{ github.token }}
     steps:
-      - name: Checkout deployment manifest and scripts
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag }}
+          ref: \${{ inputs.release_tag }}
+          fetch-depth: 0
 
-      - name: Validate release tag and image digest inputs
+      - name: Require an annotated semantic tag reachable from main
         shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          API_DIGEST: ${{ inputs.api_digest }}
-          WORKER_DIGEST: ${{ inputs.worker_digest }}
-          SANDBOX_DIGEST: ${{ inputs.sandbox_digest }}
-          WEB_DIGEST: ${{ inputs.web_digest }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "Release tag must use vMAJOR.MINOR.PATCH." >&2
             exit 1
           }
-          for digest in "$API_DIGEST" "$WORKER_DIGEST" "$SANDBOX_DIGEST" "$WEB_DIGEST"; do
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-              echo "Every image digest must be a full lowercase sha256 digest." >&2
-              exit 1
-            }
-          done
-          {
-            echo "RELEASE_TAG=$RELEASE_TAG"
-            echo "API_IMAGE=ghcr.io/strategyg/rusa-ai-api"
-            echo "API_DIGEST=$API_DIGEST"
-            echo "WORKER_IMAGE=ghcr.io/strategyg/rusa-ai-worker"
-            echo "WORKER_DIGEST=$WORKER_DIGEST"
-            echo "SANDBOX_IMAGE=ghcr.io/strategyg/rusa-ai-sandbox"
-            echo "SANDBOX_DIGEST=$SANDBOX_DIGEST"
-            echo "WEB_IMAGE=ghcr.io/strategyg/rusa-ai-web"
-            echo "WEB_DIGEST=$WEB_DIGEST"
-          } >> "$GITHUB_ENV"
+          [[ "$(git cat-file -t "$RELEASE_TAG")" == "tag" ]] || {
+            echo "Release tag must be annotated." >&2
+            exit 1
+          }
+          git fetch origin main --no-tags --depth=1
+          SOURCE_SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main || {
+            echo "Release tag does not point to a commit reachable from main." >&2
+            exit 1
+          }
+          printf 'SOURCE_SHA=%s\n' "$SOURCE_SHA" >> "$GITHUB_ENV"
 
-      - name: Authenticate to GHCR for signature verification
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+      - name: Download signed release manifest and SBOM assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-evidence
+          gh release download "$RELEASE_TAG" \
+            --pattern release-manifest.json \
+            --pattern release-manifest.sigstore.json \
+            --pattern 'sbom-*.cdx.json' \
+            --dir release-evidence
+
+      - name: Install Python and validate the release contract
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.12"
+      - name: Install RUSA certification validator
+        run: python -m pip install --disable-pip-version-check --no-cache-dir .
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
         with:
           cosign-release: v2.6.0
 
-      - name: Verify all image signatures against the exact release workflow identity
+      - name: Authenticate to GHCR for image signature verification
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the detached release-manifest signature
         shell: bash
         run: |
           set -euo pipefail
-          expected_identity="https://github.com/StrategyG/RusaAi/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
-          issuer="https://token.actions.githubusercontent.com"
-          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$API_IMAGE@$API_DIGEST"
-          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$WORKER_IMAGE@$WORKER_DIGEST"
-          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$SANDBOX_IMAGE@$SANDBOX_DIGEST"
-          cosign verify --certificate-identity "$expected_identity" --certificate-oidc-issuer "$issuer" "$WEB_IMAGE@$WEB_DIGEST"
+          expected_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          cosign verify-blob \
+            --bundle release-evidence/release-manifest.sigstore.json \
+            --certificate-identity "$expected_identity" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            release-evidence/release-manifest.json
+
+      - name: Validate manifest, source binding, image names, digests, and SBOM bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rusa-certify validate-release-manifest \
+            --manifest release-evidence/release-manifest.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit-sha "$SOURCE_SHA"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          release_tag = os.environ["RELEASE_TAG"]
+          payload = json.loads(Path("release-evidence/release-manifest.json").read_text())
+          expected = {
+              "api": "ghcr.io/strategyg/rusa-ai-api",
+              "worker": "ghcr.io/strategyg/rusa-ai-worker",
+              "sandbox": "ghcr.io/strategyg/rusa-ai-sandbox",
+              "web": "ghcr.io/strategyg/rusa-ai-web",
+          }
+          artifacts = {item["name"]: item for item in payload["artifacts"]}
+          if set(artifacts) != set(expected):
+              raise SystemExit("Release manifest must contain exactly api, worker, sandbox, and web artifacts.")
+
+          env_values = {}
+          for name, image in expected.items():
+              item = artifacts[name]
+              digest = item["digest"]
+              if item["image"] != image:
+                  raise SystemExit(f"{name}: image repository is not approved.")
+              if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                  raise SystemExit(f"{name}: image digest is not immutable SHA-256.")
+              sbom_name = f"sbom-{name}.cdx.json"
+              sbom_path = Path("release-evidence") / sbom_name
+              if not sbom_path.is_file():
+                  raise SystemExit(f"{name}: release SBOM asset is missing.")
+              actual_sbom_digest = "sha256:" + hashlib.sha256(sbom_path.read_bytes()).hexdigest()
+              if actual_sbom_digest != item["sbom"]["digest"]:
+                  raise SystemExit(f"{name}: downloaded SBOM bytes do not match the signed manifest.")
+              if item["sbom"]["subject_digest"] != digest:
+                  raise SystemExit(f"{name}: SBOM is not bound to the image digest.")
+              expected_uri = f"https://github.com/{repository}/releases/download/{release_tag}/{sbom_name}"
+              if item["sbom"]["uri"] != expected_uri:
+                  raise SystemExit(f"{name}: SBOM URI does not point to the exact release asset.")
+              env_values[f"{name.upper()}_IMAGE"] = image
+              env_values[f"{name.upper()}_DIGEST"] = digest
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              for key, value in env_values.items():
+                  output.write(f"{key}={value}\n")
+          PY
+
+      - name: Verify all image signatures and SLSA provenance attestations
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          predicate_type="https://slsa.dev/provenance/v1"
+          for name in api worker sandbox web; do
+            image_var="$(printf '%s_IMAGE' "$name" | tr '[:lower:]' '[:upper:]')"
+            digest_var="$(printf '%s_DIGEST' "$name" | tr '[:lower:]' '[:upper:]')"
+            image="\${!image_var}"
+            digest="\${!digest_var}"
+            cosign verify \
+              --certificate-identity "$expected_identity" \
+              --certificate-oidc-issuer "$OIDC_ISSUER" \
+              "$image@$digest"
+            gh attestation verify "oci://$image@$digest" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow ".github/workflows/release.yml" \
+              --source-digest "$SOURCE_SHA" \
+              --cert-identity "$expected_identity" \
+              --cert-oidc-issuer "$OIDC_ISSUER" \
+              --predicate-type "$predicate_type" \
+              --format json
+          done
 
       - name: Configure pinned SSH host identity
         env:
-          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
-          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PRODUCTION_SSH_PRIVATE_KEY: \${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: \${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          : "${PRODUCTION_SSH_PRIVATE_KEY:?Configure production secret PRODUCTION_SSH_PRIVATE_KEY}"
-          : "${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production secret PRODUCTION_SSH_KNOWN_HOSTS}"
+          : "\${PRODUCTION_SSH_PRIVATE_KEY:?Configure production secret PRODUCTION_SSH_PRIVATE_KEY}"
+          : "\${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production secret PRODUCTION_SSH_KNOWN_HOSTS}"
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
@@ -114,9 +191,9 @@ jobs:
 
       - name: Transfer production Compose and deployment scripts
         env:
-          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
-          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: \${{ vars.PRODUCTION_DEPLOY_PATH }}
         run: |
           set -euo pipefail
           [[ "$PRODUCTION_SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || {
@@ -143,23 +220,23 @@ jobs:
 
       - name: Authenticate the production host to GHCR
         env:
-          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
-          GHCR_PULL_USERNAME: ${{ vars.GHCR_PULL_USERNAME }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
+          GHCR_PULL_USERNAME: \${{ vars.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: \${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
-          : "${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
-          : "${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
+          : "\${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
+          : "\${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
           remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
           printf '%s' "$GHCR_PULL_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
             "docker login ghcr.io --username '$GHCR_PULL_USERNAME' --password-stdin"
 
       - name: Deploy signed image digests with automatic rollback
         env:
-          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
-          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: \${{ vars.PRODUCTION_DEPLOY_PATH }}
         run: |
           set -euo pipefail
           remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"

@@ -24,6 +24,7 @@ on:
       - ".github/workflows/deploy-production.yml"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

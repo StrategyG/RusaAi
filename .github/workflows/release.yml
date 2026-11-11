@@ -1,0 +1,293 @@
+name: RUSA AI signed release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  core-ci:
+    name: Core CI on the tagged source commit
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  web-ci:
+    name: Web CI on the tagged source commit
+    uses: ./.github/workflows/web-ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Build, scan, attest, sign, and publish release
+    needs:
+      - core-ci
+      - web-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: \${{ github.ref_name }}
+      API_IMAGE: ghcr.io/strategyg/rusa-ai-api
+      WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker
+      SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox
+      WEB_IMAGE: ghcr.io/strategyg/rusa-ai-web
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Check out the exact tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require an annotated semantic tag on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_TYPE" == "tag" ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Release tag must use vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          }
+          [[ "$(git cat-file -t "$RELEASE_TAG")" == "tag" ]] || {
+            echo "Release tags must be annotated tags." >&2
+            exit 1
+          }
+          git fetch origin main --no-tags --depth=1
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Release tag must point to a commit reachable from main." >&2
+            exit 1
+          }
+
+      - name: Download the exact web lockfile validated by Web CI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-package-lock-\${{ github.sha }}
+          path: web
+
+      - name: Verify the web dependency lockfile
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Re-verify web dependencies for the release build
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Build and push the four production images by release tag
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx inspect --bootstrap
+
+          build_and_push() {
+            local output_name="$1"
+            local image="$2"
+            local dockerfile="$3"
+            local context="$4"
+            local metadata_file="$5"
+            shift 5
+            docker buildx build \
+              --pull \
+              --push \
+              --provenance=false \
+              --sbom=false \
+              --metadata-file "$metadata_file" \
+              --tag "$image:$RELEASE_TAG" \
+              -f "$dockerfile" \
+              "$@" \
+              "$context"
+            local digest
+            digest="$(jq -r '."containerimage.digest" // empty' "$metadata_file")"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+              echo "Buildx did not return an immutable digest for $image." >&2
+              exit 1
+            }
+            printf '%s_digest=%s\n' "$output_name" "$digest" >> "$GITHUB_OUTPUT"
+          }
+
+          build_and_push api "$API_IMAGE" Dockerfile . "$RUNNER_TEMP/api-metadata.json"
+          build_and_push worker "$WORKER_IMAGE" Dockerfile.worker . "$RUNNER_TEMP/worker-metadata.json" \
+            --build-arg RUSA_INSTALL_RAG=1
+          build_and_push sandbox "$SANDBOX_IMAGE" Dockerfile.agent-sandbox . "$RUNNER_TEMP/sandbox-metadata.json"
+          build_and_push web "$WEB_IMAGE" Dockerfile web "$RUNNER_TEMP/web-metadata.json"
+
+      - name: Sign all immutable image digests with keyless Cosign
+        env:
+          API_DIGEST: \${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$API_IMAGE@$API_DIGEST"
+          cosign sign --yes "$WORKER_IMAGE@$WORKER_DIGEST"
+          cosign sign --yes "$SANDBOX_IMAGE@$SANDBOX_DIGEST"
+          cosign sign --yes "$WEB_IMAGE@$WEB_DIGEST"
+
+      - name: Attest API image provenance
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad # actions/attest-build-provenance wrapping actions/attest v4.2.2
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-api
+          subject-digest: \${{ steps.images.outputs.api_digest }}
+          push-to-registry: true
+
+      - name: Attest worker image provenance
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-worker
+          subject-digest: \${{ steps.images.outputs.worker_digest }}
+          push-to-registry: true
+
+      - name: Attest sandbox image provenance
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-sandbox
+          subject-digest: \${{ steps.images.outputs.sandbox_digest }}
+          push-to-registry: true
+
+      - name: Attest web image provenance
+        uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
+        with:
+          subject-name: ghcr.io/strategyg/rusa-ai-web
+          subject-digest: \${{ steps.images.outputs.web_digest }}
+          push-to-registry: true
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.70.0
+        with:
+          version: v0.70.0
+          cache: true
+
+      - name: Scan exact image digests and generate CycloneDX SBOMs
+        id: evidence
+        env:
+          API_DIGEST: \${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TRIVY_CACHE_DIR="$RUNNER_TEMP/trivy-cache"
+          trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
+          test -s "$TRIVY_CACHE_DIR/db/metadata.json"
+          cp "$TRIVY_CACHE_DIR/db/metadata.json" trivy-db-metadata.json
+
+          declare -A IMAGES=(
+            [api]="$API_IMAGE"
+            [worker]="$WORKER_IMAGE"
+            [sandbox]="$SANDBOX_IMAGE"
+            [web]="$WEB_IMAGE"
+          )
+          declare -A DIGESTS=(
+            [api]="$API_DIGEST"
+            [worker]="$WORKER_DIGEST"
+            [sandbox]="$SANDBOX_DIGEST"
+            [web]="$WEB_DIGEST"
+          )
+
+          for name in api worker sandbox web; do
+            subject="\${IMAGES[$name]}@\${DIGESTS[$name]}"
+            trivy image --cache-dir "$TRIVY_CACHE_DIR" --scanners vuln \
+              --format json --output "trivy-$name.json" "$subject"
+            trivy image --cache-dir "$TRIVY_CACHE_DIR" --scanners vuln \
+              --format cyclonedx --output "sbom-$name.cdx.json" "$subject"
+            test -s "trivy-$name.json"
+            test -s "sbom-$name.cdx.json"
+          done
+
+      - name: Block releases with any unresolved Critical or High findings
+        env:
+          API_DIGEST: \${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for subject in \
+            "$API_IMAGE@$API_DIGEST" \
+            "$WORKER_IMAGE@$WORKER_DIGEST" \
+            "$SANDBOX_IMAGE@$SANDBOX_DIGEST" \
+            "$WEB_IMAGE@$WEB_DIGEST"; do
+            trivy image --exit-code 1 --severity CRITICAL,HIGH \
+              --pkg-types os,library "$subject"
+          done
+
+      - name: Build and cryptographically verify the release manifest
+        env:
+          GH_TOKEN: \${{ github.token }}
+          API_DIGEST: \${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-cache-dir .
+          certificate_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          python -m rusa_agents.certification.manifest_builder \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit-sha "$GITHUB_SHA" \
+            --release-id "$RELEASE_TAG" \
+            --source-ref "$GITHUB_REF" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-path ".github/workflows/release.yml" \
+            --signer-workflow ".github/workflows/release.yml" \
+            --certificate-identity "$certificate_identity" \
+            --oidc-issuer "$OIDC_ISSUER" \
+            --trivy-db-metadata trivy-db-metadata.json \
+            --sbom-base-uri "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG" \
+            --artifact api "$API_IMAGE" "$API_DIGEST" trivy-api.json sbom-api.cdx.json \
+            --artifact worker "$WORKER_IMAGE" "$WORKER_DIGEST" trivy-worker.json sbom-worker.cdx.json \
+            --artifact sandbox "$SANDBOX_IMAGE" "$SANDBOX_DIGEST" trivy-sandbox.json sbom-sandbox.cdx.json \
+            --artifact web "$WEB_IMAGE" "$WEB_DIGEST" trivy-web.json sbom-web.cdx.json \
+            --output release-manifest.json
+
+      - name: Sign and verify the exact release manifest bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          cosign sign-blob --yes --bundle release-manifest.sigstore.json release-manifest.json
+          cosign verify-blob \
+            --bundle release-manifest.sigstore.json \
+            --certificate-identity "$certificate_identity" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            release-manifest.json
+
+      - name: Publish signed release manifest, SBOMs, scans, and resolved web lockfile
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp web/package-lock.json web-package-lock.json
+          gh release create "$RELEASE_TAG" \
+            --title "RUSA-AI $RELEASE_TAG" \
+            --generate-notes \
+            release-manifest.json \
+            release-manifest.sigstore.json \
+            trivy-db-metadata.json \
+            trivy-api.json trivy-worker.json trivy-sandbox.json trivy-web.json \
+            sbom-api.cdx.json sbom-worker.cdx.json sbom-sandbox.cdx.json sbom-web.cdx.json \
+            web-package-lock.json
