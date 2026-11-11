@@ -25,14 +25,14 @@ jobs:
       packages: read
       attestations: read
     env:
-      RELEASE_TAG: \${{ inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
       OIDC_ISSUER: https://token.actions.githubusercontent.com
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the exact release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: \${{ inputs.release_tag }}
+          ref: ${{ inputs.release_tag }}
           fetch-depth: 0
 
       - name: Require an annotated semantic tag reachable from main
@@ -81,8 +81,8 @@ jobs:
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
-          username: \${{ github.actor }}
-          password: \${{ secrets.GITHUB_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify the detached release-manifest signature
         shell: bash
@@ -158,10 +158,12 @@ jobs:
           expected_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
           predicate_type="https://slsa.dev/provenance/v1"
           for name in api worker sandbox web; do
-            image_var="$(printf '%s_IMAGE' "$name" | tr '[:lower:]' '[:upper:]')"
-            digest_var="$(printf '%s_DIGEST' "$name" | tr '[:lower:]' '[:upper:]')"
-            image="\${!image_var}"
-            digest="\${!digest_var}"
+            case "$name" in
+              api) image="$API_IMAGE"; digest="$API_DIGEST" ;;
+              worker) image="$WORKER_IMAGE"; digest="$WORKER_DIGEST" ;;
+              sandbox) image="$SANDBOX_IMAGE"; digest="$SANDBOX_DIGEST" ;;
+              web) image="$WEB_IMAGE"; digest="$WEB_DIGEST" ;;
+            esac
             cosign verify \
               --certificate-identity "$expected_identity" \
               --certificate-oidc-issuer "$OIDC_ISSUER" \
@@ -178,12 +180,12 @@ jobs:
 
       - name: Configure pinned SSH host identity
         env:
-          PRODUCTION_SSH_PRIVATE_KEY: \${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
-          PRODUCTION_SSH_KNOWN_HOSTS: \${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          : "\${PRODUCTION_SSH_PRIVATE_KEY:?Configure production secret PRODUCTION_SSH_PRIVATE_KEY}"
-          : "\${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production secret PRODUCTION_SSH_KNOWN_HOSTS}"
+          : "${PRODUCTION_SSH_PRIVATE_KEY:?Configure production secret PRODUCTION_SSH_PRIVATE_KEY}"
+          : "${PRODUCTION_SSH_KNOWN_HOSTS:?Configure production secret PRODUCTION_SSH_KNOWN_HOSTS}"
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
           printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
@@ -191,9 +193,9 @@ jobs:
 
       - name: Transfer production Compose and deployment scripts
         env:
-          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
-          PRODUCTION_DEPLOY_PATH: \${{ vars.PRODUCTION_DEPLOY_PATH }}
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
         run: |
           set -euo pipefail
           [[ "$PRODUCTION_SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || {
@@ -220,23 +222,23 @@ jobs:
 
       - name: Authenticate the production host to GHCR
         env:
-          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
-          GHCR_PULL_USERNAME: \${{ vars.GHCR_PULL_USERNAME }}
-          GHCR_PULL_TOKEN: \${{ secrets.GHCR_PULL_TOKEN }}
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          GHCR_PULL_USERNAME: ${{ vars.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           set -euo pipefail
-          : "\${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
-          : "\${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
+          : "${GHCR_PULL_USERNAME:?Configure production variable GHCR_PULL_USERNAME}"
+          : "${GHCR_PULL_TOKEN:?Configure production secret GHCR_PULL_TOKEN}"
           remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
           printf '%s' "$GHCR_PULL_TOKEN" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$remote" \
             "docker login ghcr.io --username '$GHCR_PULL_USERNAME' --password-stdin"
 
       - name: Deploy signed image digests with automatic rollback
         env:
-          PRODUCTION_SSH_HOST: \${{ vars.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: \${{ vars.PRODUCTION_SSH_USER }}
-          PRODUCTION_DEPLOY_PATH: \${{ vars.PRODUCTION_DEPLOY_PATH }}
+          PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+          PRODUCTION_DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
         run: |
           set -euo pipefail
           remote="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"

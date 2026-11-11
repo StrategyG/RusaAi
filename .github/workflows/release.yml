@@ -34,7 +34,7 @@ jobs:
       id-token: write
       attestations: write
     env:
-      RELEASE_TAG: \${{ github.ref_name }}
+      RELEASE_TAG: ${{ github.ref_name }}
       API_IMAGE: ghcr.io/strategyg/rusa-ai-api
       WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker
       SANDBOX_IMAGE: ghcr.io/strategyg/rusa-ai-sandbox
@@ -68,7 +68,7 @@ jobs:
       - name: Download the exact web lockfile validated by Web CI
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: web-package-lock-\${{ github.sha }}
+          name: web-package-lock-${{ github.sha }}
           path: web
 
       - name: Verify the web dependency lockfile
@@ -83,8 +83,8 @@ jobs:
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           registry: ghcr.io
-          username: \${{ github.actor }}
-          password: \${{ secrets.GITHUB_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
@@ -137,10 +137,10 @@ jobs:
 
       - name: Sign all immutable image digests with keyless Cosign
         env:
-          API_DIGEST: \${{ steps.images.outputs.api_digest }}
-          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
-          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
-          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: ${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: ${{ steps.images.outputs.web_digest }}
         run: |
           set -euo pipefail
           cosign sign --yes "$API_IMAGE@$API_DIGEST"
@@ -152,28 +152,28 @@ jobs:
         uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad # actions/attest-build-provenance wrapping actions/attest v4.2.2
         with:
           subject-name: ghcr.io/strategyg/rusa-ai-api
-          subject-digest: \${{ steps.images.outputs.api_digest }}
+          subject-digest: ${{ steps.images.outputs.api_digest }}
           push-to-registry: true
 
       - name: Attest worker image provenance
         uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
         with:
           subject-name: ghcr.io/strategyg/rusa-ai-worker
-          subject-digest: \${{ steps.images.outputs.worker_digest }}
+          subject-digest: ${{ steps.images.outputs.worker_digest }}
           push-to-registry: true
 
       - name: Attest sandbox image provenance
         uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
         with:
           subject-name: ghcr.io/strategyg/rusa-ai-sandbox
-          subject-digest: \${{ steps.images.outputs.sandbox_digest }}
+          subject-digest: ${{ steps.images.outputs.sandbox_digest }}
           push-to-registry: true
 
       - name: Attest web image provenance
         uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
         with:
           subject-name: ghcr.io/strategyg/rusa-ai-web
-          subject-digest: \${{ steps.images.outputs.web_digest }}
+          subject-digest: ${{ steps.images.outputs.web_digest }}
           push-to-registry: true
 
       - name: Install Trivy
@@ -185,10 +185,10 @@ jobs:
       - name: Scan exact image digests and generate CycloneDX SBOMs
         id: evidence
         env:
-          API_DIGEST: \${{ steps.images.outputs.api_digest }}
-          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
-          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
-          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: ${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: ${{ steps.images.outputs.web_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -197,21 +197,14 @@ jobs:
           test -s "$TRIVY_CACHE_DIR/db/metadata.json"
           cp "$TRIVY_CACHE_DIR/db/metadata.json" trivy-db-metadata.json
 
-          declare -A IMAGES=(
-            [api]="$API_IMAGE"
-            [worker]="$WORKER_IMAGE"
-            [sandbox]="$SANDBOX_IMAGE"
-            [web]="$WEB_IMAGE"
-          )
-          declare -A DIGESTS=(
-            [api]="$API_DIGEST"
-            [worker]="$WORKER_DIGEST"
-            [sandbox]="$SANDBOX_DIGEST"
-            [web]="$WEB_DIGEST"
-          )
-
           for name in api worker sandbox web; do
-            subject="\${IMAGES[$name]}@\${DIGESTS[$name]}"
+            case "$name" in
+              api) image="$API_IMAGE"; digest="$API_DIGEST" ;;
+              worker) image="$WORKER_IMAGE"; digest="$WORKER_DIGEST" ;;
+              sandbox) image="$SANDBOX_IMAGE"; digest="$SANDBOX_DIGEST" ;;
+              web) image="$WEB_IMAGE"; digest="$WEB_DIGEST" ;;
+            esac
+            subject="$image@$digest"
             trivy image --cache-dir "$TRIVY_CACHE_DIR" --scanners vuln \
               --format json --output "trivy-$name.json" "$subject"
             trivy image --cache-dir "$TRIVY_CACHE_DIR" --scanners vuln \
@@ -222,10 +215,10 @@ jobs:
 
       - name: Block releases with any unresolved Critical or High findings
         env:
-          API_DIGEST: \${{ steps.images.outputs.api_digest }}
-          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
-          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
-          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: ${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: ${{ steps.images.outputs.web_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -240,11 +233,11 @@ jobs:
 
       - name: Build and cryptographically verify the release manifest
         env:
-          GH_TOKEN: \${{ github.token }}
-          API_DIGEST: \${{ steps.images.outputs.api_digest }}
-          WORKER_DIGEST: \${{ steps.images.outputs.worker_digest }}
-          SANDBOX_DIGEST: \${{ steps.images.outputs.sandbox_digest }}
-          WEB_DIGEST: \${{ steps.images.outputs.web_digest }}
+          GH_TOKEN: ${{ github.token }}
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+          SANDBOX_DIGEST: ${{ steps.images.outputs.sandbox_digest }}
+          WEB_DIGEST: ${{ steps.images.outputs.web_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -282,7 +275,7 @@ jobs:
 
       - name: Publish signed release manifest, SBOMs, scans, and resolved web lockfile
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail

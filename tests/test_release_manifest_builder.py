@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from rusa_agents.certification import manifest_builder
-
 
 NOW = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
 COMMIT = "a" * 40
