@@ -69,7 +69,21 @@ The OpenAI-compatible /v1/chat/completions request accepts an optional integer d
 - If streaming has already started, the API emits an SSE timeout_error event followed by data: [DONE]; it cancels the pending provider iteration and releases the slot.
 - If deadline_ms is omitted, the existing queue timeout and provider timeout behavior remains unchanged.
 - A queue-capacity rejection remains HTTP 429. A queue timeout that occurs before the request deadline also remains HTTP 429.
-- This is API-process deadline enforcement. It does not yet provide a durable cross-process scheduler or propagate the same deadline to the autonomous worker's direct model-server path.
+- The CPU Compose profile routes autonomous worker requests through the same API endpoint with a tenant-scoped API key and a configured worker inference deadline. This shares the API-process admission controller and removes the worker's direct llama.cpp bypass for that profile.
+- The admission queue is still process-local, not durable or shared across multiple API replicas. Keep one API replica per model endpoint until the PostgreSQL-backed cross-process scheduler and its crash/restart tests are implemented.
+
+### Worker-to-API inference gateway
+
+For the CPU Compose profile, the API is the only component that connects to llama.cpp. The autonomous worker connects to the API's OpenAI-compatible endpoint and supplies the API key mapped to the current task tenant. The worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
+
+- Set `RUSA_WORKER_INFERENCE_GATEWAY=true`.
+- Set `RUSA_WORKER_INFERENCE_BASE_URL` to the API gateway URL. Production requires credential-free HTTPS with certificate validation.
+- Set `RUSA_WORKER_INFERENCE_API_KEYS` to a tenant-to-secret mapping. Keep raw keys in the secret manager; each key's SHA-256 digest must resolve to a principal in `RUSA_API_KEYS_JSON` with the same tenant and an inference-capable role.
+- Set `RUSA_WORKER_INFERENCE_DEADLINE_MS` to a bounded request budget. The API enforces that budget across queue wait and generation.
+- The worker provider sends `X-API-Key` and a JSON-object response-format requirement. The API validates the request and forwards the response format to the model backend.
+- The baseline is single API process per model endpoint. Multiple API replicas do not share FIFO state; llama.cpp `--parallel 1` is only a final active-generation guard.
+
+The local CPU Compose route uses private-network HTTP for development/staging only. Do not copy that URL into production configuration.
 
 ## 4. Startup and health checks
 
