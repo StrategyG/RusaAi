@@ -140,7 +140,14 @@ async def _await_with_deadline(awaitable: Any, deadline_at: float | None) -> Any
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         raise
-    done, _ = await asyncio.wait({task}, timeout=remaining)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+    except asyncio.CancelledError:
+        # A disconnected client or cancelled request must not leave generation
+        # running after the API releases its admission slot.
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
     if task not in done:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
