@@ -301,8 +301,19 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
 
 
 
-def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, monkeypatch):
+def test_runtime_builds_workers_with_tenant_and_task_agent_bound_providers(tmp_path, monkeypatch):
     tenant_provider = object()
+    bound_providers = []
+
+    class TenantProvider:
+        def for_agent(self, task_id, agent_id):
+            provider = type(
+                "BoundAgentProvider",
+                (),
+                {"task_id": task_id, "agent_id": agent_id},
+            )()
+            bound_providers.append(provider)
+            return provider
 
     class ProviderFactory:
         def __init__(self):
@@ -310,7 +321,7 @@ def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, m
 
         def for_tenant(self, tenant_id):
             self.requested_tenants.append(tenant_id)
-            return tenant_provider
+            return TenantProvider()
 
     class WorkspaceManager:
         def create(self, coding_task, tenant_id):
@@ -348,4 +359,8 @@ def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, m
     assert workspace.endswith("tenant-a-workspace")
     assert runtime.provider.requested_tenants == ["tenant-a"]
     assert captured["workers"]
-    assert all(worker.provider is tenant_provider for worker in captured["workers"])
+    assert all(worker.provider is not tenant_provider for worker in captured["workers"])
+    assert [provider.agent_id for provider in bound_providers] == [
+        role.value for role in AICodeOrchestrator.PIPELINE
+    ]
+    assert all(provider.task_id == str(task().task_id) for provider in bound_providers)
