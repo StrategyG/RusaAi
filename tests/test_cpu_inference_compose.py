@@ -21,6 +21,7 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     api = compose["services"]["api"]
     api_environment = api["environment"]
 
+    assert "RUSA_MODEL_HEALTH_URL" not in api_environment
     assert "env_file" not in api
     assert "env_file" not in worker
     assert "env_file" not in compose["services"]["web"]
