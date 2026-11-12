@@ -97,9 +97,10 @@ The current document row points to its active version through
 `current_version_id`. The current retrieval chunks remain a separate
 replaceable projection; version chunks are append-only snapshots. The
 `rusa_knowledge_worker` role receives SELECT/INSERT only on version tables,
-not UPDATE or DELETE. Tenant RLS applies to both version tables. Authorized
-tenant erasure may cascade through the document foreign key; ordinary worker
-operations cannot rewrite or delete historical versions.
+not UPDATE or DELETE, and is explicitly denied DELETE on current documents.
+Tenant RLS applies to both version tables. Tenant erasure is intentionally not
+exposed through the worker store; it requires a separate privileged retention
+procedure and approved deletion workflow.
 
 The 1536-dimensional and 384-dimensional vectors remain separate columns in
 version snapshots. A 384d runtime writes `embedding_384`; a 1536d runtime
