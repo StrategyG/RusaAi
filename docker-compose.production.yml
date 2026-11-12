@@ -13,6 +13,7 @@ services:
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
+      SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_GITHUB_TOKEN: ""
       RUSA_SANDBOX_IMAGE: ""
@@ -30,6 +31,8 @@ services:
     cpus: 2.0
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - ${RUSA_INTERNAL_CA_BUNDLE:?Set the trusted model/API gateway CA bundle}:/run/secrets/rusa-internal-ca.crt:ro
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -120,6 +123,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
     networks: [rusa-internal, rusa-egress]
 
 networks:
