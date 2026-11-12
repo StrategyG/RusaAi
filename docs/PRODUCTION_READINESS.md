@@ -70,7 +70,8 @@ release manifest.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | PR #107 passed; PR #108 Docker gate and PR #109 full CI pending |
+| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | PR #107 passed; PR #109 exact-head CI running after 8-GB Compose environment fix |
+| Inference contract integration | Endpoint and worker validate v1 request/response schemas, stable IDs, model identity, error semantics, and measured performance fields | Schema files exist, but README confirms the OpenAI-compatible endpoint does not yet consume them; blocked |
 | Local model artifact | Approved non-Qwen model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no production checkpoint; Bhineka-GPT is PILOT_ONLY pending audit |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
