@@ -489,3 +489,17 @@ def test_lease_renewal_failure_cancels_generation_and_releases_slot(
             ).fetchone()[0] == 0
 
     asyncio.run(scenario())
+
+
+def test_scheduler_readiness_ping_checks_database_config_and_exact_slot_set(
+    scheduler_database,
+):
+    controller = make_controller(scheduler_database)
+    assert controller.ping() is True
+
+    with psycopg.connect(scheduler_database) as conn:
+        conn.execute(
+            "DELETE FROM public.rusa_inference_admission_slots WHERE slot_id=0"
+        )
+
+    assert controller.ping() is False
