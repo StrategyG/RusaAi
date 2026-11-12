@@ -21,9 +21,9 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
-    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
     monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
 
@@ -172,11 +172,19 @@ def test_production_api_rejects_plain_http_model_endpoint(monkeypatch):
         RuntimeConfig.from_env().validate_api()
 
 
-def test_production_worker_rejects_plain_http_model_endpoint(monkeypatch):
+def test_production_worker_rejects_direct_model_server_url(monkeypatch):
     set_worker_environment(monkeypatch)
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "http://llama-cpp:8080/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
 
-    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+    with pytest.raises(RuntimeError, match="must not be provided to the Worker"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_model_server_inference_token(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+
+    with pytest.raises(RuntimeError, match="only the API gateway holds"):
         RuntimeConfig.from_env().validate_worker()
 
 
@@ -255,4 +263,11 @@ def test_production_api_rejects_angle_bracket_model_host_placeholder(monkeypatch
     )
 
     with pytest.raises(RuntimeError, match="real model host"):
+        RuntimeConfig.from_env().validate_api()
+
+def test_production_api_rejects_placeholder_model_id(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_NAME", "replace-with-registered-rusamodels-model-id")
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
         RuntimeConfig.from_env().validate_api()
