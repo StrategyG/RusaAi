@@ -83,6 +83,36 @@ class PostgresInferenceAdmissionController:
             ),
         )
 
+    def ping(self) -> bool:
+        """Check the shared scheduler configuration and exact slot set without mutation."""
+        expected = (
+            self.max_active,
+            self.max_waiting,
+            int(round(self.queue_timeout * 1000)),
+            self.lease_seconds,
+        )
+        with self._connect() as conn:
+            with conn.transaction():
+                configured = conn.execute(
+                    """
+                    SELECT max_active, max_waiting, queue_timeout_ms, lease_seconds
+                    FROM public.rusa_inference_admission_config
+                    WHERE singleton_id = 1
+                    """
+                ).fetchone()
+                slots = conn.execute(
+                    """
+                    SELECT slot_id
+                    FROM public.rusa_inference_admission_slots
+                    ORDER BY slot_id
+                    """
+                ).fetchall()
+        return (
+            configured is not None
+            and tuple(configured) == expected
+            and [row[0] for row in slots] == list(range(self.max_active))
+        )
+
     @staticmethod
     def _lock_scheduler(conn) -> None:
         conn.execute(
