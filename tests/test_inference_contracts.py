@@ -4,6 +4,11 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from rusa_agents.inference_contracts import (
+    validate_inference_request,
+    validate_inference_response,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "shared" / "contracts" / "inference_contract"
 
@@ -107,3 +112,20 @@ def test_v1_inference_response_rejects_unknown_fields():
     response["authorization_granted"] = True
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(response, schema)
+
+
+
+def test_runtime_request_validator_uses_the_checked_in_v1_schema():
+    assert validate_inference_request(valid_request()) == []
+
+    invalid = valid_request()
+    invalid["constraints"]["gpu_offload"] = True
+    assert validate_inference_request(invalid)
+
+
+def test_runtime_response_validator_requires_real_completion_metrics():
+    assert validate_inference_response(valid_response()) == []
+
+    invalid = valid_response()
+    invalid.pop("performance")
+    assert validate_inference_response(invalid)
