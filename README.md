@@ -6,7 +6,7 @@ RusaAi is an AI and autonomous-agent platform under active development. The repo
 
 **Model status:** The v2.0 core remains DESIGN_ONLY. The required non-Qwen foundation checkpoint and tokenizer are not selected; weights and GGUF artifacts are not built; training has not started; and no CPU benchmark has been run. The checked-in Qwen3-4B QLoRA setup is a separate legacy AICode worker-contract experiment, not the RusaAi-Edge core model.
 
-**Inference status:** The CPU baseline is llama.cpp + GGUF Q4_K_M, GPU offload disabled, one active generation, 4K initial context, and 8K only after device-specific memory validation. The API admission queue is bounded and FIFO. The worker still reaches the private model server directly, so the server's one parallel slot remains the cross-process active-generation guard; a unified cross-process queue is future work.
+**Inference status:** RusaModels owns GGUF artifacts, llama.cpp/embedding runtimes, model residency and the Model Server API. RusaAi is the authenticated Control Plane gateway. Worker requests pass through the RusaAi API and its PostgreSQL-backed FIFO admission scheduler before reaching the RusaModels Model Server. The CPU baseline is one active generation, with three waiting requests on the 16-GB profile and one on the 8-GB profile. The non-Qwen RusaAi-Edge checkpoint remains unselected.
 
 **Production status:** RusaAi is not production-certified. A passing CI run validates only the exact commit and automated checks it executed. Production release still requires an approved model/provider artifact, staging load and soak tests, adversarial tenant-isolation review, backup/restore and rollback drills, monitoring, TLS, secret management, and operator sign-off. See docs/architecture/IMPLEMENTATION_ALIGNMENT.md for the implementation map and remaining gaps.
 
@@ -15,7 +15,7 @@ RusaAi is an AI and autonomous-agent platform under active development. The repo
 ## Key Features & Architecture
 
 - **Neural core blueprint**: Dense decoder-only Transformer matching the RusaAi-Edge-1.54B v2.0 design target; no model artifact or training result is claimed.
-- **Inference gateway**: FastAPI OpenAI-compatible API with bounded FIFO admission; CPU baseline uses a private llama.cpp GGUF server with one active generation.
+- **Inference gateway**: FastAPI OpenAI-compatible Control Plane gateway with durable PostgreSQL-backed FIFO admission; inference is delegated to the authenticated RusaModels Model Server.
 - **Knowledge retrieval**: Optional tenant-scoped PostgreSQL/pgvector ingestion and hybrid retrieval, with offline Recall@K, MRR, and NDCG@K evaluation.
 - **Knowledge MCP**: Separate read-only, bearer-authenticated MCP service for tenant-scoped search and document access.
 - **Agent runtime**: Tenant-scoped task orchestration, durable PostgreSQL queue, worker lease controls, retry/recovery, and sandboxed tool execution.
@@ -28,30 +28,20 @@ RusaAi is an AI and autonomous-agent platform under active development. The repo
 
 ## CPU-first GGUF inference (no GPU)
 
-For CPU-only servers, use the llama.cpp server through the existing OpenAI-compatible inference provider. This avoids installing PyTorch, CUDA, Transformers, or GPTQ on the serving host. RusaAi v2.0 requires a non-Qwen core checkpoint, but that checkpoint and its tokenizer have not yet been selected. A temporary GGUF used for transport smoke tests must be labeled as a test artifact, not as RusaAi-Edge.
+For CPU-only deployment, run the model artifact, llama.cpp runtime and embedding service in RusaModels. RusaAi must not mount GGUF weights or start a model runtime. Configure the RusaAi gateway to call the authenticated RusaModels Model Server at `/openai/v1`. The current RusaModels CPU profile uses `rusa-general-4b` as a historical Qwen3-4B smoke-test alias; it is not RusaAi-Edge. The v2.0 non-Qwen foundation checkpoint and tokenizer remain unselected.
 
-1. After a non-Qwen checkpoint is formally selected, obtain its approved GGUF Q4_K_M build and place it outside the repository (for example, `/srv/rusa/models/model.gguf`). Review its license, immutable source revision, chat template, architecture compatibility, and context limit.
-2. Record the model checksum with `sha256sum /srv/rusa/models/model.gguf`.
-3. Copy `.env.example` to `.env`, merge `.env.cpu.example`, and set both `RUSA_GGUF_MODEL_PATH` and `RUSA_GGUF_MODEL_SHA256` in `.env`. For an 8-GB device, also merge `.env.cpu-8gb.example` after the general CPU profile.
-4. In a Python 3.10+ virtual environment, install the base package and verify the pinned artifact:
-   ```bash
-   python -m pip install -e .
-   python scripts/verify_gguf_model.py
-   ```
-5. Start the development/staging CPU stack with `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d`.
-6. Check `GET /health/ready`, then send chat requests to the regular RUSA-AI API. The llama.cpp service is private to the Compose network and the GGUF file is mounted read-only.
+1. Start the RusaModels CPU Model Server using its [CPU inference runbook](https://github.com/StrategyG/RusaModels/blob/main/docs/CPU_INFERENCE.md). Register and verify the GGUF artifact there; keep weights outside Git and mount them read-only.
+2. Create a dedicated RusaModels API principal with role `inference` only. Configure its token digest in `RUSAMODELS_API_PRINCIPALS` and keep the raw token in the secret manager.
+3. Copy `.env.example` to `.env`, merge `.env.cpu.example`, and set `RUSA_MODEL_BASE_URL` to the reachable RusaModels `/openai/v1` endpoint, `RUSA_MODEL_NAME` to the exact configured model ID, and `RUSA_MODEL_API_KEY` to the dedicated inference token. For the current smoke profile, the model ID is `rusa-general-4b`.
+4. For an 8-GB device, merge `.env.cpu-8gb.example` and the Control Plane resource overlay. The current RusaModels CPU profile is for 16-GB Codespaces; an 8-GB combined Model Plane profile is not yet validated.
+5. Start the RusaAi Control Plane with `docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d`.
+6. Check the RusaModels authenticated `/openai/v1/models` endpoint and RusaAi `/health/ready`, then send a chat request through the RusaAi API. RusaAi never connects directly to llama.cpp.
 
 See [docs/CPU_INFERENCE_OPERATIONS.md](docs/CPU_INFERENCE_OPERATIONS.md) for model sizing, CPU tuning, smoke tests, and operational limits. The optional GPTQ and Transformers/vLLM paths remain separate experimental workflows; they are not the v2.0 CPU deployment baseline. The supplied HTTP Compose override is for development/staging; production requires the HTTPS model-endpoint boundary described in the runbook.
 
 ## Optional local model runtime
 
-Install the local inference dependencies with `pip install -r requirements-model.txt`.
-For vLLM, use the separately managed `requirements-vllm.txt` on a compatible
-CUDA/Linux environment. Create and verify a model manifest with
-`scripts/create_model_manifest.py`, then configure `RUSA_LOCAL_MODEL_PATH`.
-Production deployments must pin the manifest digest with
-`RUSA_MODEL_MANIFEST_SHA256`. Model weights are not downloaded automatically.
-See `docs/INFERENCE_OPERATIONS.md`.
+The legacy local Transformers/vLLM adapter remains available for isolated development experiments only. Production RusaAi Control Plane configuration rejects `RUSA_LOCAL_MODEL_PATH` and `RUSA_MODEL_PATH`; production inference must use the authenticated RusaModels Model Server. Model manifests, GGUF verification, model weights and runtime dependencies are owned by RusaModels. See `docs/INFERENCE_OPERATIONS.md`.
 
 ## Agent model fine-tuning
 
@@ -84,14 +74,14 @@ RusaAi/
 │   └── serve/                    # FastAPI serving and inference gateway
 ├── schemas/                      # Existing A2A and model artifact schemas
 ├── migrations/                   # Durable task, tenant, audit, and RAG schemas
-├── scripts/                      # GGUF verification and operations utilities
+├── scripts/                      # Control Plane operations utilities
 ├── tests/                        # Repository-wide regression suite
 ├── deployment/profiles/          # rusa-cpu-16 and rusa-edge-8 CPU profiles
 ├── docs/
 │   ├── architecture/             # v2.0 implementation alignment
 │   └── adr/                      # Architecture decision records
 ├── docker-compose.yml
-├── docker-compose.cpu.yml        # CPU-only llama.cpp/GGUF override
+├── docker-compose.cpu.yml        # CPU-first gateway to the external RusaModels Model Plane
 ├── pyproject.toml
 └── README.md
 ```
