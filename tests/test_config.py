@@ -247,3 +247,12 @@ def test_production_requires_explicit_model_server_identity(monkeypatch, validat
 
     with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
         getattr(RuntimeConfig.from_env(), validator)()
+
+def test_production_api_rejects_angle_bracket_model_host_placeholder(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_MODEL_BASE_URL", "https://<model-server-host>/openai/v1"
+    )
+
+    with pytest.raises(RuntimeError, match="real model host"):
+        RuntimeConfig.from_env().validate_api()
