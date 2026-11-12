@@ -492,8 +492,10 @@ class WorkspaceToolGateway:
             "write_file": {"path", "content"},
             "run_check": {"profile"},
             "git_diff": set(),
-            "search_knowledge": {"query", "limit"},
-            "get_document": {"document_id"},
+            # Accept the legacy collection argument for compatibility, but the
+            # handler always uses the server-configured collection and ignores it.
+            "search_knowledge": {"query", "collection", "limit"},
+            "get_document": {"document_id", "collection"},
             "list_collections": set(),
         }
         if name not in schemas:
