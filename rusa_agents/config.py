@@ -185,6 +185,10 @@ class RuntimeConfig:
                 for repository in repositories
             ):
                 errors.append(f"tenant {tenant} has an invalid owner/repository allowlist entry")
+        if not os.getenv("RUSA_MODEL_NAME", "").strip():
+            errors.append(
+                "RUSA_MODEL_NAME must explicitly match the configured RusaModels Model Server model ID"
+            )
         if not self.model_base_url:
             errors.append("RUSA_MODEL_BASE_URL is required")
         else:
