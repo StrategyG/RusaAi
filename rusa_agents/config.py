@@ -173,7 +173,9 @@ class RuntimeConfig:
             errors.append(f"{variable} must use sslmode=require, verify-ca, or verify-full")
         return errors
 
-    def _validate_tenants_and_model(self, *, require_model_api_key: bool = True) -> list[str]:
+    def _validate_tenants_and_model(
+        self, *, require_model_api_key: bool = True, require_model_base_url: bool = True
+    ) -> list[str]:
         errors: list[str] = []
         if not self.tenant_repositories:
             errors.append("RUSA_TENANT_REPOSITORIES is required")
@@ -187,23 +189,25 @@ class RuntimeConfig:
                 for repository in repositories
             ):
                 errors.append(f"tenant {tenant} has an invalid owner/repository allowlist entry")
-        if not os.getenv("RUSA_MODEL_NAME", "").strip():
+        configured_model_name = os.getenv("RUSA_MODEL_NAME", "").strip()
+        if not configured_model_name or self._looks_placeholder(configured_model_name):
             errors.append(
-                "RUSA_MODEL_NAME must explicitly match the configured RusaModels Model Server model ID"
+                "RUSA_MODEL_NAME must explicitly match a real registered RusaModels Model Server model ID"
             )
-        if not self.model_base_url:
-            errors.append("RUSA_MODEL_BASE_URL is required")
-        else:
-            model_url = urlparse(self.model_base_url)
-            if (
-                model_url.scheme != "https"
-                or not model_url.hostname
-                or model_url.username
-                or model_url.password
-            ):
-                errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
-            if self._looks_placeholder(model_url.hostname):
-                errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
+        if require_model_base_url:
+            if not self.model_base_url:
+                errors.append("RUSA_MODEL_BASE_URL is required")
+            else:
+                model_url = urlparse(self.model_base_url)
+                if (
+                    model_url.scheme != "https"
+                    or not model_url.hostname
+                    or model_url.username
+                    or model_url.password
+                ):
+                    errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
+                if self._looks_placeholder(model_url.hostname):
+                    errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
         if self.environment == "production" and require_model_api_key:
             if not self.model_api_key:
                 errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
@@ -279,7 +283,19 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
-        missing.extend(self._validate_tenants_and_model(require_model_api_key=False))
+        missing.extend(
+            self._validate_tenants_and_model(
+                require_model_api_key=False, require_model_base_url=False
+            )
+        )
+        if self.model_base_url:
+            missing.append(
+                "RUSA_MODEL_BASE_URL must not be provided to the Worker; use RUSA_WORKER_INFERENCE_BASE_URL"
+            )
+        if self.model_api_key:
+            missing.append(
+                "RUSA_MODEL_API_KEY must not be provided to the Worker; only the API gateway holds the RusaModels token"
+            )
 
         gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
         if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
