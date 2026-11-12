@@ -21,8 +21,11 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
 
 
 def set_worker_environment(monkeypatch):
@@ -40,8 +43,11 @@ def set_worker_environment(monkeypatch):
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     worker_key = "w" * 48
     worker_key_digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
     monkeypatch.setenv(
@@ -230,3 +236,14 @@ def test_production_api_rejects_local_model_artifact_paths(monkeypatch, variable
 
     with pytest.raises(RuntimeError, match="RusaModels owns model artifact loading"):
         RuntimeConfig.from_env().validate_api()
+
+@pytest.mark.parametrize("validator", ["validate_api", "validate_worker"])
+def test_production_requires_explicit_model_server_identity(monkeypatch, validator):
+    if validator == "validate_api":
+        set_api_environment(monkeypatch)
+    else:
+        set_worker_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
+        getattr(RuntimeConfig.from_env(), validator)()
