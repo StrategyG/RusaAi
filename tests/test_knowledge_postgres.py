@@ -41,8 +41,14 @@ def knowledge_store():
         )
         admin.execute(
             sql.SQL(
+                "GRANT SELECT, INSERT, UPDATE ON "
+                "public.rusa_knowledge_documents TO {}"
+            ).format(sql.Identifier(role_name))
+        )
+        admin.execute(
+            sql.SQL(
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON "
-                "public.rusa_knowledge_documents, public.rusa_knowledge_chunks TO {}"
+                "public.rusa_knowledge_chunks TO {}"
             ).format(sql.Identifier(role_name))
         )
         admin.execute(
