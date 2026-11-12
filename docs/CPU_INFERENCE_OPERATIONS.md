@@ -4,6 +4,8 @@
 
 This profile runs the RusaAi Control Plane on a CPU-only host. **The model runtime and model artifacts belong to RusaModels**, not this repository.
 
+**Deployment scope:** this runbook describes the containerized Compose path. The supplied CPU Deployment Configuration v1.0 records a native Windows 11 baseline, while Architecture v2.0 targets Windows 11 x64 and Android ARM64; this Compose profile is not evidence that either native-device deployment has passed acceptance testing. Native Windows and Android certification remain pending. The historical Qwen3-4B v1.0 baseline is not the v2.0 non-Qwen product-model target.
+
 The request path is:
 
 ```text
