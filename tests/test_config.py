@@ -21,11 +21,9 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    # The Worker reaches inference only through the RusaAi gateway.
-    # It must not receive the Model Plane endpoint or its service credential.
-    monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
-    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
     monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
 
@@ -45,9 +43,11 @@ def set_worker_environment(monkeypatch):
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    # The Worker reaches inference only through the RusaAi gateway.
+    # It must not receive the Model Plane endpoint or its service credential.
+    monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
-    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
     monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     worker_key = "w" * 48
