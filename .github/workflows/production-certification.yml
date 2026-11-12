@@ -137,7 +137,7 @@ jobs:
           set -euo pipefail
           : "${GH_TOKEN:?Configure RUSA_CERTIFICATION_REVIEWER_TOKEN with read:org and pull-request read access}"
           python -m rusa_agents.certification.signoff_verification \
-            --record certification-record.json \
+            --record "$CERTIFICATION_RECORD_PATH" \
             --manifest release-evidence/release-manifest.json \
             --output production-certification.json \
             --repository "$GITHUB_REPOSITORY" \
