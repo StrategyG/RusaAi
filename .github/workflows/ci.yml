@@ -239,10 +239,19 @@ jobs:
           RUSA_WORKER_IMAGE: ghcr.io/strategyg/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WEB_IMAGE: ghcr.io/strategyg/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WEB_SESSION_SECRET: ci-web-session-secret-123456789012345678901234567890
-          RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
-          RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
-          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
-          RUSA_METRICS_API_KEY: ci-metrics-key-12345678901234567890123456789012
+          RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt
+          RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt
+          RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]},"43e35305847a4f9e7a8dccdd4d8325c6ceaac628740ce992da2ad23969adcc45":{"subject":"ci-worker","tenant_id":"tenant-ci","roles":["developer"]}}'
+          RUSA_METRICS_API_KEY: ci-metrics-api-key-12345678901234567890123456789012
+          RUSA_INTERNAL_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+          RUSA_MAX_CONCURRENT_INFERENCES: "1"
+          RUSA_MAX_WAITING_INFERENCES: "3"
+          RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
+          RUSA_INFERENCE_LEASE_SECONDS: "30"
+          RUSA_WORKER_INFERENCE_GATEWAY: "true"
+          RUSA_WORKER_INFERENCE_BASE_URL: https://api.internal/v1
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"tenant-ci":"worker-inference-secret-ci-12345678901234567890"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
           RUSA_MODEL_NAME: rusa-ai
@@ -277,7 +286,7 @@ jobs:
           RUSA_MODEL_MEMORY_LIMIT: 8g
           RUSA_MODEL_CPU_LIMIT: "4.0"
           RUSA_MAX_CONCURRENT_INFERENCES: "1"
-          RUSA_MAX_WAITING_INFERENCES: "4"
+          RUSA_MAX_WAITING_INFERENCES: "3"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
           RUSA_GENERATION_TIMEOUT_SECONDS: "300"
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
