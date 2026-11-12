@@ -489,3 +489,98 @@ def test_lease_renewal_failure_cancels_generation_and_releases_slot(
             ).fetchone()[0] == 0
 
     asyncio.run(scenario())
+
+
+def test_renew_uses_advisory_lock_before_slot_and_request_updates(monkeypatch):
+    controller = PostgresInferenceAdmissionController(
+        "postgresql://scheduler.internal/rusa",
+        max_active=1,
+        max_waiting=1,
+        queue_timeout=2.0,
+        lease_seconds=5,
+    )
+
+    class Cursor:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Transaction:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    class Connection:
+        def __init__(self):
+            self.statements = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def transaction(self):
+            return Transaction()
+
+        def execute(self, statement, params=None):
+            normalized = " ".join(statement.split())
+            self.statements.append(normalized)
+            if "RETURNING slot_id" in normalized:
+                return Cursor((0,))
+            return Cursor()
+
+    connection = Connection()
+    monkeypatch.setattr(controller, "_connect", lambda: connection)
+
+    assert controller._renew(uuid4(), uuid4()) is True
+    assert "pg_advisory_xact_lock" in connection.statements[0]
+    assert "UPDATE public.rusa_inference_admission_slots" in connection.statements[1]
+    assert "UPDATE public.rusa_inference_admission_requests" in connection.statements[2]
+
+
+def test_stream_owner_task_is_cancelled_when_lease_renewal_fails(
+    scheduler_database, monkeypatch
+):
+    controller = make_controller(scheduler_database)
+    monkeypatch.setattr(controller, "_renew", lambda request_id, owner_id: False)
+
+    stream_started = asyncio.Event()
+    stream_cancelled = asyncio.Event()
+
+    async def scenario():
+        await controller.acquire()
+
+        async def stream_body():
+            assert controller.bind_owner_task() is True
+            stream_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                stream_cancelled.set()
+                raise
+            finally:
+                await controller.release()
+
+        stream_task = asyncio.create_task(stream_body())
+        await asyncio.wait_for(stream_started.wait(), timeout=2.0)
+        await asyncio.wait_for(stream_cancelled.wait(), timeout=4.0)
+        with pytest.raises(asyncio.CancelledError):
+            await stream_task
+
+        with psycopg.connect(scheduler_database) as conn:
+            assert conn.execute(
+                "SELECT count(*) FROM rusa_inference_admission_slots "
+                "WHERE active_request_id IS NOT NULL"
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT count(*) FROM rusa_inference_admission_requests "
+                "WHERE status='active'"
+            ).fetchone()[0] == 0
+
+    asyncio.run(scenario())
+
