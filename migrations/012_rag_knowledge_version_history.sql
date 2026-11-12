@@ -93,6 +93,10 @@ GRANT SELECT, INSERT
 GRANT SELECT, INSERT
     ON public.rusa_knowledge_version_chunks TO rusa_knowledge_worker;
 
+-- Historical snapshots are append-only. The worker may refresh current chunks,
+-- but tenant/document erasure requires a privileged retention procedure.
+REVOKE DELETE ON public.rusa_knowledge_documents FROM rusa_knowledge_worker;
+
 COMMENT ON TABLE public.rusa_knowledge_document_versions IS
     'Append-only source snapshots. The runtime role is intentionally denied UPDATE and DELETE.';
 COMMENT ON TABLE public.rusa_knowledge_version_chunks IS
