@@ -120,5 +120,11 @@ def test_8gb_profile_uses_a_smaller_bounded_waiting_queue():
             values[key] = value
     assert values["RUSA_MAX_CONCURRENT_INFERENCES"] == "1"
     assert values["RUSA_MAX_WAITING_INFERENCES"] == "1"
-    assert values["RUSA_MODEL_CONTEXT"] == "4096"
-    assert values["RUSA_MODEL_PARALLEL"] == "1"
+    assert values["RUSA_MAX_PARALLEL_WORKERS"] == "1"
+
+    # Context, model parallelism, CPU threads and model memory belong to the
+    # RusaModels Model Plane, not the RusaAi Control Plane environment.
+    assert "RUSA_MODEL_CONTEXT" not in values
+    assert "RUSA_MODEL_PARALLEL" not in values
+    assert "RUSA_CPU_THREADS" not in values
+    assert "RUSA_MODEL_MEMORY_LIMIT" not in values
