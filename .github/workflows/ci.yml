@@ -70,6 +70,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, immutable commit
       - name: Build API image
         run: docker build --pull -t rusa-ai:${{ github.sha }} .
+      - name: Build model telemetry image
+        run: docker build --pull -f Dockerfile.model-telemetry -t rusa-ai-model-telemetry:${{ github.sha }} .
       - name: Build isolated agent sandbox image
         run: docker build --pull -f Dockerfile.agent-sandbox -t rusa-ai-agent-sandbox:${{ github.sha }} .
       - name: Inspect sandbox Python package origins
@@ -118,6 +120,7 @@ jobs:
           set -euo pipefail
           for image in \
             "rusa-ai:${{ github.sha }}" \
+            "rusa-ai-model-telemetry:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
@@ -179,6 +182,7 @@ jobs:
           set -euo pipefail
           for image in \
             "rusa-ai:${{ github.sha }}" \
+            "rusa-ai-model-telemetry:${{ github.sha }}" \
             "rusa-ai-agent-sandbox:${{ github.sha }}" \
             "rusa-ai-worker:${{ github.sha }}" \
             "rusa-ai-rag-mcp:${{ github.sha }}"; do
@@ -197,8 +201,10 @@ jobs:
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
-          RUSA_MODEL_NAME: rusa-ai
+          RUSA_MODEL_NAME: rusaai-edge-derived
           RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_MODEL_TELEMETRY_URL: https://model.internal/v1/telemetry
+          RUSA_MODEL_TELEMETRY_API_KEY: ci-model-telemetry-key-12345678901234567890
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -232,6 +238,7 @@ jobs:
           RUSA_MAX_WAITING_INFERENCES: "3"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
           RUSA_GENERATION_TIMEOUT_SECONDS: "300"
+          RUSA_MODEL_TELEMETRY_API_KEY: ci-model-telemetry-key-12345678901234567890
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
           RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
@@ -258,6 +265,7 @@ jobs:
           RUSA_WORKER_INFERENCE_API_KEYS: '{"development":"local-dev-key"}'
           RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
           RUSA_GENERATION_TIMEOUT_SECONDS: "300"
+          RUSA_MODEL_TELEMETRY_API_KEY: ci-model-telemetry-key-12345678901234567890
           RUSA_MAX_PARALLEL_WORKERS: "1"
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
