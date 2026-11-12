@@ -26,11 +26,11 @@ def _set_valid_environment(monkeypatch):
     )
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:db-password@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_worker_login:db-password@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_worker_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     worker_key = "worker-inference-secret-ci-12345678901234567890"
     monkeypatch.setenv(
