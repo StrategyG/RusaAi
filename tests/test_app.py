@@ -14,6 +14,7 @@ from rusa_agents.inference_admission import (
     InferenceAdmissionController,
     InferenceDeadlineTimeout,
 )
+from rusa_agents.model_telemetry import ModelTelemetryError
 from rusa_agents.providers import InferenceStreamEvent
 
 client = TestClient(app)
@@ -854,3 +855,192 @@ def test_cancelled_request_cancels_provider_coroutine():
         assert cancelled.is_set()
 
     asyncio.run(scenario())
+
+
+
+def _valid_contract_inference_request():
+    return {
+        "schema_version": "1.0",
+        "request_id": "REQ-api-contract-001",
+        "task_id": "TASK-api-contract-001",
+        "agent_id": "software_engineer",
+        "model_id": "rusaai-edge-derived",
+        "capability_profile": "ASTRA",
+        "reasoning_mode": "STANDARD",
+        "context": {
+            "system_context": [{"type": "agent_system_prompt", "content": "Return JSON."}],
+            "project_context": [{"type": "task_prompt", "content": "Return an action."}],
+            "retrieved_evidence": [],
+        },
+        "generation": {"max_output_tokens": 128},
+        "constraints": {"deadline_ms": 1000, "gpu_offload": False},
+    }
+
+
+def _configure_contract_gateway(monkeypatch, provider, controller=None):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(
+            environment="development",
+            model_name="rusaai-edge-derived",
+            model_telemetry_url="https://model.internal/v1/telemetry",
+            model_telemetry_api_key="t" * 40,
+        ),
+        raising=False,
+    )
+    admission = controller or InferenceAdmissionController(
+        max_active=1, max_waiting=1, queue_timeout=1
+    )
+    monkeypatch.setattr(app.state, "inference_admission", admission, raising=False)
+    set_inference_provider(provider)
+    return admission
+
+
+def test_versioned_inference_gateway_validates_and_returns_measured_envelope(monkeypatch):
+    captured = {}
+
+    class ContractProvider:
+        async def stream(self, messages, **parameters):
+            captured["messages"] = messages
+            captured["parameters"] = parameters
+            yield InferenceStreamEvent(content='{"action":"complete"}')
+            yield InferenceStreamEvent(finish_reason="stop")
+            yield InferenceStreamEvent(prompt_tokens=18, completion_tokens=4)
+
+    async def telemetry(url, api_key, model_id):
+        captured["telemetry"] = (url, api_key, model_id)
+        return {
+            "schema_version": "1.0",
+            "model_id": model_id,
+            "peak_ram_mb": 2048.0,
+            "current_ram_mb": 1800.0,
+        }
+
+    controller = _configure_contract_gateway(monkeypatch, ContractProvider())
+    monkeypatch.setattr(app, "fetch_model_telemetry", telemetry)
+    try:
+        response = client.post(
+            "/internal/v1/inference",
+            json=_valid_contract_inference_request(),
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["output"] == {"action": "complete"}
+    assert body["usage"] == {
+        "prompt_tokens": 18,
+        "completion_tokens": 4,
+        "total_tokens": 22,
+    }
+    assert body["performance"]["peak_ram_mb"] == 2048.0
+    assert body["performance"]["ttft_ms"] >= 0
+    assert body["performance"]["generation_tokens_per_second"] > 0
+    assert body["verification"] == {"schema_valid": True, "orm_status": "PENDING"}
+    assert captured["parameters"]["response_format"] == {"type": "json_object"}
+    assert captured["parameters"]["deadline_ms"] == 1000
+    assert captured["telemetry"][2] == "rusaai-edge-derived"
+    assert controller.active_count == 0
+    assert controller.waiting_count == 0
+
+
+def test_versioned_inference_gateway_rejects_invalid_request_before_generation(monkeypatch):
+    class MustNotRun:
+        async def stream(self, messages, **parameters):
+            raise AssertionError("invalid contract request must not reach the model")
+            yield InferenceStreamEvent()
+
+    controller = _configure_contract_gateway(monkeypatch, MustNotRun())
+    payload = _valid_contract_inference_request()
+    payload["constraints"]["gpu_offload"] = True
+    try:
+        response = client.post("/internal/v1/inference", json=payload)
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "inference_request_schema_invalid"
+    assert controller.active_count == 0
+
+
+def test_versioned_inference_gateway_rejects_non_json_model_output(monkeypatch):
+    class InvalidJsonProvider:
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content="not-json")
+            yield InferenceStreamEvent(finish_reason="stop")
+            yield InferenceStreamEvent(prompt_tokens=10, completion_tokens=2)
+
+    controller = _configure_contract_gateway(monkeypatch, InvalidJsonProvider())
+    try:
+        response = client.post(
+            "/internal/v1/inference",
+            json=_valid_contract_inference_request(),
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "model_output_invalid_json"
+    assert controller.active_count == 0
+
+
+def test_versioned_inference_gateway_fails_closed_without_model_telemetry(monkeypatch):
+    class ContractProvider:
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content='{"ok":true}')
+            yield InferenceStreamEvent(finish_reason="stop")
+            yield InferenceStreamEvent(prompt_tokens=10, completion_tokens=2)
+
+    async def unavailable_telemetry(url, api_key, model_id):
+        raise ModelTelemetryError("telemetry unavailable")
+
+    controller = _configure_contract_gateway(monkeypatch, ContractProvider())
+    monkeypatch.setattr(app, "fetch_model_telemetry", unavailable_telemetry)
+    try:
+        response = client.post(
+            "/internal/v1/inference",
+            json=_valid_contract_inference_request(),
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "model_telemetry_unavailable"
+    assert controller.active_count == 0
+
+
+def test_versioned_inference_gateway_deadline_cancels_provider_and_releases_slot(monkeypatch):
+    class SlowContractProvider:
+        cancelled = False
+
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content='{"partial":')
+            try:
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            yield InferenceStreamEvent(content="true}")
+            yield InferenceStreamEvent(finish_reason="stop")
+            yield InferenceStreamEvent(prompt_tokens=10, completion_tokens=2)
+
+    provider = SlowContractProvider()
+    controller = _configure_contract_gateway(monkeypatch, provider)
+    payload = _valid_contract_inference_request()
+    payload["constraints"]["deadline_ms"] = 50
+    try:
+        response = client.post("/internal/v1/inference", json=payload)
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 504
+    assert response.json()["detail"]["code"] == "inference_deadline_exceeded"
+    assert provider.cancelled is True
+    assert controller.active_count == 0
+    assert controller.waiting_count == 0
