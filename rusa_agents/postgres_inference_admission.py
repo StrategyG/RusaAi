@@ -72,7 +72,16 @@ class PostgresInferenceAdmissionController:
             raise RuntimeError(
                 "Install the PostgreSQL runtime dependencies to use durable inference admission"
             ) from exc
-        return psycopg.connect(self.dsn)
+        return psycopg.connect(
+            self.dsn,
+            connect_timeout=5,
+            application_name="rusa-inference-admission",
+            options=(
+                "-c lock_timeout=5000 "
+                "-c statement_timeout=5000 "
+                "-c idle_in_transaction_session_timeout=10000"
+            ),
+        )
 
     @staticmethod
     def _lock_scheduler(conn) -> None:
