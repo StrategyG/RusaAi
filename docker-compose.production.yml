@@ -101,8 +101,8 @@ services:
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
       RUSA_METRICS_API_KEY: ""
-      RUSA_MODEL_BASE_URL: ${RUSA_MODEL_BASE_URL:?Set the approved HTTPS model gateway URL}
-      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:?Set the approved backend model alias}
+      RUSA_MODEL_BASE_URL: ""
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:?Set the approved RusaModels Model Server model ID}
       RUSA_MODEL_API_KEY: ""
       RUSA_MODEL_TIMEOUT_SECONDS: ${RUSA_MODEL_TIMEOUT_SECONDS:-300}
       RUSA_MODEL_MAX_RESPONSE_BYTES: ${RUSA_MODEL_MAX_RESPONSE_BYTES:-2000000}
