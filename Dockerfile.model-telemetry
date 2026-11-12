@@ -5,8 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
 COPY rusa_agents/model_telemetry_exporter.py /app/model_telemetry_exporter.py
 
-RUN useradd --system --uid 10001 --no-create-home telemetry
-USER 10001:10001
+USER 65532:65532
 
 EXPOSE 9101
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
