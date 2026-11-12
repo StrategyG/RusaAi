@@ -78,7 +78,8 @@ jobs:
             echo "Release tag is not reachable from protected main." >&2
             exit 1
           }
-          git show "origin/main:$CERTIFICATION_RECORD_PATH" > certification-record.json
+          mkdir -p "$(dirname "$CERTIFICATION_RECORD_PATH")"
+          git show "origin/main:$CERTIFICATION_RECORD_PATH" > "$CERTIFICATION_RECORD_PATH"
           printf 'SOURCE_SHA=%s\n' "$SOURCE_SHA" >> "$GITHUB_ENV"
 
       - name: Download exact release manifest and signature
