@@ -62,6 +62,7 @@ class PostgresInferenceAdmissionController:
         self._owner_ids: dict[UUID, UUID] = {}
         self._owner_tasks: dict[UUID, asyncio.Task] = {}
         self._heartbeat_tasks: dict[UUID, asyncio.Task] = {}
+        self._lease_lost: set[UUID] = set()
         self._local_active = 0
         self._local_waiting = 0
 
@@ -513,6 +514,9 @@ class PostgresInferenceAdmissionController:
     def _renew(self, request_id: UUID, owner_id: UUID) -> bool:
         with self._connect() as conn:
             with conn.transaction():
+                # Keep the same advisory-lock-first order as _withdraw/_expire_stale.
+                # Otherwise heartbeat (slot -> request) can deadlock with release (request -> slot).
+                self._lock_scheduler(conn)
                 slot = conn.execute(
                     """
                     UPDATE public.rusa_inference_admission_slots
@@ -581,9 +585,7 @@ class PostgresInferenceAdmissionController:
                         ),
                     )
 
-    async def _heartbeat(
-        self, request_id: UUID, owner_id: UUID, owner_task: asyncio.Task
-    ) -> None:
+    async def _heartbeat(self, request_id: UUID, owner_id: UUID) -> None:
         interval = max(1.0, self.lease_seconds / 3)
         try:
             while True:
@@ -595,7 +597,11 @@ class PostgresInferenceAdmissionController:
                     renewed = False
                 if not renewed:
                     logger.error("Inference admission lease lost; cancelling generation task")
-                    if not owner_task.done():
+                    self._lease_lost.add(request_id)
+                    # StreamingResponse runs its body in a child task. Resolve the
+                    # current owner at failure time so a stream can rebind it.
+                    owner_task = self._owner_tasks.get(request_id)
+                    if owner_task is not None and not owner_task.done():
                         owner_task.cancel()
                     return
         except asyncio.CancelledError:
@@ -696,11 +702,25 @@ class PostgresInferenceAdmissionController:
             raise RuntimeError("Inference admission must be acquired from an asyncio task")
         self._owner_tasks[request_id] = owner_task
         self._heartbeat_tasks[request_id] = asyncio.create_task(
-            self._heartbeat(request_id, owner_id, owner_task)
+            self._heartbeat(request_id, owner_id)
         )
         self._local_active += 1
         INFERENCE_ACTIVE_GENERATIONS.inc()
         INFERENCE_QUEUE_WAIT_SECONDS.observe(time.monotonic() - queued_at)
+
+    def bind_owner_task(self) -> bool:
+        """Bind a streaming response body to the task that owns generation."""
+        request_id = self._request_context.get()
+        if request_id is None or request_id not in self._owner_ids:
+            raise RuntimeError("Cannot bind a stream without an active inference lease")
+        heartbeat = self._heartbeat_tasks.get(request_id)
+        if request_id in self._lease_lost or heartbeat is None or heartbeat.done():
+            return False
+        owner_task = asyncio.current_task()
+        if owner_task is None:
+            raise RuntimeError("Inference stream binding requires an asyncio task")
+        self._owner_tasks[request_id] = owner_task
+        return True
 
     async def release(self) -> None:
         """Release only the slot owned by the current request context."""
@@ -723,6 +743,8 @@ class PostgresInferenceAdmissionController:
             self._request_context.set(None)
             self._owner_ids.pop(request_id, None)
             self._owner_tasks.pop(request_id, None)
+            self._lease_lost.discard(request_id)
+            self._lease_lost.discard(request_id)
             self._local_active = max(0, self._local_active - 1)
             INFERENCE_ACTIVE_GENERATIONS.dec()
 
