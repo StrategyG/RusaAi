@@ -6,6 +6,27 @@ This ledger describes the capabilities present on the integration branch and sep
 automated code validation from deployment certification. Passing CI is evidence only
 for the exact commit and checks that ran; it is not a production approval.
 
+## Canonical shared knowledge-store decision (2026-11-12)
+
+ADR-0002 selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
+shared Agent/Worker knowledge store, subject to implementation and release gates.
+
+- SQLite/FTS5 remains device-local memory/state; it is not a shared-corpus replica.
+- RAG_Cerdas IM19 remains separate; dual-write, mirroring, bulk synchronization and
+  cross-read are not authorized.
+- RusaModels remains the Model Plane and is accessed through an authenticated API.
+- The 1,536-dimensional and 384-dimensional vector spaces remain separate. The
+  final production embedding profile is not selected.
+- This decision does not authorize production migrations, ingestion, embeddings,
+  index writes, publication or deployment.
+
+Open RusaAi integration work requires reconciliation before merge:
+- PR #82 proposes RAG agent/project scope and version history but is draft and
+  introduces migration numbers that collide with current main and PR #109.
+- PR #109 introduces inference admission migration 010.
+- PR #111 is a combined CPU/inference integration candidate and must pass exact-head CI.
+- All migrations must be re-sequenced into one reviewed, unique ordered inventory.
+
 ## Delivered in this integration branch
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
@@ -79,6 +100,9 @@ release manifest.
 | Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | PR #107 unit/integration CI passed; staging recovery drill still required |
 | Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | PostgreSQL scheduler implemented in PR #109; exact-head CI and staging crash/restart drill pending |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
+| Knowledge governance | Rights, source versions, review, human approval, publication, deletion and audit lifecycle | Initial governance is proposed in PR #115; purge, index-generation reconciliation and erasure remain open |
+| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | PR #111 adds migrations 011/012; exact-head and PostgreSQL ACL evidence required |
+| Retrieval quality | Human-reviewed Indonesian/English gold set, citations, groundedness and security evaluation | Not measured |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
 | Reliability operations | Backup/restore drill, rollback rehearsal, alerting and incident runbook | Not completed |
@@ -92,13 +116,18 @@ release manifest.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Apply application migrations `001` through `010` in their declared order
-  using the database owner before enabling production task intake and inference.
-  Apply pgvector/knowledge migrations only to their designated pgvector-enabled
-  knowledge database. The API runtime must not have schema-owner or superuser
-  privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
-  knowledge database and configure the restricted `rusa_knowledge_worker` role.
+- Preserve the existing mainline migration inventory `001`–`009`. Treat
+  migrations `010` (inference admission), `011` (agent/project scope),
+  `012` (immutable knowledge versions), and `013` (governance) as open-PR
+  changes until one unique ordered inventory is reviewed and disposable
+  PostgreSQL/pgvector forward/rollback tests pass. Do not apply open-PR migrations
+  to staging or production. The API runtime must not have schema-owner or
+  superuser privileges.
+- Apply `migrations/007_rag_knowledge_pgvector.sql` only on the designated
+  pgvector-enabled knowledge database and configure the restricted
+  `rusa_knowledge_worker` role. Apply `migrations/009_knowledge_embedding_384.sql`
+  only when the separate 384-dimensional profile is deliberately enabled and
+  its model contract passes.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
 - Do not commit model weights, credentials, tenant bearer tokens, or private
