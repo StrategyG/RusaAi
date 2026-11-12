@@ -10,7 +10,7 @@ def set_api_environment(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:secret@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     monkeypatch.setenv(
         "RUSA_API_KEYS_JSON",
@@ -29,7 +29,7 @@ def set_worker_environment(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_worker_login:secret@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_worker_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_WORKSPACE_ROOT", "/srv/rusa/workspaces")
@@ -77,7 +77,7 @@ def test_production_api_rejects_database_without_tls(monkeypatch):
     set_api_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:secret@db/rusa",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa",
     )
     with pytest.raises(RuntimeError, match="sslmode"):
         RuntimeConfig.from_env().validate_api()
@@ -88,7 +88,7 @@ def test_production_api_rejects_legacy_shared_database_dsn(monkeypatch):
     monkeypatch.delenv("RUSA_API_DATABASE_URL", raising=False)
     monkeypatch.setenv(
         "RUSA_DATABASE_URL",
-        "postgresql://rusa:secret@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     with pytest.raises(RuntimeError, match="RUSA_API_DATABASE_URL"):
         RuntimeConfig.from_env().validate_api()
@@ -98,7 +98,7 @@ def test_production_worker_rejects_api_database_identity(monkeypatch):
     set_worker_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_api_login:secret@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     with pytest.raises(RuntimeError, match="rusa_worker_login"):
         RuntimeConfig.from_env().validate_worker()
@@ -227,7 +227,7 @@ def test_production_api_rejects_sslmode_require_without_server_identity_verifica
     set_api_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:secret@db/rusa?sslmode=require&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=require&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     with pytest.raises(RuntimeError, match="sslmode=verify-full"):
         RuntimeConfig.from_env().validate_api()
@@ -237,7 +237,7 @@ def test_production_worker_rejects_sslmode_require_without_server_identity_verif
     set_worker_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_worker_login:secret@db/rusa?sslmode=require&sslrootcert=/run/secrets/rusa-internal-ca.crt",
+        "postgresql://rusa_worker_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=require&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     with pytest.raises(RuntimeError, match="sslmode=verify-full"):
         RuntimeConfig.from_env().validate_worker()
@@ -247,7 +247,7 @@ def test_production_api_requires_an_absolute_trusted_database_ca_path(monkeypatc
     set_api_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:secret@db/rusa?sslmode=verify-full",
+        "postgresql://rusa_api_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full",
     )
     with pytest.raises(RuntimeError, match="sslrootcert"):
         RuntimeConfig.from_env().validate_api()
@@ -257,7 +257,7 @@ def test_production_worker_requires_an_absolute_trusted_database_ca_path(monkeyp
     set_worker_environment(monkeypatch)
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_worker_login:secret@db/rusa?sslmode=verify-full",
+        "postgresql://rusa_worker_login:ci-db-password-12345678901234567890123456789012@db/rusa?sslmode=verify-full",
     )
     with pytest.raises(RuntimeError, match="sslrootcert"):
         RuntimeConfig.from_env().validate_worker()
