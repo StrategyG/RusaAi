@@ -1,7 +1,7 @@
-# Conservative resource overlay for the rusa-edge-8 (8-GB) Docker profile.
+# Conservative resource overlay for the rusa-edge-8 (8-GB) RusaAi Control Plane.
 # Apply after docker-compose.yml and docker-compose.cpu.yml.
-# The configured container memory ceilings total 5 GiB; this is not a
-# reservation and does not replace runtime checks for >=2 GiB free host RAM.
+# These limits cover only RusaAi Control Plane containers. The RusaModels Model
+# Plane runs separately and must be budgeted so the combined host retains >=2 GiB free RAM.
 
 services:
   postgres:
@@ -23,7 +23,3 @@ services:
   web:
     mem_limit: 384m
     cpus: 0.25
-
-  llama-cpp:
-    mem_limit: ${RUSA_MODEL_MEMORY_LIMIT:-3g}
-    cpus: ${RUSA_MODEL_CPU_LIMIT:-2.0}
