@@ -11,8 +11,12 @@ services:
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
       RUSA_MODEL_API_KEY: ""
       RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health
+      RUSA_MODEL_TELEMETRY_URL: http://model-telemetry:9101/v1/telemetry
+      RUSA_MODEL_TELEMETRY_API_KEY: ${RUSA_MODEL_TELEMETRY_API_KEY:?Set model telemetry API key in .env}
     depends_on:
       llama-cpp:
+        condition: service_started
+      model-telemetry:
         condition: service_started
     healthcheck:
       start_period: 10m
@@ -33,6 +37,32 @@ services:
         condition: service_started
       api:
         condition: service_healthy
+  model-telemetry:
+    build:
+      context: .
+      dockerfile: Dockerfile.model-telemetry
+    restart: unless-stopped
+    pid: "service:llama-cpp"
+    environment:
+      RUSA_MODEL_TELEMETRY_BIND: 0.0.0.0
+      RUSA_MODEL_TELEMETRY_PORT: "9101"
+      RUSA_MODEL_TELEMETRY_PROCESS_NAME: llama-server
+      RUSA_MODEL_TELEMETRY_API_KEY: ${RUSA_MODEL_TELEMETRY_API_KEY:?Set model telemetry API key in .env}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    expose: ["9101"]
+    depends_on:
+      llama-cpp:
+        condition: service_started
+    networks: [rusa-internal]
+
   llama-cpp:
     image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
