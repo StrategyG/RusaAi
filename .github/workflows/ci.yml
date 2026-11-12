@@ -59,7 +59,7 @@ jobs:
             --train-file llm-project/data/curated/train.jsonl \
             --eval-file llm-project/data/curated/eval.jsonl
       - name: Tests
-        run: python -m pytest -q
+        run: python -m pytest -vv -o faulthandler_timeout=60
 
   docker-build:
     name: Build, test, and scan production images
