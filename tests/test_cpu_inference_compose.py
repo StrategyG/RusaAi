@@ -16,9 +16,18 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     compose = yaml.safe_load(
         (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
     )
-    worker_environment = compose["services"]["worker"]["environment"]
+    worker = compose["services"]["worker"]
+    worker_environment = worker["environment"]
+    api = compose["services"]["api"]
+    api_environment = api["environment"]
 
     assert worker_environment["RUSA_MODEL_API_KEY"] == ""
+    assert api_environment["SSL_CERT_FILE"] == "/run/secrets/rusa-internal-ca.crt"
+    assert any(
+        "/run/secrets/rusa-internal-ca.crt:ro" in volume
+        for volume in api["volumes"]
+    )
+    assert worker["depends_on"]["api"]["condition"] == "service_healthy"
     assert worker_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "true"
     assert worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"].startswith(
         "${RUSA_WORKER_INFERENCE_BASE_URL:?"
