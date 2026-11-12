@@ -27,13 +27,16 @@ misrepresented as a selected or trained RusaAi-Edge model.
    checkpoint, tokenizer, artifact, training, and benchmark states as pending.
 3. Use llama.cpp with GGUF Q4_K_M for the CPU deployment baseline, GPU
    offload zero, one active generation, 4K initial context, and 8K only after
-   target-device memory validation.
+   target-device memory validation. RusaModels owns the GGUF artifact and
+   runtime; RusaAi calls the authenticated RusaModels Model Server through its
+   Model Access Gateway.
 4. Replace semaphore waiting accounting with a bounded FIFO admission queue
    that handles timeout and cancellation without leaking a reserved slot.
 5. Set rusa-cpu-16 (16-GB) to three waiting requests. Configure rusa-edge-8
-   (8-GB) to one waiting request and add a dedicated Compose resource overlay.
-   The overlay caps all five service memory ceilings at 5 GiB combined; these
-   are conservative implementation limits, not measured performance claims.
+   (8-GB) to one waiting request and add a dedicated RusaAi Control Plane
+   Compose resource overlay. Its four service memory ceilings total 2 GiB;
+   RusaModels Model Plane memory is budgeted separately. No combined 8-GB
+   Model Plane/Control Plane fit is certified by these limits.
 6. Keep the current six-role AICode SFT experiment isolated from the
    RusaAi-Edge neural-core target.
 7. Use `rusaai-cpu-smoke-test` as the CPU sample alias while no approved
@@ -46,12 +49,14 @@ misrepresented as a selected or trained RusaAi-Edge model.
 - The previous MoE/Opus blueprint is removed from the active model target.
 - The CPU sample profile uses a smoke-test alias and does not misidentify an
   arbitrary GGUF as the not-yet-built RusaAi-Edge model.
-- The API admission queue is FIFO and bounded within the API process.
-- llama.cpp's one parallel slot remains the cross-process guard because
-  worker inference currently bypasses the API admission queue.
-- The full shared cross-process scheduler, model registry, residency manager,
-  model checkpoint selection, tokenizer selection, training, and benchmarks
-  remain future work.
+- The API admission queue is bounded and FIFO. With the PostgreSQL scheduler
+  configured, API replicas share durable queue state and active slots; the
+  in-memory controller is a development fallback.
+- Worker inference passes through the RusaAi API gateway and the same admission
+  controller. The Worker never calls llama.cpp or the RusaModels runtime directly.
+- RusaModels owns model registry, artifact lifecycle, runtime loading and
+  residency. The full model checkpoint selection, tokenizer selection,
+  training, and target-device benchmarks remain future work.
 - Existing AICode, tenant isolation, queue, audit, sandbox, and CI controls
   remain in place.
 
@@ -59,9 +64,9 @@ misrepresented as a selected or trained RusaAi-Edge model.
 
 - Unit tests assert the exact model dimensions and parameter count.
 - Unit tests cover queue capacity, FIFO handoff, timeout cleanup, cancellation,
-  and invalid release.
-- Compose tests assert one active inference, the non-canonical smoke-test
-  alias, CPU-only offload, the configured batch/ubatch defaults, and bounded
-  8-GB service memory/queue settings.
+  durable PostgreSQL slot leasing, and invalid release.
+- Compose tests assert the RusaAi-to-RusaModels Model Plane boundary, one active
+  inference, the smoke-test model alias, tenant-scoped Worker gateway routing,
+  and bounded 8-GB Control Plane memory/queue settings.
 - Full repository CI is the final gate for this branch. No production
   certification is claimed by this ADR.
