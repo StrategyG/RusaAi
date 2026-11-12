@@ -744,7 +744,6 @@ class PostgresInferenceAdmissionController:
             self._owner_ids.pop(request_id, None)
             self._owner_tasks.pop(request_id, None)
             self._lease_lost.discard(request_id)
-            self._lease_lost.discard(request_id)
             self._local_active = max(0, self._local_active - 1)
             INFERENCE_ACTIVE_GENERATIONS.dec()
 
@@ -779,3 +778,4 @@ class PostgresInferenceAdmissionController:
                 self._local_active = max(0, self._local_active - 1)
                 INFERENCE_ACTIVE_GENERATIONS.dec()
             self._owner_tasks.pop(request_id, None)
+            self._lease_lost.discard(request_id)
