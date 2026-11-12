@@ -208,6 +208,10 @@ class RuntimeConfig:
                     errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
                 if self._looks_placeholder(model_url.hostname):
                     errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
+                if model_url.path.rstrip("/") != "/openai/v1" or model_url.query or model_url.fragment:
+                    errors.append(
+                        "RUSA_MODEL_BASE_URL must target the RusaModels /openai/v1 endpoint"
+                    )
         if self.environment == "production" and require_model_api_key:
             if not self.model_api_key:
                 errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
@@ -238,6 +242,11 @@ class RuntimeConfig:
         elif len(self.metrics_api_key.encode("utf-8")) < 32 or self._looks_placeholder(self.metrics_api_key):
             missing.append("RUSA_METRICS_API_KEY must be a real secret of at least 32 UTF-8 bytes")
         missing.extend(self._validate_tenants_and_model())
+        if os.getenv("RUSA_MODEL_HEALTH_URL"):
+            missing.append(
+                "RUSA_MODEL_HEALTH_URL override is forbidden in production; "
+                "readiness must authenticate against the RusaModels /openai/v1/models route"
+            )
         if os.getenv("RUSA_LOCAL_MODEL_PATH") or os.getenv("RUSA_MODEL_PATH"):
             missing.append(
                 "RUSA_LOCAL_MODEL_PATH/RUSA_MODEL_PATH are forbidden in the production Control Plane; "
