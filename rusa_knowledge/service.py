@@ -88,10 +88,12 @@ class KnowledgeService:
             if not ready:
                 store.close()
                 required_migrations = (
-                    "migrations/007_rag_knowledge_pgvector.sql and "
-                    "migrations/009_knowledge_embedding_384.sql"
+                    "migrations/007_rag_knowledge_pgvector.sql, "
+                    "migrations/009_knowledge_embedding_384.sql, and "
+                    "migrations/011_rag_agent_project_scope.sql"
                     if dimensions == 384
-                    else "migrations/007_rag_knowledge_pgvector.sql"
+                    else "migrations/007_rag_knowledge_pgvector.sql and "
+                    "migrations/011_rag_agent_project_scope.sql"
                 )
                 raise RuntimeError(
                     f"knowledge database is not ready; apply {required_migrations}"
