@@ -21,6 +21,8 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
+    # The Worker reaches inference only through the RusaAi gateway.
+    # It must not receive the Model Plane endpoint or its service credential.
     monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
