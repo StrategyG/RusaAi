@@ -42,6 +42,7 @@ class RuntimeConfig:
     model_api_key: str | None = None
     model_telemetry_url: str | None = None
     model_telemetry_api_key: str | None = None
+    model_artifact_sha256: str | None = None
     aicode_enabled: bool = False
 
     @staticmethod
@@ -153,6 +154,7 @@ class RuntimeConfig:
             model_api_key=os.getenv("RUSA_MODEL_API_KEY"),
             model_telemetry_url=os.getenv("RUSA_MODEL_TELEMETRY_URL"),
             model_telemetry_api_key=os.getenv("RUSA_MODEL_TELEMETRY_API_KEY"),
+            model_artifact_sha256=os.getenv("RUSA_MODEL_ARTIFACT_SHA256"),
             aicode_enabled=aicode_enabled,
         )
 
@@ -259,6 +261,12 @@ class RuntimeConfig:
         ):
             missing.append(
                 "RUSA_MODEL_TELEMETRY_API_KEY must be a real secret of at least 32 UTF-8 bytes"
+            )
+        if not self.model_artifact_sha256 or not re.fullmatch(
+            r"[0-9a-f]{64}", self.model_artifact_sha256
+        ):
+            missing.append(
+                "RUSA_MODEL_ARTIFACT_SHA256 must be the externally approved 64-character artifact digest"
             )
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
