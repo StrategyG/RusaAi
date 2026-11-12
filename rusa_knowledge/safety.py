@@ -57,7 +57,11 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
         raise ValueError("agent_ids must be a unique array of valid agent identifiers")
     if knowledge_scope == "agent_specific" and not agent_ids:
         raise ValueError("agent_specific knowledge requires at least one agent_id")
+    if knowledge_scope == "shared" and agent_ids:
+        raise ValueError("shared knowledge must not declare agent_ids")
     project_id = metadata.get("project_id")
+    if project_id is not None and knowledge_scope != "agent_specific":
+        raise ValueError("project_id requires agent_specific knowledge_scope")
     if project_id is not None and (
         not isinstance(project_id, str)
         or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", project_id)
