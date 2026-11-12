@@ -353,7 +353,10 @@ def test_runtime_builds_workers_with_tenant_and_task_agent_bound_providers(tmp_p
         CapturingOrchestrator,
     )
 
-    orchestrator, workspace = asyncio.run(runtime._build_orchestrator(task(), "tenant-a"))
+    coding_task = task()
+    orchestrator, workspace = asyncio.run(
+        runtime._build_orchestrator(coding_task, "tenant-a")
+    )
 
     assert isinstance(orchestrator, CapturingOrchestrator)
     assert workspace.endswith("tenant-a-workspace")
@@ -363,4 +366,4 @@ def test_runtime_builds_workers_with_tenant_and_task_agent_bound_providers(tmp_p
     assert [provider.agent_id for provider in bound_providers] == [
         role.value for role in AICodeOrchestrator.PIPELINE
     ]
-    assert all(provider.task_id == str(task().task_id) for provider in bound_providers)
+    assert all(provider.task_id == str(coding_task.task_id) for provider in bound_providers)
