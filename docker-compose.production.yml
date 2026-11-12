@@ -36,6 +36,7 @@ services:
       RUSA_WORKER_INFERENCE_API_KEYS: ""
       RUSA_WORKER_INFERENCE_DEADLINE_MS: ""
       SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
+      PGSSLROOTCERT: /run/secrets/rusa-internal-ca.crt
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -135,6 +136,7 @@ services:
       RUSA_METRICS_BIND: 0.0.0.0
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
       SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
+      PGSSLROOTCERT: /run/secrets/rusa-internal-ca.crt
       RUSA_DOCKER_SOCKET: /run/docker.sock
       DOCKER_HOST: unix:///run/docker.sock
     read_only: true
