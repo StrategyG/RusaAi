@@ -40,6 +40,9 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
         "/run/secrets/rusa-internal-ca.crt:ro" in volume
         for volume in compose["services"]["worker"]["volumes"]
     )
+    assert compose["services"]["worker"]["depends_on"]["api"]["condition"] == (
+        "service_healthy"
+    )
 
 
 def test_cpu_compose_routes_api_to_private_gguf_server():
