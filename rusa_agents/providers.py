@@ -277,6 +277,25 @@ class OpenAIChatInferenceProvider:
         ) as client:
             async with client.stream("GET", readiness_url, headers=self._headers()) as response:
                 response.raise_for_status()
+                if self.readiness_url is None:
+                    # The authenticated Model Server model-list route is the
+                    # default readiness contract. A healthy endpoint is not
+                    # sufficient if it does not serve the configured model ID.
+                    body = await _read_limited_json(response, self.max_response_bytes)
+                    entries = body.get("data") if isinstance(body, dict) else None
+                    if not isinstance(entries, list):
+                        raise RuntimeError(
+                            "Model Server readiness response is missing its model data list"
+                        )
+                    model_ids = {
+                        entry.get("id")
+                        for entry in entries
+                        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                    }
+                    if self.default_model not in model_ids:
+                        raise RuntimeError(
+                            "Configured RUSA_MODEL_NAME is not served by the RusaModels Model Server"
+                        )
             return True
 
     async def complete(
