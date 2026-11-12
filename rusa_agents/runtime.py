@@ -117,10 +117,15 @@ class AICodeRuntime:
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
         )
-        workers = [
-            AutonomousCodeWorker(role, tenant_provider, gateway)
-            for role in AICodeOrchestrator.PIPELINE
-        ]
+        workers = []
+        for role in AICodeOrchestrator.PIPELINE:
+            agent_provider_factory = getattr(tenant_provider, "for_agent", None)
+            agent_provider = (
+                agent_provider_factory(str(task.task_id), role.value)
+                if callable(agent_provider_factory)
+                else tenant_provider
+            )
+            workers.append(AutonomousCodeWorker(role, agent_provider, gateway))
         return (
             AICodeOrchestrator(
                 workers=workers,
