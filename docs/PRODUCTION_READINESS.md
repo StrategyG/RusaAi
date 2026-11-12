@@ -6,6 +6,27 @@ This ledger describes the capabilities present on the integration branch and sep
 automated code validation from deployment certification. Passing CI is evidence only
 for the exact commit and checks that ran; it is not a production approval.
 
+## Canonical shared knowledge-store decision (2026-11-12)
+
+ADR-0002 selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
+shared Agent/Worker knowledge store, subject to implementation and release gates.
+
+- SQLite/FTS5 remains device-local memory/state; it is not a shared-corpus replica.
+- RAG_Cerdas IM19 remains separate; dual-write, mirroring, bulk synchronization and
+  cross-read are not authorized.
+- RusaModels remains the Model Plane and is accessed through an authenticated API.
+- The 1,536-dimensional and 384-dimensional vector spaces remain separate. The
+  final production embedding profile is not selected.
+- This decision does not authorize production migrations, ingestion, embeddings,
+  index writes, publication or deployment.
+
+Open RusaAi integration work requires reconciliation before merge:
+- PR #82 proposes RAG agent/project scope and version history but is draft and
+  introduces migration numbers that collide with current main and PR #109.
+- PR #109 introduces inference admission migration 010.
+- PR #111 is a combined CPU/inference integration candidate and must pass exact-head CI.
+- All migrations must be re-sequenced into one reviewed, unique ordered inventory.
+
 ## Delivered in this integration branch
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
@@ -47,6 +68,9 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
 | Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | Automated tests added; latest run pending |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
+| Knowledge governance | Rights, source versions, review, human approval, publication, deletion and audit lifecycle | Not implemented in full |
+| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | Pending PR #82 reconciliation |
+| Retrieval quality | Human-reviewed Indonesian/English gold set, citations, groundedness and security evaluation | Not measured |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
 | Reliability operations | Backup/restore drill, rollback rehearsal, alerting and incident runbook | Not completed |
@@ -63,8 +87,12 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 - Apply migrations `001` through `006` in order using the database owner before
   enabling production task intake. The API runtime must not have schema-owner or
   superuser privileges.
-- Apply `migrations/005_rag_knowledge_pgvector.sql` only on a pgvector-enabled
+- Apply `migrations/007_rag_knowledge_pgvector.sql` only on a pgvector-enabled
   knowledge database and configure the restricted `rusa_knowledge_worker` role.
+  Apply `migrations/009_knowledge_embedding_384.sql` only when the separate
+  384-dimensional profile is deliberately enabled and its model contract passes.
+- Do not apply migrations introduced by open PRs until the combined migration
+  inventory has unique numbering and its forward/rollback tests pass.
 - Keep MCP private behind TLS/network policy. Never store raw bearer tokens in
   `RUSA_MCP_TENANT_KEYS`; store SHA-256 digests mapped to tenant IDs.
 - Do not commit model weights, credentials, tenant bearer tokens, or private
