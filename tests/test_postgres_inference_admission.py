@@ -31,7 +31,13 @@ def _hold_scheduler_slot_in_process(dsn, label, release_event, result_queue):
         await controller.acquire()
         request_id = str(next(iter(controller._owner_ids)))
         result_queue.put((label, request_id))
-        await asyncio.to_thread(release_event.wait)
+        if release_event is None:
+            # Crash-recovery tests terminate this process deliberately. Keep
+            # the wait primitive process-local so termination cannot strand
+            # a shared multiprocessing.Condition lock in the parent.
+            await asyncio.Event().wait()
+        else:
+            await asyncio.to_thread(release_event.wait)
         await controller.release()
 
     asyncio.run(run())
@@ -388,11 +394,10 @@ def test_fifo_admission_is_shared_across_separate_os_processes(scheduler_databas
 
 def test_process_crash_recovers_after_global_lease_expiry(scheduler_database):
     context = multiprocessing.get_context("spawn")
-    release_event = context.Event()
     result_queue = context.Queue()
     process = context.Process(
         target=_hold_scheduler_slot_in_process,
-        args=(scheduler_database, "crashed-process", release_event, result_queue),
+        args=(scheduler_database, "crashed-process", None, result_queue),
     )
     controller = make_controller(scheduler_database, queue_timeout=10.0)
 
@@ -419,7 +424,6 @@ def test_process_crash_recovers_after_global_lease_expiry(scheduler_database):
     try:
         asyncio.run(scenario())
     finally:
-        release_event.set()
         if process.is_alive():
             process.terminate()
             process.join(timeout=3)
