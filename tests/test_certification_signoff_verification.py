@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 
 from rusa_agents.certification import signoff_verification as verifier
