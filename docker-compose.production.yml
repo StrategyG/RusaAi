@@ -4,7 +4,6 @@ services:
     pull_policy: always
     restart: unless-stopped
     init: true
-    env_file: .env
     environment:
       ENVIRONMENT: production
       RUSA_API_DATABASE_URL: ${RUSA_API_DATABASE_URL:?Set the API PostgreSQL login DSN}
@@ -13,21 +12,30 @@ services:
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
-      # The API authenticates worker principals from hashes; it must never receive raw worker keys.
+      RUSA_METRICS_API_KEY: ${RUSA_METRICS_API_KEY:?Set the operator-only metrics key}
+      RUSA_TENANT_REPOSITORIES: ${RUSA_TENANT_REPOSITORIES:?Set tenant repository allowlists}
+      RUSA_MODEL_BASE_URL: ${RUSA_MODEL_BASE_URL:?Set the approved HTTPS model gateway URL}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:?Set the approved backend model alias}
+      RUSA_MODEL_API_KEY: ${RUSA_MODEL_API_KEY:?Set the model gateway service key}
+      RUSA_MODEL_TIMEOUT_SECONDS: ${RUSA_MODEL_TIMEOUT_SECONDS:-300}
+      RUSA_MODEL_MAX_RESPONSE_BYTES: ${RUSA_MODEL_MAX_RESPONSE_BYTES:-2000000}
+      RUSA_MODEL_HEALTH_URL: ${RUSA_MODEL_HEALTH_URL:-}
+      RUSA_MAX_CONCURRENT_INFERENCES: ${RUSA_MAX_CONCURRENT_INFERENCES:-1}
+      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-3}
+      RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
+      RUSA_INFERENCE_LEASE_SECONDS: ${RUSA_INFERENCE_LEASE_SECONDS:-30}
+      RUSA_RATE_LIMIT_CHAT_PER_MINUTE: ${RUSA_RATE_LIMIT_CHAT_PER_MINUTE:-60}
+      RUSA_RATE_LIMIT_TASKS_PER_MINUTE: ${RUSA_RATE_LIMIT_TASKS_PER_MINUTE:-10}
+      RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE: ${RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE:-120}
+      RUSA_MAX_REQUEST_BYTES: ${RUSA_MAX_REQUEST_BYTES:-1048576}
+      RUSA_REQUEST_BODY_TIMEOUT_SECONDS: ${RUSA_REQUEST_BODY_TIMEOUT_SECONDS:-15}
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      # Worker-only raw credentials and execution settings are never injected into API.
       RUSA_WORKER_INFERENCE_GATEWAY: "false"
       RUSA_WORKER_INFERENCE_BASE_URL: ""
       RUSA_WORKER_INFERENCE_API_KEYS: ""
       RUSA_WORKER_INFERENCE_DEADLINE_MS: ""
       SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
-      RUSA_AUDIT_HMAC_KEY: ""
-      RUSA_GITHUB_TOKEN: ""
-      RUSA_SANDBOX_IMAGE: ""
-      RUSA_WORKSPACE_ROOT: ""
-      RUSA_GIT_MIRROR_ROOT: ""
-      RUSA_DOCKER_SOCKET: ""
-      RUSA_DOCKER_GID: ""
-      POSTGRES_PASSWORD: ""
-      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
@@ -84,7 +92,6 @@ services:
     restart: unless-stopped
     init: true
     command: ["python", "-m", "rusa_agents.worker_main"]
-    env_file: .env
     environment:
       ENVIRONMENT: production
       RUSA_WORKER_DATABASE_URL: ${RUSA_WORKER_DATABASE_URL:?Set the worker PostgreSQL login DSN}
@@ -92,20 +99,44 @@ services:
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
-      RUSA_MODEL_API_KEY: ""
-      # Digest registry contains tenant-bound principals; raw worker keys are
-      # separately injected from the production secret manager.
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
+      RUSA_METRICS_API_KEY: ""
+      RUSA_MODEL_BASE_URL: ${RUSA_MODEL_BASE_URL:?Set the approved HTTPS model gateway URL}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:?Set the approved backend model alias}
+      RUSA_MODEL_API_KEY: ""
+      RUSA_MODEL_TIMEOUT_SECONDS: ${RUSA_MODEL_TIMEOUT_SECONDS:-300}
+      RUSA_MODEL_MAX_RESPONSE_BYTES: ${RUSA_MODEL_MAX_RESPONSE_BYTES:-2000000}
       RUSA_WORKER_INFERENCE_GATEWAY: "true"
       RUSA_WORKER_INFERENCE_BASE_URL: ${RUSA_WORKER_INFERENCE_BASE_URL:?Set the HTTPS worker-facing API gateway URL}
       RUSA_WORKER_INFERENCE_API_KEYS: ${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference secrets}
       RUSA_WORKER_INFERENCE_DEADLINE_MS: ${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}
-      SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
-      RUSA_METRICS_API_KEY: ""
-      POSTGRES_PASSWORD: ""
-      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
-      DOCKER_HOST: unix:///run/docker.sock
+      RUSA_TENANT_REPOSITORIES: ${RUSA_TENANT_REPOSITORIES:?Set tenant repository allowlists}
+      RUSA_AUDIT_HMAC_KEY: ${RUSA_AUDIT_HMAC_KEY:?Set the audit HMAC key}
+      RUSA_WORKSPACE_ROOT: ${RUSA_WORKSPACE_ROOT:?Set the persistent workspace path}
+      RUSA_GIT_MIRROR_ROOT: ${RUSA_GIT_MIRROR_ROOT:?Set the persistent Git mirror path}
+      RUSA_GITHUB_TOKEN: ${RUSA_GITHUB_TOKEN:?Set the repository-scoped GitHub token}
+      RUSA_SANDBOX_IMAGE: ${RUSA_SANDBOX_IMAGE:?Set the immutable sandbox image digest}
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
+      RUSA_MAX_REPAIR_CYCLES: ${RUSA_MAX_REPAIR_CYCLES:-2}
+      RUSA_TASK_TIMEOUT_SECONDS: ${RUSA_TASK_TIMEOUT_SECONDS:-3600}
+      RUSA_CI_TIMEOUT_SECONDS: ${RUSA_CI_TIMEOUT_SECONDS:-900}
+      RUSA_CI_POLL_SECONDS: ${RUSA_CI_POLL_SECONDS:-15}
+      RUSA_RAG_ENABLED: ${RUSA_RAG_ENABLED:-false}
+      RUSA_KNOWLEDGE_DATABASE_URL: ${RUSA_KNOWLEDGE_DATABASE_URL:-}
+      RUSA_KNOWLEDGE_COLLECTION: ${RUSA_KNOWLEDGE_COLLECTION:-agent}
+      RUSA_KNOWLEDGE_DB_ROLE: ${RUSA_KNOWLEDGE_DB_ROLE:-rusa_knowledge_worker}
+      RUSA_EMBEDDING_BASE_URL: ${RUSA_EMBEDDING_BASE_URL:-}
+      RUSA_EMBEDDING_MODEL: ${RUSA_EMBEDDING_MODEL:-rusa-embedding-small}
+      RUSA_EMBEDDING_API_KEY: ${RUSA_EMBEDDING_API_KEY:-}
+      RUSA_EMBEDDING_DIMENSIONS: ${RUSA_EMBEDDING_DIMENSIONS:-384}
+      RUSA_EMBEDDING_INPUT_TYPE_ENABLED: ${RUSA_EMBEDDING_INPUT_TYPE_ENABLED:-true}
+      RUSA_EMBEDDING_TIMEOUT: ${RUSA_EMBEDDING_TIMEOUT:-120}
+      RUSA_METRICS_PORT: ${RUSA_METRICS_PORT:-9100}
       RUSA_METRICS_BIND: 0.0.0.0
+      RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
+      SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
+      RUSA_DOCKER_SOCKET: /run/docker.sock
+      DOCKER_HOST: unix:///run/docker.sock
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
