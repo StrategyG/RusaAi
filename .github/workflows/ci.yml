@@ -200,9 +200,9 @@ jobs:
           RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
           RUSA_INFERENCE_LEASE_SECONDS: "30"
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
-          RUSA_MODEL_BASE_URL: https://model.internal/v1
-          RUSA_MODEL_NAME: rusa-ai
-          RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -223,15 +223,9 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
-          RUSA_GGUF_MODEL_PATH: /srv/rusa/models/model.gguf
-          RUSA_GGUF_MODEL_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
-          LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
-          RUSA_MODEL_NAME: rusaai-cpu-smoke-test
-          RUSA_MODEL_CONTEXT: "4096"
-          RUSA_CPU_THREADS: "4"
-          RUSA_MODEL_PARALLEL: "1"
-          RUSA_MODEL_MEMORY_LIMIT: 8g
-          RUSA_MODEL_CPU_LIMIT: "4.0"
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
           RUSA_MAX_CONCURRENT_INFERENCES: "1"
           RUSA_MAX_WAITING_INFERENCES: "3"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
@@ -249,15 +243,9 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
-          RUSA_GGUF_MODEL_PATH: /srv/rusa/models/model.gguf
-          RUSA_GGUF_MODEL_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
-          LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
-          RUSA_MODEL_NAME: rusaai-cpu-smoke-test
-          RUSA_MODEL_CONTEXT: "4096"
-          RUSA_CPU_THREADS: "2"
-          RUSA_MODEL_PARALLEL: "1"
-          RUSA_MODEL_MEMORY_LIMIT: 3g
-          RUSA_MODEL_CPU_LIMIT: "2.0"
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
           RUSA_MAX_CONCURRENT_INFERENCES: "1"
           RUSA_MAX_WAITING_INFERENCES: "1"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
