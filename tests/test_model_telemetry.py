@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -59,6 +60,7 @@ def test_model_telemetry_client_authenticates_and_checks_model_identity():
                 "model_id": "rusaai-edge-derived",
                 "peak_ram_mb": 2048.0,
                 "current_ram_mb": 1800.0,
+                "sampled_at_unix": time.time(),
             },
             request=request,
         )
@@ -86,6 +88,7 @@ def test_model_telemetry_client_rejects_wrong_model_identity():
                 "model_id": "different-model",
                 "peak_ram_mb": 2048.0,
                 "current_ram_mb": 1800.0,
+                "sampled_at_unix": time.time(),
             },
             request=request,
         )
@@ -112,6 +115,7 @@ def test_model_telemetry_client_rejects_missing_or_non_finite_memory_values():
                     "model_id": "rusaai-edge-derived",
                     "peak_ram_mb": value,
                     "current_ram_mb": 1800.0,
+                    "sampled_at_unix": time.time(),
                 },
                 request=request,
             )
@@ -125,3 +129,30 @@ def test_model_telemetry_client_rejects_missing_or_non_finite_memory_values():
                     transport=transport,
                 )
             )
+
+
+
+def test_model_telemetry_client_rejects_stale_samples():
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "schema_version": "1.0",
+                "model_id": "rusaai-edge-derived",
+                "peak_ram_mb": 2048.0,
+                "current_ram_mb": 1800.0,
+                "sampled_at_unix": time.time() - 120,
+            },
+            request=request,
+        )
+    )
+
+    with pytest.raises(ModelTelemetryError, match="stale"):
+        asyncio.run(
+            fetch_model_telemetry(
+                "https://model.internal/v1/telemetry",
+                "t" * 40,
+                "rusaai-edge-derived",
+                transport=transport,
+            )
+        )
