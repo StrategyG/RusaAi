@@ -22,7 +22,10 @@ def set_api_environment(monkeypatch):
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusaai-edge-derived")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.setenv("RUSA_MODEL_TELEMETRY_URL", "https://model.internal/v1/telemetry")
+    monkeypatch.setenv("RUSA_MODEL_TELEMETRY_API_KEY", "t" * 48)
 
 
 def set_worker_environment(monkeypatch):
@@ -41,6 +44,7 @@ def set_worker_environment(monkeypatch):
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
     monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusaai-edge-derived")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
     worker_key = "w" * 48
     worker_key_digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
@@ -222,3 +226,29 @@ def test_production_worker_requires_tls_api_gateway(monkeypatch):
 def test_default_model_name_uses_safe_smoke_alias_until_checkpoint_is_approved(monkeypatch):
     monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
     assert RuntimeConfig.from_env().model_name == "rusaai-cpu-smoke-test"
+
+
+
+def test_production_api_rejects_missing_model_telemetry_credentials(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_TELEMETRY_URL", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_TELEMETRY_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_TELEMETRY_URL"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_api_rejects_untrusted_model_telemetry_endpoint(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_TELEMETRY_URL", "http://model.internal/v1/telemetry")
+
+    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_runtime_rejects_unapproved_smoke_model_identity(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test")
+
+    with pytest.raises(RuntimeError, match="smoke-test alias"):
+        RuntimeConfig.from_env().validate_api()
