@@ -49,6 +49,8 @@ class RuntimeConfig:
         lowered = value.strip().lower()
         if not lowered:
             return False
+        if any(character in lowered for character in "<>{}"):
+            return True
         markers = (
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
@@ -185,6 +187,10 @@ class RuntimeConfig:
                 for repository in repositories
             ):
                 errors.append(f"tenant {tenant} has an invalid owner/repository allowlist entry")
+        if not os.getenv("RUSA_MODEL_NAME", "").strip():
+            errors.append(
+                "RUSA_MODEL_NAME must explicitly match the configured RusaModels Model Server model ID"
+            )
         if not self.model_base_url:
             errors.append("RUSA_MODEL_BASE_URL is required")
         else:
@@ -228,6 +234,11 @@ class RuntimeConfig:
         elif len(self.metrics_api_key.encode("utf-8")) < 32 or self._looks_placeholder(self.metrics_api_key):
             missing.append("RUSA_METRICS_API_KEY must be a real secret of at least 32 UTF-8 bytes")
         missing.extend(self._validate_tenants_and_model())
+        if os.getenv("RUSA_LOCAL_MODEL_PATH") or os.getenv("RUSA_MODEL_PATH"):
+            missing.append(
+                "RUSA_LOCAL_MODEL_PATH/RUSA_MODEL_PATH are forbidden in the production Control Plane; "
+                "RusaModels owns model artifact loading and inference"
+            )
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
 
