@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from rusa_agents.audit import AuditLog
 from rusa_agents.contracts import (
     CodingTask,
@@ -349,3 +351,11 @@ def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, m
     assert runtime.provider.requested_tenants == ["tenant-a"]
     assert captured["workers"]
     assert all(worker.provider is tenant_provider for worker in captured["workers"])
+
+
+def test_knowledge_project_scope_is_derived_from_authorized_repository_target():
+    assert AICodeRuntime._knowledge_project_scope("StrategyG/RusaAi") == "strategyg--rusaai"
+    with pytest.raises(ValueError, match="repository target"):
+        AICodeRuntime._knowledge_project_scope("StrategyG")
+    with pytest.raises(ValueError, match="unsupported project-scope"):
+        AICodeRuntime._knowledge_project_scope("StrategyG/Repo With Spaces")
