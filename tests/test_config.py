@@ -26,6 +26,7 @@ def set_api_environment(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
     monkeypatch.setenv("RUSA_MODEL_TELEMETRY_URL", "https://model.internal/v1/telemetry")
     monkeypatch.setenv("RUSA_MODEL_TELEMETRY_API_KEY", "t" * 48)
+    monkeypatch.setenv("RUSA_MODEL_ARTIFACT_SHA256", "a" * 64)
 
 
 def set_worker_environment(monkeypatch):
@@ -274,3 +275,16 @@ def test_production_worker_rejects_openai_only_gateway_mode(monkeypatch):
 
     with pytest.raises(RuntimeError, match="CONTRACT=true"):
         RuntimeConfig.from_env().validate_worker()
+
+
+
+def test_production_api_rejects_missing_or_invalid_model_artifact_digest(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_ARTIFACT_SHA256", raising=False)
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_ARTIFACT_SHA256"):
+        RuntimeConfig.from_env().validate_api()
+
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_ARTIFACT_SHA256", "not-a-digest")
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_ARTIFACT_SHA256"):
+        RuntimeConfig.from_env().validate_api()
