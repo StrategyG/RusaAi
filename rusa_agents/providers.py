@@ -5,10 +5,16 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
+from uuid import uuid4
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from rusa_agents.inference_contracts import (
+    validate_inference_request,
+    validate_inference_response,
+)
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,13 @@ class OpenAICompatibleProvider:
         if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise ValueError("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
         self.gateway_mode = gateway_value in {"1", "true", "yes", "on"}
+        contract_value = os.getenv("RUSA_WORKER_INFERENCE_CONTRACT", "false").strip().lower()
+        if contract_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ValueError("RUSA_WORKER_INFERENCE_CONTRACT must be a boolean value")
+        self.contract_mode = contract_value in {"1", "true", "yes", "on"}
+        self.contract_url = os.getenv("RUSA_WORKER_INFERENCE_CONTRACT_URL", "").strip()
+        self.task_id: str | None = None
+        self.agent_id: str | None = None
         try:
             tenant_keys = json.loads(os.getenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}"))
         except json.JSONDecodeError as exc:
@@ -133,6 +146,10 @@ class OpenAICompatibleProvider:
             raise ValueError("Provider timeout must be positive and max_retries cannot be negative")
         if not self.base_url:
             raise ValueError("RUSA_MODEL_BASE_URL must point to an OpenAI-compatible chat endpoint")
+        if self.contract_mode and not self.gateway_mode:
+            raise ValueError("RUSA_WORKER_INFERENCE_CONTRACT requires the authenticated API gateway")
+        if self.contract_mode and not self.contract_url:
+            raise ValueError("RUSA_WORKER_INFERENCE_CONTRACT_URL is required in contract mode")
 
     def for_tenant(self, tenant_id: str) -> OpenAICompatibleProvider:
         """Return a tenant-scoped gateway client without changing the worker contract."""
@@ -143,7 +160,7 @@ class OpenAICompatibleProvider:
             raise PermissionError(
                 f"No worker inference credential is configured for tenant {tenant_id!r}"
             )
-        return OpenAICompatibleProvider(
+        provider = OpenAICompatibleProvider(
             base_url=self.base_url,
             model=self.model,
             api_key=api_key,
@@ -152,8 +169,87 @@ class OpenAICompatibleProvider:
             max_response_bytes=self.max_response_bytes,
             transport=self.transport,
         )
+        provider.contract_mode = self.contract_mode
+        provider.contract_url = self.contract_url
+        return provider
+
+    def for_agent(self, task_id: str, agent_id: str) -> OpenAICompatibleProvider:
+        """Bind stable task/agent identity to the v1 inference request envelope."""
+        if not self.contract_mode:
+            return self
+        normalized_task_id = str(task_id)
+        if not normalized_task_id.startswith("TASK-"):
+            normalized_task_id = f"TASK-{normalized_task_id}"
+        provider = OpenAICompatibleProvider(
+            base_url=self.base_url,
+            model=self.model,
+            api_key=self.api_key,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            max_response_bytes=self.max_response_bytes,
+            transport=self.transport,
+        )
+        provider.contract_mode = True
+        provider.contract_url = self.contract_url
+        provider.task_id = normalized_task_id
+        provider.agent_id = agent_id
+        return provider
+
+    async def _complete_contract(self, *, system_prompt: str, user_prompt: str) -> str:
+        if not self.task_id or not self.agent_id:
+            raise RuntimeError("Contract-mode inference provider is missing task/agent identity")
+        payload: dict[str, Any] = {
+            "schema_version": "1.0",
+            "request_id": f"REQ-{uuid4().hex}",
+            "task_id": self.task_id,
+            "agent_id": self.agent_id,
+            "model_id": self.model,
+            "capability_profile": os.getenv("RUSA_WORKER_CAPABILITY_PROFILE", "ASTRA"),
+            "reasoning_mode": os.getenv("RUSA_WORKER_REASONING_MODE", "STANDARD"),
+            "context": {
+                "system_context": [{"type": "agent_system_prompt", "content": system_prompt}],
+                "project_context": [{"type": "task_prompt", "content": user_prompt}],
+                "retrieved_evidence": [],
+            },
+            "generation": {"max_output_tokens": 4096},
+            "constraints": {
+                "deadline_ms": self.gateway_deadline_ms,
+                "gpu_offload": False,
+            },
+        }
+        request_errors = validate_inference_request(payload)
+        if request_errors:
+            raise ValueError("Worker generated an invalid inference request envelope")
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
+        timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=False, transport=self.transport
+        ) as client:
+            async with client.stream(
+                "POST",
+                self.contract_url,
+                headers=headers,
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                body = await _read_limited_json(response, self.max_response_bytes)
+        response_errors = validate_inference_response(body)
+        if response_errors:
+            raise RuntimeError("Model Access Gateway returned an invalid response envelope")
+        if body["status"] != "COMPLETED":
+            raise RuntimeError("Model Access Gateway did not complete the inference request")
+        output = body["output"]
+        return json.dumps(output, ensure_ascii=False, separators=(",", ":"))
 
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
+        if self.contract_mode:
+            return await self._complete_contract(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -218,7 +314,9 @@ class OpenAICompatibleProvider:
         top_p: float = 1.0,
         max_tokens: int = 4096,
     ) -> AsyncIterator[InferenceStreamEvent]:
-        """Expose the same bounded SSE transport to agent-side callers."""
+        """Expose bounded SSE transport; v1 contract requests are completion-only."""
+        if self.contract_mode:
+            raise RuntimeError("Streaming is not exposed through the worker v1 inference contract")
         provider = OpenAIChatInferenceProvider(
             self.base_url,
             default_model=self.model,
