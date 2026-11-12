@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -14,6 +15,27 @@ TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
+
+
+def _document_fingerprint(
+    source_uri: str,
+    title: str,
+    content_hash: str,
+    metadata: dict[str, Any],
+) -> str:
+    payload = json.dumps(
+        {
+            "source_uri": source_uri,
+            "title": title,
+            "content_hash": content_hash,
+            "metadata": metadata,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _vector_literal(vector: list[float], dimensions: int) -> str:
@@ -138,7 +160,54 @@ class PostgresKnowledgeStore:
                     ),
                     to_regclass('public.rusa_knowledge_documents_scope_idx') IS NOT NULL,
                     to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL,
-                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL
+                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL,
+                    COALESCE((
+                        SELECT relrowsecurity AND relforcerowsecurity
+                        FROM pg_class
+                        WHERE oid = to_regclass('public.rusa_knowledge_document_versions')
+                    ), false),
+                    COALESCE((
+                        SELECT relrowsecurity AND relforcerowsecurity
+                        FROM pg_class
+                        WHERE oid = to_regclass('public.rusa_knowledge_version_chunks')
+                    ), false),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_document_versions'
+                          AND policyname='rusa_knowledge_document_versions_tenant_isolation'
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM pg_policies
+                        WHERE schemaname='public'
+                          AND tablename='rusa_knowledge_version_chunks'
+                          AND policyname='rusa_knowledge_version_chunks_tenant_isolation'
+                    ),
+                    to_regclass('public.rusa_knowledge_versions_document_idx') IS NOT NULL,
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_document_versions', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_document_versions', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_document_versions', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_document_versions', 'DELETE'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_version_chunks', 'SELECT'
+                    ),
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_version_chunks', 'INSERT'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_version_chunks', 'UPDATE'
+                    ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_version_chunks', 'DELETE'
+                    )
                 """,
                 (f"vector({self.dimensions})", self.embedding_column),
             ).fetchone()
@@ -177,6 +246,10 @@ class PostgresKnowledgeStore:
         if len(metadata_json.encode("utf-8")) > 16_384:
             raise ValueError("document metadata exceeds 16 KiB")
 
+        current_metadata = json.loads(metadata_json)
+        current_fingerprint = _document_fingerprint(
+            source_uri, title, content_hash, current_metadata
+        )
         rows = []
         for index, (content, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             if not content.strip() or len(content) > 20_000:
@@ -190,48 +263,121 @@ class PostgresKnowledgeStore:
                 )
             )
 
+        from psycopg import sql
+
+        version_embedding_column = sql.Identifier(self.embedding_column)
+        version_insert_sql = sql.SQL(
+            """
+            INSERT INTO rusa_knowledge_version_chunks
+                (tenant_id, version_id, chunk_index, content, {embedding_column}, metadata)
+            VALUES (%s, %s::uuid, %s, %s, %s::vector, %s::jsonb)
+            """
+        ).format(embedding_column=version_embedding_column)
+        current_insert_sql = sql.SQL(
+            """
+            INSERT INTO rusa_knowledge_chunks
+                (tenant_id, document_id, collection, chunk_index, content, {embedding_column}, metadata)
+            VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
+            """
+        ).format(embedding_column=version_embedding_column)
+
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
-            document = connection.execute(
+            lock_key = json.dumps(
+                [tenant_id, collection, source_uri],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (lock_key,),
+            )
+            existing = connection.execute(
                 """
-                INSERT INTO rusa_knowledge_documents
-                    (tenant_id, collection, source_uri, title, content_hash, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-                ON CONFLICT (tenant_id, collection, source_uri)
-                DO UPDATE SET
-                    title = EXCLUDED.title,
-                    content_hash = EXCLUDED.content_hash,
-                    metadata = EXCLUDED.metadata,
-                    updated_at = now()
-                RETURNING document_id
+                SELECT document_id
+                FROM rusa_knowledge_documents
+                WHERE tenant_id=%s AND collection=%s AND source_uri=%s
+                FOR UPDATE
                 """,
-                (tenant_id, collection, source_uri, title, content_hash, metadata_json),
+                (tenant_id, collection, source_uri),
             ).fetchone()
-            document_id = str(document[0])
+            if existing is None:
+                document = connection.execute(
+                    """
+                    INSERT INTO rusa_knowledge_documents
+                        (tenant_id, collection, source_uri, title, content_hash, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                    RETURNING document_id
+                    """,
+                    (tenant_id, collection, source_uri, title, content_hash, metadata_json),
+                ).fetchone()
+                document_id = str(document[0])
+            else:
+                document_id = str(existing[0])
+
+            existing_version = connection.execute(
+                """
+                SELECT version_id
+                FROM rusa_knowledge_document_versions
+                WHERE tenant_id=%s AND document_id=%s::uuid AND version_fingerprint=%s
+                """,
+                (tenant_id, document_id, current_fingerprint),
+            ).fetchone()
+            if existing_version is None:
+                version_number = connection.execute(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0) + 1
+                    FROM rusa_knowledge_document_versions
+                    WHERE tenant_id=%s AND document_id=%s::uuid
+                    """,
+                    (tenant_id, document_id),
+                ).fetchone()[0]
+                version = connection.execute(
+                    """
+                    INSERT INTO rusa_knowledge_document_versions
+                        (tenant_id, document_id, version_number, collection, source_uri,
+                         title, content_hash, version_fingerprint, metadata)
+                    VALUES (%s, %s::uuid, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    RETURNING version_id
+                    """,
+                    (
+                        tenant_id, document_id, version_number, collection, source_uri,
+                        title, content_hash, current_fingerprint, metadata_json,
+                    ),
+                ).fetchone()
+                version_id = str(version[0])
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        version_insert_sql,
+                        [
+                            (
+                                tenant_id, version_id, index, content, vector, chunk_metadata,
+                            )
+                            for index, content, vector, chunk_metadata in rows
+                        ],
+                    )
+            else:
+                version_id = str(existing_version[0])
+
+            connection.execute(
+                """
+                UPDATE rusa_knowledge_documents
+                SET title=%s, content_hash=%s, metadata=%s::jsonb,
+                    current_version_id=%s::uuid, updated_at=now()
+                WHERE tenant_id=%s AND document_id=%s::uuid
+                """,
+                (title, content_hash, metadata_json, version_id, tenant_id, document_id),
+            )
             connection.execute(
                 "DELETE FROM rusa_knowledge_chunks WHERE tenant_id=%s AND document_id=%s::uuid",
                 (tenant_id, document_id),
             )
-            from psycopg import sql
-
-            insert_sql = sql.SQL(
-                """
-                INSERT INTO rusa_knowledge_chunks
-                    (tenant_id, document_id, collection, chunk_index, content, {embedding_column}, metadata)
-                VALUES (%s, %s::uuid, %s, %s, %s, %s::vector, %s::jsonb)
-                """
-            ).format(embedding_column=sql.Identifier(self.embedding_column))
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    insert_sql,
+                    current_insert_sql,
                     [
                         (
-                            tenant_id,
-                            document_id,
-                            collection,
-                            index,
-                            content,
-                            vector,
+                            tenant_id, document_id, collection, index, content, vector,
                             chunk_metadata,
                         )
                         for index, content, vector, chunk_metadata in rows
@@ -490,6 +636,172 @@ class PostgresKnowledgeStore:
             "content_hash": document[4],
             "created_at": document[5].isoformat() if document[5] else None,
             "updated_at": document[6].isoformat() if document[6] else None,
+            "content": content,
+            "truncated": sum(len(row[0]) for row in chunks) > max_chars,
+        }
+
+    def list_document_versions(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
+        try:
+            UUID(document_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("document_id must be a UUID") from exc
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("version limit must be between 1 and 100")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            rows = connection.execute(
+                """
+                SELECT v.version_id, v.version_number, v.title, v.source_uri,
+                       v.content_hash, v.metadata, v.created_at,
+                       (v.version_id = d.current_version_id) AS is_current
+                FROM rusa_knowledge_document_versions v
+                JOIN rusa_knowledge_documents d
+                  ON d.tenant_id=v.tenant_id AND d.document_id=v.document_id
+                WHERE v.tenant_id=%s AND v.collection=%s AND v.document_id=%s::uuid
+                  AND (
+                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              d.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND d.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                  AND (
+                      COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(v.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              v.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND v.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                ORDER BY v.version_number DESC
+                LIMIT %s
+                """,
+                (
+                    tenant_id, collection, document_id,
+                    agent_id, agent_id, project_id, project_id,
+                    agent_id, agent_id, project_id, project_id, limit,
+                ),
+            ).fetchall()
+        return [
+            {
+                "version_id": str(row[0]),
+                "version_number": int(row[1]),
+                "title": row[2],
+                "source_uri": row[3],
+                "content_hash": str(row[4]).strip(),
+                "metadata": row[5],
+                "created_at": row[6].isoformat() if row[6] else None,
+                "is_current": bool(row[7]),
+            }
+            for row in rows
+        ]
+
+    def get_document_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
+        try:
+            UUID(document_id)
+            UUID(version_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("document_id and version_id must be UUIDs") from exc
+        if type(max_chars) is not int or not 1 <= max_chars <= 50_000:
+            raise ValueError("max_chars must be between 1 and 50000")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            version = connection.execute(
+                """
+                SELECT v.version_id, v.version_number, v.document_id, v.title,
+                       v.source_uri, v.content_hash, v.metadata, v.created_at,
+                       (v.version_id = d.current_version_id) AS is_current
+                FROM rusa_knowledge_document_versions v
+                JOIN rusa_knowledge_documents d
+                  ON d.tenant_id=v.tenant_id AND d.document_id=v.document_id
+                WHERE v.tenant_id=%s AND v.collection=%s
+                  AND v.document_id=%s::uuid AND v.version_id=%s::uuid
+                  AND (
+                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              d.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND d.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                  AND (
+                      COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(v.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              v.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND v.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                """,
+                (
+                    tenant_id, collection, document_id, version_id,
+                    agent_id, agent_id, project_id, project_id,
+                    agent_id, agent_id, project_id, project_id,
+                ),
+            ).fetchone()
+            if version is None:
+                return None
+            chunks = connection.execute(
+                """
+                SELECT content FROM rusa_knowledge_version_chunks
+                WHERE tenant_id=%s AND version_id=%s::uuid
+                ORDER BY chunk_index
+                """,
+                (tenant_id, version_id),
+            ).fetchall()
+        content = "\n\n".join(row[0] for row in chunks)[:max_chars]
+        return {
+            "version_id": str(version[0]),
+            "version_number": int(version[1]),
+            "document_id": str(version[2]),
+            "title": version[3],
+            "source_uri": version[4],
+            "content_hash": str(version[5]).strip(),
+            "metadata": version[6],
+            "created_at": version[7].isoformat() if version[7] else None,
+            "is_current": bool(version[8]),
             "content": content,
             "truncated": sum(len(row[0]) for row in chunks) > max_chars,
         }
