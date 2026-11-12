@@ -193,6 +193,7 @@ jobs:
         env:
           RUSA_API_IMAGE: example.invalid/rusa-ai@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WORKER_IMAGE: example.invalid/rusa-ai-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          RUSA_WORKER_INFERENCE_CONTRACT_URL: https://api.internal/internal/v1/inference
           RUSA_WEB_IMAGE: example.invalid/rusa-ai-web@sha256:0000000000000000000000000000000000000000000000000000000000000000
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
           RUSA_API_DATABASE_URL: postgresql://rusa_api_login:secret@db.internal/rusa?sslmode=verify-full
