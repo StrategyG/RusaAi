@@ -46,7 +46,7 @@ Create a RusaModels API principal with role `inference` only. Do not use a Manag
 - Pass the raw token to RusaAi as `RUSA_MODEL_API_KEY`.
 - Do not pass RusaModels database credentials, object-store credentials, or its internal `X-Rusa-Service-Token` to RusaAi.
 
-RusaAi's provider readiness check calls the authenticated `GET /openai/v1/models` endpoint by default. This validates the configured Model Server route and inference principal; it does not replace an actual chat/streaming smoke test.
+RusaAi's provider readiness check calls the authenticated `GET /openai/v1/models` endpoint and verifies that the configured `RUSA_MODEL_NAME` is present in the returned model list. Production configuration requires the exact `/openai/v1` base path and rejects `RUSA_MODEL_HEALTH_URL` overrides so a generic health endpoint cannot bypass model-identity validation. This readiness check does not replace an actual chat/streaming smoke test.
 
 ## 3. Configure RusaAi
 
