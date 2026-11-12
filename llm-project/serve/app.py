@@ -846,6 +846,16 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         try:
+            bind_owner_task = getattr(controller, "bind_owner_task", None)
+            if callable(bind_owner_task) and not bind_owner_task():
+                yield _sse({
+                    "error": {
+                        "message": "Inference admission lease was lost before streaming began",
+                        "type": "server_error",
+                    }
+                })
+                yield _sse("[DONE]")
+                return
             yield _sse({
                 "id": completion_id,
                 "object": "chat.completion.chunk",
