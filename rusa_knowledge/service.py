@@ -51,19 +51,20 @@ class KnowledgeService:
         if dimensions == 384 and not input_type_enabled:
             raise ValueError("384-dimensional RusaModels E5 embeddings require query/passage input types")
 
-        default_base_url = (
-            os.getenv("RUSA_MODEL_BASE_URL", "")
-            if dimensions == 384
-            else "https://api.openai.com/v1"
-        )
+        # The Model Plane is the default embedding endpoint for both vector
+        # spaces. An explicit RUSA_EMBEDDING_BASE_URL may select a separately
+        # approved OpenAI-compatible embedding route.
+        default_base_url = os.getenv("RUSA_MODEL_BASE_URL", "")
         base_url = os.getenv("RUSA_EMBEDDING_BASE_URL") or default_base_url
         if not base_url:
-            raise RuntimeError("RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for 384-dimensional embeddings")
+            raise RuntimeError(
+                "RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for embeddings"
+            )
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=base_url,
             api_key=(
                 os.getenv("RUSA_EMBEDDING_API_KEY")
-                or (os.getenv("RUSA_MODEL_API_KEY", "") if dimensions == 384 else "")
+                or os.getenv("RUSA_MODEL_API_KEY", "")
             ),
             model=os.getenv(
                 "RUSA_EMBEDDING_MODEL",
@@ -93,8 +94,9 @@ class KnowledgeService:
                     "migrations/011_rag_agent_project_scope.sql, and "
                     "migrations/012_rag_knowledge_version_history.sql"
                     if dimensions == 384
-                    else "migrations/007_rag_knowledge_pgvector.sql and "
-                    "migrations/011_rag_agent_project_scope.sql"
+                    else "migrations/007_rag_knowledge_pgvector.sql, "
+                    "migrations/011_rag_agent_project_scope.sql, and "
+                    "migrations/012_rag_knowledge_version_history.sql"
                 )
                 raise RuntimeError(
                     f"knowledge database is not ready; apply {required_migrations}"
