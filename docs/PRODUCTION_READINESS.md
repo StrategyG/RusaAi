@@ -52,7 +52,7 @@ remain unmeasured until a specific checkpoint and target hardware are supplied.
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
 | Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | PR #107 unit/integration CI passed; staging recovery drill still required |
-| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | CPU Compose API gateway routing implemented in PR #108; API queue remains process-local, durable scheduler not implemented |
+| Shared inference admission | API and worker use one tenant-authenticated gateway; multi-process fairness, cancellation, restart and crash recovery | CPU and production Compose worker routing are configured in PR #108; production TLS trust and tenant secrets require deployment verification; API queue remains process-local pending distributed scheduler (PR #109) |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
