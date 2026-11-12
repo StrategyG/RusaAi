@@ -429,5 +429,5 @@ def test_rusamodels_readiness_rejects_unserved_configured_model():
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(RuntimeError, match="not served by the model endpoint"):
+    with pytest.raises(RuntimeError, match="not served by the RusaModels Model Server"):
         asyncio.run(provider.check_ready())
