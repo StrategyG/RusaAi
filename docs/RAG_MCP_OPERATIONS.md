@@ -9,6 +9,9 @@ not enabled by the core API merely because its package is installed.
 - PostgreSQL 16 with the pgvector extension available.
 - A dedicated database role with only the privileges granted by
   `migrations/007_rag_knowledge_pgvector.sql`.
+- Agent/project lookup indexes from `migrations/011_rag_agent_project_scope.sql`.
+  Apply `migrations/009_knowledge_embedding_384.sql` only when the optional
+  384-dimensional profile is deliberately enabled.
 - An OpenAI-compatible embeddings endpoint. The default model is
   `text-embedding-3-small` with 1536 dimensions; the configured embedding model
   must return vectors of the configured dimension.
@@ -20,7 +23,10 @@ not enabled by the core API merely because its package is installed.
 Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or
 administrator on the dedicated knowledge database. The migration creates
 tenant-scoped document and chunk tables, pgvector indexes, forced row-level
-security, and a non-login knowledge-worker role. Follow the migration's grant
+security, and a non-login knowledge-worker role. Then apply
+`migrations/011_rag_agent_project_scope.sql` to add the scope lookup indexes.
+Apply `migrations/009_knowledge_embedding_384.sql` only when the separate
+384-dimensional embedding profile is deliberately enabled. Follow the migration's grant
 instructions and configure `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker`
 for the runtime role. Do not run the service with a PostgreSQL superuser.
 
@@ -31,6 +37,47 @@ The embedding provider is configured with:
 - `RUSA_EMBEDDING_API_KEY`
 - `RUSA_EMBEDDING_MODEL`
 - `RUSA_EMBEDDING_TIMEOUT`
+
+## Agent and project scope
+
+Knowledge metadata supports two explicit visibility scopes:
+
+- `knowledge_scope: "shared"` — visible to authorized workers in the tenant.
+  Shared records must not include `agent_ids` or `project_id`.
+- `knowledge_scope: "agent_specific"` — visible only to the listed `agent_ids`.
+  An optional `project_id` further restricts the record to that project.
+
+The six AICode Worker identities map to `aicode-analyst`,
+`aicode-architect`, `aicode-developer`, `aicode-debugger`,
+`aicode-tester`, and `aicode-security`.
+
+For operator ingestion, the scope is explicit:
+
+```bash
+rusa-knowledge ingest --file ./analyst-playbook.md --tenant-id tenant-a \
+  --collection agent --knowledge-scope agent_specific \
+  --agent-id aicode-analyst --project-id strategyg--rusaai
+```
+
+Repeat `--agent-id` to authorize more than one worker role. Do not use
+model-generated identifiers as access-control decisions.
+
+The AICode runtime derives tenant scope from the authenticated task lease,
+agent scope from the executing WorkerRole, and project scope from the already
+authorized repository target. These values are injected into the Tool Gateway;
+the model cannot override them. Search, document reads and collection counts
+apply the same scope filter.
+
+The standalone MCP bearer token currently authenticates a tenant but not an
+individual agent or project. Therefore MCP reads are shared-only: records with
+`agent_specific` scope are excluded when no trusted agent identity is present.
+Do not expose agent-specific knowledge through MCP until its service identity
+contract includes authenticated agent and project claims.
+
+This migration adds retrieval filtering and indexes only. It does not yet
+implement source-rights review, human approval, publication authorization,
+immutable source-version history or deletion/tombstone lifecycle. Production
+publication remains blocked until those controls are implemented and reviewed.
 
 ## Ingest and evaluate
 
