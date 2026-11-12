@@ -89,8 +89,9 @@ class KnowledgeService:
                 store.close()
                 required_migrations = (
                     "migrations/007_rag_knowledge_pgvector.sql, "
-                    "migrations/009_knowledge_embedding_384.sql, and "
-                    "migrations/011_rag_agent_project_scope.sql"
+                    "migrations/009_knowledge_embedding_384.sql, "
+                    "migrations/011_rag_agent_project_scope.sql, and "
+                    "migrations/012_rag_knowledge_version_history.sql"
                     if dimensions == 384
                     else "migrations/007_rag_knowledge_pgvector.sql and "
                     "migrations/011_rag_agent_project_scope.sql"
@@ -230,6 +231,46 @@ class KnowledgeService:
             max_chars=max_chars,
             agent_id=agent_id,
             project_id=project_id,
+        )
+
+    def list_document_versions(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_document_versions(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    def get_document_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        return self.store.get_document_version(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            version_id=version_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            max_chars=max_chars,
         )
 
     def list_collections(
