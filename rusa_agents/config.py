@@ -370,6 +370,25 @@ class RuntimeConfig:
                         f"Worker inference credential for tenant {tenant} must match a tenant-bound inference principal in RUSA_API_KEYS_JSON"
                     )
 
+        contract_value = os.getenv("RUSA_WORKER_INFERENCE_CONTRACT", "false").strip().lower()
+        if contract_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            missing.append("RUSA_WORKER_INFERENCE_CONTRACT must be a boolean value")
+        elif contract_value not in {"1", "true", "yes", "on"}:
+            missing.append("RUSA_WORKER_INFERENCE_CONTRACT=true is required in production")
+
+        contract_url = urlparse(os.getenv("RUSA_WORKER_INFERENCE_CONTRACT_URL", ""))
+        if (
+            contract_url.scheme != "https"
+            or not contract_url.hostname
+            or contract_url.username
+            or contract_url.password
+            or contract_url.path != "/internal/v1/inference"
+            or self._looks_placeholder(contract_url.hostname)
+        ):
+            missing.append(
+                "RUSA_WORKER_INFERENCE_CONTRACT_URL must be trusted HTTPS ending in /internal/v1/inference"
+            )
+
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
 
