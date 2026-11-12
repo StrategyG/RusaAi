@@ -166,9 +166,15 @@ class RuntimeConfig:
             errors.append(f"{variable} must authenticate as {expected_user}")
         if cls._looks_placeholder(parsed.hostname) or cls._looks_placeholder(parsed.password):
             errors.append(f"{variable} must not contain example host/password placeholders")
-        ssl_modes = parse_qs(parsed.query).get("sslmode", [])
-        if not ssl_modes or ssl_modes[-1] not in {"require", "verify-ca", "verify-full"}:
-            errors.append(f"{variable} must use sslmode=require, verify-ca, or verify-full")
+        query = parse_qs(parsed.query)
+        ssl_modes = query.get("sslmode", [])
+        if not ssl_modes or ssl_modes[-1] != "verify-full":
+            errors.append(f"{variable} must use sslmode=verify-full to verify the database server identity")
+        root_certificates = query.get("sslrootcert", [])
+        if not root_certificates or not Path(root_certificates[-1]).is_absolute():
+            errors.append(
+                f"{variable} must set sslrootcert to an absolute path for the trusted database CA"
+            )
         return errors
 
     def _validate_tenants_and_model(self, *, require_model_api_key: bool = True) -> list[str]:
