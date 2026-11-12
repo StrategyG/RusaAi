@@ -854,3 +854,61 @@ def test_cancelled_request_cancels_provider_coroutine():
         assert cancelled.is_set()
 
     asyncio.run(scenario())
+
+
+def test_streaming_response_rebinds_durable_admission_owner_task(monkeypatch):
+    class LeaseAwareAdmission:
+        def __init__(self):
+            self.bound = False
+            self.released = False
+
+        async def acquire(self, *, timeout_seconds=None):
+            return None
+
+        def bind_owner_task(self):
+            self.bound = True
+            return True
+
+        async def release(self):
+            self.released = True
+
+    class StreamingProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "unused"
+
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content="streamed")
+            yield InferenceStreamEvent(finish_reason="stop")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    admission = LeaseAwareAdmission()
+    monkeypatch.setattr(app.state, "inference_admission", admission, raising=False)
+    set_inference_provider(StreamingProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Stream"}],
+                "stream": True,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert '"content":"streamed"' in response.text
+    assert admission.bound is True
+    assert admission.released is True
+
