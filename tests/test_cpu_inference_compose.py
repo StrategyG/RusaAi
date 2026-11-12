@@ -22,6 +22,8 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     api_environment = api["environment"]
 
     assert worker_environment["RUSA_MODEL_API_KEY"] == ""
+    assert api_environment["RUSA_WORKER_INFERENCE_API_KEYS"] == ""
+    assert api_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "false"
     assert api_environment["SSL_CERT_FILE"] == "/run/secrets/rusa-internal-ca.crt"
     assert any(
         "/run/secrets/rusa-internal-ca.crt:ro" in volume
