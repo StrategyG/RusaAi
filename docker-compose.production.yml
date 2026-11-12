@@ -13,6 +13,11 @@ services:
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
       RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
+      # The API authenticates worker principals from hashes; it must never receive raw worker keys.
+      RUSA_WORKER_INFERENCE_GATEWAY: "false"
+      RUSA_WORKER_INFERENCE_BASE_URL: ""
+      RUSA_WORKER_INFERENCE_API_KEYS: ""
+      RUSA_WORKER_INFERENCE_DEADLINE_MS: ""
       SSL_CERT_FILE: /run/secrets/rusa-internal-ca.crt
       RUSA_AUDIT_HMAC_KEY: ""
       RUSA_GITHUB_TOKEN: ""
