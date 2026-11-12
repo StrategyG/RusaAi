@@ -45,4 +45,5 @@ def test_document_version_history_migration_is_append_only_and_dimension_aware()
     assert "GRANT SELECT, INSERT" in migration
     assert "GRANT UPDATE" not in migration
     assert "GRANT DELETE" not in migration
+    assert "REVOKE DELETE ON public.rusa_knowledge_documents" in migration
     assert "current_version_id" in migration
