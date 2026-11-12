@@ -153,6 +153,10 @@ Run the existing task, policy, tenant-isolation, and audit tests independently o
 
 The supplied `docker-compose.cpu.yml` override uses plain HTTP between containers on the isolated Compose network and is intended for development or staging. The production API configuration deliberately requires a credential-free HTTPS `RUSA_MODEL_BASE_URL`. For production, place the llama.cpp server behind a trusted internal TLS reverse proxy, configure the API to use that HTTPS endpoint, and install the issuing CA in the API container trust store. Do not weaken the production HTTPS validation to make the development override work.
 
+Production workers must also use the shared HTTPS API gateway; direct worker-to-model access is rejected by production configuration validation because it bypasses API admission. Set `RUSA_WORKER_INFERENCE_BASE_URL` to the trusted HTTPS API endpoint and provide one random credential of at least 32 bytes per task-enabled tenant in `RUSA_WORKER_INFERENCE_API_KEYS`. Register each credential's SHA-256 digest in `RUSA_API_KEYS_JSON` with the same tenant ID and an inference-capable role. Keep raw worker credentials in the secret manager; the hash-only principal registry is safe to pass to the worker for tenant-binding validation.
+
+Set `RUSA_INTERNAL_CA_BUNDLE` to a read-only PEM trust bundle containing the required internal CA certificates (and any public roots needed by the configured endpoints). The production Compose file mounts this bundle into both API and worker containers at `/run/secrets/rusa-internal-ca.crt` and sets `SSL_CERT_FILE`, so upstream model TLS and worker-to-API TLS remain certificate-verified. The worker clears `RUSA_MODEL_API_KEY` and waits for the API health check before it starts processing tasks.
+
 ## 8. Rollback and limitations
 
 To stop the CPU model stack, use the same Compose file pair:
