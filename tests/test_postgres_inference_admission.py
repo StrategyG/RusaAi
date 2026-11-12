@@ -425,3 +425,67 @@ def test_process_crash_recovers_after_global_lease_expiry(scheduler_database):
             process.join(timeout=3)
         result_queue.close()
         result_queue.join_thread()
+
+
+def test_scheduler_database_connections_have_bounded_timeouts(monkeypatch):
+    captured = {}
+    sentinel = object()
+
+    def fake_connect(dsn, **kwargs):
+        captured["dsn"] = dsn
+        captured["kwargs"] = kwargs
+        return sentinel
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    controller = PostgresInferenceAdmissionController(
+        "postgresql://scheduler.internal/rusa",
+        max_active=1,
+        max_waiting=1,
+        queue_timeout=2.0,
+        lease_seconds=5,
+    )
+
+    assert controller._connect() is sentinel
+    assert captured["dsn"] == "postgresql://scheduler.internal/rusa"
+    assert captured["kwargs"]["connect_timeout"] == 5
+    assert captured["kwargs"]["application_name"] == "rusa-inference-admission"
+    assert "lock_timeout=5000" in captured["kwargs"]["options"]
+    assert "statement_timeout=5000" in captured["kwargs"]["options"]
+    assert "idle_in_transaction_session_timeout=10000" in captured["kwargs"]["options"]
+
+
+def test_lease_renewal_failure_cancels_generation_and_releases_slot(
+    scheduler_database, monkeypatch
+):
+    controller = make_controller(scheduler_database)
+    monkeypatch.setattr(controller, "_renew", lambda request_id, owner_id: False)
+
+    cancelled = asyncio.Event()
+
+    async def owner_request():
+        await controller.acquire()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        finally:
+            await controller.release()
+
+    async def scenario():
+        task = asyncio.create_task(owner_request())
+        await asyncio.wait_for(cancelled.wait(), timeout=4.0)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        with psycopg.connect(scheduler_database) as conn:
+            assert conn.execute(
+                "SELECT count(*) FROM rusa_inference_admission_slots "
+                "WHERE active_request_id IS NOT NULL"
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT count(*) FROM rusa_inference_admission_requests "
+                "WHERE status='active'"
+            ).fetchone()[0] == 0
+
+    asyncio.run(scenario())
