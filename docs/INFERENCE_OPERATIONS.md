@@ -99,6 +99,13 @@ active-generation slots.
 - Active requests renew their lease every third of the lease interval. If an API
   process crashes, a later request reclaims an expired slot. If a live process
   cannot renew its lease, the associated generation task is cancelled.
+- Streaming responses rebind lease ownership to the task that consumes the SSE
+  body; lease loss therefore cancels the actual stream/generation task rather
+  than the already-completed route handler. A stream whose lease is lost before
+  its body starts fails closed without invoking the model provider.
+- Lease renewal takes the same scheduler advisory lock as release and expiry
+  before touching slot/request rows. This keeps row-lock order consistent and
+  prevents a heartbeat/release deadlock.
 - Scheduler database connections use a five-second connection timeout, five-second
   lock/statement timeouts, and a ten-second idle-in-transaction timeout. A stalled
   database therefore fails closed instead of holding admission or heartbeat work
