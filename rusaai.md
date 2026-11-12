@@ -166,33 +166,42 @@ Exit criteria:
 
 ### Fase R2 — Shared inference scheduler
 
-**Prioritas: P0 · Status: NOT IMPLEMENTED END-TO-END**
+**Prioritas: P0 · Status: IMPLEMENTED IN CODE — EXACT-HEAD CI PENDING; STAGING NOT VERIFIED**
 
 Path utama:
 - `rusa_agents/inference_admission.py`
+- `rusa_agents/postgres_inference_admission.py`
 - `rusa_agents/providers.py`
 - `rusa_agents/worker_main.py`
 - `rusa_agents/workers.py`
 - `llm-project/serve/`
+- `migrations/010_inference_admission.sql`
 - `docker-compose.cpu.yml`
-- `tests/test_inference_admission.py`
-- `tests/test_provider_limits.py`
+- `docker-compose.production.yml`
+- `tests/test_postgres_inference_admission.py`
 
 Pekerjaan:
-- [ ] Jadikan satu scheduler sebagai pintu masuk seluruh pemanggil inference, baik API maupun worker.
-- [ ] Hapus direct worker-to-llama.cpp bypass setelah jalur scheduler siap.
-- [ ] Simpan queue state dan request ownership secara aman lintas proses.
-- [ ] Tetapkan FIFO/priority policy, bounded waiting, queue timeout, deadline, cancellation, dan idempotency.
-- [ ] Pastikan satu active generation untuk baseline CPU.
-- [ ] Tangani worker crash, caller disconnect, lease expiry, duplicate submit, dan slot handoff race.
+- [x] Jadikan API gateway satu pintu inference untuk API dan worker; worker memakai credential tenant-scoped.
+- [x] Hapus direct worker-to-llama.cpp bypass pada CPU profile.
+- [x] Simpan request state, slot ownership, dan lease di PostgreSQL agar berlaku lintas proses.
+- [x] Terapkan FIFO, bounded waiting, queue timeout, request deadline, cancellation, lease renewal, dan stale-owner fencing.
+- [x] Pertahankan satu active generation pada baseline CPU melalui konfigurasi default.
+- [x] Tambahkan pengujian controller independen dan proses OS terpisah, termasuk lease expiry dan process-crash recovery.
 - [x] Instrument API queue wait, active/waiting count, timeout/rejection, stream TTFT, generation duration, dan provider errors.
-- [ ] Extend inference telemetry to worker-to-model calls and add model RAM, CPU utilization, and tokens/second measurements.
+- [ ] Tambahkan idempotency/deduplication untuk duplicate submit.
+- [ ] Tambahkan priority scheduling; implementasi saat ini FIFO.
+- [ ] Extend telemetry ke worker-to-model calls dan tambahkan model RAM, CPU utilization, serta tokens/second.
 
 Exit criteria:
-- API dan worker memakai scheduler yang sama.
-- Uji concurrency lintas proses membuktikan tidak ada generation paralel yang melampaui konfigurasi.
-- FIFO/priority, queue-full, timeout, cancellation, restart, dan crash recovery lulus.
-- Tidak ada slot leak atau double release.
+- [x] API dan worker menggunakan gateway/scheduler yang sama pada jalur implementasi.
+- [x] Test lintas proses membuktikan global active-slot ownership dan FIFO.
+- [x] Test mencakup queue-full, timeout, cancellation, lease expiry, stale-owner fencing, dan process-crash recovery.
+- [x] Test memastikan worker runtime tidak memiliki akses langsung ke tabel scheduler.
+- [ ] Exact-head CI harus hijau sebelum merge.
+- [ ] Staging crash/restart/failover drill dan load/soak verification harus lulus.
+- [ ] Tidak ada slot leak atau double release pada staging evidence.
+
+PR implementasi: [#109](https://github.com/StrategyG/RusaAi/pull/109). Kode dan test tersedia; status `VERIFIED` belum boleh diberikan sampai exact-head CI dan staging evidence tersedia.
 
 ### Fase R3 — Durable workflow dan agent runtime
 
