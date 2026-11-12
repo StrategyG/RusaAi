@@ -99,6 +99,10 @@ active-generation slots.
 - Active requests renew their lease every third of the lease interval. If an API
   process crashes, a later request reclaims an expired slot. If a live process
   cannot renew its lease, the associated generation task is cancelled.
+- Scheduler database connections use a five-second connection timeout, five-second
+  lock/statement timeouts, and a ten-second idle-in-transaction timeout. A stalled
+  database therefore fails closed instead of holding admission or heartbeat work
+  indefinitely.
 - Waiting requests are claimed in database FIFO order. Queue-full, queue-timeout,
   request-deadline, cancellation, and stale-lease states are recorded separately.
 - The API readiness/startup path checks the migration, database role privileges,
