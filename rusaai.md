@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.7.0"
+version: "1.8.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -462,6 +462,7 @@ Sebuah komponen disebut:
 | 1.5.0 | 2026-11-12 | Menambahkan shared API inference path untuk worker CPU, kredensial per tenant, deadline gateway, JSON response format, dan mencegah retry yang dapat menggandakan generasi. Scheduler durable lintas proses masih terbuka. |
 | 1.6.0 | 2026-11-12 | Menambahkan PostgreSQL-backed FIFO scheduler, slot leases, heartbeat, stale-owner fencing, crash recovery, migration 010, dan integration tests untuk admission lintas controller. |
 | 1.7.0 | 2026-11-12 | Mencatat keputusan foundation checkpoint sebagai PILOT_ONLY; memisahkan target arsitektur 1.541B dari identitas produk sementara dan menegaskan belum ada artifact produksi yang disetujui. |
+| 1.8.0 | 2026-11-12 | Memperketat operasi scheduler PostgreSQL dengan connect/lock/query/idle-transaction timeout yang bounded serta regression test untuk lease-loss cancellation dan pembersihan slot. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -522,7 +523,9 @@ Branch: feat/postgres-inference-admission (PR #109, consolidated directly on PR 
 - [x] Restrict scheduler table privileges to the API runtime role; the worker has no direct database access to scheduler state.
 - [x] Fail API startup if migration 010, required privileges, scheduler settings, or configured slot rows are missing or inconsistent.
 - [x] Add PostgreSQL integration tests for FIFO across independent controller instances, global queue capacity, cancellation cleanup, deadline classification, stale lease recovery, and stale-owner release.
-- [x] Document database migration order and the cluster-wide scheduler configuration contract.
+- [x] Bound scheduler database connect, lock, statement, and idle-transaction waits so database stalls fail closed.
+- [x] Add regression tests proving lease-renewal failure cancels generation and releases its active slot.
+- [x] Document database migration order, cluster-wide scheduler configuration, and bounded database-operation timeouts.
 
 **Remaining R2.1 work**
 
