@@ -53,7 +53,8 @@ class RuntimeConfig:
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
             "api_image_digest", "worker_image_digest", "model_host", "db_host",
-            "managed-secret",
+            "managed-secret", "replace-me", "example.com", "example.org",
+            "change-me", "ci-only", "test-only", "your-",
         )
         return any(marker in lowered for marker in markers)
 
@@ -166,6 +167,8 @@ class RuntimeConfig:
             errors.append(f"{variable} must authenticate as {expected_user}")
         if cls._looks_placeholder(parsed.hostname) or cls._looks_placeholder(parsed.password):
             errors.append(f"{variable} must not contain example host/password placeholders")
+        if parsed.password is None or len(parsed.password.encode("utf-8")) < 32:
+            errors.append(f"{variable} must use a managed database password of at least 32 bytes")
         query = parse_qs(parsed.query)
         ssl_modes = query.get("sslmode", [])
         if not ssl_modes or ssl_modes[-1] != "verify-full":
