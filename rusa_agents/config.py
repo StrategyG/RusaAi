@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -170,7 +171,7 @@ class RuntimeConfig:
             errors.append(f"{variable} must use sslmode=require, verify-ca, or verify-full")
         return errors
 
-    def _validate_tenants_and_model(self) -> list[str]:
+    def _validate_tenants_and_model(self, *, require_model_api_key: bool = True) -> list[str]:
         errors: list[str] = []
         if not self.tenant_repositories:
             errors.append("RUSA_TENANT_REPOSITORIES is required")
@@ -197,7 +198,7 @@ class RuntimeConfig:
                 errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
             if self._looks_placeholder(model_url.hostname):
                 errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
-        if self.environment == "production":
+        if self.environment == "production" and require_model_api_key:
             if not self.model_api_key:
                 errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
             elif (
@@ -267,7 +268,76 @@ class RuntimeConfig:
             self.sandbox_image,
         ):
             missing.append("RUSA_SANDBOX_IMAGE must be pinned by a valid immutable sha256 digest")
-        missing.extend(self._validate_tenants_and_model())
+        missing.extend(self._validate_tenants_and_model(require_model_api_key=False))
+
+        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
+        if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            missing.append("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
+        elif gateway_value not in {"1", "true", "yes", "on"}:
+            missing.append("RUSA_WORKER_INFERENCE_GATEWAY=true is required in production")
+
+        gateway_url = os.getenv("RUSA_WORKER_INFERENCE_BASE_URL", "")
+        parsed_gateway_url = urlparse(gateway_url)
+        if (
+            parsed_gateway_url.scheme != "https"
+            or not parsed_gateway_url.hostname
+            or parsed_gateway_url.username
+            or parsed_gateway_url.password
+            or self._looks_placeholder(parsed_gateway_url.hostname)
+        ):
+            missing.append(
+                "RUSA_WORKER_INFERENCE_BASE_URL must use credential-free HTTPS to the API gateway"
+            )
+
+        try:
+            worker_keys = json.loads(os.getenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}"))
+        except json.JSONDecodeError:
+            worker_keys = {}
+            missing.append("RUSA_WORKER_INFERENCE_API_KEYS must be a JSON tenant-to-key object")
+        if not isinstance(worker_keys, dict) or any(
+            not isinstance(tenant, str)
+            or not tenant.strip()
+            or not isinstance(key, str)
+            or not key.strip()
+            for tenant, key in worker_keys.items()
+        ):
+            missing.append(
+                "RUSA_WORKER_INFERENCE_API_KEYS must map tenant IDs to non-empty API keys"
+            )
+        else:
+            unknown_worker_tenants = set(worker_keys) - set(self.tenant_repositories)
+            if unknown_worker_tenants:
+                missing.append(
+                    "RUSA_WORKER_INFERENCE_API_KEYS contains tenants outside RUSA_TENANT_REPOSITORIES"
+                )
+            for tenant in self.tenant_repositories:
+                worker_key = worker_keys.get(tenant)
+                if worker_key is None:
+                    missing.append(
+                        f"RUSA_WORKER_INFERENCE_API_KEYS is missing tenant {tenant}"
+                    )
+                    continue
+                if (
+                    len(worker_key.encode("utf-8")) < 32
+                    or self._looks_placeholder(worker_key)
+                ):
+                    missing.append(
+                        f"Worker inference credential for tenant {tenant} must be a real secret of at least 32 UTF-8 bytes"
+                    )
+                    continue
+                digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
+                principal = self.api_key_principals.get(digest)
+                if (
+                    principal is None
+                    or principal.tenant_id != tenant
+                    or not {"platform_admin", "tenant_admin", "developer"}.intersection(
+                        principal.roles
+                    )
+                ):
+                    missing.append(
+                        f"Worker inference credential for tenant {tenant} must match a tenant-bound inference principal in RUSA_API_KEYS_JSON"
+                    )
+
         if missing:
             raise RuntimeError("Production worker configuration is incomplete: " + ", ".join(missing))
 

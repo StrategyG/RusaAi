@@ -53,6 +53,54 @@ def test_chat_completions_uses_injected_inference_provider():
         set_inference_provider(None)
 
 
+def test_chat_completions_validates_and_forwards_json_response_format(monkeypatch):
+    captured = {}
+
+    class StubInferenceProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            captured.update(parameters)
+            return '{"done": true}'
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    set_inference_provider(StubInferenceProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Return JSON"}],
+                "response_format": {"type": "json_object"},
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert captured["response_format"] == {"type": "json_object"}
+
+
+def test_chat_completions_rejects_unsupported_response_format():
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "Hello"}],
+            "response_format": {"type": "text"},
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_validate_task_endpoint_valid():
     valid_envelope = {
         "protocol_version": "1.0",

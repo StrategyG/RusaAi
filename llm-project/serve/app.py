@@ -320,6 +320,12 @@ class ChatMessage(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class ChatResponseFormat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["json_object"]
+
+
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -333,6 +339,7 @@ class ChatCompletionRequest(BaseModel):
     top_p: float = Field(default=0.9, gt=0.0, le=1.0)
     max_tokens: int = Field(default=1024, ge=1, le=4096)
     deadline_ms: int | None = Field(default=None, ge=1, le=3_600_000)
+    response_format: ChatResponseFormat | None = None
     stream: bool = False
 
 
@@ -751,6 +758,11 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     temperature=request.temperature,
                     top_p=request.top_p,
                     max_tokens=request.max_tokens,
+                    response_format=(
+                        request.response_format.model_dump()
+                        if request.response_format is not None
+                        else None
+                    ),
                 ),
                 deadline_at,
             )
@@ -829,6 +841,11 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     temperature=request.temperature,
                     top_p=request.top_p,
                     max_tokens=request.max_tokens,
+                    response_format=(
+                        request.response_format.model_dump()
+                        if request.response_format is not None
+                        else None
+                    ),
                 ),
                 deadline_at,
             ):
