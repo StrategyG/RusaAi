@@ -114,12 +114,15 @@ def test_8gb_compose_profile_bounds_all_service_memory_and_waiting_work():
     )
     services = overlay["services"]
 
-    assert set(services) == {"postgres", "api", "worker", "web", "llama-cpp"}
+    assert set(services) == {
+        "postgres", "api", "worker", "web", "llama-cpp", "model-telemetry"
+    }
     assert services["postgres"]["mem_limit"] == "384m"
     assert services["api"]["mem_limit"] == "512m"
     assert services["worker"]["mem_limit"] == "768m"
     assert services["web"]["mem_limit"] == "384m"
     assert services["llama-cpp"]["mem_limit"] == "${RUSA_MODEL_MEMORY_LIMIT:-3g}"
+    assert services["model-telemetry"]["mem_limit"] == "64m"
 
     total_cap_mib = sum(
         _memory_limit_mib(
@@ -127,7 +130,7 @@ def test_8gb_compose_profile_bounds_all_service_memory_and_waiting_work():
         )
         for name in services
     )
-    assert total_cap_mib == 5 * 1024
+    assert total_cap_mib == 5 * 1024 + 64
     assert services["api"]["environment"]["RUSA_MAX_WAITING_INFERENCES"] == (
         "${RUSA_MAX_WAITING_INFERENCES:-1}"
     )
