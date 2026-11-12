@@ -21,6 +21,9 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     api = compose["services"]["api"]
     api_environment = api["environment"]
 
+    assert "env_file" not in api
+    assert "env_file" not in worker
+    assert "env_file" not in compose["services"]["web"]
     assert worker_environment["RUSA_MODEL_API_KEY"] == ""
     assert api_environment["RUSA_WORKER_INFERENCE_API_KEYS"] == ""
     assert api_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "false"
