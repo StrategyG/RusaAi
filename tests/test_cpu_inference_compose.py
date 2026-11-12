@@ -34,6 +34,12 @@ def test_production_worker_uses_tenant_scoped_https_api_gateway():
     )
     assert worker["depends_on"]["api"]["condition"] == "service_healthy"
     assert worker_environment["RUSA_WORKER_INFERENCE_GATEWAY"] == "true"
+    assert worker_environment["RUSA_WORKER_INFERENCE_CONTRACT"] == "true"
+    assert worker_environment["RUSA_WORKER_INFERENCE_CONTRACT_URL"].endswith(
+        "/internal/v1/inference"
+    )
+    assert api_environment["RUSA_MODEL_TELEMETRY_URL"].startswith("${RUSA_MODEL_TELEMETRY_URL:?")
+    assert api_environment["RUSA_MODEL_TELEMETRY_API_KEY"].startswith("${RUSA_MODEL_TELEMETRY_API_KEY:?")
     assert worker_environment["RUSA_WORKER_INFERENCE_BASE_URL"].startswith(
         "${RUSA_WORKER_INFERENCE_BASE_URL:?"
     )
@@ -62,10 +68,15 @@ def test_cpu_compose_routes_api_to_private_gguf_server():
     assert 'RUSA_MODEL_PATH: ""' in api
     assert "RUSA_WORKER_INFERENCE_BASE_URL: http://api:8000/v1" in worker
     assert 'RUSA_WORKER_INFERENCE_GATEWAY: "true"' in worker
+    assert 'RUSA_WORKER_INFERENCE_CONTRACT: "false"' in worker
     assert "${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference API keys in .env}" in worker
     assert "RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1" not in worker
     assert "RUSA_MODEL_API_KEY: \"\"" in api
     assert "RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health" in api
+    assert "RUSA_MODEL_TELEMETRY_URL: http://model-telemetry:9101/v1/telemetry" in api
+    assert "RUSA_MODEL_TELEMETRY_API_KEY:" in api
+    assert "  model-telemetry:" in compose
+    assert 'pid: "service:llama-cpp"' in compose
     assert "RUSA_MODEL_API_KEY: \"\"" in worker
     assert "${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}" in worker
     assert "api:\n        condition: service_healthy" in worker
