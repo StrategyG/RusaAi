@@ -49,6 +49,8 @@ class RuntimeConfig:
         lowered = value.strip().lower()
         if not lowered:
             return False
+        if any(character in lowered for character in "<>{}"):
+            return True
         markers = (
             "replace-with", "placeholder", "redacted", "long_random",
             "at_least_32", "fine_grained_repository_token", "registry_digest",
