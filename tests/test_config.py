@@ -62,6 +62,11 @@ def set_worker_environment(monkeypatch):
     monkeypatch.setenv(
         "RUSA_WORKER_INFERENCE_BASE_URL", "https://api.internal/v1"
     )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_CONTRACT", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_CONTRACT_URL",
+        "https://api.internal/internal/v1/inference",
+    )
     monkeypatch.setenv(
         "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": worker_key})
     )
@@ -252,3 +257,20 @@ def test_production_runtime_rejects_unapproved_smoke_model_identity(monkeypatch)
 
     with pytest.raises(RuntimeError, match="smoke-test alias"):
         RuntimeConfig.from_env().validate_api()
+
+
+
+def test_production_worker_rejects_missing_inference_contract_url(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_WORKER_INFERENCE_CONTRACT_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_WORKER_INFERENCE_CONTRACT_URL"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_openai_only_gateway_mode(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_CONTRACT", "false")
+
+    with pytest.raises(RuntimeError, match="CONTRACT=true"):
+        RuntimeConfig.from_env().validate_worker()
