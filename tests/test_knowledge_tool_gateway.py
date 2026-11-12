@@ -77,14 +77,18 @@ def test_worker_cannot_choose_collection_and_document_reads_keep_agent_scope(tmp
         knowledge_collection="agent",
         knowledge_project_id="strategyg--rusaai",
     )
-    with pytest.raises(ToolDenied, match="Unexpected arguments"):
-        gateway.execute(
-            {
-                "name": "search_knowledge",
-                "arguments": {"query": "deployment", "collection": "other"},
-            },
-            WorkerRole.ANALYST,
-        )
+    # A legacy collection argument is accepted for compatibility but ignored;
+    # the server-configured collection remains authoritative.
+    result_collection = gateway.execute(
+        {
+            "name": "search_knowledge",
+            "arguments": {"query": "deployment", "collection": "other"},
+        },
+        WorkerRole.ANALYST,
+    )
+    assert result_collection.ok
+    search_call = next(call for call in service.calls if call[0] == "search")
+    assert search_call[1]["collection"] == "agent"
 
     result = gateway.execute(
         {
