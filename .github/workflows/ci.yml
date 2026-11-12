@@ -195,6 +195,11 @@ jobs:
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_INTERNAL_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+          RUSA_WORKER_INFERENCE_BASE_URL: https://api.internal/v1
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"tenant-ci":"worker-inference-secret-ci-12345678901234567890"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
+          RUSA_INFERENCE_LEASE_SECONDS: "30"
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
           RUSA_MODEL_BASE_URL: https://model.internal/v1
           RUSA_MODEL_NAME: rusa-ai
