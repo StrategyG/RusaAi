@@ -1,0 +1,188 @@
+name: Certify RUSA-AI staging candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Signed semantic release tag, for example v1.2.3"
+        required: true
+        type: string
+      certification_record_path:
+        description: "Merged certification record path under certification/records/"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+  attestations: read
+  id-token: write
+
+concurrency:
+  group: rusa-ai-certification-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    name: Verify staging evidence and sign production certification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production-certification
+    permissions:
+      contents: write
+      packages: read
+      attestations: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      CERTIFICATION_RECORD_PATH: ${{ inputs.certification_record_path }}
+      WORKFLOW_REF: ${{ github.ref }}
+      WORKFLOW_REF_PROTECTED: ${{ github.ref_protected }}
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+
+      - name: Require protected main, annotated semantic tag, and merged certification record
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_REF" == "refs/heads/main" ]] || {
+            echo "Certification workflow must be dispatched from main." >&2
+            exit 1
+          }
+          [[ "$WORKFLOW_REF_PROTECTED" == "true" ]] || {
+            echo "The main branch must be protected before certification." >&2
+            exit 1
+          }
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Release tag must use vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          }
+          [[ "$CERTIFICATION_RECORD_PATH" =~ ^certification/records/[A-Za-z0-9._-]+\.json$ ]] || {
+            echo "Certification record must be under certification/records/." >&2
+            exit 1
+          }
+          [[ "$(git cat-file -t "$RELEASE_TAG")" == "tag" ]] || {
+            echo "Release tag must be annotated." >&2
+            exit 1
+          }
+          git fetch origin main --no-tags
+          SOURCE_SHA="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main || {
+            echo "Release tag is not reachable from protected main." >&2
+            exit 1
+          }
+          git show "origin/main:$CERTIFICATION_RECORD_PATH" > certification-record.json
+          printf 'SOURCE_SHA=%s\n' "$SOURCE_SHA" >> "$GITHUB_ENV"
+
+      - name: Download exact release manifest and signature
+        run: |
+          set -euo pipefail
+          mkdir -p release-evidence
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern release-manifest.json \
+            --pattern release-manifest.sigstore.json \
+            --dir release-evidence
+
+      - name: Set up Python and install the release-bound validator
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install RUSA certification package
+        run: python -m pip install --disable-pip-version-check --no-cache-dir .
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+        with:
+          cosign-release: v2.6.0
+
+      - name: Verify the signed release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
+          cosign verify-blob \
+            --bundle release-evidence/release-manifest.sigstore.json \
+            --certificate-identity "$release_identity" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            release-evidence/release-manifest.json
+          rusa-certify validate-release-manifest \
+            --manifest release-evidence/release-manifest.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit-sha "$SOURCE_SHA"
+          manifest_digest="sha256:$(sha256sum release-evidence/release-manifest.json | awk '{print $1}')"
+          printf 'MANIFEST_DIGEST=%s\n' "$manifest_digest" >> "$GITHUB_ENV"
+          printf 'RELEASE_SIGNER_IDENTITY=%s\n' "$release_identity" >> "$GITHUB_ENV"
+
+      - name: Verify release evidence, seven role reviews, and team membership
+        env:
+          GH_TOKEN: ${{ secrets.RUSA_CERTIFICATION_REVIEWER_TOKEN }}
+          RUSA_CERT_TEAM_PLATFORM: ${{ vars.RUSA_CERT_TEAM_PLATFORM }}
+          RUSA_CERT_TEAM_SECURITY: ${{ vars.RUSA_CERT_TEAM_SECURITY }}
+          RUSA_CERT_TEAM_SRE: ${{ vars.RUSA_CERT_TEAM_SRE }}
+          RUSA_CERT_TEAM_QA: ${{ vars.RUSA_CERT_TEAM_QA }}
+          RUSA_CERT_TEAM_DATA_GOVERNANCE: ${{ vars.RUSA_CERT_TEAM_DATA_GOVERNANCE }}
+          RUSA_CERT_TEAM_FINOPS: ${{ vars.RUSA_CERT_TEAM_FINOPS }}
+          RUSA_CERT_TEAM_PROCESS_OWNER: ${{ vars.RUSA_CERT_TEAM_PROCESS_OWNER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?Configure RUSA_CERTIFICATION_REVIEWER_TOKEN with read:org and pull-request read access}"
+          python -m rusa_agents.certification.signoff_verification \
+            --record certification-record.json \
+            --manifest release-evidence/release-manifest.json \
+            --output production-certification.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-tag "$RELEASE_TAG" \
+            --commit-sha "$SOURCE_SHA" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --workflow-path ".github/workflows/production-certification.yml" \
+            --release-signer-identity "$RELEASE_SIGNER_IDENTITY" \
+            --oidc-issuer "$OIDC_ISSUER" \
+            --team "platform=$RUSA_CERT_TEAM_PLATFORM" \
+            --team "security=$RUSA_CERT_TEAM_SECURITY" \
+            --team "sre=$RUSA_CERT_TEAM_SRE" \
+            --team "qa=$RUSA_CERT_TEAM_QA" \
+            --team "data_governance=$RUSA_CERT_TEAM_DATA_GOVERNANCE" \
+            --team "finops=$RUSA_CERT_TEAM_FINOPS" \
+            --team "process_owner=$RUSA_CERT_TEAM_PROCESS_OWNER"
+
+      - name: Require a PASS decision for the exact source and manifest digest
+        run: |
+          set -euo pipefail
+          rusa-certify evaluate \
+            --record production-certification.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit-sha "$SOURCE_SHA" \
+            --manifest-digest "$MANIFEST_DIGEST"
+
+      - name: Sign and verify the exact certification record
+        shell: bash
+        run: |
+          set -euo pipefail
+          certification_identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/production-certification.yml@refs/heads/main"
+          cosign sign-blob --yes --bundle production-certification.sigstore.json production-certification.json
+          cosign verify-blob \
+            --bundle production-certification.sigstore.json \
+            --certificate-identity "$certification_identity" \
+            --certificate-oidc-issuer "$OIDC_ISSUER" \
+            production-certification.json
+
+      - name: Publish signed certification record to the exact release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            production-certification.json \
+            production-certification.sigstore.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
