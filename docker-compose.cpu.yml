@@ -1,77 +1,31 @@
 services:
   api:
     environment:
-      RUSA_MODEL_BASE_URL: http://llama-cpp:8080/v1
+      # RusaModels owns GGUF artifacts, llama.cpp and model residency.
+      # RusaAi owns the tenant-aware Control Plane and its bounded gateway.
+      RUSA_MODEL_BASE_URL: ${RUSA_MODEL_BASE_URL:?Set RUSA_MODEL_BASE_URL to the RusaModels /openai/v1 endpoint}
       RUSA_LOCAL_MODEL_PATH: ""
       RUSA_MODEL_PATH: ""
-      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-general-4b}
       RUSA_MAX_CONCURRENT_INFERENCES: ${RUSA_MAX_CONCURRENT_INFERENCES:-1}
       RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-3}
       RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: ${RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS:-60}
       RUSA_GENERATION_TIMEOUT_SECONDS: ${RUSA_GENERATION_TIMEOUT_SECONDS:-300}
-      RUSA_MODEL_API_KEY: ""
-      RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health
-    depends_on:
-      llama-cpp:
-        condition: service_started
+      RUSA_MODEL_API_KEY: ${RUSA_MODEL_API_KEY:?Set RUSA_MODEL_API_KEY to a dedicated RusaModels inference-role token}
     healthcheck:
       start_period: 10m
 
   worker:
     environment:
-      # Development/staging path: all agent inference passes through the API
-      # gateway so API and worker calls share its bounded admission controller.
+      # Worker -> RusaAi gateway -> RusaModels Model Server -> private runtime.
+      # The worker never receives the RusaModels inference token.
       RUSA_WORKER_INFERENCE_BASE_URL: http://api:8000/v1
       RUSA_WORKER_INFERENCE_GATEWAY: "true"
       RUSA_WORKER_INFERENCE_API_KEYS: ${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference API keys in .env}
       RUSA_WORKER_INFERENCE_DEADLINE_MS: ${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}
-      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
+      RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusa-general-4b}
       RUSA_MODEL_API_KEY: ""
       RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
     depends_on:
-      llama-cpp:
-        condition: service_started
       api:
         condition: service_healthy
-  llama-cpp:
-    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
-    restart: unless-stopped
-    init: true
-    command:
-      - --model
-      - /models/model.gguf
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-      - --ctx-size
-      - "${RUSA_MODEL_CONTEXT:-4096}"
-      - --threads
-      - "${RUSA_CPU_THREADS:-4}"
-      - --threads-batch
-      - "${RUSA_CPU_THREADS:-4}"
-      - --batch-size
-      - "128"
-      - --ubatch-size
-      - "64"
-      - --threads-http
-      - "2"
-      - --parallel
-      - "${RUSA_MODEL_PARALLEL:-1}"
-      - --n-gpu-layers
-      - "0"
-      - --alias
-      - "${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}"
-    volumes:
-      - "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}:/models/model.gguf:ro"
-    expose:
-      - "8080"
-    mem_limit: ${RUSA_MODEL_MEMORY_LIMIT:-8g}
-    cpus: ${RUSA_MODEL_CPU_LIMIT:-4.0}
-    pids_limit: 128
-    read_only: true
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: ["ALL"]
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=128m
-    networks: [rusa-internal]
