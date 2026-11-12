@@ -45,6 +45,13 @@ def knowledge_store():
                 "public.rusa_knowledge_documents, public.rusa_knowledge_chunks TO {}"
             ).format(sql.Identifier(role_name))
         )
+        admin.execute(
+            sql.SQL(
+                "GRANT SELECT, INSERT ON "
+                "public.rusa_knowledge_document_versions, "
+                "public.rusa_knowledge_version_chunks TO {}"
+            ).format(sql.Identifier(role_name))
+        )
 
     connection_options = conninfo_to_dict(DSN)
     connection_options["user"] = role_name
