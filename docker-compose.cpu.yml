@@ -27,6 +27,8 @@ services:
       # gateway so API and worker calls share its bounded admission controller.
       RUSA_WORKER_INFERENCE_BASE_URL: http://api:8000/v1
       RUSA_WORKER_INFERENCE_GATEWAY: "true"
+      RUSA_WORKER_INFERENCE_CONTRACT: "false"
+      RUSA_WORKER_INFERENCE_CONTRACT_URL: ""
       RUSA_WORKER_INFERENCE_API_KEYS: ${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference API keys in .env}
       RUSA_WORKER_INFERENCE_DEADLINE_MS: ${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}
       RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
