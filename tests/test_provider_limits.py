@@ -409,3 +409,126 @@ def test_worker_gateway_stream_uses_tenant_auth_deadline_and_json_mode(monkeypat
     assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
     assert captured["payload"]["deadline_ms"] == 45000
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+
+def test_worker_provider_uses_v1_inference_contract_with_bound_task_and_agent(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_CONTRACT", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_CONTRACT_URL",
+        "https://api.internal/internal/v1/inference",
+    )
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "45000")
+    captured = {}
+
+    def handler(request):
+        captured["url"] = str(request.url)
+        captured["headers"] = request.headers
+        captured["payload"] = json.loads(request.content)
+        payload = captured["payload"]
+        return httpx.Response(
+            200,
+            json={
+                "schema_version": "1.0",
+                "request_id": payload["request_id"],
+                "task_id": payload["task_id"],
+                "model_id": payload["model_id"],
+                "status": "COMPLETED",
+                "output": {"action": "done"},
+                "evidence": [],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
+                "performance": {
+                    "ttft_ms": 100.0,
+                    "generation_tokens_per_second": 12.0,
+                    "peak_ram_mb": 2048.0,
+                },
+                "verification": {"schema_valid": True, "orm_status": "PENDING"},
+            },
+            request=request,
+        )
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        model="rusaai-edge-derived",
+        transport=httpx.MockTransport(handler),
+    )
+    tenant_provider = provider.for_tenant("tenant-a")
+    agent_provider = tenant_provider.for_agent("123e4567-e89b-12d3-a456-426614174000", "software_engineer")
+    result = asyncio.run(
+        agent_provider.complete(system_prompt="system", user_prompt="task")
+    )
+
+    assert result == '{"action":"done"}'
+    assert captured["url"] == "https://api.internal/internal/v1/inference"
+    assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
+    assert captured["payload"]["request_id"].startswith("REQ-")
+    assert captured["payload"]["task_id"] == "TASK-123e4567-e89b-12d3-a456-426614174000"
+    assert captured["payload"]["agent_id"] == "software_engineer"
+    assert captured["payload"]["model_id"] == "rusaai-edge-derived"
+    assert captured["payload"]["capability_profile"] == "ASTRA"
+    assert captured["payload"]["reasoning_mode"] == "STANDARD"
+    assert captured["payload"]["generation"]["max_output_tokens"] == 4096
+    assert captured["payload"]["constraints"] == {
+        "deadline_ms": 45000,
+        "gpu_offload": False,
+    }
+
+
+def test_worker_v1_contract_rejects_invalid_response_envelope(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_CONTRACT", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_CONTRACT_URL",
+        "https://api.internal/internal/v1/inference",
+    )
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"status": "COMPLETED", "output": {"action": "done"}},
+            request=request,
+        )
+    )
+    provider = (
+        OpenAICompatibleProvider(
+            base_url="https://api.internal/v1",
+            model="rusaai-edge-derived",
+            transport=transport,
+        )
+        .for_tenant("tenant-a")
+        .for_agent("task-123", "planner")
+    )
+
+    with pytest.raises(RuntimeError, match="invalid response envelope"):
+        asyncio.run(provider.complete(system_prompt="system", user_prompt="task"))
+
+
+def test_worker_v1_contract_rejects_streaming_fallback(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_CONTRACT", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_CONTRACT_URL",
+        "https://api.internal/internal/v1/inference",
+    )
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    provider = (
+        OpenAICompatibleProvider(
+            base_url="https://api.internal/v1",
+            model="rusaai-edge-derived",
+        )
+        .for_tenant("tenant-a")
+    )
+
+    async def collect():
+        return [event async for event in provider.stream([])]
+
+    with pytest.raises(RuntimeError, match="completion-only"):
+        asyncio.run(collect())
