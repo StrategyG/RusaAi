@@ -85,7 +85,7 @@ class PostgresKnowledgeStore:
         ):
             raise ValueError("project_id is invalid")
 
-    def _set_db_role(self, connection: Any) -> None::
+    def _set_db_role(self, connection: Any) -> None:
         if self.db_role:
             connection.execute("SELECT set_config('role', %s, true)", (self.db_role,))
 
