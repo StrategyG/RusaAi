@@ -21,8 +21,11 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
 
 
 def set_worker_environment(monkeypatch):
@@ -40,8 +43,11 @@ def set_worker_environment(monkeypatch):
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     worker_key = "w" * 48
     worker_key_digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
     monkeypatch.setenv(
@@ -222,3 +228,31 @@ def test_production_worker_requires_tls_api_gateway(monkeypatch):
 def test_default_model_name_uses_safe_smoke_alias_until_checkpoint_is_approved(monkeypatch):
     monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
     assert RuntimeConfig.from_env().model_name == "rusaai-cpu-smoke-test"
+
+@pytest.mark.parametrize("variable", ["RUSA_LOCAL_MODEL_PATH", "RUSA_MODEL_PATH"])
+def test_production_api_rejects_local_model_artifact_paths(monkeypatch, variable):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(variable, "/srv/rusa/models/local-checkpoint")
+
+    with pytest.raises(RuntimeError, match="RusaModels owns model artifact loading"):
+        RuntimeConfig.from_env().validate_api()
+
+@pytest.mark.parametrize("validator", ["validate_api", "validate_worker"])
+def test_production_requires_explicit_model_server_identity(monkeypatch, validator):
+    if validator == "validate_api":
+        set_api_environment(monkeypatch)
+    else:
+        set_worker_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
+        getattr(RuntimeConfig.from_env(), validator)()
+
+def test_production_api_rejects_angle_bracket_model_host_placeholder(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_MODEL_BASE_URL", "https://<model-server-host>/openai/v1"
+    )
+
+    with pytest.raises(RuntimeError, match="real model host"):
+        RuntimeConfig.from_env().validate_api()
