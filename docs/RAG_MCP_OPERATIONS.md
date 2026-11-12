@@ -3,6 +3,27 @@
 The knowledge retrieval service is an optional, separately deployed component. It is
 not enabled by the core API merely because its package is installed.
 
+## Canonical shared knowledge-store decision
+
+ADR-0002 selects the existing RusaAi `rusa_knowledge` PostgreSQL/pgvector service
+as the canonical shared Agent/Worker knowledge store, subject to the release gates
+below. This is an architecture decision, not evidence that a production database
+has been migrated, populated, deployed or activated.
+
+- SQLite/FTS5 remains device-local memory/state and local retrieval. It is not a
+  second writer or a replica of the shared corpus.
+- RAG_Cerdas IM19 remains a separate candidate system. Do not dual-write, mirror,
+  bulk-copy or cross-read it with RusaAi under this decision.
+- RusaModels is accessed through an authenticated Model Plane API for inference
+  and embedding; RusaAi must not access its database or model-storage credentials.
+- The 1,536-dimensional and 384-dimensional embeddings remain separate vector
+  spaces. The final production embedding profile is not selected by ADR-0002.
+- The service remains optional and disabled by default until source rights,
+  schema/migration, ACL, retrieval evaluation, deployment and owner approval pass.
+
+See `docs/adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md` for
+the decision, alternatives and implementation/release gates.
+
 ## Runtime requirements
 
 - Python 3.11 or newer.
@@ -80,10 +101,12 @@ individual agent or project. Therefore MCP reads are shared-only: records with
 Do not expose agent-specific knowledge through MCP until its service identity
 contract includes authenticated agent and project claims.
 
-This migration adds retrieval filtering and indexes only. It does not yet
-implement source-rights review, human approval, publication authorization,
-immutable source-version history or deletion/tombstone lifecycle. Production
-publication remains blocked until those controls are implemented and reviewed.
+Migrations 011 and 012 add agent/project retrieval scope and immutable
+document-version snapshots. They do not yet implement the complete source-rights,
+independent review, human approval, publication authorization, external
+vector/cache purge, index-generation reconciliation or tombstone/erasure lifecycle.
+Production publication remains blocked until the applicable governance and
+deletion controls are implemented, reviewed and tested.
 
 ## Immutable document versions
 
