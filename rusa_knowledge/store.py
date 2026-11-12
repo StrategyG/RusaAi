@@ -12,6 +12,8 @@ from .safety import validate_document_metadata
 
 TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 COLLECTION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 
 
 def _vector_literal(vector: list[float], dimensions: int) -> str:
@@ -69,7 +71,21 @@ class PostgresKnowledgeStore:
         if not isinstance(collection, str) or not COLLECTION_PATTERN.fullmatch(collection):
             raise ValueError("collection is invalid")
 
-    def _set_db_role(self, connection: Any) -> None:
+    @staticmethod
+    def _validate_agent_id(agent_id: str | None) -> None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+
+    @staticmethod
+    def _validate_project_id(project_id: str | None) -> None:
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+
+    def _set_db_role(self, connection: Any) -> None::
         if self.db_role:
             connection.execute("SELECT set_config('role', %s, true)", (self.db_role,))
 
@@ -119,7 +135,10 @@ class PostgresKnowledgeStore:
                     EXISTS (
                         SELECT 1 FROM pg_roles
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
-                    )
+                    ),
+                    to_regclass('public.rusa_knowledge_documents_scope_idx') IS NOT NULL,
+                    to_regclass('public.rusa_knowledge_documents_agent_ids_gin') IS NOT NULL,
+                    to_regclass('public.rusa_knowledge_documents_project_scope_idx') IS NOT NULL
                 """,
                 (f"vector({self.dimensions})", self.embedding_column),
             ).fetchone()
@@ -228,8 +247,12 @@ class PostgresKnowledgeStore:
         query: str,
         query_embedding: list[float],
         limit: int = 5,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
         if not 1 <= limit <= 20:
@@ -241,12 +264,33 @@ class PostgresKnowledgeStore:
 
         query_sql = sql.SQL(
             """
-            WITH vector_candidates AS (
+            WITH scoped_chunks AS NOT MATERIALIZED (
+                SELECT c.chunk_id, c.document_id, c.tenant_id, c.collection,
+                       c.chunk_index, c.content, c.{embedding_column}, c.search_vector
+                FROM rusa_knowledge_chunks c
+                JOIN rusa_knowledge_documents d
+                  ON d.tenant_id=c.tenant_id AND d.document_id=c.document_id
+                WHERE c.tenant_id=%s AND c.collection=%s
+                  AND (
+                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              d.metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND d.metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
+            ),
+            vector_candidates AS (
                 SELECT chunk_id,
                        ROW_NUMBER() OVER (ORDER BY {embedding_column} <=> %s::vector) AS vector_rank
-                FROM rusa_knowledge_chunks
-                WHERE tenant_id=%s AND collection=%s
-                  AND {embedding_column} IS NOT NULL
+                FROM scoped_chunks
+                WHERE {embedding_column} IS NOT NULL
                 ORDER BY {embedding_column} <=> %s::vector
                 LIMIT %s
             ),
@@ -255,9 +299,8 @@ class PostgresKnowledgeStore:
                        ROW_NUMBER() OVER (
                            ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
                        ) AS lexical_rank
-                FROM rusa_knowledge_chunks
-                WHERE tenant_id=%s AND collection=%s
-                  AND search_vector @@ plainto_tsquery('simple', %s)
+                FROM scoped_chunks
+                WHERE search_vector @@ plainto_tsquery('simple', %s)
                 ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC
                 LIMIT %s
             ),
@@ -281,8 +324,9 @@ class PostgresKnowledgeStore:
             """
         ).format(embedding_column=sql.Identifier(self.embedding_column))
         params = (
-            vector, tenant_id, collection, vector, candidate_limit,
-            query, tenant_id, collection, query, query, candidate_limit,
+            tenant_id, collection, agent_id, agent_id, project_id, project_id,
+            vector, vector, candidate_limit,
+            query, query, query, candidate_limit,
             vector, tenant_id, limit,
         )
         with self._pool.connection() as connection:
@@ -389,8 +433,12 @@ class PostgresKnowledgeStore:
         collection: str,
         document_id: str,
         max_chars: int = 20_000,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
         self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         try:
             UUID(document_id)
         except (ValueError, TypeError, AttributeError) as exc:
@@ -404,8 +452,22 @@ class PostgresKnowledgeStore:
                 SELECT document_id, title, source_uri, metadata, content_hash, created_at, updated_at
                 FROM rusa_knowledge_documents
                 WHERE tenant_id=%s AND collection=%s AND document_id=%s::uuid
+                  AND (
+                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
                 """,
-                (tenant_id, collection, document_id),
+                (tenant_id, collection, document_id, agent_id, agent_id, project_id, project_id),
             ).fetchone()
             if document is None:
                 return None
@@ -430,9 +492,17 @@ class PostgresKnowledgeStore:
             "truncated": sum(len(row[0]) for row in chunks) > max_chars,
         }
 
-    def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
+    def list_collections(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
             raise ValueError("tenant_id is invalid")
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
         with self._pool.connection() as connection:
             self._set_tenant(connection, tenant_id)
             rows = connection.execute(
@@ -440,11 +510,25 @@ class PostgresKnowledgeStore:
                 SELECT collection, COUNT(*) AS document_count
                 FROM rusa_knowledge_documents
                 WHERE tenant_id=%s
+                  AND (
+                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          %s::text IS NOT NULL
+                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              metadata->>'project_id' IS NULL
+                              OR (
+                                  %s::text IS NOT NULL
+                                  AND metadata->>'project_id' = %s
+                              )
+                          )
+                      )
+                  )
                 GROUP BY collection
                 ORDER BY collection
                 LIMIT 100
                 """,
-                (tenant_id,),
+                (tenant_id, agent_id, agent_id, project_id, project_id),
             ).fetchall()
         return [{"collection": row[0], "document_count": int(row[1])} for row in rows]
 
