@@ -84,8 +84,14 @@ services:
       RUSA_DATABASE_URL: ""
       RUSA_API_KEY: ""
       RUSA_API_KEYS: "{}"
-      RUSA_API_KEYS_JSON: "{}"
+      # Hash-only principal registry; raw tenant credentials remain worker-only secrets.
+      RUSA_API_KEYS_JSON: ${RUSA_API_KEYS_JSON:?Set the SHA-256 tenant API key registry}
       RUSA_METRICS_API_KEY: ""
+      RUSA_MODEL_API_KEY: ""
+      RUSA_WORKER_INFERENCE_GATEWAY: "true"
+      RUSA_WORKER_INFERENCE_BASE_URL: ${RUSA_WORKER_INFERENCE_BASE_URL:?Set the trusted HTTPS API gateway URL}
+      RUSA_WORKER_INFERENCE_API_KEYS: ${RUSA_WORKER_INFERENCE_API_KEYS:?Set tenant-scoped worker inference keys}
+      RUSA_WORKER_INFERENCE_DEADLINE_MS: ${RUSA_WORKER_INFERENCE_DEADLINE_MS:-270000}
       POSTGRES_PASSWORD: ""
       RUSA_AICODE_ENABLED: ${RUSA_AICODE_ENABLED:-false}
       DOCKER_HOST: unix:///run/docker.sock
@@ -111,6 +117,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      api:
+        condition: service_healthy
     networks: [rusa-internal, rusa-egress]
 
 networks:
