@@ -222,3 +222,11 @@ def test_production_worker_requires_tls_api_gateway(monkeypatch):
 def test_default_model_name_uses_safe_smoke_alias_until_checkpoint_is_approved(monkeypatch):
     monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
     assert RuntimeConfig.from_env().model_name == "rusaai-cpu-smoke-test"
+
+@pytest.mark.parametrize("variable", ["RUSA_LOCAL_MODEL_PATH", "RUSA_MODEL_PATH"])
+def test_production_api_rejects_local_model_artifact_paths(monkeypatch, variable):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(variable, "/srv/rusa/models/local-checkpoint")
+
+    with pytest.raises(RuntimeError, match="RusaModels owns model artifact loading"):
+        RuntimeConfig.from_env().validate_api()
