@@ -274,7 +274,8 @@ class PostgresKnowledgeStore:
                   AND (
                       COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
                       OR (
-                          %s::text IS NOT NULL
+                          COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
                           AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
                           AND (
                               d.metadata->>'project_id' IS NULL
@@ -455,7 +456,8 @@ class PostgresKnowledgeStore:
                   AND (
                       COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
                       OR (
-                          %s::text IS NOT NULL
+                          COALESCE(metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
                           AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
                           AND (
                               metadata->>'project_id' IS NULL
@@ -513,7 +515,8 @@ class PostgresKnowledgeStore:
                   AND (
                       COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
                       OR (
-                          %s::text IS NOT NULL
+                          COALESCE(metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
                           AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
                           AND (
                               metadata->>'project_id' IS NULL
