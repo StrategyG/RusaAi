@@ -19,3 +19,12 @@ def test_384d_migration_preserves_legacy_vectors_and_adds_parallel_index():
     assert "rusa_knowledge_chunks_embedding_384_hnsw_idx" in migration
     assert "DROP COLUMN" not in migration
     assert "UPDATE public.rusa_knowledge_chunks" not in migration
+
+
+def test_agent_project_scope_migration_adds_lookup_indexes():
+    migration = Path("migrations/011_rag_agent_project_scope.sql").read_text(encoding="utf-8")
+    assert "rusa_knowledge_documents_scope_idx" in migration
+    assert "rusa_knowledge_documents_agent_ids_gin" in migration
+    assert "rusa_knowledge_documents_project_scope_idx" in migration
+    assert "tenant_id" in migration
+    assert "DROP " not in migration
