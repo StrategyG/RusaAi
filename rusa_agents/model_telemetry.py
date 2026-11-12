@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 import httpx
@@ -46,6 +47,16 @@ async def fetch_model_telemetry(
         raise ModelTelemetryError("Model Plane telemetry schema version is unsupported")
     if payload.get("model_id") != expected_model_id:
         raise ModelTelemetryError("Model Plane telemetry model identity does not match the request")
+
+    sampled_at = payload.get("sampled_at_unix")
+    if (
+        isinstance(sampled_at, bool)
+        or not isinstance(sampled_at, (int, float))
+        or not math.isfinite(sampled_at)
+        or sampled_at > time.time() + 30
+        or time.time() - sampled_at > 60
+    ):
+        raise ModelTelemetryError("Model Plane telemetry sample is stale or has an invalid timestamp")
 
     peak_ram_mb = payload.get("peak_ram_mb")
     current_ram_mb = payload.get("current_ram_mb")
