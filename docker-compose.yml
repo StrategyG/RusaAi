@@ -70,6 +70,9 @@ services:
       RUSA_WORKER_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      # Do not inherit the API-to-model secret into the worker container.
+      # Direct non-production worker providers may use this separate secret.
+      RUSA_MODEL_API_KEY: ${RUSA_WORKER_MODEL_API_KEY:-}
       DOCKER_HOST: unix:///run/docker.sock
       RUSA_METRICS_BIND: 0.0.0.0
     volumes:

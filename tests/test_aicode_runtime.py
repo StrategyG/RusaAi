@@ -11,6 +11,7 @@ from rusa_agents.contracts import (
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
+from rusa_agents.runtime import AICodeRuntime
 
 
 class StubWorker:
@@ -297,3 +298,54 @@ def test_quality_failure_triggers_bounded_repair_cycle(tmp_path):
     assert len([
         result for result in record.results if result.role == WorkerRole.TESTER
     ]) == 2
+
+
+
+def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, monkeypatch):
+    tenant_provider = object()
+
+    class ProviderFactory:
+        def __init__(self):
+            self.requested_tenants = []
+
+        def for_tenant(self, tenant_id):
+            self.requested_tenants.append(tenant_id)
+            return tenant_provider
+
+    class WorkspaceManager:
+        def create(self, coding_task, tenant_id):
+            assert tenant_id == "tenant-a"
+            return tmp_path / "tenant-a-workspace"
+
+    captured = {}
+
+    class CapturingOrchestrator:
+        PIPELINE = AICodeOrchestrator.PIPELINE
+
+        def __init__(self, *, workers, memory, audit, max_parallel_workers, max_repair_cycles):
+            captured["workers"] = workers
+
+    runtime = object.__new__(AICodeRuntime)
+    runtime.provider = ProviderFactory()
+    runtime.workspace_manager = WorkspaceManager()
+    runtime.sandbox = object()
+    runtime.knowledge_service = None
+    runtime.memory = object()
+    runtime.audit = object()
+
+    monkeypatch.setattr(
+        "rusa_agents.runtime.WorkspaceToolGateway",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "rusa_agents.runtime.AICodeOrchestrator",
+        CapturingOrchestrator,
+    )
+
+    orchestrator, workspace = asyncio.run(runtime._build_orchestrator(task(), "tenant-a"))
+
+    assert isinstance(orchestrator, CapturingOrchestrator)
+    assert workspace.endswith("tenant-a-workspace")
+    assert runtime.provider.requested_tenants == ["tenant-a"]
+    assert captured["workers"]
+    assert all(worker.provider is tenant_provider for worker in captured["workers"])

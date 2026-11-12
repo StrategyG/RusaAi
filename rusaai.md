@@ -2,7 +2,7 @@
 title: "RusaAi Repository Roadmap"
 document: "rusaai.md"
 repository: "StrategyG/RusaAi"
-version: "1.4.0"
+version: "1.8.0"
 updated: "2026-11-12"
 status: "Repository engineering roadmap"
 language: "id"
@@ -166,33 +166,42 @@ Exit criteria:
 
 ### Fase R2 — Shared inference scheduler
 
-**Prioritas: P0 · Status: NOT IMPLEMENTED END-TO-END**
+**Prioritas: P0 · Status: IMPLEMENTED IN CODE — EXACT-HEAD CI PENDING; STAGING NOT VERIFIED**
 
 Path utama:
 - `rusa_agents/inference_admission.py`
+- `rusa_agents/postgres_inference_admission.py`
 - `rusa_agents/providers.py`
 - `rusa_agents/worker_main.py`
 - `rusa_agents/workers.py`
 - `llm-project/serve/`
+- `migrations/010_inference_admission.sql`
 - `docker-compose.cpu.yml`
-- `tests/test_inference_admission.py`
-- `tests/test_provider_limits.py`
+- `docker-compose.production.yml`
+- `tests/test_postgres_inference_admission.py`
 
 Pekerjaan:
-- [ ] Jadikan satu scheduler sebagai pintu masuk seluruh pemanggil inference, baik API maupun worker.
-- [ ] Hapus direct worker-to-llama.cpp bypass setelah jalur scheduler siap.
-- [ ] Simpan queue state dan request ownership secara aman lintas proses.
-- [ ] Tetapkan FIFO/priority policy, bounded waiting, queue timeout, deadline, cancellation, dan idempotency.
-- [ ] Pastikan satu active generation untuk baseline CPU.
-- [ ] Tangani worker crash, caller disconnect, lease expiry, duplicate submit, dan slot handoff race.
+- [x] Jadikan API gateway satu pintu inference untuk API dan worker; worker memakai credential tenant-scoped.
+- [x] Hapus direct worker-to-llama.cpp bypass pada CPU profile.
+- [x] Simpan request state, slot ownership, dan lease di PostgreSQL agar berlaku lintas proses.
+- [x] Terapkan FIFO, bounded waiting, queue timeout, request deadline, cancellation, lease renewal, dan stale-owner fencing.
+- [x] Pertahankan satu active generation pada baseline CPU melalui konfigurasi default.
+- [x] Tambahkan pengujian controller independen dan proses OS terpisah, termasuk lease expiry dan process-crash recovery.
 - [x] Instrument API queue wait, active/waiting count, timeout/rejection, stream TTFT, generation duration, dan provider errors.
-- [ ] Extend inference telemetry to worker-to-model calls and add model RAM, CPU utilization, and tokens/second measurements.
+- [ ] Tambahkan idempotency/deduplication untuk duplicate submit.
+- [ ] Tambahkan priority scheduling; implementasi saat ini FIFO.
+- [ ] Extend telemetry ke worker-to-model calls dan tambahkan model RAM, CPU utilization, serta tokens/second.
 
 Exit criteria:
-- API dan worker memakai scheduler yang sama.
-- Uji concurrency lintas proses membuktikan tidak ada generation paralel yang melampaui konfigurasi.
-- FIFO/priority, queue-full, timeout, cancellation, restart, dan crash recovery lulus.
-- Tidak ada slot leak atau double release.
+- [x] API dan worker menggunakan gateway/scheduler yang sama pada jalur implementasi.
+- [x] Test lintas proses membuktikan global active-slot ownership dan FIFO.
+- [x] Test mencakup queue-full, timeout, cancellation, lease expiry, stale-owner fencing, dan process-crash recovery.
+- [x] Test memastikan worker runtime tidak memiliki akses langsung ke tabel scheduler.
+- [ ] Exact-head CI harus hijau sebelum merge.
+- [ ] Staging crash/restart/failover drill dan load/soak verification harus lulus.
+- [ ] Tidak ada slot leak atau double release pada staging evidence.
+
+PR implementasi: [#109](https://github.com/StrategyG/RusaAi/pull/109). Kode dan test tersedia; status `VERIFIED` belum boleh diberikan sampai exact-head CI dan staging evidence tersedia.
 
 ### Fase R3 — Durable workflow dan agent runtime
 
@@ -430,6 +439,8 @@ Sebuah komponen disebut:
 
 - Repository: https://github.com/StrategyG/RusaAi
 - Architecture PR #107: https://github.com/StrategyG/RusaAi/pull/107
+- Worker API gateway predecessor PR #108 (superseded by consolidated PR #109): https://github.com/StrategyG/RusaAi/pull/108
+- Consolidated worker gateway + PostgreSQL admission PR #109: https://github.com/StrategyG/RusaAi/pull/109
 - CI Run #4228 (deadline implementation snapshot): https://github.com/StrategyG/RusaAi/actions/runs/43095281714
 - Implementation alignment: `docs/architecture/IMPLEMENTATION_ALIGNMENT.md`
 - Autonomous implementation mapping: `docs/AUTONOMOUS_IMPLEMENTATION_ROADMAP.md`
@@ -448,6 +459,10 @@ Sebuah komponen disebut:
 | 1.2.0 | 2026-11-12 | Mencatat readiness fail-closed dan API inference telemetry; menandai batas metrics process-local serta pekerjaan observability worker/model yang tersisa. |
 | 1.3.0 | 2026-11-12 | Menambahkan log implementasi R1: deadline API untuk queue dan generation, pembatalan completion/stream, metrik deadline, regression tests, serta daftar pekerjaan cross-process yang masih terbuka. |
 | 1.4.0 | 2026-11-12 | Memperkuat lifecycle cancellation: coroutine tertutup saat deadline sudah habis, request cancellation menghentikan provider sebelum slot dilepas, dan regression tests ditambahkan. |
+| 1.5.0 | 2026-11-12 | Menambahkan shared API inference path untuk worker CPU, kredensial per tenant, deadline gateway, JSON response format, dan mencegah retry yang dapat menggandakan generasi. Scheduler durable lintas proses masih terbuka. |
+| 1.6.0 | 2026-11-12 | Menambahkan PostgreSQL-backed FIFO scheduler, slot leases, heartbeat, stale-owner fencing, crash recovery, migration 010, dan integration tests untuk admission lintas controller. |
+| 1.7.0 | 2026-11-12 | Mencatat keputusan foundation checkpoint sebagai PILOT_ONLY; memisahkan target arsitektur 1.541B dari identitas produk sementara dan menegaskan belum ada artifact produksi yang disetujui. |
+| 1.8.0 | 2026-11-12 | Memperketat operasi scheduler PostgreSQL dengan connect/lock/query/idle-transaction timeout yang bounded serta regression test untuk lease-loss cancellation dan pembersihan slot. |
 
 ## 11. Implementation progress — 2026-11-12
 
@@ -457,6 +472,8 @@ Sebuah komponen disebut:
 
 Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 
+Baseline CI passed at the architecture snapshot; re-check the latest exact PR head after CI workflow trigger changes before marking this section VERIFIED.
+
 - [x] Add optional deadline_ms (1–3,600,000 ms) to the OpenAI-compatible chat request.
 - [x] Apply the request budget to FIFO admission wait without replacing the configured queue timeout.
 - [x] Return HTTP 504 when the request deadline expires before generation or during non-streaming generation.
@@ -465,13 +482,71 @@ Branch: feat/architecture-v2-cpu-first-alignment (PR #107)
 - [x] Cancel and await provider work when the request task itself is cancelled, before releasing its admission slot.
 - [x] Close a generation coroutine cleanly if the request deadline has already expired before it starts.
 - [x] Add low-cardinality deadline metrics by phase and regression tests for queue timeout classification, deadline expiry, request cancellation, streaming cancellation, and request validation.
-- [x] Document the HTTP/SSE behavior and explicitly state that the deadline is API-process scoped.
+- [x] Document the HTTP/SSE behavior and apply the same deadline budget to the PostgreSQL-backed shared admission queue when the API database is configured.
 
 ### Remaining R1/R2 work
 
 - [ ] Integrate the full versioned inference envelope with the API/provider and validate model identity, context, evidence, usage, and structured error semantics.
-- [ ] Propagate deadline and cancellation through autonomous worker requests.
-- [ ] Replace separate API admission and worker direct model calls with one durable cross-process scheduler.
-- [ ] Add concurrency/restart/crash-recovery tests proving global single-generation behavior.
 
 **Verification status:** implementation is committed to the architecture PR branch. Do not change the status to VERIFIED until the CI run for the exact branch head completes successfully and its test results are reviewed.
+
+### R2 — Shared API admission path for CPU worker inference
+
+**IMPLEMENTED IN CPU COMPOSE PROFILE — pending CI and staging verification**
+
+Implementation branch: feat/shared-api-inference-gateway (predecessor PR #108)
+
+The worker gateway and durable scheduler are consolidated in PR #109, which targets PR #107 directly so its CI validates the complete R2/R2.1 change set.
+
+- [x] Route CPU-profile worker inference through the OpenAI-compatible API instead of calling llama.cpp directly.
+- [x] Reuse the API's shared admission controller for API and worker generation requests.
+- [x] Use per-tenant worker API credentials; validate the worker key digest against the API principal's tenant and inference-capable role in production.
+- [x] Fail closed when a task tenant has no configured worker inference credential.
+- [x] Propagate a bounded worker request deadline to the API gateway.
+- [x] Forward and validate JSON-object response formatting end to end.
+- [x] Disable automatic retries for worker gateway requests so a 429/504 or transport failure cannot silently duplicate a generation.
+- [x] Remove the worker's direct llama.cpp URL from the CPU Compose overlay and document the private HTTP route as development/staging only.
+- [x] Keep the model gateway secret out of the worker's production configuration requirements.
+
+**R2.1 — Durable PostgreSQL inference admission**
+
+**IMPLEMENTED — pending exact-head CI and production staging verification**
+
+Branch: feat/postgres-inference-admission (PR #109, consolidated directly on PR #107)
+
+- [x] Add migration 010 with global scheduler configuration, request history, and active slot tables.
+- [x] Use a PostgreSQL advisory transaction lock to serialize FIFO enqueue/claim/release across API replicas.
+- [x] Enforce a globally bounded waiting queue and a configured active slot count.
+- [x] Renew active slot leases; reclaim expired slots after process loss.
+- [x] Cancel the generation task if the API process cannot renew its slot lease.
+- [x] Fence stale releases so an expired owner cannot release a slot now held by a newer request.
+- [x] Restrict scheduler table privileges to the API runtime role; the worker has no direct database access to scheduler state.
+- [x] Fail API startup if migration 010, required privileges, scheduler settings, or configured slot rows are missing or inconsistent.
+- [x] Add PostgreSQL integration tests for FIFO across independent controller instances, global queue capacity, cancellation cleanup, deadline classification, stale lease recovery, and stale-owner release.
+- [x] Bound scheduler database connect, lock, statement, and idle-transaction waits so database stalls fail closed.
+- [x] Add regression tests proving lease-renewal failure cancels generation and releases its active slot.
+- [x] Document database migration order, cluster-wide scheduler configuration, and bounded database-operation timeouts.
+
+**Remaining R2.1 work**
+
+- [ ] Pass exact-head CI including the new PostgreSQL integration tests and isolated Docker/sandbox/Trivy checks.
+- [x] Add separate-OS-process FIFO and process-crash lease-recovery integration tests.
+- [ ] Run production staging crash/restart and failover drills.
+- [ ] Add production TLS endpoint for the worker-facing API gateway and verify certificate validation in staging.
+- [ ] Add model-server/host RAM, TTFT, tokens/sec, queue wait, and active/waiting telemetry to the same request trace.
+
+**Limit:** durable queue/slot state is now shared through PostgreSQL, but production staging, multi-process acceptance evidence, TLS deployment, and model/hardware performance certification are still required.
+
+
+### R3 — Foundation checkpoint and model artifact gate
+
+**DECISION RECORDED — PILOT_ONLY; no production checkpoint approved**
+
+- Product identity remains `rusaai-edge-derived` with status `CHECKPOINT_CANDIDATE_PENDING_AUDIT`.
+- `rusaai-edge-1.54b` remains the 1.541B architecture reference target, not an assertion that a compatible checkpoint exists.
+- `BhinekaIntiLabs/bhineka-gpt` is recorded only as an 8-GB pilot candidate: 556,269,696 parameters and 2K published context. The model card declares Apache-2.0 metadata but warns that custom `bhineka` code may require `trust_remote_code=True`.
+- No immutable revision, artifact SHA-256, lineage approval, full license/data audit, CPU benchmark, instruction-following evaluation, or safety certification is recorded.
+- The candidate is not a production dependency and does not replace the 1.541B architecture target.
+- Decision record: `documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md`.
+
+The historical Qwen3-4B CPU v1.0 baseline is not silently restored; v2.0 requires a compatible non-Qwen checkpoint.

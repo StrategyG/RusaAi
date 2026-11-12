@@ -69,7 +69,87 @@ The OpenAI-compatible /v1/chat/completions request accepts an optional integer d
 - If streaming has already started, the API emits an SSE timeout_error event followed by data: [DONE]; it cancels the pending provider iteration and releases the slot.
 - If deadline_ms is omitted, the existing queue timeout and provider timeout behavior remains unchanged.
 - A queue-capacity rejection remains HTTP 429. A queue timeout that occurs before the request deadline also remains HTTP 429.
-- This is API-process deadline enforcement. It does not yet provide a durable cross-process scheduler or propagate the same deadline to the autonomous worker's direct model-server path.
+- The CPU Compose profile routes autonomous worker requests through the same API endpoint with a tenant-scoped API key and a configured worker inference deadline. This shares the API-process admission controller and removes the worker's direct llama.cpp bypass for that profile.
+- The admission queue is still process-local, not durable or shared across multiple API replicas. Keep one API replica per model endpoint until the PostgreSQL-backed cross-process scheduler and its crash/restart tests are implemented.
+
+### Durable PostgreSQL admission scheduler
+
+When `RUSA_API_DATABASE_URL` is configured, the API uses the PostgreSQL-backed
+scheduler instead of the in-memory admission controller. All API replicas that
+serve the same model endpoint therefore share one FIFO queue and one set of
+active-generation slots.
+
+- Apply `migrations/010_inference_admission.sql` after migrations 001-009 before
+  deploying the API. The migration grants access only to `rusa_api_runtime`;
+  the worker runtime receives no direct scheduler-table access.
+- The scheduler persists request IDs, state, queue expiry, slot ownership, and
+  lease expiry only. It does not store prompts, completions, or tenant payloads.
+- The migration defaults are one active slot, three waiting requests, a 60-second
+  queue timeout, and a 30-second lease. The database config row
+  `rusa_inference_admission_config` must match
+  `RUSA_MAX_CONCURRENT_INFERENCES`,
+  `RUSA_MAX_WAITING_INFERENCES`,
+  `RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS`, and
+  `RUSA_INFERENCE_LEASE_SECONDS` on every API replica. Startup fails closed if
+  they differ.
+- To change the active slot count, update the config row during a maintenance
+  window and provision exactly one row per slot in
+  `rusa_inference_admission_slots` before restarting API replicas. Do not
+  increase `max_active` beyond the model server's tested capacity.
+- Active requests renew their lease every third of the lease interval. If an API
+  process crashes, a later request reclaims an expired slot. If a live process
+  cannot renew its lease, the associated generation task is cancelled.
+- Scheduler database connections use a five-second connection timeout, five-second
+  lock/statement timeouts, and a ten-second idle-in-transaction timeout. A stalled
+  database therefore fails closed instead of holding admission or heartbeat work
+  indefinitely.
+- Waiting requests are claimed in database FIFO order. Queue-full, queue-timeout,
+  request-deadline, cancellation, and stale-lease states are recorded separately.
+- The API readiness/startup path checks the migration, database role privileges,
+  scheduler configuration, and slot rows. Missing schema or privilege errors
+  prevent the API from starting.
+
+For a 16-GB CPU profile, the default scheduler row is one active and three
+waiting. For an 8-GB profile, set `max_waiting=1` in both the database config
+row and the environment. Keep the same settings across all replicas.
+
+For example, changing to two active slots and one waiting request requires a
+maintenance window with API traffic drained, then a database-owner transaction
+such as:
+
+```sql
+BEGIN;
+UPDATE public.rusa_inference_admission_config
+SET max_active = 2,
+    max_waiting = 1,
+    queue_timeout_ms = 60000,
+    lease_seconds = 30,
+    updated_at = clock_timestamp()
+WHERE singleton_id = 1;
+INSERT INTO public.rusa_inference_admission_slots(slot_id)
+SELECT generate_series(0, 1)::smallint
+ON CONFLICT (slot_id) DO NOTHING;
+COMMIT;
+```
+
+Set the same values in the environment before starting the API replicas. Only
+increase active slots after the model backend has passed a concurrency and
+memory-capacity test for that target hardware.
+
+### Worker-to-API inference gateway
+
+For the CPU Compose profile, the API is the only component that connects to llama.cpp. The autonomous worker connects to the API's OpenAI-compatible endpoint and supplies the API key mapped to the current task tenant. The worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
+
+- Set `RUSA_WORKER_INFERENCE_GATEWAY=true`.
+- Set `RUSA_WORKER_INFERENCE_BASE_URL` to the API gateway URL. Production requires credential-free HTTPS with certificate validation.
+- Mount the internal CA bundle read-only into the worker and set `SSL_CERT_FILE` to the in-container bundle path. The production Compose overlay requires `RUSA_INTERNAL_CA_BUNDLE` as the host-side source path.
+- Set `RUSA_WORKER_INFERENCE_API_KEYS` to a tenant-to-secret mapping. Keep raw keys in the secret manager; each key's SHA-256 digest must resolve to a principal in `RUSA_API_KEYS_JSON` with the same tenant and an inference-capable role.
+- Set `RUSA_WORKER_INFERENCE_DEADLINE_MS` to a bounded request budget. The API enforces that budget across queue wait and generation.
+- The worker provider sends `X-API-Key` and a JSON-object response-format requirement. The API validates the request and forwards the response format to the model backend.
+- The worker gateway does not automatically retry HTTP capacity/deadline errors or transport failures; this avoids duplicate model generations. Task-level retry remains controlled by the durable queue and its idempotency policy.
+- The baseline is single API process per model endpoint. Multiple API replicas do not share FIFO state; llama.cpp `--parallel 1` is only a final active-generation guard.
+
+The local CPU Compose route uses private-network HTTP for development/staging only. Do not copy that URL into production configuration.
 
 ## 4. Startup and health checks
 
