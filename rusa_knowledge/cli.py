@@ -37,6 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("check", help="verify PostgreSQL, pgvector, and RLS readiness")
 
+    versions = commands.add_parser("versions", help="list immutable versions of one document")
+    versions.add_argument("--tenant-id", required=True)
+    versions.add_argument("--collection", default="agent")
+    versions.add_argument("--document-id", required=True)
+    versions.add_argument("--agent-id")
+    versions.add_argument("--project-id")
+    versions.add_argument("--limit", type=int, default=20)
+
+    get_version = commands.add_parser("get-version", help="read one immutable document version")
+    get_version.add_argument("--tenant-id", required=True)
+    get_version.add_argument("--collection", default="agent")
+    get_version.add_argument("--document-id", required=True)
+    get_version.add_argument("--version-id", required=True)
+    get_version.add_argument("--agent-id")
+    get_version.add_argument("--project-id")
+    get_version.add_argument("--max-chars", type=int, default=20_000)
+
     evaluation = commands.add_parser("evaluate", help="evaluate retrieval against a JSONL relevance dataset")
     evaluation.add_argument("--dataset", required=True)
     evaluation.add_argument("--tenant-id", required=True)
@@ -54,6 +71,31 @@ def main() -> int:
         service = KnowledgeService.from_env(check_ready=True)
         if args.command == "check":
             print(json.dumps({"ready": service.store.check_ready()}))
+            return 0
+
+        if args.command == "versions":
+            versions = service.list_document_versions(
+                tenant_id=args.tenant_id,
+                collection=args.collection,
+                document_id=args.document_id,
+                agent_id=args.agent_id,
+                project_id=args.project_id,
+                limit=args.limit,
+            )
+            print(json.dumps({"versions": versions}, ensure_ascii=False))
+            return 0
+
+        if args.command == "get-version":
+            version = service.get_document_version(
+                tenant_id=args.tenant_id,
+                collection=args.collection,
+                document_id=args.document_id,
+                version_id=args.version_id,
+                agent_id=args.agent_id,
+                project_id=args.project_id,
+                max_chars=args.max_chars,
+            )
+            print(json.dumps({"found": version is not None, "version": version}, ensure_ascii=False))
             return 0
 
         if args.command == "evaluate":
