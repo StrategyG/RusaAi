@@ -409,3 +409,25 @@ def test_worker_gateway_stream_uses_tenant_auth_deadline_and_json_mode(monkeypat
     assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
     assert captured["payload"]["deadline_ms"] == 45000
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+def test_rusamodels_readiness_rejects_unserved_configured_model():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/openai/v1/models"
+        assert request.headers["Authorization"] == "Bearer inference-token"
+        assert request.headers["X-API-Key"] == "inference-token"
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "rusa-general-4b"}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.internal/openai/v1",
+        api_key="inference-token",
+        default_model="rusaai-edge-1.54b",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(RuntimeError, match="not served by the model endpoint"):
+        asyncio.run(provider.check_ready())
