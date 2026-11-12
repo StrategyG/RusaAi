@@ -13,6 +13,7 @@ services:
       RUSA_MODEL_HEALTH_URL: http://llama-cpp:8080/health
       RUSA_MODEL_TELEMETRY_URL: http://model-telemetry:9101/v1/telemetry
       RUSA_MODEL_TELEMETRY_API_KEY: ${RUSA_MODEL_TELEMETRY_API_KEY:?Set model telemetry API key in .env}
+      RUSA_MODEL_ARTIFACT_SHA256: ${RUSA_GGUF_MODEL_SHA256:-}
     depends_on:
       llama-cpp:
         condition: service_started
@@ -51,6 +52,10 @@ services:
       RUSA_MODEL_TELEMETRY_PROCESS_NAME: llama-server
       RUSA_MODEL_TELEMETRY_API_KEY: ${RUSA_MODEL_TELEMETRY_API_KEY:?Set model telemetry API key in .env}
       RUSA_MODEL_NAME: ${RUSA_MODEL_NAME:-rusaai-cpu-smoke-test}
+      RUSA_MODEL_ARTIFACT_PATH: /models/model.gguf
+      RUSA_MODEL_ARTIFACT_SHA256: ${RUSA_GGUF_MODEL_SHA256:-}
+    volumes:
+      - "${RUSA_GGUF_MODEL_PATH:?Set RUSA_GGUF_MODEL_PATH in .env}:/models/model.gguf:ro"
     read_only: true
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
