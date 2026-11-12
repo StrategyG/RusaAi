@@ -154,6 +154,9 @@ class PostgresKnowledgeStore:
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_chunks', 'SELECT'
                     ),
+                    NOT has_table_privilege(
+                        current_user, 'public.rusa_knowledge_documents', 'DELETE'
+                    ),
                     EXISTS (
                         SELECT 1 FROM pg_roles
                         WHERE rolname=current_user AND NOT rolsuper AND NOT rolbypassrls
@@ -850,13 +853,10 @@ class PostgresKnowledgeStore:
     def delete_tenant(self, *, tenant_id: str) -> int:
         if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
             raise ValueError("tenant_id is invalid")
-        with self._pool.connection() as connection:
-            self._set_tenant(connection, tenant_id)
-            cursor = connection.execute(
-                "DELETE FROM rusa_knowledge_documents WHERE tenant_id=%s",
-                (tenant_id,),
-            )
-            return cursor.rowcount
+        raise PermissionError(
+            "tenant erasure requires the privileged retention procedure; "
+            "the knowledge worker role cannot delete documents or immutable versions"
+        )
 
     def close(self) -> None:
         self._pool.close()
