@@ -40,6 +40,8 @@ class RuntimeConfig:
     model_name: str
     tenant_repositories: dict[str, list[str]]
     model_api_key: str | None = None
+    model_telemetry_url: str | None = None
+    model_telemetry_api_key: str | None = None
     aicode_enabled: bool = False
 
     @staticmethod
@@ -149,6 +151,8 @@ class RuntimeConfig:
             model_name=os.getenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test"),
             tenant_repositories=tenant_repositories,
             model_api_key=os.getenv("RUSA_MODEL_API_KEY"),
+            model_telemetry_url=os.getenv("RUSA_MODEL_TELEMETRY_URL"),
+            model_telemetry_api_key=os.getenv("RUSA_MODEL_TELEMETRY_API_KEY"),
             aicode_enabled=aicode_enabled,
         )
 
@@ -198,6 +202,14 @@ class RuntimeConfig:
                 errors.append("RUSA_MODEL_BASE_URL must use credential-free HTTPS")
             if self._looks_placeholder(model_url.hostname):
                 errors.append("RUSA_MODEL_BASE_URL must point to a real model host")
+        if self.environment == "production" and self.model_name not in {
+            "rusaai-edge-1.54b",
+            "rusaai-edge-derived",
+        }:
+            errors.append(
+                "RUSA_MODEL_NAME must be an approved RusaAi-Edge model identity; "
+                "the CPU smoke-test alias is not permitted in production"
+            )
         if self.environment == "production" and require_model_api_key:
             if not self.model_api_key:
                 errors.append("RUSA_MODEL_API_KEY is required for the authenticated model gateway")
@@ -228,6 +240,26 @@ class RuntimeConfig:
         elif len(self.metrics_api_key.encode("utf-8")) < 32 or self._looks_placeholder(self.metrics_api_key):
             missing.append("RUSA_METRICS_API_KEY must be a real secret of at least 32 UTF-8 bytes")
         missing.extend(self._validate_tenants_and_model())
+        telemetry_url = urlparse(self.model_telemetry_url or "")
+        if (
+            telemetry_url.scheme != "https"
+            or not telemetry_url.hostname
+            or telemetry_url.username
+            or telemetry_url.password
+            or self._looks_placeholder(telemetry_url.hostname)
+        ):
+            missing.append(
+                "RUSA_MODEL_TELEMETRY_URL must use credential-free HTTPS to the Model Plane telemetry endpoint"
+            )
+        if not self.model_telemetry_api_key:
+            missing.append("RUSA_MODEL_TELEMETRY_API_KEY is required")
+        elif (
+            len(self.model_telemetry_api_key.encode("utf-8")) < 32
+            or self._looks_placeholder(self.model_telemetry_api_key)
+        ):
+            missing.append(
+                "RUSA_MODEL_TELEMETRY_API_KEY must be a real secret of at least 32 UTF-8 bytes"
+            )
         if missing:
             raise RuntimeError("Production API configuration is incomplete: " + ", ".join(missing))
 
