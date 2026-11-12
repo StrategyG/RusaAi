@@ -48,6 +48,14 @@ INFERENCE_PROVIDER_ERRORS = Counter(
     "Inference provider failures by request mode",
     ("mode",),
 )
+MODEL_PROCESS_CURRENT_RAM_MB = Gauge(
+    "rusa_model_process_current_ram_mb",
+    "Current resident memory of the configured Model Plane process in MiB",
+)
+MODEL_PROCESS_PEAK_RAM_MB = Gauge(
+    "rusa_model_process_peak_ram_mb",
+    "High-water resident memory of the configured Model Plane process in MiB",
+)
 AICODE_TASKS = Counter(
     "rusa_aicode_tasks_total",
     "AICode tasks by terminal outcome",
