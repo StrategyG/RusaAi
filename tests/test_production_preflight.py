@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -25,16 +26,26 @@ def _set_valid_environment(monkeypatch):
     )
     monkeypatch.setenv(
         "RUSA_API_DATABASE_URL",
-        "postgresql://rusa_api_login:db-password@db/rusa?sslmode=verify-full",
+        "postgresql://rusa_api_login:db-password@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
     monkeypatch.setenv(
         "RUSA_WORKER_DATABASE_URL",
-        "postgresql://rusa_worker_login:db-password@db/rusa?sslmode=verify-full",
+        "postgresql://rusa_worker_login:db-password@db/rusa?sslmode=verify-full&sslrootcert=/run/secrets/rusa-internal-ca.crt",
     )
+    worker_key = "worker-inference-secret-ci-12345678901234567890"
     monkeypatch.setenv(
         "RUSA_API_KEYS_JSON",
-        '{"' + "e" * 64 + '":{"subject":"api-test","tenant_id":"tenant-a","roles":["tenant_admin"]}}',
+        json.dumps({
+            "e" * 64: {"subject": "api-test", "tenant_id": "tenant-a", "roles": ["tenant_admin"]},
+            "43e35305847a4f9e7a8dccdd4d8325c6ceaac628740ce992da2ad23969adcc45": {
+                "subject": "worker-ci", "tenant_id": "tenant-a", "roles": ["developer"]
+            },
+        }),
     )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_BASE_URL", "https://api.internal/v1")
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": worker_key}))
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "270000")
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 48)
     monkeypatch.setenv("RUSA_AUDIT_HMAC_KEY", "a" * 48)
     monkeypatch.setenv("RUSA_GITHUB_TOKEN", "github_pat_" + "g" * 32)
