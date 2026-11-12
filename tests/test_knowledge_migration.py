@@ -28,3 +28,21 @@ def test_agent_project_scope_migration_adds_lookup_indexes():
     assert "rusa_knowledge_documents_project_scope_idx" in migration
     assert "tenant_id" in migration
     assert "DROP " not in migration
+
+
+def test_document_version_history_migration_is_append_only_and_dimension_aware():
+    migration = Path("migrations/012_rag_knowledge_version_history.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "rusa_knowledge_document_versions" in migration
+    assert "rusa_knowledge_version_chunks" in migration
+    assert "version_fingerprint" in migration
+    assert "version_number" in migration
+    assert "embedding vector(1536)" in migration
+    assert "embedding_384 vector(384)" in migration
+    assert "ENABLE ROW LEVEL SECURITY" in migration
+    assert "FORCE ROW LEVEL SECURITY" in migration
+    assert "GRANT SELECT, INSERT" in migration
+    assert "GRANT UPDATE" not in migration
+    assert "GRANT DELETE" not in migration
+    assert "current_version_id" in migration
