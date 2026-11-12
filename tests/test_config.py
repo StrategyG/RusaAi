@@ -273,3 +273,18 @@ def test_production_api_rejects_placeholder_model_id(monkeypatch):
 
     with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
         RuntimeConfig.from_env().validate_api()
+
+def test_production_api_requires_rusamodels_openai_v1_endpoint(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+
+    with pytest.raises(RuntimeError, match="RusaModels /openai/v1 endpoint"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_api_rejects_custom_readiness_override(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_HEALTH_URL", "https://model.internal/health")
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_HEALTH_URL override is forbidden"):
+        RuntimeConfig.from_env().validate_api()
