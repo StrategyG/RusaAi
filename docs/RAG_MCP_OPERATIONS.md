@@ -10,6 +10,8 @@ not enabled by the core API merely because its package is installed.
 - A dedicated database role with only the privileges granted by
   `migrations/007_rag_knowledge_pgvector.sql`.
 - Agent/project lookup indexes from `migrations/011_rag_agent_project_scope.sql`.
+- Append-only document version history from
+  `migrations/012_rag_knowledge_version_history.sql`.
   Apply `migrations/009_knowledge_embedding_384.sql` only when the optional
   384-dimensional profile is deliberately enabled.
 - An OpenAI-compatible embeddings endpoint. The default model is
@@ -24,9 +26,13 @@ Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or
 administrator on the dedicated knowledge database. The migration creates
 tenant-scoped document and chunk tables, pgvector indexes, forced row-level
 security, and a non-login knowledge-worker role. Then apply
-`migrations/011_rag_agent_project_scope.sql` to add the scope lookup indexes.
-Apply `migrations/009_knowledge_embedding_384.sql` only when the separate
-384-dimensional embedding profile is deliberately enabled. Follow the migration's grant
+`migrations/011_rag_agent_project_scope.sql` to add the scope lookup indexes
+and `migrations/012_rag_knowledge_version_history.sql` to create append-only
+document/version chunk snapshots. Apply
+`migrations/009_knowledge_embedding_384.sql` only when the separate
+384-dimensional embedding profile is deliberately enabled. Migration 012
+stores both 1536d and 384d version-vector columns; the runtime writes only
+the configured embedding space. Follow the migration's grant
 instructions and configure `RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_worker`
 for the runtime role. Do not run the service with a PostgreSQL superuser.
 
@@ -78,6 +84,40 @@ This migration adds retrieval filtering and indexes only. It does not yet
 implement source-rights review, human approval, publication authorization,
 immutable source-version history or deletion/tombstone lifecycle. Production
 publication remains blocked until those controls are implemented and reviewed.
+
+## Immutable document versions
+
+Each successful ingestion creates or reuses an immutable version fingerprint
+for the document. A version records the source URI, title, content hash,
+metadata, version number and ordered chunk snapshot. Re-ingesting an identical
+fingerprint does not create a duplicate version. Updating a document creates a
+new version while preserving earlier content and embeddings.
+
+The current document row points to its active version through
+`current_version_id`. The current retrieval chunks remain a separate
+replaceable projection; version chunks are append-only snapshots. The
+`rusa_knowledge_worker` role receives SELECT/INSERT only on version tables,
+not UPDATE or DELETE. Tenant RLS applies to both version tables. Authorized
+tenant erasure may cascade through the document foreign key; ordinary worker
+operations cannot rewrite or delete historical versions.
+
+The 1536-dimensional and 384-dimensional vectors remain separate columns in
+version snapshots. A 384d runtime writes `embedding_384`; a 1536d runtime
+writes `embedding`. No cross-dimensional conversion is performed.
+
+List versions and read a historical snapshot with the operator CLI:
+
+```bash
+rusa-knowledge versions --tenant-id tenant-a --collection agent \
+  --document-id <document-uuid>
+
+rusa-knowledge get-version --tenant-id tenant-a --collection agent \
+  --document-id <document-uuid> --version-id <version-uuid>
+```
+
+Agent/project-specific history uses the same trusted scope filters as current
+document retrieval. Supply `--agent-id` and, when applicable, `--project-id`
+to the operator CLI; do not infer authorization from version metadata alone.
 
 ## Ingest and evaluate
 
