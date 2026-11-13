@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: RUSA AI Model Plane API
+  version: 0.1.0
+  description: >-
+    Draft canonical inference contract owned by RusaAi. The endpoint below is
+    proposed and is not implemented by the current RusaModels OpenAI-compatible
+    proxy. Current compatibility routes remain under /openai/v1.
+servers:
+  - url: https://model-server.example.invalid
+    description: Replace with the approved Model Server HTTPS origin.
+paths:
+  /model-plane/v1/inference:
+    post:
+      operationId: createModelPlaneInference
+      summary: Execute inference within an approved model profile
+      description: >-
+        RusaAi chooses and authorizes the logical model profile. RusaModels may
+        resolve only a deployment inside the caller-authorized profile set.
+        Model-produced tool calls are proposals; RusaAi Tool Gateway is the
+        only action execution boundary.
+      security:
+        - inferenceBearer: []
+      parameters:
+        - in: header
+          name: X-Request-ID
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - in: header
+          name: traceparent
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./inference-request.schema.json
+      responses:
+        "200":
+          description: Inference completed
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-response.schema.json
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "401":
+          description: Service authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "403":
+          description: Caller or policy is not authorized
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "404":
+          description: Profile or model is not found
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "409":
+          description: Idempotency key conflict
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "413":
+          description: Request exceeds configured payload limits
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "429":
+          description: Caller is rate limited
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "502":
+          description: Upstream runtime unavailable
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "503":
+          description: Approved model profile unavailable; no implicit fallback
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "500":
+          description: Internal inference service error
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+        "504":
+          description: Request deadline exceeded
+          content:
+            application/json:
+              schema:
+                $ref: ./inference-error.schema.json
+components:
+  securitySchemes:
+    inferenceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Production credential must be short-lived and bound to issuer, subject,
+        audience, tenant, expiry, inference:invoke scope, policy version and
+        permitted model profiles. The current static hashed inference principal
+        is an interim pilot credential, not the final tenant-bound identity.
