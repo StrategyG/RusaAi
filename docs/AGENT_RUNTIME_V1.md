@@ -114,6 +114,30 @@ queue's claim/lease fencing, idempotency, cancellation and atomic checkpoint
 compare-and-set. Those controls remain mandatory before activation; task-memory
 persistence alone is not a worker lease.
 
+## API and worker-process integration
+
+The existing API exposes two authenticated, read-only control-plane endpoints.
+Both require the existing `task:read` permission and emit policy-audit events:
+
+- `GET /v1/agent-runtime/status` returns registry status, role counts,
+  dispatchable count, source-crosswalk status, and the execution-enabled flag.
+- `POST /v1/agent-runtime/route-preview` accepts a scope plus explicit
+  capability IDs or a role ID and returns candidate roles. It never dispatches
+  a worker and always returns an empty `tool_grants` list.
+
+The production `AICodeRuntime.initialize()` loads the same packaged registry
+before starting its queue and sandbox services. It validates that the existing
+six-role AICode pipeline (`analyst`, `architect`, `developer`, `debugger`,
+`tester`, `security`) is mapped to six registry entries of type
+`aicode_worker`. This is a compatibility check only: the legacy AICode
+orchestrator remains responsible for execution and its evidence/repair gates.
+The registry's draft state does not block existing AICode tasks, and it does
+not authorize any new role dispatch.
+
+The API route preview and worker startup checks share the same JSON package
+data and JSON Schema validator. A missing or invalid registry causes the
+corresponding control-plane operation to fail closed.
+
 ## Existing AICode integration
 
 The current `AICodeOrchestrator` remains the specialized six-worker coding
