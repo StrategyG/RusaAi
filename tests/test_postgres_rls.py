@@ -67,6 +67,21 @@ def test_api_rls_limits_queue_rows_to_current_tenant():
                 )
 
 
+def test_api_role_can_append_tenant_scoped_task_approval_event():
+    tenant_id = "approval-audit-" + uuid4().hex[:12]
+    task_id = str(uuid4())
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_id)
+        conn.execute(
+            """
+            INSERT INTO public.aicode_task_policy_events
+                (tenant_id, task_id, actor, action, decision)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (tenant_id, task_id, "api:tenant-admin", "task.approve", "allow"),
+        )
+
+
 def test_api_role_cannot_read_memory_or_audit():
     import psycopg
 
