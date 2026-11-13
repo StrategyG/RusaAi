@@ -219,6 +219,12 @@ def test_agent_runtime_task_intake_rejects_unscoped_worker_tools(monkeypatch):
 
     _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(
+        app.state,
+        "queue",
+        SimpleNamespace(enqueue=lambda *args, **kwargs: True),
+        raising=False,
+    )
     response = client.post(
         "/v1/agent-runtime/tasks",
         headers={"X-API-Key": "tenant-key"},
@@ -253,6 +259,12 @@ def test_agent_runtime_task_intake_requires_dependent_quality_gates_for_code_cha
 
     _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(
+        app.state,
+        "queue",
+        SimpleNamespace(enqueue=lambda *args, **kwargs: True),
+        raising=False,
+    )
     response = client.post(
         "/v1/agent-runtime/tasks",
         headers={"X-API-Key": "tenant-key"},
