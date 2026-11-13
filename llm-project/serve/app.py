@@ -552,6 +552,30 @@ class AgentTaskPlanCreateRequest(BaseModel):
         return value
 
 
+class AgentRuntimeApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    approved_node_ids: list[str] = Field(min_length=1, max_length=64)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("approved_node_ids")
+    @classmethod
+    def validate_approved_node_ids(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() or len(item) > 128 for item in value):
+            raise ValueError("Approved node IDs must be non-empty strings of at most 128 characters")
+        if len(set(value)) != len(value):
+            raise ValueError("Approved node IDs cannot contain duplicates")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def validate_approval_rationale(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Approval rationale cannot be blank")
+        return value
+
+
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
     return authenticate_api_key(request, api_key)
 
@@ -640,8 +664,8 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
 
 
 TASK_ROLE_PERMISSIONS = {
-    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
-    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel", "task:approve"}),
+    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel", "task:approve"}),
     "developer": frozenset({"task:create", "task:read"}),
     "read_only": frozenset({"task:read"}),
 }
@@ -1489,6 +1513,59 @@ def list_aicode_tasks(
         logger.exception("Could not list AICode tasks")
         audit_api_task(request, tenant_id, "*", "task.list", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
+
+@app.post(
+    "/v1/agent-runtime/tasks/{task_id}/approve",
+    status_code=202,
+)
+def approve_agent_runtime_task(
+    task_id: UUID,
+    body: AgentRuntimeApprovalRequest,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:approve")),
+):
+    """Approve only node-level review gates for the exact tenant-owned DAG plan."""
+    config = RuntimeConfig.from_env()
+    if not config.aicode_enabled:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Agent Runtime task execution is disabled")
+    queue = getattr(http_request.app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        approved = queue.approve(
+            str(task_id),
+            tenant_id,
+            body.plan_fingerprint,
+            body.approved_node_ids,
+            body.rationale,
+            audit_actor=_api_task_actor(http_request),
+        )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Agent Runtime approval could not be persisted")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Agent Runtime approval store is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.approve", approved, persist=False
+    )
+    if not approved:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Task is not awaiting node approval, the plan fingerprint changed, "
+                "or one or more nodes are not approval-gated"
+            ),
+        )
+    return {
+        "task_id": str(task_id),
+        "status": "queued",
+        "approved_node_ids": body.approved_node_ids,
+    }
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
