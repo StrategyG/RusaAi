@@ -169,7 +169,7 @@ class PostgresMemory:
                 if not version_column or not version_column[0]:
                     raise RuntimeError(
                         "Production checkpoint CAS schema is missing; "
-                        "apply migrations/013_aicode_memory_checkpoint_cas.sql"
+                        "apply migrations/014_aicode_memory_checkpoint_cas.sql"
                     )
                 return
             conn.execute("""
