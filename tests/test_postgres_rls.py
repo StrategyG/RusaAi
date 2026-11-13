@@ -439,8 +439,8 @@ async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_ca
     from rusa_agents.runtime_v1 import AgentRuntimeV1
     from rusa_agents.task_decomposer import TaskNode, TaskPlan
     from rusa_agents.worker_execution import (
-        PolicyDecision,
         PlanStatus,
+        PolicyDecision,
         VerificationDecision,
         WorkerOutput,
     )
