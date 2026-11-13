@@ -431,13 +431,13 @@ def test_worker_memory_checkpoint_compare_and_set_is_atomic_and_tenant_scoped():
 
 
 @pytest.mark.asyncio
-async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_cas(tmp_path):
+async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_cas():
     from rusa_agents.capability_registry import AgentWorkerRegistry
     from rusa_agents.memory import PostgresMemory
     from rusa_agents.queue import PostgresTaskQueue
     from rusa_agents.runtime import AICodeRuntime
-    from rusa_agents.task_decomposer import TaskNode, TaskPlan
     from rusa_agents.runtime_v1 import AgentRuntimeV1
+    from rusa_agents.task_decomposer import TaskNode, TaskPlan
     from rusa_agents.worker_execution import (
         PolicyDecision,
         PlanStatus,
@@ -468,8 +468,6 @@ async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_ca
     job = None
 
     class Handler:
-        tenant_id = tenant_id
-
         async def execute(self, node, dependency_results):
             return WorkerOutput(
                 summary="PostgreSQL queue-to-DAG acceptance passed",
