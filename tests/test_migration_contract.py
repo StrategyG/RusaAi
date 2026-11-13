@@ -44,6 +44,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
+        "013_aicode_memory_checkpoint_cas.sql",
     ]
 
 
@@ -71,3 +72,13 @@ def test_inference_admission_migration_is_api_runtime_scoped():
     assert "TO rusa_api_runtime" in migration
     assert "rusa_worker_runtime" in migration
     assert "No prompt or completion data" in migration or "no tenant payload" in migration
+
+
+
+def test_agent_runtime_checkpoint_cas_migration_adds_monotonic_version():
+    migration = Path("migrations/013_aicode_memory_checkpoint_cas.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ADD COLUMN IF NOT EXISTS checkpoint_version BIGINT NOT NULL DEFAULT 0" in migration
+    assert "CHECK (checkpoint_version >= 0)" in migration
