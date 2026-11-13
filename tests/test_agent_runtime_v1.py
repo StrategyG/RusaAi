@@ -1,6 +1,7 @@
 """Tests for the staged Agent Runtime v1.0 registry, router, DAG and executor."""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from rusa_agents.runtime import AICodeRuntime
 from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
 from rusa_agents.worker_execution import (
+    CheckpointConflictError,
     InMemoryCheckpointStore,
     LeaseBoundCheckpointStore,
     NodeStatus,
@@ -123,12 +125,64 @@ def test_task_memory_checkpoint_store_is_tenant_scoped_and_durable(tmp_path) -> 
     }
     store.save("root-task-001", "tenant-a", payload)
     restored = store.load("root-task-001", "tenant-a")
-    assert restored == payload
+    assert restored["schema_version"] == payload["schema_version"]
+    assert restored["checkpoint_version"] == 1
     assert store.load("root-task-001", "tenant-b") is None
     reopened = TaskMemoryCheckpointStore(
         SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
     )
     assert reopened.load("root-task-001", "tenant-a") == payload
+
+
+def test_task_memory_checkpoint_compare_and_set_rejects_stale_writers(tmp_path) -> None:
+    database = str(tmp_path / "checkpoint-cas.sqlite3")
+    first_writer = TaskMemoryCheckpointStore(SQLiteMemory(database))
+    stale_writer = TaskMemoryCheckpointStore(SQLiteMemory(database))
+    payload = {
+        "schema_version": "1.0",
+        "tenant_id": "tenant-a",
+        "plan_fingerprint": "fingerprint-first",
+        "node_results": [],
+    }
+
+    assert first_writer.compare_and_set(
+        "root-task-cas", "tenant-a", payload, expected_version=0
+    ) == 1
+    with pytest.raises(CheckpointConflictError, match="expected version 0"):
+        stale_writer.compare_and_set(
+            "root-task-cas",
+            "tenant-a",
+            {**payload, "plan_fingerprint": "stale-overwrite"},
+            expected_version=0,
+        )
+
+    current = stale_writer.load("root-task-cas", "tenant-a")
+    assert current["plan_fingerprint"] == "fingerprint-first"
+    assert current["checkpoint_version"] == 1
+    assert stale_writer.compare_and_set(
+        "root-task-cas", "tenant-a", payload, expected_version=1
+    ) == 2
+    assert stale_writer.load("root-task-cas", "tenant-b") is None
+
+
+def test_task_memory_checkpoint_cas_cannot_overwrite_legacy_task_state(tmp_path) -> None:
+    memory = SQLiteMemory(str(tmp_path / "checkpoint-legacy.sqlite3"))
+    memory.save(
+        "root-task-legacy",
+        "StrategyG/RusaAi",
+        "aicode_task_state",
+        {"legacy": True},
+        tenant_id="tenant-a",
+    )
+    store = TaskMemoryCheckpointStore(memory)
+    with pytest.raises(CheckpointConflictError, match="expected version 0"):
+        store.compare_and_set(
+            "root-task-legacy",
+            "tenant-a",
+            {"schema_version": "1.0", "tenant_id": "tenant-a"},
+            expected_version=0,
+        )
+    assert memory.get("root-task-legacy", "tenant-a")["state"] == "aicode_task_state"
 
 
 def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
@@ -559,6 +613,88 @@ async def test_worker_engine_persists_checkpoints_through_existing_task_memory(t
     assert record["state"] == "agent_runtime_checkpoint"
     assert record["payload"]["plan_fingerprint"] == result.plan_fingerprint
     assert memory.get(plan.root_task_id, tenant_id="tenant-b") is None
+
+
+@pytest.mark.asyncio
+async def test_worker_engine_cancels_in_flight_node_without_stale_checkpoint() -> None:
+    cancellation = asyncio.Event()
+    store = InMemoryCheckpointStore()
+    engine = WorkerExecutionEngine(_registry(active=True), store, _authorizer, _verifier)
+
+    class CancellationAwareHandler:
+        def __init__(self):
+            self.started = False
+            self.cancelled = False
+
+        async def execute(self, node, dependency_results):
+            self.started = True
+            cancellation.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    handler = CancellationAwareHandler()
+    plan = _plan(_node("task-cancel", "analyst"))
+    result = await engine.execute(
+        plan,
+        {"analyst": handler},
+        trusted_tenant_id="tenant-a",
+        cancellation_event=cancellation,
+    )
+
+    assert result.status == PlanStatus.CANCELLED
+    assert result.node_results[0].status == NodeStatus.CANCELLED
+    assert handler.started is True
+    assert handler.cancelled is True
+    # Queue cancellation revokes the lease; the worker must not write a stale checkpoint.
+    assert store.load(plan.root_task_id, plan.tenant_id) is None
+
+
+@pytest.mark.asyncio
+async def test_queue_lease_bound_engine_uses_atomic_checkpoint_cas(tmp_path) -> None:
+    class StubLeaseQueue:
+        def __init__(self):
+            self.calls = 0
+            self.valid = True
+
+        def with_lease_owned(
+            self, job_id, tenant_id, worker_id, lease_token, operation, *, lease_seconds
+        ):
+            self.calls += 1
+            if not self.valid:
+                raise RuntimeError("lease revoked")
+            return operation()
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.memory = SQLiteMemory(str(tmp_path / "queue-dag-cas.sqlite3"))
+    runtime.queue = StubLeaseQueue()
+    runtime.worker_id = "worker-cas"
+    job = Job(
+        id=77,
+        task_id="root-task-001",
+        tenant_id="tenant-a",
+        payload={},
+        attempts=1,
+        max_attempts=3,
+        lease_owner="worker-cas",
+        lease_token="00000000-0000-4000-8000-000000000077",
+    )
+    engine = runtime.build_agent_execution_engine(job, _authorizer, _verifier)
+    plan = _plan(_node("task-queue-cas", "analyst"))
+    result = await engine.execute(
+        plan,
+        {"analyst": _Handler()},
+        trusted_tenant_id="tenant-a",
+    )
+
+    assert result.status == PlanStatus.COMPLETED
+    assert runtime.queue.calls >= 3  # fenced load, node checkpoint, final checkpoint
+    record = runtime.memory.get(plan.root_task_id, tenant_id="tenant-a")
+    assert record["state"] == "agent_runtime_checkpoint"
+    assert record["checkpoint_version"] >= 2
 
 
 @pytest.mark.asyncio
