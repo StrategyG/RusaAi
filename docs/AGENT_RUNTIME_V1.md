@@ -110,9 +110,11 @@ executor does not expose shell, network, filesystem, or secret APIs.
 Use `TaskMemoryCheckpointStore` with the existing `SQLiteMemory` or
 `PostgresMemory` implementation for checkpoint persistence. The in-memory store
 is only for tests/development. For a queue-backed worker, wrap the durable store
-with `LeaseBoundCheckpointStore`, passing the current queue job ID, tenant ID,
-worker ID, and lease token. Its `PostgresTaskQueue.with_lease_owned()` callback
-holds the task row lock while the bounded checkpoint read/write runs, so
+with `LeaseBoundCheckpointStore`, passing the current queue job ID,
+queue task ID, tenant ID, worker ID, and lease token. The adapter rejects a
+checkpoint task or tenant that does not match the claimed job. Its
+`PostgresTaskQueue.with_lease_owned()` callback holds the task row lock while the
+bounded checkpoint read/write runs, so
 `SKIP LOCKED` claimers cannot take over the job during that operation. This
 guard is for short checkpoint I/O only, never model inference, Git operations,
 or other network work.
