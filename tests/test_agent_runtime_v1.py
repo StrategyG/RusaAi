@@ -18,6 +18,7 @@ from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
 from rusa_agents.worker_execution import (
     InMemoryCheckpointStore,
+    LeaseBoundCheckpointStore,
     NodeStatus,
     PlanStatus,
     PolicyDecision,
@@ -126,6 +127,42 @@ def test_task_memory_checkpoint_store_is_tenant_scoped_and_durable(tmp_path) -> 
         SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
     )
     assert reopened.load("root-task-001", "tenant-a") == payload
+
+
+def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
+    class StubLeaseQueue:
+        def __init__(self):
+            self.valid = True
+            self.calls = 0
+
+        def with_lease_owned(
+            self, job_id, tenant_id, worker_id, lease_token, operation, *, lease_seconds
+        ):
+            self.calls += 1
+            if not self.valid:
+                raise RuntimeError("lease lost")
+            return operation()
+
+    delegate = InMemoryCheckpointStore()
+    queue = StubLeaseQueue()
+    store = LeaseBoundCheckpointStore(
+        delegate,
+        queue,
+        job_id=7,
+        tenant_id="tenant-a",
+        worker_id="worker-a",
+        lease_token="lease-token",
+    )
+    payload = {"tenant_id": "tenant-a", "plan_fingerprint": "fingerprint"}
+    store.save("root-task-001", "tenant-a", payload)
+    assert store.load("root-task-001", "tenant-a") == payload
+    assert queue.calls == 2
+    with pytest.raises(PermissionError, match="Checkpoint tenant"):
+        store.load("root-task-001", "tenant-b")
+    queue.valid = False
+    with pytest.raises(RuntimeError, match="lease lost"):
+        store.save("root-task-001", "tenant-a", {"stale": True})
+    assert delegate.load("root-task-001", "tenant-a") == payload
 
 
 
