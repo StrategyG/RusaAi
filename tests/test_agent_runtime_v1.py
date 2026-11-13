@@ -876,7 +876,7 @@ async def test_run_once_holds_agent_runtime_job_for_review_without_adapters(
 
     assert processed is True
     assert runtime.queue.approval is not None
-    assert "not configured" in runtime.queue.approval[4]
+    assert "execution is disabled" in runtime.queue.approval[4]
     assert runtime.agent_runtime.status()["execution_enabled"] is False
 
 
