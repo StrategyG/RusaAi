@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from rusa_agents.audit import AuditLog
+from rusa_agents.contracts import WorkerRole
 from rusa_agents.capability_registry import (
     AgentWorkerRegistry,
     RegistryNotActivatedError,
@@ -411,6 +412,142 @@ def _agent_runtime_queue_job(payload: dict) -> Job:
         lease_owner="worker-queue",
         lease_token="00000000-0000-4000-8000-000000000901",
     )
+
+
+def test_agent_runtime_coding_task_enforces_tenant_repository_scope() -> None:
+    job = _agent_runtime_queue_job({
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "context": "Reviewed project context",
+    })
+    plan = TaskPlan(
+        root_task_id=job.task_id,
+        tenant_id=job.tenant_id,
+        objective="Implement a tenant-scoped change",
+        nodes=(_node("node_repo_scope", "analyst"),),
+    )
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.config = SimpleNamespace(
+        environment="production",
+        tenant_repositories={"tenant-a": ["StrategyG/RusaAi"]},
+    )
+
+    task = runtime._agent_runtime_coding_task(job, plan)
+
+    assert task.repository.full_name == "StrategyG/RusaAi"
+    assert task.repository.base_branch == "main"
+    assert task.repository.work_branch.startswith("feature/aicode/root-task-q")
+    assert task.context == "Reviewed project context"
+    assert task.metadata["tenant_id"] == "tenant-a"
+
+    runtime.config = SimpleNamespace(
+        environment="production",
+        tenant_repositories={"tenant-a": ["Other/Repo"]},
+    )
+    with pytest.raises(PermissionError, match="not authorized"):
+        runtime._agent_runtime_coding_task(job, plan)
+
+
+def test_agent_runtime_policy_and_result_verification_fail_closed() -> None:
+    normal = AICodeRuntime._agent_runtime_policy_authorizer(
+        _node("node-policy", "developer"), "tenant-a"
+    )
+    high_risk = AICodeRuntime._agent_runtime_policy_authorizer(
+        _node("node-risk", "developer", risk_class="high"), "tenant-a"
+    )
+    unauthorized = TaskNode(
+        task_id="node-permission",
+        selected_role_id="analyst",
+        scope="worker",
+        objective="Attempt a protected action",
+        delegated_by_role_id="supreme_orchestrator",
+        acceptance_criteria=("Do not deploy",),
+        requested_permissions=("deploy",),
+    )
+    denied = AICodeRuntime._agent_runtime_policy_authorizer(unauthorized, "tenant-a")
+
+    assert normal.allowed is True
+    assert high_risk.allowed is False and high_risk.requires_approval is True
+    assert denied.allowed is False and "exceed" in denied.reason
+
+    security_node = _node("node-security", "security")
+    incomplete = AICodeRuntime._agent_runtime_result_verifier(
+        security_node, WorkerOutput(summary="Security review completed")
+    )
+    verified = AICodeRuntime._agent_runtime_result_verifier(
+        security_node,
+        WorkerOutput(
+            summary="Security review completed",
+            tests_or_checks={
+                "check:bandit": {"exit_code": 0},
+                "check:ruff": {"exit_code": 0},
+                "check:compile": {"exit_code": 0},
+            },
+        ),
+    )
+    assert incomplete.accepted is False
+    assert verified.accepted is True
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_builds_tenant_scoped_handlers_with_narrow_tool_allowlists():
+    class StubProvider:
+        async def complete(self, *, system_prompt, user_prompt):
+            return json.dumps({"message": "Analysis complete", "actions": [], "done": True})
+
+    base_worker = SimpleNamespace(
+        role=WorkerRole.ANALYST,
+        provider=StubProvider(),
+        gateway=object(),
+        max_steps=4,
+        max_actions_per_step=2,
+        max_output_chars=1000,
+    )
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.config = SimpleNamespace(
+        environment="development",
+        tenant_repositories={"tenant-a": ["StrategyG/RusaAi"]},
+    )
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.worker_id = "worker-queue"
+    runtime.queue = SimpleNamespace(owns_lease=lambda *args: True)
+
+    async def build_orchestrator(coding_task, tenant_id):
+        assert tenant_id == "tenant-a"
+        assert coding_task.repository.full_name == "StrategyG/RusaAi"
+        return SimpleNamespace(workers={WorkerRole.ANALYST: base_worker}), "/tmp/agent-runtime-workspace"
+
+    runtime._build_orchestrator = build_orchestrator
+    job = _agent_runtime_queue_job({
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "agent_runtime_plan": {},
+    })
+    node = TaskNode(
+        task_id="node-scoped-handler",
+        selected_role_id="analyst",
+        scope="worker",
+        objective="Inspect the repository",
+        delegated_by_role_id="supreme_orchestrator",
+        acceptance_criteria=("Return an analysis",),
+        tool_allowlist=("read_file",),
+    )
+    plan = TaskPlan(
+        root_task_id=job.task_id,
+        tenant_id=job.tenant_id,
+        objective="Run scoped analysis",
+        nodes=(node,),
+    )
+
+    dispatch = await runtime._build_agent_runtime_dispatch(job, plan, asyncio.Event())
+    output = await dispatch["handlers"]["analyst"].execute(node, {})
+
+    assert output.summary == "Analysis complete"
+    assert dispatch["coding_task"].repository.full_name == "StrategyG/RusaAi"
+    assert dispatch["workspace"] == "/tmp/agent-runtime-workspace"
+    escalated = TaskNode(
+        **{**node.__dict__, "tool_allowlist": ("write_file",)}
+    )
+    with pytest.raises(PermissionError, match="exceeds"):
+        await dispatch["handlers"]["analyst"].execute(escalated, {})
 
 
 def test_agent_runtime_queue_payload_is_parsed_with_trusted_job_identity() -> None:
