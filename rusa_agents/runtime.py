@@ -360,7 +360,7 @@ class AICodeRuntime:
         return VerificationDecision(True, "Worker output and required evidence passed verification")
 
     async def _build_agent_runtime_dispatch(
-        self, job: Job, plan: TaskPlan
+        self, job: Job, plan: TaskPlan, cancellation_event: asyncio.Event
     ) -> dict[str, Any]:
         if self.agent_runtime is None:
             self._load_agent_runtime_registry()
@@ -374,9 +374,15 @@ class AICodeRuntime:
             raise RegistryNotActivatedError(
                 "No reviewed execution adapter is available for roles: " + ", ".join(unsupported)
             )
-        await self._assert_lease(job, asyncio.Event())
+        await self._assert_lease(job, cancellation_event)
         task = self._agent_runtime_coding_task(job, plan)
         orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+        if cancellation_event.is_set():
+            try:
+                await asyncio.to_thread(self.workspace_manager.cleanup, task, job.tenant_id)
+            except Exception:
+                logger.exception("Could not clean workspace after Agent Runtime lease loss %s", task.task_id)
+            raise LeaseLostError("Agent Runtime queue lease was lost while creating its workspace")
         handlers: dict[str, WorkerHandler] = {}
         for role_id in sorted({node.selected_role_id for node in plan.nodes}):
             role = WorkerRole(role_id)
@@ -439,7 +445,7 @@ class AICodeRuntime:
         dispatch = getattr(self, "_agent_runtime_dispatch", None)
         if dispatch is None:
             try:
-                dispatch = await self._build_agent_runtime_dispatch(job, plan)
+                dispatch = await self._build_agent_runtime_dispatch(job, plan, cancellation_event)
             except RegistryNotActivatedError as exc:
                 return await self._await_agent_runtime_approval(
                     job,
