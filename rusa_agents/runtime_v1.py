@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping
+from typing import Any
 
 from .capability_registry import AgentWorkerRegistry, RegistryNotActivatedError
 from .capability_router import CapabilityRouter, RouteDecision, RouteRequest
