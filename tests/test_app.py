@@ -26,11 +26,16 @@ def test_health_endpoint():
     assert response.json()["status"] == "healthy"
 
 
-def _configure_agent_runtime_api(monkeypatch):
+def _configure_agent_runtime_api(monkeypatch, agent_runtime=None):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
     monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
-    monkeypatch.setattr(app.state, "agent_runtime", AgentRuntimeV1(), raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "agent_runtime",
+        agent_runtime or AgentRuntimeV1(),
+        raising=False,
+    )
 
 
 def test_agent_runtime_status_is_authenticated_and_reports_staged_registry(monkeypatch):
@@ -163,11 +168,10 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
             self.created = (task_id, tenant_id, payload, audit_actor)
             return True
 
-    _configure_agent_runtime_api(monkeypatch)
-    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     runtime = ActiveRuntime()
+    _configure_agent_runtime_api(monkeypatch, runtime)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
     queue = Queue()
-    monkeypatch.setattr(app.state, "agent_runtime", runtime, raising=False)
     monkeypatch.setattr(app.state, "queue", queue, raising=False)
 
     response = client.post(
@@ -270,7 +274,6 @@ def test_agent_runtime_task_intake_respects_kill_switch(monkeypatch):
     _configure_agent_runtime_api(monkeypatch)
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "false")
     queue = Queue()
-    monkeypatch.setattr(app.state, "agent_runtime", ActiveRuntime(), raising=False)
     monkeypatch.setattr(app.state, "queue", queue, raising=False)
 
     response = client.post(
