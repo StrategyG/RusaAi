@@ -771,10 +771,10 @@ class PostgresTaskQueue:
                                 COALESCE(result, '{}'::jsonb),
                                 '{approval}',
                                 jsonb_build_object(
-                                    'plan_fingerprint', %s,
+                                    'plan_fingerprint', %s::text,
                                     'approved_node_ids', %s::jsonb,
-                                    'approved_by', %s,
-                                    'rationale', %s,
+                                    'approved_by', %s::text,
+                                    'rationale', %s::text,
                                     'approved_at', NOW()::text
                                 ),
                                 true
