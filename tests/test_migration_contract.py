@@ -46,6 +46,7 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
         "014_aicode_memory_checkpoint_cas.sql",
+        "015_aicode_task_approval.sql",
     ]
 
 
@@ -74,6 +75,16 @@ def test_inference_admission_migration_is_api_runtime_scoped():
     assert "rusa_worker_runtime" in migration
     assert "No prompt or completion data" in migration or "no tenant payload" in migration
 
+
+
+def test_agent_runtime_task_approval_migration_extends_policy_audit_actions():
+    migration = Path("migrations/015_aicode_task_approval.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "aicode_task_policy_events_action_check" in migration
+    assert "'task.approve'" in migration
+    assert "BEGIN;" in migration and "COMMIT;" in migration
 
 
 def test_agent_runtime_checkpoint_cas_migration_adds_monotonic_version():
