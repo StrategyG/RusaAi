@@ -1,4 +1,5 @@
 """Tests for the staged Agent Runtime v1.0 registry, router, DAG and executor."""
+# ruff: noqa: I001
 from __future__ import annotations
 
 import json
@@ -320,3 +321,20 @@ async def test_worker_engine_rejects_checkpoint_for_different_plan() -> None:
     changed = _plan(_node("task-a", "analyst", risk_class="medium"))
     with pytest.raises(ValueError, match="fingerprint"):
         await engine.execute(changed, {"analyst": _Handler()})
+
+
+@pytest.mark.asyncio
+async def test_high_risk_node_executes_only_after_policy_confirms_approval() -> None:
+    def approved(node, tenant_id):
+        return PolicyDecision(allowed=True, approval_satisfied=True)
+
+    engine = WorkerExecutionEngine(
+        _registry(active=True), InMemoryCheckpointStore(), approved, _verifier
+    )
+    handler = _Handler()
+    result = await engine.execute(
+        _plan(_node("task-approved", "analyst", risk_class="high")),
+        {"analyst": handler},
+    )
+    assert result.status == PlanStatus.COMPLETED
+    assert handler.calls == 1
