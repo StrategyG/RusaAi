@@ -1109,6 +1109,40 @@ async def test_worker_engine_requires_approval_for_high_risk_nodes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_worker_engine_hard_denial_cannot_be_overridden_by_production_review() -> None:
+    node = TaskNode(
+        task_id="task-hard-denial",
+        selected_role_id="analyst",
+        scope="worker",
+        objective="Attempt a prohibited production action",
+        delegated_by_role_id="supreme_orchestrator",
+        acceptance_criteria=("Do not execute the prohibited action",),
+        requested_permissions=("deploy",),
+        target_environment="production",
+    )
+
+    def hard_deny(node, tenant_id):
+        return PolicyDecision(
+            allowed=False,
+            requires_approval=False,
+            reason="hard policy denial cannot be approved",
+        )
+
+    handler = _Handler()
+    engine = WorkerExecutionEngine(
+        _registry(active=True), InMemoryCheckpointStore(), hard_deny, _verifier
+    )
+    result = await engine.execute(
+        _plan(node), {"analyst": handler}, trusted_tenant_id="tenant-a"
+    )
+
+    assert result.status == PlanStatus.BLOCKED
+    assert result.node_results[0].status == NodeStatus.BLOCKED
+    assert "hard policy denial" in result.node_results[0].error
+    assert handler.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_worker_engine_denies_policy_and_blocks_dependants() -> None:
     def deny(node, tenant_id):
         return PolicyDecision(allowed=False, reason="denied by test policy")
