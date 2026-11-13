@@ -7,7 +7,12 @@ from typing import Any
 from .capability_registry import AgentWorkerRegistry, RegistryNotActivatedError
 from .capability_router import CapabilityRouter, RouteDecision, RouteRequest
 from .task_decomposer import TaskDecomposer, TaskPlan, TaskPlanValidation
-from .worker_execution import CheckpointStore, PolicyAuthorizer, ResultVerifier, WorkerExecutionEngine
+from .worker_execution import (
+    CheckpointStore,
+    PolicyAuthorizer,
+    ResultVerifier,
+    WorkerExecutionEngine,
+)
 
 
 class AgentRuntimeV1:
