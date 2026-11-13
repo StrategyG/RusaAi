@@ -5,7 +5,7 @@ import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Mapping
+from collections.abc import Mapping
 
 from .capability_registry import AgentWorkerRegistry
 
