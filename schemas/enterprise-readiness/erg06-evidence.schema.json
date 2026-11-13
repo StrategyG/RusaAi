@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa-ai.example/schemas/erg06-evidence.schema.json",
+  "title": "RUSA-AI ERG-06 Staging Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "candidate_sha",
+    "environment",
+    "source",
+    "checks",
+    "signoffs"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "generated_at": { "type": "string", "minLength": 10 },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{40}$"
+    },
+    "environment": { "const": "staging" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "run_id", "attestation_verified", "attestation_ref"],
+      "properties": {
+        "workflow": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "attestation_verified": { "type": "boolean" },
+        "attestation_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenant_isolation",
+        "failure_recovery",
+        "disaster_recovery",
+        "kill_switch",
+        "load",
+        "policy_audit",
+        "independent_qa"
+      ],
+      "properties": {
+        "tenant_isolation": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": [
+              "negative_cases",
+              "unauthorized_cross_tenant_reads",
+              "unauthorized_cross_tenant_writes",
+              "unauthorized_accesses"
+            ],
+            "properties": {
+              "negative_cases": { "type": "integer", "minimum": 0 },
+              "unauthorized_cross_tenant_reads": { "type": "integer", "minimum": 0 },
+              "unauthorized_cross_tenant_writes": { "type": "integer", "minimum": 0 },
+              "unauthorized_accesses": { "type": "integer", "minimum": 0 }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "failure_recovery": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": [
+              "recoverable_faults",
+              "recovered",
+              "duplicate_business_effects",
+              "state_integrity_failures"
+            ],
+            "properties": {
+              "recoverable_faults": { "type": "integer", "minimum": 0 },
+              "recovered": { "type": "integer", "minimum": 0 },
+              "duplicate_business_effects": { "type": "integer", "minimum": 0 },
+              "state_integrity_failures": { "type": "integer", "minimum": 0 }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "disaster_recovery": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": ["rpo_seconds", "rto_seconds", "confirmed_audit_loss"],
+            "properties": {
+              "rpo_seconds": { "type": "number", "minimum": 0 },
+              "rto_seconds": { "type": "number", "minimum": 0 },
+              "confirmed_audit_loss": { "type": "integer", "minimum": 0 }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "kill_switch": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": ["propagation_p99_seconds", "cancellation_p95_seconds"],
+            "properties": {
+              "propagation_p99_seconds": { "type": "number", "minimum": 0 },
+              "cancellation_p95_seconds": { "type": "number", "minimum": 0 }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "load": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": ["peak_multiplier", "duration_minutes", "slo_met"],
+            "properties": {
+              "peak_multiplier": { "type": "number", "minimum": 0 },
+              "duration_minutes": { "type": "integer", "minimum": 0 },
+              "slo_met": { "type": "boolean" }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "policy_audit": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": [
+              "sensitive_actions",
+              "audited_sensitive_actions",
+              "critical_false_allows",
+              "duplicate_business_effects"
+            ],
+            "properties": {
+              "sensitive_actions": { "type": "integer", "minimum": 0 },
+              "audited_sensitive_actions": { "type": "integer", "minimum": 0 },
+              "critical_false_allows": { "type": "integer", "minimum": 0 },
+              "duplicate_business_effects": { "type": "integer", "minimum": 0 }
+            }
+          }],
+          "unevaluatedProperties": false
+        },
+        "independent_qa": {
+          "$ref": "#/$defs/evidenceCheck",
+          "allOf": [{
+            "type": "object",
+            "required": ["independent", "approved", "critical_findings", "reviewer"],
+            "properties": {
+              "independent": { "type": "boolean" },
+              "approved": { "type": "boolean" },
+              "critical_findings": { "type": "integer", "minimum": 0 },
+              "reviewer": { "type": "string", "minLength": 1 }
+            }
+          }],
+          "unevaluatedProperties": false
+        }
+      }
+    },
+    "signoffs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "security",
+        "sre",
+        "qa",
+        "data_governance",
+        "finops",
+        "process_owner"
+      ],
+      "properties": {
+        "platform": { "$ref": "#/$defs/signoff" },
+        "security": { "$ref": "#/$defs/signoff" },
+        "sre": { "$ref": "#/$defs/signoff" },
+        "qa": { "$ref": "#/$defs/signoff" },
+        "data_governance": { "$ref": "#/$defs/signoff" },
+        "finops": { "$ref": "#/$defs/signoff" },
+        "process_owner": { "$ref": "#/$defs/signoff" }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceCheck": {
+      "type": "object",
+      "required": ["status", "evidence_ref"],
+      "properties": {
+        "status": { "enum": ["PASS", "HOLD", "FAIL"] },
+        "evidence_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "signoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewer", "approved"],
+      "properties": {
+        "reviewer": { "type": "string", "minLength": 1 },
+        "approved": { "type": "boolean" }
+      }
+    }
+  }
+}
