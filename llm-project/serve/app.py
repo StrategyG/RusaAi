@@ -21,10 +21,12 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
+from rusa_agents.agent_tools import ROLE_PERMISSION_ALLOWLIST, ROLE_TOOL_ALLOWLIST
 from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
 from rusa_agents.capability_registry import RegistryValidationError
 from rusa_agents.capability_router import RouteRequest
 from rusa_agents.config import RuntimeConfig
+from rusa_agents.contracts import WorkerRole
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
@@ -718,6 +720,62 @@ def _agent_task_nodes(
     return tuple(converted)
 
 
+def _validate_agent_runtime_execution_plan(plan: TaskPlan, validation: Any) -> None:
+    """Reject DAGs that cannot be executed by the reviewed AICode worker adapters."""
+    roles = {node.selected_role_id for node in plan.nodes}
+    supported = {role.value for role in ROLE_TOOL_ALLOWLIST}
+    unsupported = roles - supported
+    if unsupported:
+        raise ValueError(
+            "No reviewed execution adapter is available for roles: "
+            + ", ".join(sorted(unsupported))
+        )
+    for node in plan.nodes:
+        role = WorkerRole(node.selected_role_id)
+        if node.tool_allowlist and not set(node.tool_allowlist).issubset(ROLE_TOOL_ALLOWLIST[role]):
+            raise ValueError(
+                f"{node.task_id} tool_allowlist exceeds the registered {role.value} role permissions"
+            )
+        if node.requested_permissions and not set(node.requested_permissions).issubset(
+            ROLE_PERMISSION_ALLOWLIST[role]
+        ):
+            raise ValueError(
+                f"{node.task_id} requested_permissions exceed the registered {role.value} role policy"
+            )
+
+    developer_ids = {
+        node.task_id for node in plan.nodes if node.selected_role_id == "developer"
+    }
+    if not developer_ids:
+        return
+    missing_roles = {"tester", "security"} - roles
+    if missing_roles:
+        raise ValueError(
+            "Repository implementation plans require tester and security nodes; missing: "
+            + ", ".join(sorted(missing_roles))
+        )
+    dependencies = validation.effective_dependencies
+
+    def ancestors(task_id: str) -> set[str]:
+        found: set[str] = set()
+        pending = list(dependencies[task_id])
+        while pending:
+            parent_id = pending.pop()
+            if parent_id in found:
+                continue
+            found.add(parent_id)
+            pending.extend(dependencies[parent_id])
+        return found
+
+    for node in plan.nodes:
+        if node.selected_role_id in {"tester", "security"}:
+            if not developer_ids.issubset(ancestors(node.task_id)):
+                raise ValueError(
+                    f"{node.selected_role_id} node {node.task_id!r} must depend on every "
+                    "developer node before quality verification"
+                )
+
+
 def require_task_permission(permission: str):
     def dependency(
         request: Request,
@@ -1274,7 +1332,8 @@ def create_agent_runtime_task(
         nodes=_agent_task_nodes(body.nodes),
     )
     try:
-        runtime.validate_plan(plan)
+        validation = runtime.validate_plan(plan)
+        _validate_agent_runtime_execution_plan(plan, validation)
     except (KeyError, ValueError) as exc:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=422, detail=str(exc)) from None
