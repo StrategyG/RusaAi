@@ -181,6 +181,14 @@ class PostgresInferenceAdmissionController:
                     """
                 )
 
+            # The development DDL above acquires relation locks. Commit it
+            # before waiting for the scheduler advisory lock. Otherwise a
+            # concurrent API process can hold the advisory lock while this
+            # initializer holds DDL locks, creating a relation/advisory deadlock.
+            # The production path also closes its read-only schema-check transaction
+            # here so every process enters the scheduler transaction consistently.
+            conn.commit()
+
             expected = (
                 self.max_active,
                 self.max_waiting,

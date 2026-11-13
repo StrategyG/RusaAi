@@ -6,9 +6,10 @@ def test_database_migrations_have_unique_monotonic_versions():
     paths = sorted(Path("migrations").glob("*.sql"), key=lambda path: path.name)
     versions = [int(path.name.split("_", 1)[0]) for path in paths]
 
+    # Gaps are allowed while independent draft PRs reserve migration numbers.
     assert versions == sorted(versions)
     assert len(versions) == len(set(versions))
-    assert versions == list(range(1, len(paths) + 1))
+    assert versions and versions[0] == 1
 
 
 def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
@@ -31,6 +32,12 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert "aicode_task_policy_events_worker_insert" in audit_migration
     assert "BEFORE UPDATE OR DELETE" in audit_migration
     assert "BEFORE TRUNCATE" in audit_migration
+    queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
+    approval_migration = Path("migrations/015_aicode_task_approval.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "task.approve" in queue
+    assert "'task.approve'" in approval_migration
 
 
 def test_rls_integration_fixture_applies_migrations_once_in_version_order():
@@ -44,6 +51,8 @@ def test_rls_integration_fixture_applies_migrations_once_in_version_order():
         "004_aicode_tenant_rls.sql",
         "005_aicode_task_policy_audit.sql",
         "006_aicode_idempotency.sql",
+        "014_aicode_memory_checkpoint_cas.sql",
+        "015_aicode_task_approval.sql",
     ]
 
 
@@ -71,3 +80,23 @@ def test_inference_admission_migration_is_api_runtime_scoped():
     assert "TO rusa_api_runtime" in migration
     assert "rusa_worker_runtime" in migration
     assert "No prompt or completion data" in migration or "no tenant payload" in migration
+
+
+
+def test_agent_runtime_task_approval_migration_extends_policy_audit_actions():
+    migration = Path("migrations/015_aicode_task_approval.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "aicode_task_policy_events_action_check" in migration
+    assert "'task.approve'" in migration
+    assert "BEGIN;" in migration and "COMMIT;" in migration
+
+
+def test_agent_runtime_checkpoint_cas_migration_adds_monotonic_version():
+    migration = Path("migrations/014_aicode_memory_checkpoint_cas.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ADD COLUMN IF NOT EXISTS checkpoint_version BIGINT NOT NULL DEFAULT 0" in migration
+    assert "CHECK (checkpoint_version >= 0)" in migration

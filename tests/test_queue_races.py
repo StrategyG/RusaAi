@@ -168,6 +168,110 @@ def test_expired_worker_attempt_limit_moves_job_to_failed():
         remove_task(task_id, tenant)
 
 
+def test_lease_bound_operation_refuses_expired_lease_before_checkpoint():
+    queue = make_queue()
+    tenant = f"queue-checkpoint-stale-{uuid4().hex}"
+    task_id = str(uuid4())
+    called = []
+    try:
+        assert queue.enqueue(
+            task_id, tenant, {"objective": "stale checkpoint"}, priority=2**31 - 1
+        )
+        job_id, lease_token = claim_specific_task(
+            task_id, tenant, "checkpoint-stale-worker"
+        )
+        expire_lease(job_id, tenant)
+
+        with pytest.raises(LeaseLostError, match="active task lease"):
+            queue.with_lease_owned(
+                job_id,
+                tenant,
+                "checkpoint-stale-worker",
+                lease_token,
+                lambda: called.append("checkpointed"),
+            )
+        assert called == []
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
+    queue = make_queue()
+    tenant = f"queue-checkpoint-fence-{uuid4().hex}"
+    task_id = str(uuid4())
+    checkpointing = Event()
+    release_checkpoint = Event()
+    expiry_started = Event()
+
+    def expire_while_locked(job_id: int) -> None:
+        with psycopg.connect(DSN) as connection:
+            expiry_started.set()
+            connection.execute(
+                "UPDATE aicode_jobs SET lease_until=NOW() - INTERVAL '1 second' "
+                "WHERE id=%s AND tenant_id=%s",
+                (job_id, tenant),
+            )
+
+    def bounded_checkpoint() -> str:
+        checkpointing.set()
+        if not release_checkpoint.wait(timeout=10):
+            raise TimeoutError("test checkpoint was not released")
+        return "checkpoint-saved"
+
+    try:
+        assert queue.enqueue(
+            task_id, tenant, {"objective": "fenced checkpoint"}, priority=2**31 - 1
+        )
+        job_id, lease_token = claim_specific_task(
+            task_id, tenant, "checkpoint-fence-worker"
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            checkpoint = pool.submit(
+                queue.with_lease_owned,
+                job_id,
+                tenant,
+                "checkpoint-fence-worker",
+                lease_token,
+                bounded_checkpoint,
+                lease_seconds=30,
+            )
+            assert checkpointing.wait(timeout=5)
+
+            expiry = pool.submit(expire_while_locked, job_id)
+            assert expiry_started.wait(timeout=5)
+            time.sleep(0.1)
+            assert not expiry.done(), "lease row was not locked during checkpoint"
+
+            with psycopg.connect(DSN) as connection:
+                skipped = connection.execute(
+                    "SELECT id FROM aicode_jobs WHERE id=%s FOR UPDATE SKIP LOCKED",
+                    (job_id,),
+                ).fetchone()
+            assert skipped is None, "SKIP LOCKED did not skip the checkpoint-locked task"
+            release_checkpoint.set()
+            assert checkpoint.result(timeout=10) == "checkpoint-saved"
+            expiry.result(timeout=10)
+
+        replacement_token = str(uuid4())
+        with psycopg.connect(DSN) as connection:
+            replacement = connection.execute(
+                """
+                UPDATE aicode_jobs
+                SET lease_owner='replacement-checkpoint-worker', lease_token=%s::uuid,
+                    lease_until=NOW() + INTERVAL '30 seconds', attempts=attempts+1
+                WHERE id=%s AND tenant_id=%s AND status='running'
+                  AND lease_until < NOW()
+                RETURNING lease_token::text
+                """,
+                (replacement_token, job_id, tenant),
+            ).fetchone()
+        assert replacement and replacement[0] != lease_token
+    finally:
+        release_checkpoint.set()
+        remove_task(task_id, tenant)
+
+
 def test_publication_refuses_an_expired_or_replaced_lease():
     queue = make_queue()
     tenant = f"queue-publish-stale-{uuid4().hex}"

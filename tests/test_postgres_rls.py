@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -30,6 +32,8 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            "014_aicode_memory_checkpoint_cas.sql",
+            "015_aicode_task_approval.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
@@ -61,6 +65,21 @@ def test_api_rls_limits_queue_rows_to_current_tenant():
                     "INSERT INTO aicode_jobs(task_id, tenant_id, payload) VALUES (%s, %s, %s::jsonb)",
                     (task_b, "rls-tenant-b", '{"objective":"must be denied"}'),
                 )
+
+
+def test_api_role_can_append_tenant_scoped_task_approval_event():
+    tenant_id = "approval-audit-" + uuid4().hex[:12]
+    task_id = str(uuid4())
+    with connect() as conn:
+        set_role_and_tenant(conn, "rusa_api_runtime", tenant_id)
+        conn.execute(
+            """
+            INSERT INTO public.aicode_task_policy_events
+                (tenant_id, task_id, actor, action, decision)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (tenant_id, task_id, "api:tenant-admin", "task.approve", "allow"),
+        )
 
 
 def test_api_role_cannot_read_memory_or_audit():
@@ -369,3 +388,175 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+def test_worker_memory_checkpoint_compare_and_set_is_atomic_and_tenant_scoped():
+    from rusa_agents.memory import PostgresMemory
+
+    memory = PostgresMemory(DSN)
+    task_id = str(uuid4())
+    tenant_id = f"checkpoint-cas-{uuid4().hex}"
+    payloads = [
+        {"tenant_id": tenant_id, "plan_fingerprint": "writer-a"},
+        {"tenant_id": tenant_id, "plan_fingerprint": "writer-b"},
+    ]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(
+                lambda payload: memory.compare_and_set(
+                    task_id,
+                    "agent-runtime",
+                    "agent_runtime_checkpoint",
+                    payload,
+                    tenant_id,
+                    0,
+                ),
+                payloads,
+            ))
+        assert sorted(value for value in outcomes if value is not None) == [1]
+        assert sum(value is not None for value in outcomes) == 1
+
+        current = memory.get(task_id, tenant_id)
+        assert current is not None
+        assert current["checkpoint_version"] == 1
+        assert current["payload"]["plan_fingerprint"] in {"writer-a", "writer-b"}
+        assert memory.get(task_id, tenant_id + "-other") is None
+        assert memory.compare_and_set(
+            task_id,
+            "agent-runtime",
+            "agent_runtime_checkpoint",
+            {"tenant_id": tenant_id, "plan_fingerprint": "stale"},
+            tenant_id,
+            0,
+        ) is None
+        assert memory.compare_and_set(
+            task_id,
+            "agent-runtime",
+            "agent_runtime_checkpoint",
+            {"tenant_id": tenant_id, "plan_fingerprint": "writer-next"},
+            tenant_id,
+            1,
+        ) == 2
+    finally:
+        with connect() as conn:
+            conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            conn.execute(
+                "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
+
+
+@pytest.mark.asyncio
+async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_cas():
+    from rusa_agents.capability_registry import AgentWorkerRegistry
+    from rusa_agents.memory import PostgresMemory
+    from rusa_agents.queue import PostgresTaskQueue
+    from rusa_agents.runtime import AICodeRuntime
+    from rusa_agents.runtime_v1 import AgentRuntimeV1
+    from rusa_agents.task_decomposer import TaskNode, TaskPlan
+    from rusa_agents.worker_execution import (
+        PlanStatus,
+        PolicyDecision,
+        VerificationDecision,
+        WorkerOutput,
+    )
+
+    registry_dir = Path(__file__).resolve().parents[1] / "rusa_agents" / "data"
+    registry_data = json.loads((registry_dir / "agent_worker_registry.v1.json").read_text())
+    registry_schema = json.loads((registry_dir / "agent_worker_registry.v1.schema.json").read_text())
+    registry_data["status"] = "active"
+    registry_data["source_chunk_map_status"] = "approved_for_routing"
+    for index, role in enumerate(registry_data["roles"], start=900):
+        role["registration_status"] = "registered"
+        role["runtime_status"] = "verified"
+        role["activation_state"] = "active"
+        role["source_chunk_ids"] = [f"RUSA-KB-{index:03d}"]
+    registry_data["counts"]["source_chunk_refs_total"] = len(registry_data["roles"])
+    registry = AgentWorkerRegistry.from_mapping(registry_data, registry_schema)
+
+    queue = PostgresTaskQueue(DSN)
+    memory = PostgresMemory(DSN)
+    queue.initialize()
+    memory.initialize()
+    tenant_id = f"dag-e2e-{uuid4().hex}"
+    task_id = str(uuid4())
+    worker_id = f"dag-e2e-worker-{uuid4().hex[:8]}"
+    job = None
+
+    class Handler:
+        async def execute(self, node, dependency_results):
+            return WorkerOutput(
+                summary="PostgreSQL queue-to-DAG acceptance passed",
+                evidence_refs=("evidence://postgres-queue-dag",),
+            )
+
+    def authorize(node, trusted_tenant):
+        return PolicyDecision(allowed=True)
+
+    def verify(node, output):
+        return VerificationDecision(accepted=bool(output.evidence_refs))
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.agent_runtime = AgentRuntimeV1(registry)
+    runtime.memory = memory
+    runtime.queue = queue
+    runtime.worker_id = worker_id
+
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant_id,
+            {"objective": "PostgreSQL queue-to-DAG acceptance"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim(worker_id, lease_seconds=60)
+        assert job is not None and job.task_id == task_id
+
+        plan = TaskPlan(
+            root_task_id=task_id,
+            tenant_id=tenant_id,
+            objective="Verify queue lease, DAG execution, and atomic checkpoint persistence",
+            nodes=(
+                TaskNode(
+                    task_id="node-postgres-e2e",
+                    selected_role_id="analyst",
+                    scope="worker",
+                    objective="Run a bounded integration acceptance task",
+                    delegated_by_role_id="supreme_orchestrator",
+                    acceptance_criteria=("Persist versioned checkpoint",),
+                ),
+            ),
+        )
+        result = await runtime.execute_agent_plan(
+            job,
+            plan,
+            {"analyst": Handler()},
+            authorize,
+            verify,
+            asyncio.Event(),
+        )
+
+        assert result.status == PlanStatus.COMPLETED
+        record = memory.get(task_id, tenant_id)
+        assert record is not None
+        assert record["state"] == "agent_runtime_checkpoint"
+        assert record["checkpoint_version"] >= 2
+        assert queue.complete(
+            job.id,
+            tenant_id,
+            worker_id,
+            job.lease_token,
+            {"plan_status": result.status.value},
+        )
+        assert queue.get(task_id, tenant_id)["status"] == "succeeded"
+    finally:
+        with connect() as conn:
+            conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            conn.execute(
+                "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
+            conn.execute(
+                "DELETE FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )

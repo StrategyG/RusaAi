@@ -58,6 +58,14 @@ def test_policy_protects_production_actions():
     assert policy.evaluate("repo_read", RiskLevel.CRITICAL).requires_approval
 
 
+def test_worker_runtime_loads_v1_registry_and_checks_legacy_pipeline_binding():
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    result = runtime._load_agent_runtime_registry()
+    assert result["compatible"] is True
+    assert result["dispatchable"] is False
+    assert runtime.agent_runtime.status()["status"] == "draft_proposed_not_activated"
+
+
 def test_memory_persists_task(tmp_path):
     memory = SQLiteMemory(str(tmp_path / "memory.sqlite3"))
     memory.save("task-1", "StrategyG/RusaAi", "executing", {"attempt": 2}, tenant_id="tenant-a")

@@ -1,0 +1,846 @@
+{
+  "schema_version": "1.0.0",
+  "registry_id": "rusaai-agent-worker-capability-registry",
+  "generated_at": "2026-11-13",
+  "project_id": "rusaai",
+  "status": "draft_proposed_not_activated",
+  "source_registry_version": "RUSA Master Knowledge Ledger v2.7; Batch 015 + Batch 033 snapshot 2026-11-12",
+  "counts": {
+    "agents": 10,
+    "aicode_workers": 6,
+    "devops_lifecycle_profiles": 8,
+    "workers_total": 14,
+    "source_chunks_total": 0,
+    "provisional_capability_ids_total": 34,
+    "source_chunk_refs_total": 24
+  },
+  "roles": [
+    {
+      "role_id": "supreme_orchestrator",
+      "display_name": "Supreme Orchestrator",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Koordinasi, delegasi, prioritas, status akhir.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-001",
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-DEVOPS-001",
+        "RUSA-AW-DEVOPS-002",
+        "RUSA-AW-DEVOPS-003",
+        "RUSA-AW-DEVOPS-004",
+        "RUSA-AW-DEVOPS-005",
+        "RUSA-AW-DEVOPS-006",
+        "RUSA-AW-DEVOPS-007",
+        "RUSA-AW-DEVOPS-008",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-004",
+        "RUSA-AW-GOV-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-634",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-852",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "system_architect",
+      "display_name": "System Architect",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Desain arsitektur, kontrak, integrasi, standar teknis.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-002",
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-WORKER-001",
+        "RUSA-AW-WORKER-002",
+        "RUSA-AW-WORKER-003",
+        "RUSA-AW-WORKER-004",
+        "RUSA-AW-WORKER-005",
+        "RUSA-AW-WORKER-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-634",
+        "RUSA-KB-638",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "planner",
+      "display_name": "Planner",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Rencana, milestone, dependency, acceptance criteria.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-003",
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-003"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-634",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-848",
+        "RUSA-KB-849"
+      ]
+    },
+    {
+      "role_id": "task_decomposer",
+      "display_name": "Task Decomposer",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Memecah pekerjaan menjadi task kecil dan DAG.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-004",
+        "RUSA-AW-GOV-002"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-634",
+        "RUSA-KB-846",
+        "RUSA-KB-849",
+        "RUSA-KB-852"
+      ]
+    },
+    {
+      "role_id": "software_engineer",
+      "display_name": "Software Engineer",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Implementasi kode, refactoring, dokumentasi teknis.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-005",
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-WORKER-001",
+        "RUSA-AW-WORKER-002",
+        "RUSA-AW-WORKER-003",
+        "RUSA-AW-WORKER-004",
+        "RUSA-AW-WORKER-005",
+        "RUSA-AW-WORKER-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857"
+      ]
+    },
+    {
+      "role_id": "devops",
+      "display_name": "DevOps",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Build, deployment, infrastructure, reliability.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-006",
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-DEVOPS-001",
+        "RUSA-AW-DEVOPS-002",
+        "RUSA-AW-DEVOPS-003",
+        "RUSA-AW-DEVOPS-004",
+        "RUSA-AW-DEVOPS-005",
+        "RUSA-AW-DEVOPS-006",
+        "RUSA-AW-DEVOPS-007",
+        "RUSA-AW-DEVOPS-008",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-004",
+        "RUSA-AW-GOV-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-849",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "qa_testing",
+      "display_name": "QA & Testing",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Test plan, unit/integration/regression, acceptance verification.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-007",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-005",
+        "RUSA-AW-WORKER-001",
+        "RUSA-AW-WORKER-002",
+        "RUSA-AW-WORKER-003",
+        "RUSA-AW-WORKER-004",
+        "RUSA-AW-WORKER-005",
+        "RUSA-AW-WORKER-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-638",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "security_policy",
+      "display_name": "Security & Policy",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Risk assessment, permission, policy, security review.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-008",
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-004",
+        "RUSA-AW-GOV-005",
+        "RUSA-AW-WORKER-001",
+        "RUSA-AW-WORKER-002",
+        "RUSA-AW-WORKER-003",
+        "RUSA-AW-WORKER-004",
+        "RUSA-AW-WORKER-005",
+        "RUSA-AW-WORKER-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-636",
+        "RUSA-KB-637",
+        "RUSA-KB-638",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "memory_knowledge",
+      "display_name": "Memory & Knowledge",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Memory, indexing, RAG, provenance, retrieval.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-009",
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-GOV-003"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-636",
+        "RUSA-KB-637",
+        "RUSA-KB-638",
+        "RUSA-KB-845"
+      ]
+    },
+    {
+      "role_id": "evaluation_reporting",
+      "display_name": "Evaluation & Reporting",
+      "identity_type": "core_agent",
+      "scope": {
+        "agent_scope": "agent_core",
+        "worker_scope": "not_worker"
+      },
+      "parent_role_id": null,
+      "registration_status": "not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Metrik, evidence, laporan, improvement.",
+      "capability_ids": [
+        "RUSA-AW-AGENT-010",
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-GOV-003",
+        "RUSA-AW-GOV-005"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-636",
+        "RUSA-KB-637",
+        "RUSA-KB-638",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "analyst",
+      "display_name": "Analyst",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Analisis requirement, repository, data, dan bukti sebelum implementasi.",
+      "capability_ids": [
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-001"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "architect",
+      "display_name": "Architect",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Mendesain solusi teknis untuk task atau subsystem terbatas.",
+      "capability_ids": [
+        "RUSA-AW-CAP-001",
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-002"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-857",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "developer",
+      "display_name": "Developer",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menerapkan patch kode sesuai task dan desain yang disetujui.",
+      "capability_ids": [
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-004",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-003"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-856",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "debugger",
+      "display_name": "Debugger",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menemukan akar masalah dan membuat perbaikan yang dapat direproduksi.",
+      "capability_ids": [
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-005",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-004"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "tester",
+      "display_name": "Tester",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menyiapkan dan menjalankan test untuk unit perubahan.",
+      "capability_ids": [
+        "RUSA-AW-CAP-002",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-002",
+        "RUSA-AW-GOV-005",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-005"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "security",
+      "display_name": "Security",
+      "identity_type": "aicode_worker",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_core"
+      },
+      "parent_role_id": null,
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Melakukan security review terarah terhadap code, dependency, config, dan workflow.",
+      "capability_ids": [
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-CAP-004",
+        "RUSA-AW-GOV-001",
+        "RUSA-AW-GOV-004",
+        "RUSA-AW-GOV-005",
+        "RUSA-AW-GOV-006",
+        "RUSA-AW-WORKER-006"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-599",
+        "RUSA-KB-600",
+        "RUSA-KB-601",
+        "RUSA-KB-602",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "rusa_plan_agent",
+      "display_name": "Plan Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menyusun rencana perubahan dan delivery DevOps.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-001"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "rusa_code_agent",
+      "display_name": "Code Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Membuat dan memelihara infrastructure/application automation code.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-002"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "rusa_build_agent",
+      "display_name": "Build Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Membangun artifact yang reproducible.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-003"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "rusa_test_agent",
+      "display_name": "Test Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menjalankan pipeline test dan quality gate.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-004",
+        "RUSA-AW-GOV-005"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-845",
+        "RUSA-KB-846",
+        "RUSA-KB-847",
+        "RUSA-KB-848",
+        "RUSA-KB-849",
+        "RUSA-KB-850",
+        "RUSA-KB-851",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "rusa_release_agent",
+      "display_name": "Release Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menyiapkan versi dan release manifest.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-005"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-849",
+        "RUSA-KB-852",
+        "RUSA-KB-853",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-856",
+        "RUSA-KB-857",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "rusa_deploy_agent",
+      "display_name": "Deploy Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menjalankan deployment yang telah disetujui.",
+      "capability_ids": [
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-DEVOPS-006",
+        "RUSA-AW-GOV-004"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-853",
+        "RUSA-KB-858"
+      ]
+    },
+    {
+      "role_id": "rusa_operate_agent",
+      "display_name": "Operate Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Menjalankan operasi rutin dan incident response.",
+      "capability_ids": [
+        "RUSA-AW-CAP-003",
+        "RUSA-AW-DEVOPS-007",
+        "RUSA-AW-GOV-004"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    },
+    {
+      "role_id": "rusa_monitor_agent",
+      "display_name": "Monitor Agent",
+      "identity_type": "devops_lifecycle_profile",
+      "scope": {
+        "agent_scope": "agent_platform",
+        "worker_scope": "worker_adjacent"
+      },
+      "parent_role_id": "devops",
+      "registration_status": "planned_not_verified",
+      "runtime_status": "not_verified",
+      "activation_state": "disabled_pending_implementation_review_and_approval",
+      "mission": "Mengamati telemetry, threshold, dan perubahan layanan.",
+      "capability_ids": [
+        "RUSA-AW-DEVOPS-008"
+      ],
+      "source_chunk_ids": [
+        "RUSA-KB-635",
+        "RUSA-KB-845",
+        "RUSA-KB-847",
+        "RUSA-KB-854",
+        "RUSA-KB-855",
+        "RUSA-KB-858",
+        "RUSA-KB-861"
+      ]
+    }
+  ],
+  "source_chunk_map_status": "candidate_crosswalk_pending_review"
+}

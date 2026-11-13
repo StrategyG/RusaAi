@@ -23,6 +23,7 @@ class AutonomousCodeWorker:
         max_steps: int = 12,
         max_actions_per_step: int = 8,
         max_output_chars: int = 12000,
+        allowed_tools: set[str] | frozenset[str] | None = None,
     ) -> None:
         if max_steps < 1 or max_steps > 30:
             raise ValueError("max_steps must be between 1 and 30")
@@ -32,6 +33,13 @@ class AutonomousCodeWorker:
         self.max_steps = max_steps
         self.max_actions_per_step = max_actions_per_step
         self.max_output_chars = max_output_chars
+        self.allowed_tools = (
+            frozenset(allowed_tools) if allowed_tools is not None else None
+        )
+        if self.allowed_tools is not None and not self.allowed_tools.issubset(
+            self.ROLE_TOOLS[self.role]
+        ):
+            raise ValueError("Worker tool allowlist cannot exceed its registered role permissions")
 
     @staticmethod
     def _parse_response(raw: str) -> dict[str, Any]:
@@ -57,7 +65,12 @@ class AutonomousCodeWorker:
         return payload
 
     async def run(self, task: CodingTask, prior_results: list[WorkerResult]) -> WorkerResult:
-        allowed = sorted(self.ROLE_TOOLS[self.role])
+        allowed_tool_names = (
+            self.allowed_tools
+            if self.allowed_tools is not None
+            else self.ROLE_TOOLS[self.role]
+        )
+        allowed = sorted(allowed_tool_names)
         history = "\n".join(
             f"{item.role.value}: {item.summary[:1500]}" for item in prior_results
         ) or "No previous worker reports."
@@ -125,7 +138,7 @@ class AutonomousCodeWorker:
                         success=False, artifacts=artifacts, evidence=evidence,
                         blockers=["Tool action must include a name and arguments object."],
                     )
-                if action["name"] not in self.ROLE_TOOLS[self.role]:
+                if action["name"] not in allowed_tool_names:
                     return WorkerResult(
                         role=self.role, summary=f"Tool not allowed for role: {action['name']}",
                         success=False, artifacts=artifacts, evidence=evidence,
