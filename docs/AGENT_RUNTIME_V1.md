@@ -189,6 +189,31 @@ Policy authorization and independent result verification remain explicit
 injected adapters. These methods do not make the draft registry dispatchable
 or grant any new role/tool permission.
 
+The API exposes `POST /v1/agent-runtime/tasks` for authenticated DAG
+intake. The endpoint derives tenant identity from the authenticated principal,
+generates the root task ID server-side, validates the DAG, and enqueues an
+`execution_mode=agent_runtime_v1` payload only when the registry reports
+`execution_enabled=true`. Draft registries remain preview-only and receive
+HTTP 409 on task intake. The endpoint supports the existing idempotency-key
+contract and never accepts caller-supplied tenant identity.
+
+The worker's existing `run_once()` now branches on the explicit execution
+mode. It revalidates the queue lease and task-execution authorization, parses
+the bounded versioned plan payload, and invokes
+`execute_agent_plan()` with the configured handler, policy, and verifier
+adapters. A missing adapter set or inactive registry moves the job to
+`awaiting_approval`; blocked/approval-required plans are also held for review.
+Completed plans are committed to the queue with their node evidence, while
+failed plans use the queue's bounded retry policy. Cancellation or lease loss
+does not attempt queue completion.
+
+The dispatch adapters are deliberately not configured by default in
+`worker_main`. The checked-in registry remains
+`draft_proposed_not_activated`, so production dispatch remains fail-closed
+until the source crosswalk, role approvals, production policy/verifier
+adapters, and worker handler implementations are reviewed and injected. The
+existing AICode coding-task path remains unchanged.
+
 The API route preview and worker startup checks share the same JSON package
 data and JSON Schema validator. A missing or invalid registry causes the
 corresponding control-plane operation to fail closed.
