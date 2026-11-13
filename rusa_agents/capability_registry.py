@@ -29,7 +29,8 @@ class RoleDefinition:
     runtime_status: str
     activation_state: str
     mission: str
-    capability_chunk_ids: tuple[str, ...]
+    capability_ids: tuple[str, ...]
+    source_chunk_ids: tuple[str, ...]
 
     @property
     def scope(self) -> str:
@@ -72,7 +73,8 @@ class AgentWorkerRegistry:
                 runtime_status=item["runtime_status"],
                 activation_state=item["activation_state"],
                 mission=item["mission"],
-                capability_chunk_ids=tuple(item["capability_chunk_ids"]),
+                capability_ids=tuple(item["capability_ids"]),
+                source_chunk_ids=tuple(item["source_chunk_ids"]),
             )
             for item in self._data["roles"]
         }
@@ -122,6 +124,29 @@ class AgentWorkerRegistry:
         if len(role_ids) != len(set(role_ids)):
             raise RegistryValidationError("role_id values must be unique")
         role_map = {item["role_id"]: item for item in roles}
+        capability_ids = {
+            capability_id
+            for item in roles
+            for capability_id in item["capability_ids"]
+        }
+        source_chunk_ids = {
+            chunk_id
+            for item in roles
+            for chunk_id in item["source_chunk_ids"]
+        }
+        if self._data["counts"]["provisional_capability_ids_total"] != len(capability_ids):
+            raise RegistryValidationError("provisional_capability_ids_total is inconsistent")
+        if self._data["counts"]["source_chunks_total"] != len(source_chunk_ids):
+            raise RegistryValidationError("source_chunks_total is inconsistent")
+        if self._data["status"] == "active":
+            unlinked = [
+                item["role_id"] for item in roles if not item["source_chunk_ids"]
+            ]
+            if unlinked:
+                raise RegistryValidationError(
+                    "An active registry requires canonical source_chunk_ids for every role: "
+                    + ", ".join(unlinked)
+                )
         identity_counts = Counter(item["identity_type"] for item in roles)
         expected = {
             "core_agent": self._data["counts"]["agents"],
@@ -220,6 +245,16 @@ class AgentWorkerRegistry:
             "dispatchable_roles": sum(
                 self.is_dispatchable(role) for role in self.roles.values()
             ),
+            "provisional_capability_id_count": len({
+                capability_id
+                for role in self.roles.values()
+                for capability_id in role.capability_ids
+            }),
+            "source_chunk_count": len({
+                chunk_id
+                for role in self.roles.values()
+                for chunk_id in role.source_chunk_ids
+            }),
             "execution_enabled": self.status == "active"
             and all(self.is_dispatchable(role) for role in self.roles.values()),
         }

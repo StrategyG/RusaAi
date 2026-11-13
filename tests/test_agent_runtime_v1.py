@@ -33,10 +33,13 @@ def _registry(active: bool = False) -> AgentWorkerRegistry:
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     if active:
         data["status"] = "active"
-        for role in data["roles"]:
+        for index, role in enumerate(data["roles"], start=900):
             role["registration_status"] = "registered"
             role["runtime_status"] = "verified"
             role["activation_state"] = "active"
+            # Test-only source IDs exercise the active-registry validation gate.
+            role["source_chunk_ids"] = [f"RUSA-KB-{index:03d}"]
+        data["counts"]["source_chunks_total"] = len(data["roles"])
     return AgentWorkerRegistry.from_mapping(data, schema)
 
 
@@ -80,6 +83,22 @@ def test_default_registry_is_structurally_valid_but_not_active() -> None:
     assert summary["devops_lifecycle_profiles"] == 8
     assert summary["dispatchable_roles"] == 0
     assert summary["execution_enabled"] is False
+    assert summary["provisional_capability_id_count"] == 34
+    assert summary["source_chunk_count"] == 0
+
+
+
+def test_registry_rejects_activation_without_canonical_source_chunks() -> None:
+    registry = _registry()
+    data = registry.raw_data
+    data["status"] = "active"
+    for role in data["roles"]:
+        role["registration_status"] = "registered"
+        role["runtime_status"] = "verified"
+        role["activation_state"] = "active"
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(RegistryValidationError, match="canonical source_chunk_ids"):
+        AgentWorkerRegistry.from_mapping(data, schema)
 
 
 def test_registry_rejects_duplicate_role_ids() -> None:
@@ -230,7 +249,7 @@ async def test_worker_engine_executes_dag_and_checkpoints_results() -> None:
         _node("task-a", "analyst"),
         _node("task-b", "developer", ("task-a",)),
     )
-    result = await engine.execute(plan, {"analyst": handler_a, "developer": handler_b})
+    result = await engine.execute(plan, {"analyst": handler_a, "developer": handler_b}, trusted_tenant_id="tenant-a")
     assert result.status == PlanStatus.COMPLETED
     assert [item.status for item in result.node_results] == [
         NodeStatus.COMPLETED, NodeStatus.COMPLETED
@@ -239,6 +258,30 @@ async def test_worker_engine_executes_dag_and_checkpoints_results() -> None:
     assert handler_b.calls == 1
     checkpoint = store.load(plan.root_task_id, plan.tenant_id)
     assert checkpoint["plan_fingerprint"] == result.plan_fingerprint
+
+
+
+@pytest.mark.asyncio
+async def test_worker_engine_rejects_model_supplied_tenant_mismatch() -> None:
+    store = InMemoryCheckpointStore()
+    handler = _Handler()
+    policy_calls = []
+
+    def authorizer(node, tenant_id):
+        policy_calls.append(tenant_id)
+        return PolicyDecision(allowed=True)
+
+    engine = WorkerExecutionEngine(_registry(active=True), store, authorizer, _verifier)
+    plan = _plan(_node("task-tenant", "analyst"))
+    with pytest.raises(PermissionError, match="authenticated tenant context"):
+        await engine.execute(
+            plan,
+            {"analyst": handler},
+            trusted_tenant_id="tenant-b",
+        )
+    assert handler.calls == 0
+    assert policy_calls == []
+    assert store.load(plan.root_task_id, "tenant-a") is None
 
 
 @pytest.mark.asyncio
@@ -250,8 +293,7 @@ async def test_worker_engine_fails_closed_for_draft_registry() -> None:
     with pytest.raises(RegistryNotActivatedError, match="disabled"):
         await engine.execute(
             _plan(_node("task-a", "analyst")),
-            {"analyst": _Handler()},
-        )
+            {"analyst": _Handler()}, trusted_tenant_id="tenant-a")
 
 
 @pytest.mark.asyncio
@@ -262,8 +304,7 @@ async def test_worker_engine_requires_approval_for_high_risk_nodes() -> None:
     handler = _Handler()
     result = await engine.execute(
         _plan(_node("task-a", "analyst", risk_class="high")),
-        {"analyst": handler},
-    )
+        {"analyst": handler}, trusted_tenant_id="tenant-a")
     assert result.status == PlanStatus.NEEDS_APPROVAL
     assert result.node_results[0].status == NodeStatus.NEEDS_APPROVAL
     assert handler.calls == 0
@@ -284,8 +325,7 @@ async def test_worker_engine_denies_policy_and_blocks_dependants() -> None:
             _node("task-a", "analyst"),
             _node("task-b", "developer", ("task-a",)),
         ),
-        {"analyst": handler_a, "developer": handler_b},
-    )
+        {"analyst": handler_a, "developer": handler_b}, trusted_tenant_id="tenant-a")
     assert result.status == PlanStatus.BLOCKED
     assert result.node_results[0].status == NodeStatus.BLOCKED
     assert result.node_results[1].status == NodeStatus.BLOCKED
@@ -298,16 +338,39 @@ async def test_worker_engine_retries_and_resumes_completed_nodes() -> None:
     engine = WorkerExecutionEngine(_registry(active=True), store, _authorizer, _verifier)
     handler = _Handler(fail=True)
     plan = _plan(_node("task-a", "analyst"))
-    failed = await engine.execute(plan, {"analyst": handler})
+    failed = await engine.execute(plan, {"analyst": handler}, trusted_tenant_id="tenant-a")
     assert failed.status == PlanStatus.FAILED
     assert handler.calls == 2
     replacement = _Handler()
-    resumed = await engine.execute(plan, {"analyst": replacement})
+    resumed = await engine.execute(plan, {"analyst": replacement}, trusted_tenant_id="tenant-a")
     assert resumed.status == PlanStatus.COMPLETED
     assert replacement.calls == 1
-    replay = await engine.execute(plan, {"analyst": _Handler()})
+    replay = await engine.execute(plan, {"analyst": _Handler()}, trusted_tenant_id="tenant-a")
     assert replay.status == PlanStatus.COMPLETED
     assert replay.node_results[0].attempts == 1
+
+
+
+@pytest.mark.asyncio
+async def test_worker_engine_reports_failure_when_dependants_are_blocked() -> None:
+    engine = WorkerExecutionEngine(
+        _registry(active=True), InMemoryCheckpointStore(), _authorizer, _verifier
+    )
+    failing = _Handler(fail=True)
+    dependent = _Handler()
+    result = await engine.execute(
+        _plan(
+            _node("task-failing", "analyst"),
+            _node("task-dependent", "developer", ("task-failing",)),
+        ),
+        {"analyst": failing, "developer": dependent},
+        trusted_tenant_id="tenant-a",
+    )
+    assert result.status == PlanStatus.FAILED
+    assert result.node_results[0].status == NodeStatus.FAILED
+    assert result.node_results[1].status == NodeStatus.BLOCKED
+    assert failing.calls == 2
+    assert dependent.calls == 0
 
 
 @pytest.mark.asyncio
@@ -315,16 +378,16 @@ async def test_worker_engine_rejects_checkpoint_for_different_plan() -> None:
     store = InMemoryCheckpointStore()
     engine = WorkerExecutionEngine(_registry(active=True), store, _authorizer, _verifier)
     plan = _plan(_node("task-a", "analyst"))
-    await engine.execute(plan, {"analyst": _Handler()})
+    await engine.execute(plan, {"analyst": _Handler()}, trusted_tenant_id="tenant-a")
     changed = _plan(_node("task-a", "analyst", risk_class="medium"))
     with pytest.raises(ValueError, match="fingerprint"):
-        await engine.execute(changed, {"analyst": _Handler()})
+        await engine.execute(changed, {"analyst": _Handler()}, trusted_tenant_id="tenant-a")
 
 
 @pytest.mark.asyncio
 async def test_high_risk_node_executes_only_after_policy_confirms_approval() -> None:
     def approved(node, tenant_id):
-        return PolicyDecision(allowed=True, approval_satisfied=True)
+        return PolicyDecision(allowed=True, requires_approval=True, approval_satisfied=True)
 
     engine = WorkerExecutionEngine(
         _registry(active=True), InMemoryCheckpointStore(), approved, _verifier
@@ -332,7 +395,6 @@ async def test_high_risk_node_executes_only_after_policy_confirms_approval() -> 
     handler = _Handler()
     result = await engine.execute(
         _plan(_node("task-approved", "analyst", risk_class="high")),
-        {"analyst": handler},
-    )
+        {"analyst": handler}, trusted_tenant_id="tenant-a")
     assert result.status == PlanStatus.COMPLETED
     assert handler.calls == 1

@@ -39,10 +39,10 @@ class RouteDecision:
 
 
 class CapabilityRouter:
-    """Routes only on explicit role IDs or source-linked capability chunk IDs.
+    """Routes only on explicit role IDs or registered capability IDs.
 
-    It intentionally does not infer a semantic match from unapproved chunk
-    text. Tool permissions remain the responsibility of Policy Engine/Tool Gateway.
+    Capability IDs are registry-local routing keys, not canonical knowledge
+    chunk IDs. Tool permissions remain the responsibility of Policy Engine/Tool Gateway.
     """
 
     def __init__(self, registry: AgentWorkerRegistry) -> None:
@@ -58,9 +58,9 @@ class CapabilityRouter:
             raise ValueError("explicit_role_id or required_capability_ids is required")
 
         known_ids = {
-            chunk_id
+            capability_id
             for role in self.registry.list_roles()
-            for chunk_id in role.capability_chunk_ids
+            for capability_id in role.capability_ids
         }
         unknown = sorted(set(capability_ids) - known_ids)
         if unknown:
@@ -77,7 +77,7 @@ class CapabilityRouter:
 
             matched = tuple(
                 chunk_id for chunk_id in capability_ids
-                if chunk_id in role.capability_chunk_ids
+                if chunk_id in role.capability_ids
             )
             if capability_ids and request.require_all_capabilities and len(matched) != len(capability_ids):
                 continue

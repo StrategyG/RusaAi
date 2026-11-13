@@ -13,7 +13,7 @@ runtime or replace the existing AICode orchestrator.
 | Component | Responsibility |
 |---|---|
 | `capability_registry.py` | Load and validate the versioned role manifest and enforce activation state |
-| `capability_router.py` | Match explicit capability chunk IDs to candidate roles |
+| `capability_router.py` | Match explicit registry-local capability IDs to candidate roles |
 | `task_decomposer.py` | Validate task contracts, dependencies, parent hierarchy, and DAG ordering |
 | `worker_execution.py` | Execute one worker at a time, enforce policy/approval gates, verify results, checkpoint, and resume |
 | `runtime_v1.py` | Compose the registry, router, decomposer, and executor |
@@ -41,10 +41,14 @@ release authorization is recorded.
 ## Routing
 
 Routing is deliberately deterministic in v1.0. Callers provide explicit
-capability IDs from the RUSA-AW-CAP-001 batch or an explicit role ID. The
-router does not infer a semantic match from draft chunk text and always
-returns an empty `tool_grants` list. The Policy Engine and Tool Gateway remain
-the only authority for tool execution.
+registry-local capability IDs (`RUSA-AW-*`) or an explicit role ID. These
+identifiers are routing keys, not canonical knowledge chunk IDs. At this
+revision, 34 provisional capability IDs exist but **zero canonical RUSA-KB
+source chunk references are linked**. The router does not infer a semantic
+match from draft text and always returns an empty `tool_grants` list. Before
+activation, each capability must be reconciled to approved canonical source
+chunk IDs and exact source locators. Do not count these routing IDs as corpus
+chunks. The Policy Engine and Tool Gateway remain the only authority for tool execution.
 
 Example:
 
@@ -84,9 +88,9 @@ deterministic validation.
 
 The executor:
 
-1. Requires an active, verified registry and a handler for every selected role.
+1. Requires a trusted tenant context, an active verified registry, an active delegating agent, and a handler bound to the same tenant for every selected role.
 2. Calls an injected Policy Engine authorizer before each worker.
-3. Stops for human approval on high/critical risk and production targets.
+3. Stops for human approval on high/critical risk and production targets; proceeds only when the policy adapter confirms that the required approval is satisfied.
 4. Runs one worker at a time on the CPU-first profile.
 5. Calls an injected independent verifier before marking a node complete.
 6. Persists a fingerprinted checkpoint after each node and supports resume.
@@ -98,8 +102,11 @@ generation. Tools must continue through the Tool Gateway and sandbox. The
 executor does not expose shell, network, filesystem, or secret APIs.
 
 Use `TaskMemoryCheckpointStore` with the existing `SQLiteMemory` or
-`PostgresMemory` implementation for durable checkpoints. The in-memory store
-is only for tests/development.
+`PostgresMemory` implementation for checkpoint persistence. The in-memory store
+is only for tests/development. This executor is not yet wired to the durable
+queue's claim/lease fencing, idempotency, cancellation and atomic checkpoint
+compare-and-set. Those controls remain mandatory before activation; task-memory
+persistence alone is not a worker lease.
 
 ## Existing AICode integration
 

@@ -225,8 +225,15 @@ class WorkerExecutionEngine:
         plan: TaskPlan,
         handlers: Mapping[str, WorkerHandler],
         *,
+        trusted_tenant_id: str,
         resume: bool = True,
     ) -> TaskExecutionResult:
+        if not isinstance(trusted_tenant_id, str) or not trusted_tenant_id.strip():
+            raise ValueError("trusted_tenant_id is required")
+        if plan.tenant_id != trusted_tenant_id:
+            raise PermissionError(
+                "Task plan tenant does not match authenticated tenant context"
+            )
         validation: TaskPlanValidation = self.decomposer.validate(plan)
         if self.registry.status != "active":
             raise RegistryNotActivatedError(
@@ -234,8 +241,14 @@ class WorkerExecutionEngine:
             )
         for node in plan.nodes:
             self.registry.require_dispatchable(node.selected_role_id)
+            self.registry.require_dispatchable(node.delegated_by_role_id)
             if node.selected_role_id not in handlers:
                 raise ValueError(f"No worker handler is registered for {node.selected_role_id}")
+            handler_tenant_id = getattr(handlers[node.selected_role_id], "tenant_id", trusted_tenant_id)
+            if handler_tenant_id != trusted_tenant_id:
+                raise PermissionError(
+                    f"Worker handler tenant does not match authenticated tenant context: {node.selected_role_id}"
+                )
 
         fingerprint = self._fingerprint(plan)
         checkpoint = (
@@ -279,13 +292,12 @@ class WorkerExecutionEngine:
                 continue
 
             decision = await self._resolve(
-                self.policy_authorizer(node, plan.tenant_id)
+                self.policy_authorizer(node, trusted_tenant_id)
             )
             if not isinstance(decision, PolicyDecision):
                 raise TypeError("policy_authorizer must return PolicyDecision")
-            if decision.requires_approval or (
-                node.approval_required and not decision.approval_satisfied
-            ):
+            approval_required = decision.requires_approval or node.approval_required
+            if approval_required and not decision.approval_satisfied:
                 results[task_id] = NodeExecutionResult(
                     task_id=task_id,
                     role_id=node.selected_role_id,
@@ -372,6 +384,8 @@ class WorkerExecutionEngine:
             plan_status = PlanStatus.COMPLETED
         elif NodeStatus.NEEDS_APPROVAL in statuses:
             plan_status = PlanStatus.NEEDS_APPROVAL
+        elif NodeStatus.FAILED in statuses:
+            plan_status = PlanStatus.FAILED
         elif NodeStatus.BLOCKED in statuses:
             plan_status = PlanStatus.BLOCKED
         else:

@@ -43,6 +43,7 @@
         "aicode_workers",
         "devops_lifecycle_profiles",
         "workers_total",
+        "provisional_capability_ids_total",
         "source_chunks_total"
       ],
       "properties": {
@@ -59,6 +60,9 @@
           "const": 14
         },
         "source_chunks_total": {
+          "const": 0
+        },
+        "provisional_capability_ids_total": {
           "const": 34
         }
       },
@@ -80,7 +84,8 @@
           "runtime_status",
           "activation_state",
           "mission",
-          "capability_chunk_ids"
+          "capability_ids",
+          "source_chunk_ids"
         ],
         "properties": {
           "role_id": {
@@ -107,10 +112,22 @@
             ],
             "properties": {
               "agent_scope": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "agent_core",
+                  "agent_platform",
+                  "agent_domain",
+                  "agent_retrieval"
+                ]
               },
               "worker_scope": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "worker_core",
+                  "worker_adjacent",
+                  "incidental_mention",
+                  "not_worker"
+                ]
               }
             },
             "additionalProperties": false
@@ -134,12 +151,21 @@
             "type": "string",
             "minLength": 1
           },
-          "capability_chunk_ids": {
+          "capability_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^RUSA-AW-(AGENT|WORKER|DEVOPS|CAP|GOV)-[0-9]{3}$"
+            }
+          },
+          "source_chunk_ids": {
             "type": "array",
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "minLength": 1
+              "pattern": "^RUSA-KB-[0-9]{3}$"
             }
           }
         },
