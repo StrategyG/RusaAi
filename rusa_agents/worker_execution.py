@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from hashlib import sha256
 from typing import Any, Protocol
-from collections.abc import Awaitable, Callable, Mapping
 
 from .capability_registry import AgentWorkerRegistry, RegistryNotActivatedError
 from .task_decomposer import TaskDecomposer, TaskNode, TaskPlan, TaskPlanValidation
