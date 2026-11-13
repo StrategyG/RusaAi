@@ -138,11 +138,22 @@ execution coroutine itself is cancelled while the lease is still valid, the
 executor attempts a final cancelled checkpoint; if the lease has already been
 lost, that write is rejected and ignored rather than bypassing the fence.
 
-Generic DAG plan intake/dispatch is still not connected to
-`AICodeRuntime.run_once()`. Production Policy Engine/verifier adapters,
-role/source-crosswalk approvals, handler-side idempotency for external side
-effects, and a live PostgreSQL queue-to-DAG end-to-end acceptance test remain
-mandatory before activating new Agent/Worker roles.
+The queue worker now recognizes the explicit `agent_runtime_v1` execution mode
+and dispatches it through the lease-fenced DAG executor. This integration is
+limited to the six existing AICode worker roles; core-agent and DevOps profile
+roles remain preview-only until their own reviewed runtime handlers exist.
+Repository implementation plans must include tester and security nodes, and
+each quality node must depend on every developer node before the plan can run.
+The executor independently verifies mandatory pytest, Bandit, Ruff, and compile
+evidence before publication. The API and worker both enforce tenant repository
+allowlists and per-role tool/permission boundaries.
+
+A live PostgreSQL queue-to-DAG end-to-end acceptance test, canonical source
+crosswalk approval, human approval recording/fulfilment, handler-side
+idempotency for retried side effects, and broader core-agent/DevOps handlers
+remain mandatory before activating new Agent/Worker roles. High/critical risk
+and production-target nodes intentionally remain blocked for human review; the
+current queue retry operation does not itself satisfy that approval.
 
 ## API and worker-process integration
 
@@ -191,28 +202,41 @@ or grant any new role/tool permission.
 
 The API exposes `POST /v1/agent-runtime/tasks` for authenticated DAG
 intake. The endpoint derives tenant identity from the authenticated principal,
-generates the root task ID server-side, validates the DAG, and enqueues an
+generates the root task ID server-side, requires an explicit repository target,
+checks it against the tenant repository allowlist, validates the executable
+role/tool/permission set and quality-gate dependencies, and enqueues an
 `execution_mode=agent_runtime_v1` payload only when the registry reports
 `execution_enabled=true`. Draft registries remain preview-only and receive
 HTTP 409 on task intake. The endpoint supports the existing idempotency-key
 contract and never accepts caller-supplied tenant identity.
 
-The worker's existing `run_once()` now branches on the explicit execution
-mode. It revalidates the queue lease and task-execution authorization, parses
-the bounded versioned plan payload, and invokes
-`execute_agent_plan()` with the configured handler, policy, and verifier
-adapters. A missing adapter set or inactive registry moves the job to
-`awaiting_approval`; blocked/approval-required plans are also held for review.
-Completed plans are committed to the queue with their node evidence, while
-failed plans use the queue's bounded retry policy. Cancellation or lease loss
-does not attempt queue completion.
+The worker's `run_once()` branches on the explicit execution mode. It
+revalidates the queue lease and task-execution authorization, parses the
+bounded versioned plan payload, and invokes `execute_agent_plan()`. When the
+registry is active and all selected nodes map to the six reviewed AICode worker
+roles, the worker builds tenant-scoped adapters from the existing AICode
+workers. Each adapter applies the node's narrower tool allowlist on top of the
+worker's fixed role permissions; requested actions are checked by the
+centralized role permission registry and the autonomy policy. A missing
+adapter, inactive registry, unsupported role, or incomplete approval state
+fails closed and moves the job to `awaiting_approval` rather than falling back
+to the legacy pipeline.
 
-The dispatch adapters are deliberately not configured by default in
-`worker_main`. The checked-in registry remains
-`draft_proposed_not_activated`, so production dispatch remains fail-closed
-until the source crosswalk, role approvals, production policy/verifier
-adapters, and worker handler implementations are reviewed and injected. The
-existing AICode coding-task path remains unchanged.
+For implementation plans, tester and security nodes are mandatory and must
+depend on every developer node. Their evidence is checked independently before
+publication. A completed implementation is committed and pushed only while
+the queue lease is held, opened as a draft pull request, and held for review if
+CI fails or times out. The queue is marked successful only after CI is
+verified. Successful workspaces are cleaned up; review-required workspaces are
+preserved. Cancellation or lease loss does not attempt queue completion or
+publication after ownership is lost.
+
+The checked-in registry still remains `draft_proposed_not_activated`, so the
+new execution path remains disabled until the source crosswalk and role
+approvals are recorded. The default adapters cover only the six existing
+AICode worker roles; other core-agent and DevOps profiles remain non-dispatchable
+until their handlers are implemented and reviewed. The legacy AICode task path
+remains unchanged.
 
 The API route preview and worker startup checks share the same JSON package
 data and JSON Schema validator. A missing or invalid registry causes the
@@ -221,10 +245,11 @@ corresponding control-plane operation to fail closed.
 ## Existing AICode integration
 
 The current `AICodeOrchestrator` remains the specialized six-worker coding
-pipeline with its evidence gates and repair cycles. `AICodeWorkerAdapter`
-allows an existing AICode worker to implement the generic DAG handler
-contract after the role registry is approved. This change does not replace
-the current worker process or activate the new registry.
+pipeline with its legacy evidence gates and repair cycles. The Agent Runtime
+uses `AICodeWorkerAdapter` to reuse those workers as sequential DAG handlers
+without replacing their role-scoped Tool Gateway. The new path adds per-node
+allowlist narrowing and independent DAG-level verification; it does not
+activate the registry or grant permissions based on registry membership.
 
 ## Validation
 
@@ -232,8 +257,8 @@ Run:
 
 ```bash
 python -m rusa_agents.runtime_v1
-python -m pytest tests/test_agent_runtime_v1.py -q
-ruff check rusa_agents tests
+python -m pytest tests/test_agent_runtime_v1.py tests/test_aicode_runtime.py tests/test_app.py tests/test_autonomous_worker.py -q
+ruff check rusa_agents tests llm-project/serve
 ```
 
 The runtime registry is a development-stage contract. Production activation
