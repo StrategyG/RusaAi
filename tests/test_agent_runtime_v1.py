@@ -607,6 +607,42 @@ def test_agent_runtime_approval_is_bound_to_plan_fingerprint_and_node_id() -> No
     with pytest.raises(ValueError, match="does not match"):
         runtime._agent_runtime_approval_authorizer(stale_job, plan, dispatch)
 
+    hard_denial_node = TaskNode(
+        task_id="node-hard-denial",
+        selected_role_id="analyst",
+        scope="worker",
+        objective="Attempt a prohibited action",
+        delegated_by_role_id="supreme_orchestrator",
+        acceptance_criteria=("Do not deploy",),
+        requested_permissions=("deploy",),
+        target_environment="production",
+    )
+    hard_denial_plan = TaskPlan(
+        root_task_id=job.task_id,
+        tenant_id=job.tenant_id,
+        objective="Do not override hard policy denial",
+        nodes=(hard_denial_node,),
+    )
+    hard_denial_fingerprint = WorkerExecutionEngine._fingerprint(hard_denial_plan)
+    hard_denial_job = _agent_runtime_queue_job(payload, result={
+        "approval": {
+            "plan_fingerprint": hard_denial_fingerprint,
+            "approved_node_ids": ["node-hard-denial"],
+            "approved_by": "api:tenant-admin",
+        },
+    })
+    deny_dispatch = {
+        "policy_authorizer": lambda node, tenant_id: PolicyDecision(
+            allowed=False, requires_approval=False, reason="hard policy denial"
+        )
+    }
+    deny_authorizer, _ = runtime._agent_runtime_approval_authorizer(
+        hard_denial_job, hard_denial_plan, deny_dispatch
+    )
+    hard_denied = asyncio.run(deny_authorizer(hard_denial_node, job.tenant_id))
+    assert hard_denied.allowed is False
+    assert hard_denied.approval_satisfied is False
+
 
 def test_agent_runtime_queue_payload_is_parsed_with_trusted_job_identity() -> None:
     job = _agent_runtime_queue_job({
