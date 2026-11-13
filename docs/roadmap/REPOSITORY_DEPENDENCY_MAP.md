@@ -1,0 +1,178 @@
+# RUSA AI Ecosystem — Repository Dependency Map
+
+**Snapshot:** 2026-11-14  
+**Architecture authority:** Roadmap v3.1 plus verified current-main ADRs, subject to CHUNK 01 reconciliation.
+
+## 1. Ownership boundaries
+
+### RusaAi — Control Plane and canonical knowledge authority
+
+Owns:
+- User/tenant identity context, authorization, task/workflow state and orchestration.
+- Agent/worker role policy, tool authorization, approval gates and audit.
+- Workspace/Git operations, sandboxed tool execution and evidence collection.
+- Canonical shared Agent/Worker knowledge through `rusa_knowledge`.
+- Tenant/project-aware retrieval, knowledge lifecycle, context assembly and publication governance.
+
+Must not:
+- Own model weights, GGUF lifecycle or model runtime internals.
+- Give workers direct RusaModels database, object-store or runtime credentials.
+- Let retrieved knowledge grant permissions or override policy.
+
+### RusaModels — Model Plane
+
+Owns:
+- Model catalog/registry, immutable model versions, manifests and artifact lifecycle.
+- Model Server, inference runtime, model routing and embedding runtime.
+- Quant Server/Worker, conversion/quantization and model artifact integrity.
+- Model/runtime telemetry and model-quality evidence.
+
+Must not:
+- Own RusaAi workflow decisions, tenant task state, agent tools or knowledge rights/publication.
+- Be accessed by RusaAi through its database or object storage.
+
+Required service boundary:
+`RusaAi Worker → RusaAi API / Model Access Gateway → authenticated RusaModels Model Server → private model runtime`.
+
+RusaAi integration uses a dedicated RusaModels `inference` principal and the versioned API boundary. The worker must not receive the RusaModels token or direct runtime URL.
+
+### RAG_Cerdas / IM19 — Isolated Knowledge Intelligence pilot
+
+Owns within its isolated pilot:
+- Candidate-source discovery and source metadata.
+- PDF/EPUB processing, extraction/OCR, structured knowledge mining and candidate review.
+- Private pilot schema, review workflow, source-rights evidence and retrieval experimentation.
+
+Must not:
+- Be treated as the canonical shared Agent/Worker store.
+- Be exposed as a multi-tenant answer-facing production API.
+- Cross-read/write, dual-write, mirror or bulk-sync with RusaAi without a separately approved ADR and versioned contract.
+
+## 2. Current high-level flow
+
+```text
+User / trusted caller
+        |
+        v
+RusaAi API — identity, tenant, authorization and task contract
+        |
+        v
+Task queue / lease / checkpoint
+        |
+        v
+RusaAi Agent orchestrator
+        |
+        +-------------------------------+
+        |                               |
+        v                               v
+RusaAi rusa_knowledge              RusaAi Policy Engine
+tenant/project-scoped retrieval    and Tool Gateway
+        |                               |
+        | embeddings/inference           v
+        +---- authenticated ------> RusaModels Model Server
+                                        |
+                                        v
+                                private model/embedding runtime
+
+RAG_Cerdas IM19:
+approved source discovery → rights/versioned extraction → candidate knowledge
+       (isolated pilot; no direct connection to canonical RusaAi store)
+       (future transfer only through approved contract, rights and review gates)
+```
+
+The diagram describes the target boundary and currently implemented code surfaces. It is not proof that the complete flow is deployed or production-active.
+
+## 3. Relevant current interfaces and artifacts
+
+| Interface / artifact | Owner | Consumer | Current evidence / limitation |
+|---|---|---|---|
+| RusaAi task/worker contracts | RusaAi | Agent runtime and workers | Six fixed roles and WorkerResult exist; typed immutable knowledge references are not yet explicit in the inspected result contract |
+| RusaAi task queue and PostgresMemory | RusaAi | Worker runtime | Durable task/lease/checkpoint path exists; it is not a substitute for reusable governed knowledge |
+| RusaAi KnowledgeService / PostgresKnowledgeStore | RusaAi | Worker Tool Gateway | Optional tenant/project-scoped RAG; activation flag defaults false |
+| RusaAi migrations 011/012 | RusaAi | Knowledge service | Agent/project scope indexes and append-only document-version snapshots exist on main |
+| RusaAi migration 013 governance proposal | RusaAi | Knowledge service / reviewers | PR #115 only; not merged |
+| Model Server OpenAI-compatible API | RusaModels | RusaAi gateway | Authenticated Model Plane boundary; exact end-to-end release contract still needs reconciliation and verification |
+| Model registry/manifests/artifacts | RusaModels | Model Server / Quant Server | Implemented infrastructure; production RusaAi-Edge checkpoint/artifact not selected or built |
+| IM19 private source/review pipeline | RAG_Cerdas | Pilot operators/reviewers | Isolated pilot; live external providers and production service are not verified |
+| Cataran event envelope snapshot | RAG_Cerdas PR #16 | Potential event consumers | Draft/provisional consumer snapshot; it does not establish the complete identity/task/approval/tool contract |
+
+## 4. Knowledge-to-action responsibility chain
+
+1. Trusted RusaAi identity establishes tenant and permitted project/repository scope.
+2. RusaAi retrieves only approved, current and authorized knowledge through the canonical knowledge service.
+3. Task context carries stable knowledge IDs and immutable versions, provenance and authorization evidence (required target; not yet fully represented in current worker contract).
+4. Agent plans and decomposes the problem; each worker receives a least-privilege context package.
+5. RusaAi Policy Engine and Tool Gateway decide whether an action is permitted; knowledge text never grants authority.
+6. Worker executes only allowlisted operations in the configured sandbox/resource budget.
+7. Test, security, regression and acceptance evidence is independently checked before task completion.
+8. Task outcome may become a knowledge candidate linked to source/task/commit/test evidence; it is not published automatically.
+9. Reviewer/approved validator decides publication, revision, deprecation or rejection under the knowledge lifecycle.
+
+## 5. Roadmap dependency graph
+
+```text
+CHUNK 00 — Repository baseline
+        |
+        v
+CHUNK 01 — Architecture and ADR reconciliation
+        |
+        v
+CHUNK 02 — Identity, authorization and tenant security
+        |
+        +----------------------+
+        |                      |
+        v                      v
+CHUNK 03 — Canonical       CHUNK 04 — Model
+knowledge lifecycle       registry/artifacts
+        |                      |
+        +----------+-----------+
+                   v
+          CHUNK 05 — API contracts
+                   |
+                   v
+          CHUNK 06 — Inference gateway
+                   |
+                   v
+          CHUNK 07 — Runtime/hardware validation
+                   |
+              +----+----+
+              |         |
+              v         v
+       CHUNK 08*   CHUNK 09 — Evaluation
+              |         |
+              +----+----+
+                   v
+          CHUNK 16 — Agent/Worker
+          Knowledge-to-Action
+                   |
+                   v
+          CHUNK 10 — Agent runtime
+                   |
+                   v
+          CHUNK 11 — Reliability/DR
+                   |
+                   v
+          CHUNK 12 — Supply-chain/deployment hardening
+                   |
+                   v
+          CHUNK 13 — Staging E2E
+                   |
+                   v
+          CHUNK 14 — Production certification
+                   |
+                   v
+          CHUNK 15 — Capacity and scale
+```
+
+`* CHUNK 08 is conditional: it is a prerequisite to CHUNK 16 only if IM19 is selected as an active source or processing path. CHUNK 16 always requires CHUNK 03, CHUNK 05, CHUNK 07 and CHUNK 09 to be PASS. CHUNK 10 cannot be PASS until CHUNK 16 is PASS.`
+
+## 6. Current dependency blockers
+
+- CHUNK 01: RusaAi ADR-0002 identifier collision; RAG_Cerdas canonical-store ADR conflict; RusaModels shared-control-plane terminology ambiguity. Related drafts: RusaAi #117, RusaModels #24, RAG_Cerdas #28.
+- CHUNK 03: canonical knowledge lifecycle is incomplete on main; RusaAi PR #115 remains open.
+- CHUNK 04/07: RusaAi-Edge checkpoint/tokenizer/artifact/target-device evidence is absent.
+- CHUNK 05/06: cross-repository API contract and exact end-to-end compatibility evidence require reconciliation.
+- CHUNK 09: human-reviewed qrels and held-out task/system-building benchmark are not evidenced.
+- CHUNK 16: blocked by the above prerequisites; current code has useful foundations but does not pass the knowledge-to-action acceptance criteria.
+- CHUNK 10: cannot be certified until CHUNK 16 passes.
+
