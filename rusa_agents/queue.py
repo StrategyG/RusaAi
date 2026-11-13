@@ -409,6 +409,81 @@ class PostgresTaskQueue:
             """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
 
+    def with_lease_owned(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        operation: Callable[[], Any],
+        *,
+        lease_seconds: int = 180,
+    ) -> Any:
+        """Run a bounded local side effect while holding the current task lease row lock.
+
+        The callback is intended for short durable checkpoint operations, not
+        model inference, Git/network requests, or other long-running work.
+        SKIP LOCKED claimers cannot take over this job until the callback and
+        the lease refresh have completed.
+        """
+        if (
+            type(job_id) is not int
+            or job_id <= 0
+            or not tenant_id
+            or not worker_id
+            or len(worker_id) > 128
+            or not lease_token
+            or not callable(operation)
+            or not 15 <= lease_seconds <= 3600
+        ):
+            raise ValueError("Lease-bound operation identity or duration is invalid")
+
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            owned = conn.execute(
+                """
+                SELECT 1 FROM public.aicode_jobs
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                  AND lease_until > NOW()
+                FOR UPDATE
+                """,
+                (job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if owned is None:
+                raise LeaseLostError("Refusing side effect without the active task lease")
+
+            extended = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                RETURNING id
+                """,
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if extended is None:
+                raise LeaseLostError("Task lease could not be extended before the side effect")
+
+            result = operation()
+
+            refreshed = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                RETURNING id
+                """,
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if refreshed is None:
+                raise LeaseLostError("Task lease changed during the lease-bound side effect")
+            return result
+
     def publish_if_lease_owned(
         self,
         job_id: int,
