@@ -107,6 +107,65 @@ def test_postgres_queue_requires_explicit_retry_after_approval():
 
 
 
+def test_postgres_queue_approval_is_fingerprint_bound_and_claimed_by_worker():
+    queue = PostgresTaskQueue(DSN)
+    queue.initialize()
+    task_id = str(uuid4())
+    tenant_id = "tenant-approval-" + task_id[:8]
+    fingerprint = "a" * 64
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant_id,
+            {"execution_mode": "agent_runtime_v1"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim("approval-review-worker", lease_seconds=30)
+        assert job is not None and job.task_id == task_id
+        assert queue.await_approval(
+            job.id,
+            tenant_id,
+            "approval-review-worker",
+            job.lease_token,
+            "High-risk node requires review",
+            {
+                "plan_fingerprint": fingerprint,
+                "node_results": [{
+                    "task_id": "node-high-risk",
+                    "status": "needs_approval",
+                }],
+            },
+        )
+        assert not queue.approve(
+            task_id, tenant_id, "b" * 64, ["node-high-risk"],
+            "Wrong plan fingerprint", audit_actor="api:tenant-admin",
+        )
+        assert not queue.approve(
+            task_id, tenant_id, fingerprint, ["node-completed"],
+            "Node is not awaiting approval", audit_actor="api:tenant-admin",
+        )
+        assert queue.approve(
+            task_id, tenant_id, fingerprint, ["node-high-risk"],
+            "Reviewed the exact high-risk change", audit_actor="api:tenant-admin",
+        )
+
+        resumed = queue.claim("approval-resume-worker", lease_seconds=30)
+        assert resumed is not None and resumed.task_id == task_id
+        assert resumed.result["approval"]["plan_fingerprint"] == fingerprint
+        assert resumed.result["approval"]["approved_node_ids"] == ["node-high-risk"]
+        assert resumed.result["approval"]["approved_by"] == "api:tenant-admin"
+        assert queue.complete(
+            resumed.id, tenant_id, "approval-resume-worker", resumed.lease_token,
+            {"outcome": "approved-and-resumed"},
+        )
+    finally:
+        with psycopg.connect(DSN) as connection:
+            connection.execute(
+                "DELETE FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
+
+
 def test_postgres_queue_fences_stale_worker_after_lease_reclaim():
     queue = PostgresTaskQueue(DSN)
     queue.initialize()
