@@ -422,6 +422,7 @@ def test_worker_memory_checkpoint_compare_and_set_is_atomic_and_tenant_scoped():
         ) == 2
     finally:
         with connect() as conn:
+            conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
             conn.execute(
                 "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
                 (task_id, tenant_id),
