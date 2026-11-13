@@ -1,0 +1,76 @@
+# RUSA AI Ecosystem — Evidence Ledger
+
+**Snapshot:** 2026-11-14  
+**Audit mode:** remote read-only GitHub inspection; no local test execution or production access.
+
+## 1. Exact-main CI evidence
+
+| Repository | Exact main SHA | Check run | Check names / outcome | Evidence |
+|---|---|---|---|---|
+| RusaAi | `1adac8d340e5870570910168b6626fe285dd2cf2` | `43354051026` | RAG/MCP integration tests: success; Test/lint/security: success; production image build/test/scan: success | [Workflow run](https://github.com/StrategyG/RusaAi/actions/runs/43354051026) |
+| RusaAi | `1adac8d340e5870570910168b6626fe285dd2cf2` | `43354050892` | Web build: success | [Workflow run](https://github.com/StrategyG/RusaAi/actions/runs/43354050892) |
+| RusaModels | `12c49b1372b230f3656be6e1badeabad870bcfa1` | `43358929126` | Test: success; Windows RUSA-CPU-16 script validation: success | [Workflow run](https://github.com/StrategyG/RusaModels/actions/runs/43358929126) |
+| RAG_Cerdas | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | `43312458157` | Tests: success | [Workflow run](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43312458157) |
+| RAG_Cerdas | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | `43481726892` | Audit repository and request agent work: success | [Workflow run](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43481726892) |
+
+The RAG_Cerdas exact-main SHA also has successful audit runs `43409058308`, `43351420481` and `43312710333`. The total exact-main check-run counts returned by the Checks API were RusaAi 4, RusaModels 2 and RAG_Cerdas 5.
+
+## 2. Relevant PR-head CI evidence
+
+These checks were queried against the exact PR head SHA returned by GitHub PR metadata.
+
+| Repository / PR | Exact head SHA | Result | Evidence |
+|---|---|---|---|
+| RusaAi #118 | `202a1c16148753a87114d49085aa052e516fdf52` | 3/3 successful | [Run 43498738170](https://github.com/StrategyG/RusaAi/actions/runs/43498738170) |
+| RusaAi #117 | `20087de34f5b8e739fa5a64aae5572ee80aca6a2` | 3/3 successful | [Run 43466465769](https://github.com/StrategyG/RusaAi/actions/runs/43466465769) |
+| RusaAi #116 | `faf686ac85875a930221ed92a357a9520a5947e5` | 3/3 successful | [Run 43403193633](https://github.com/StrategyG/RusaAi/actions/runs/43403193633) |
+| RusaAi #115 | `d8e7a7c50f1a91a84c75aceb3a139d76eb3168e9` | 3/3 successful | [Run 43358407119](https://github.com/StrategyG/RusaAi/actions/runs/43358407119) |
+| RusaAi #82 | `c882928ede520b0e3a8713981f4c956a0d12fece` | 3/3 successful | [Run 42503669112](https://github.com/StrategyG/RusaAi/actions/runs/42503669112) |
+| RusaModels #24 | `66a3fab5ea52aa31abfd88f69974938e3db3ec5a` | 2/2 successful | [Run 43466716089](https://github.com/StrategyG/RusaModels/actions/runs/43466716089) |
+| RAG_Cerdas #28 | `d2ffed40f3a80be39fdcaf6dbd098da81088b6d6` | 1/1 successful | [Run 43466283245](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43466283245) |
+| RAG_Cerdas #16 | `8e8bd2fc40f2d4e609e0d3d3e2bb81181d4e7133` | 3/3 successful | [Conformance run 43179555114](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43179555114), [test run 43179563236](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43179563236), [additional conformance run 43179562994](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43179562994) |
+
+RusaAi #107's PR description reports successful exact-head CI on `9ecd25709e482ce21490ddcb3fbbbb1160562e27` in [run 43100849792](https://github.com/StrategyG/RusaAi/actions/runs/43100849792). Its base is an older main SHA, so that historical result does not establish current-main compatibility.
+
+PRs without a check-run lookup in this audit are marked “not verified” in `BASELINE_INVENTORY.md`. Do not infer CI success from a PR description or from another PR in a stacked branch.
+
+## 3. Source inspection evidence
+
+| Repository | File / source | Git blob SHA | Evidence level | Finding supported |
+|---|---|---|---|---|
+| RusaAi | `README.md` | `5d62804f8bdb6e85b47ed4082499f14abb489223` | Static inspection | Control Plane, Model Plane boundary, model checkpoint and production-status declarations |
+| RusaAi | `.github/copilot-instructions.md` | `1398060c432e51d49e4ae185531c85afb0854233` | Static inspection | P0–P6 gates, no direct main pushes, security and benchmark requirements |
+| RusaAi | `rusa_agents/orchestrator.py` | `57978d0fc189977e7734351bc9d29aadcba245fe` | Static inspection | Fixed six-role orchestration pipeline and manager hierarchy |
+| RusaAi | `rusa_agents/runtime.py` | `35f82db0a5a859b706e80b1141bf6fff5864116d` | Static inspection | PostgreSQL task runtime and optional KnowledgeService wiring |
+| RusaAi | `rusa_agents/autonomous.py` | `e1816fce216dc3935b464fe924f1c468d002b21b` | Static inspection | Bounded JSON tool loop and role allowlist use |
+| RusaAi | `rusa_agents/contracts.py` | `520825fb5028773e6e17a747849f357153e6b206` | Static inspection | Current task/result contract shape |
+| RusaAi | `rusa_agents/memory.py` | `b390a59acf535be615e4aeb5ffeb0b87ad2b439d` | Static inspection | Tenant-aware task/checkpoint memory |
+| RusaAi | `rusa_agents/policy.py` | `78176d15da88c8bc0ba9b47295799ebf7b29c068` | Static inspection | Protected/denied action policy |
+| RusaAi | `rusa_agents/tool_gateway.py` | `60edf6afd134921854ac47410813ad1c9fba2b65` | Static inspection | Named tools and bounded Docker sandbox profiles |
+| RusaAi | `rusa_knowledge/service.py` | `cc8b0f6dffa0054afd0eb504cd2f2e86730dd26c` | Static inspection | Optional embedding/ingestion/retrieval service and supported vector dimensions |
+| RusaAi | `rusa_knowledge/store.py` | `df38bb78238001af169fd4583d478c8391d83ced` | Static inspection | PostgreSQL/pgvector store and tenant/project scope validation |
+| RusaAi | `migrations/011_rag_agent_project_scope.sql` | `a719bc1f6c4ab0356bcf302aae76780b3f564f84` | Static inspection | Agent/project scope indexes |
+| RusaAi | `migrations/012_rag_knowledge_version_history.sql` | `917792a5f2d08e4df25b81e1b2bd6905d4f7a21c` | Static inspection | Append-only knowledge version snapshots and tenant RLS |
+| RusaAi | `docs/PRODUCTION_READINESS.md` | `4b83e3f2c3d7c9356a1c5662fc2e4116a4909692` | Static inspection | Production NO-GO gates and documentation drift on migration status |
+| RusaModels | `README.md` | `ebd17c76f6dde7e3047c661939f28578dd2a2b41` | Static inspection | Model Server/Quant Server responsibilities and current model limitations |
+| RusaModels | `docs/PRODUCTION_READINESS.md` | `98734073422851a26df31410815b217ca71aac22` | Static inspection | Exact-release evidence requirements and explicit not-ready rule |
+| RusaModels | `docs/architecture.md` | `5e4e6ee7fc63a35d6ebb447f281ad5a37731bc48` | Static inspection | Model Plane, registry, runtime and artifact ownership |
+| RusaModels | `.github/CODEOWNERS` | Inspected from current main | Static inspection | Owner review requirements for repository and sensitive paths |
+| RAG_Cerdas | `README.md` | `22174494c5e12979c4b650e2f58ad0ac9e603e9b` | Static inspection | IM19 pilot status, source-rights and evaluation limitations |
+| RAG_Cerdas | `.github/copilot-instructions.md` | `f851e9aa12f6c0882b2caba451eb143ad8328c71` | Static inspection | Read-only/approval constraints and pilot validation requirements |
+| RAG_Cerdas | `docs/ADR_0001_CANONICAL_KNOWLEDGE_STORE.md` | `f5498076d120c68b37ae4b41a5958f65c09ca592` | Static inspection | Current no-selection ADR that conflicts with RusaAi's accepted decision |
+| RAG_Cerdas | `docs/IM19_VALIDATION_REPORT.md` | `56623f505316df38d5f83d8d293776a6a00beae4` | Static inspection | Historical test evidence and remaining external/production blockers |
+| RAG_Cerdas | `docs/IM19_RUNBOOK.md` | `9290d58973902a405e2d0077ee69c1dceab9254a` | Static inspection | Staging, reviewer identity, rights, worker and rollback requirements |
+
+## 4. Evidence limitations
+
+- No local clone or working tree was available; local modifications are not verified.
+- No local tests were executed by ChatGPT during CHUNK 00.
+- No live database, Dropbox, Supabase, S3, secret manager, model runtime, staging host or production host was accessed.
+- CI success is not a substitute for staging, target hardware, human-reviewed quality evaluation, security review, backup/restore or rollback evidence.
+- Branch protection was read from the GitHub branch metadata; all three `main` branches returned `protected=false`.
+- Combined commit-status lookup returned no status entries; GitHub Checks API results above are the authoritative CI evidence used in this ledger.
+
+## 5. CHUNK 00 evidence decision
+
+**Status: PASS for the read-only baseline gate.** The baseline records exact main SHAs, check-run evidence, source blob SHAs, repository structure, relevant PRs and explicit unknowns. No source code or production state was changed.
