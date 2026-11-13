@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10131b">
+  <meta name="description" content="HYBRIDA AI — asisten AI lokal di perangkat Android.">
+  <title>HYBRIDA AI</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">H</div>
+        <div><div class="brand-name">HYBRIDA</div><div class="brand-caption">LOCAL INTELLIGENCE</div></div>
+        <button class="icon-btn close-sidebar" id="closeSidebar" aria-label="Tutup menu">×</button>
+      </div>
+      <button class="new-chat" id="newChat"><span>＋</span> Percakapan baru</button>
+      <div class="side-label">RIWAYAT</div>
+      <div class="chat-list" id="chatList"><div class="side-empty">Belum ada percakapan</div></div>
+      <div class="sidebar-bottom">
+        <button class="side-action" id="openDocs"><span>▤</span><span>Knowledge lokal</span><span class="side-count" id="docCount">0</span></button>
+        <button class="side-action" id="openTools"><span>⌘</span><span>Local MCP Tools</span><span class="side-count">6</span></button>
+        <div class="local-card">
+          <div class="local-card-top"><span class="status-dot" id="modelDot"></span><span id="modelStatus">Memeriksa model…</span></div>
+          <div class="local-model" id="modelName">Qwen local</div>
+          <div class="local-note">Data tersimpan di perangkat ini</div>
+        </div>
+        <div class="sidebar-footer">HYBRIDA AI <span>·</span> PRIVATE BY DESIGN</div>
+      </div>
+    </aside>
+
+    <div class="scrim" id="scrim"></div>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn menu-btn" id="menuBtn" aria-label="Buka menu">☰</button>
+          <div class="top-title"><strong>HYBRIDA AI</strong><span>Asisten pribadi lokal</span></div>
+        </div>
+        <div class="topbar-right">
+          <div class="model-pill"><span class="status-dot" id="topModelDot"></span><span id="topModelLabel">Qwen · Lokal</span></div>
+          <button class="icon-btn" id="topDocs" aria-label="Knowledge lokal" title="Knowledge lokal">▤</button>
+        </div>
+      </header>
+
+      <section class="conversation" id="conversation">
+        <div class="welcome" id="welcome">
+          <div class="welcome-orb"><span>H</span><i></i></div>
+          <div class="eyebrow">ON-DEVICE AI ASSISTANT</div>
+          <h1>Ada yang bisa<br><em>kubantu hari ini?</em></h1>
+          <p>Berpikir, mencari pengetahuan, dan bekerja bersama AI yang berjalan langsung di perangkatmu.</p>
+          <div class="suggestions">
+            <button class="suggestion" data-prompt="Jelaskan konsep Hybrid AI dengan bahasa sederhana."><span>✦</span><b>Jelaskan sebuah konsep</b><small>Belajar dan memahami topik baru</small></button>
+            <button class="suggestion" data-prompt="Buatkan ringkasan dokumen dan poin-poin pentingnya."><span>▤</span><b>Ringkas dokumen</b><small>Gunakan knowledge lokal</small></button>
+            <button class="suggestion" data-prompt="Bantu saya menyusun rencana kerja yang terstruktur."><span>⌁</span><b>Susun sebuah rencana</b><small>Ubah ide menjadi langkah nyata</small></button>
+            <button class="suggestion" data-prompt="Bantu saya menghitung dan menjelaskan hasilnya."><span>∑</span><b>Bantu perhitungan</b><small>Gunakan Local MCP Calculator</small></button>
+          </div>
+          <div class="welcome-foot"><span class="mini-shield">◇</span> Offline-first · Dokumen dan chat tersimpan lokal</div>
+        </div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <div class="typing-row hidden" id="typing"><span></span><span></span><span></span><small>HYBRIDA sedang berpikir…</small></div>
+      </section>
+
+      <footer class="composer-area">
+        <div class="composer-tools">
+          <label class="rag-switch"><input type="checkbox" id="ragToggle" checked><span class="switch-ui"></span><span>Knowledge RAG</span></label>
+          <div class="composer-spacer"></div>
+          <button class="text-tool" id="toolsInline">⌘ <span>Tools</span></button>
+          <button class="text-tool" id="docsInline">▤ <span>Dokumen</span></button>
+        </div>
+        <form class="composer" id="chatForm">
+          <button type="button" class="attach-btn" id="attachBtn" aria-label="Tambah dokumen" title="Tambah dokumen">＋</button>
+          <textarea id="messageInput" rows="1" maxlength="4000" placeholder="Tanyakan apa saja…" aria-label="Pesan"></textarea>
+          <button type="submit" class="send-btn" id="sendBtn" aria-label="Kirim pesan"><span>↑</span></button>
+        </form>
+        <input type="file" id="fileInput" accept=".txt,.md,.html,.htm,.pdf,.docx" hidden>
+        <div class="composer-hint">HYBRIDA dapat membuat kesalahan. Periksa kembali informasi penting.</div>
+      </footer>
+    </main>
+  </div>
+
+  <dialog class="modal" id="docsDialog">
+    <div class="modal-head"><div><div class="modal-kicker">LOCAL KNOWLEDGE</div><h2>Dokumen & pengetahuan</h2></div><button class="icon-btn" data-close="docsDialog">×</button></div>
+    <p class="modal-copy">Tambahkan PDF, DOCX, TXT, Markdown, atau HTML. Dokumen diproses dan disimpan di database lokal.</p>
+    <div class="upload-zone" id="uploadZone"><div class="upload-icon">↑</div><b>Tambah dokumen</b><span>Pilih file dari perangkat · Maksimal 10 MB</span><button class="primary-small" id="chooseFile">Pilih file</button></div>
+    <div class="modal-section-title">DOKUMEN TERSIMPAN <span id="docTotal">0</span></div>
+    <div class="document-list" id="documentList"><div class="side-empty">Memuat dokumen…</div></div>
+  </dialog>
+
+  <dialog class="modal" id="toolsDialog">
+    <div class="modal-head"><div><div class="modal-kicker">LOCAL MODEL CONTEXT PROTOCOL</div><h2>Local MCP Tools</h2></div><button class="icon-btn" data-close="toolsDialog">×</button></div>
+    <p class="modal-copy">Tools berjalan di perangkat ini. Tidak ada akses shell atau akses bebas ke file perangkat.</p>
+    <div class="tool-list" id="toolList"></div>
+    <div class="tool-result hidden" id="toolResult"><div class="tool-result-title">HASIL TOOL</div><pre id="toolOutput"></pre></div>
+    <div class="mcp-endpoint"><span>Endpoint MCP</span><code>http://127.0.0.1:8765/mcp</code></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

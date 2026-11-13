@@ -292,9 +292,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]" -r requirements-rag-mcp.txt
       - name: Compile RAG and MCP packages
-        run: python -m compileall -q rusa_knowledge rusa_mcp
+        run: python -m compileall -q rusa_knowledge rusa_mcp mobile-local
       - name: Lint RAG and MCP packages
-        run: ruff check rusa_knowledge rusa_mcp tests/test_knowledge_*.py tests/test_mcp_*.py
+        run: ruff check rusa_knowledge rusa_mcp mobile-local tests/test_knowledge_*.py tests/test_mcp_*.py tests/test_mobile_local.py
       - name: Test RAG and MCP
         run: |
           python -m pytest -q \
@@ -308,4 +308,5 @@ jobs:
             tests/test_knowledge_service.py \
             tests/test_mcp_client.py \
             tests/test_mcp_server.py \
-            tests/test_mcp_server_security.py
+            tests/test_mcp_server_security.py \
+            tests/test_mobile_local.py
