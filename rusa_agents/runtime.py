@@ -431,7 +431,7 @@ class AICodeRuntime:
             if inspect.isawaitable(decision):
                 decision = await decision
             if node.task_id in approved_node_ids and (
-                decision.requires_approval or node.approval_required
+                decision.requires_approval or (node.approval_required and decision.allowed)
             ):
                 return AgentPolicyDecision(
                     allowed=True,
