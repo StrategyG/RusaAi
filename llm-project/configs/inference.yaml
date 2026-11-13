@@ -1,35 +1,68 @@
-project: llm-project
-status: planned
-
-inference:
-  backend: local-runtime
-  quantization: int8/fp8
-  speculative_decoding: true
-  batching:
-    enabled: true
-    max_batch_size: 32
-  kv_cache:
-    enabled: true
-    strategy: paged
-  tools:
-    enabled: true
-    calls:
-      - function_calling
-      - retrieval
-      - code_execution
+project: RusaAi
+model_id: rusaai-edge-1.54b
+project_id: rusaai
+status: design_baseline
 
 runtime:
+  backend: llama.cpp
+  model_format: GGUF
+  device: CPU
   local_only: true
-  external_model_apis_enabled_by_default: false
-  requires_internet: false
+  gpu_offload_layers: 0
+  model_residency: one_resident_model
+  max_active_generations: 1
+  generation_threads: 4
+  batch_threads: 4
+  http_threads: 2
+  batch_size: 128
+  ubatch_size: 64
+  thread_policy: detect_physical_cores_then_benchmark
 
-observability:
-  logging: json
-  metrics:
-    - latency
-    - throughput
-    - memory
-    - error_rate
+model:
+  quantization: Q4_K_M
+  kv_cache_quantization: Q8_0
+  kv_cache_quantization_optional: true
+
+context:
+  initial_tokens: 4096
+  extended_tokens: 8192
+  extended_context_requires_device_memory_validation: true
+
+deployment_profiles:
+  rusa-cpu-16:
+    physical_ram_gib: 16
+    context_tokens: 4096
+    max_active_generations: 1
+    max_waiting_inferences: 3
+  rusa-edge-8:
+    physical_ram_gib: 8
+    context_tokens: 4096
+    max_active_generations: 1
+    max_waiting_inferences: 1
+    queue_default_note: conservative_implementation_choice
+
+queue:
+  max_active_generations: 1
+  max_waiting_profile_16gb: 3
+  max_waiting_profile_8gb: 1
+  profile_8gb_queue_default: conservative_implementation_choice
+  queue_timeout_seconds: 60
+  deadline_required: true
+  retries: bounded
+  durable_task_state: true
+
+resource_policy:
+  reserve_free_ram_gib: 2
+  reduce_background_work_before_stopping_primary_process: true
+  backpressure:
+    cpu_reduce_background_percent: 70
+    cpu_defer_non_priority_percent: 85
+    ram_limit_new_model_or_task_percent: 75
+    ram_reduce_context_and_extra_work_percent: 85
+    free_ram_protection_gib: 2
 
 notes:
-  - Inference should be independently benchmarked before claiming runtime readiness.
+  - "This is a CPU-first design baseline, not evidence that a checkpoint or runtime has been benchmarked."
+  - "The non-Qwen checkpoint and tokenizer remain unselected; the GGUF artifact has not been built."
+  - "The 8K context is enabled only after device-specific memory validation."
+  - "llama.cpp server parallelism and the API admission controller must both preserve one active generation."

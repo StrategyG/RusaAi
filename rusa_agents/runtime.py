@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import socket
 import time
 from collections.abc import Coroutine
@@ -98,9 +99,25 @@ class AICodeRuntime:
             metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
         )
 
+    @staticmethod
+    def _knowledge_project_scope(repository_full_name: str) -> str:
+        """Derive a stable project scope from the already-authorized repository target."""
+        if not isinstance(repository_full_name, str) or repository_full_name.count("/") != 1:
+            raise ValueError("repository target cannot be mapped to a knowledge project scope")
+        project_id = repository_full_name.lower().replace("/", "--")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", project_id):
+            raise ValueError("repository target contains unsupported project-scope characters")
+        return project_id
+
     async def _build_orchestrator(
         self, task: CodingTask, tenant_id: str
     ) -> tuple[AICodeOrchestrator, str]:
+        tenant_provider_factory = getattr(self.provider, "for_tenant", None)
+        tenant_provider = (
+            tenant_provider_factory(tenant_id)
+            if callable(tenant_provider_factory)
+            else self.provider
+        )
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
@@ -110,9 +127,13 @@ class AICodeRuntime:
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
+            knowledge_project_id=(
+                self._knowledge_project_scope(task.repository.full_name)
+                if self.knowledge_service is not None else None
+            ),
         )
         workers = [
-            AutonomousCodeWorker(role, self.provider, gateway)
+            AutonomousCodeWorker(role, tenant_provider, gateway)
             for role in AICodeOrchestrator.PIPELINE
         ]
         return (

@@ -1,30 +1,30 @@
-# RUSA-AI inference operations runbook
+# RusaAi inference gateway operations runbook
 
 ## Release boundary
 
-This runbook applies to the local model serving API. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RUSA-AI product. Do not promote a release without evidence for the exact commit, model manifest digest, container digest, hardware, and deployment configuration.
+RusaAi is the Control Plane and Model Access Gateway. RusaModels owns model registry, manifests, weights, GGUF verification, runtime loading, model residency and the Model Server. This runbook covers RusaAi gateway behavior and the legacy local adapter used only for isolated development; production RusaAi must call the authenticated RusaModels `/openai/v1` endpoint. It does not certify the agent platform, RAG/MCP, tenant isolation, or the overall RusaAi product. Do not promote a release without evidence for the exact RusaAi/RusaModels commits, model artifact digest, Model Server image digest, hardware, and deployment configuration. The v2.0 RusaAi-Edge checkpoint is still unselected; using a model ID in an API request does not establish that the target artifact exists. The current RusaModels CPU smoke alias `rusa-general-4b` is a historical Qwen3-4B profile, not RusaAi-Edge. Reserve `rusaai-edge-1.54b` for an audited non-Qwen checkpoint matching the exact v2.0 reference dimensions; use `rusaai-edge-derived` when the selected non-Qwen checkpoint differs.
 
-## 1. Artifact intake
+## 1. Model artifact intake boundary
 
-1. Obtain the checkpoint from an approved storage location.
-2. Record model owner, immutable revision, license/usage restrictions, tokenizer identity/revision, architecture, context limit, and intended hardware.
-3. Keep weights outside Git and mount the directory read-only.
-4. Run scripts/create_model_manifest.py and review the generated manifest.
-5. Store the printed manifest SHA-256 in the deployment secret/configuration manager as RUSA_MODEL_MANIFEST_SHA256.
-6. Do not modify the model directory after manifest generation. Any file change requires a new manifest and digest.
-7. Confirm the model tokenizer has a valid chat template and the model is compatible with the Transformers causal-LM interface or selected vLLM backend.
+Production artifact intake is performed in RusaModels, not RusaAi:
 
-The manifest digest must be delivered through a trusted deployment channel. A manifest stored beside the model without an externally pinned digest does not establish artifact authenticity.
+1. Register the model/version in the RusaModels registry with owner, immutable source revision, license/usage restrictions, tokenizer identity/revision, architecture, context limit and intended hardware.
+2. Verify the manifest and every artifact digest in RusaModels. For GGUF, use the RusaModels GGUF verifier and pin the exact SHA-256.
+3. Keep weights outside Git and mount model files read-only in the RusaModels runtime.
+4. Configure a dedicated RusaModels API principal with role `inference` only. RusaAi receives only this bearer token; it never receives RusaModels database or object-store credentials.
+5. Configure RusaAi `RUSA_MODEL_BASE_URL` to the authenticated RusaModels `/openai/v1` endpoint, `RUSA_MODEL_NAME` to the exact registered model ID, and `RUSA_MODEL_API_KEY` to the dedicated inference token.
+
+The legacy local Transformers adapter described below is development-only. Production configuration rejects `RUSA_LOCAL_MODEL_PATH` and `RUSA_MODEL_PATH`; the RusaAi Control Plane must not load or own model artifacts.
 
 ## 2. Backend selection
 
-### Transformers baseline
+### Legacy local Transformers adapter (development only)
 
-Use RUSA_INFERENCE_BACKEND=transformers for CPU validation or a small single-GPU baseline. It uses one generation lock per process. Requests are bounded by the API admission controller, but generation is serialized. Do not claim continuous batching for this backend.
+Use `RUSA_INFERENCE_BACKEND=transformers` only for isolated local development tests. It uses one generation lock per process. It is not the production Model Plane and production configuration rejects local model paths. For CPU deployment, run llama.cpp in RusaModels and call it through the RusaModels Model Server.
 
-### vLLM production candidate
+### vLLM compatibility note
 
-Use RUSA_INFERENCE_BACKEND=vllm 0.32.x when the model and target GPU are supported by the selected vLLM/PyTorch/CUDA versions. The default API image intentionally omits heavyweight model dependencies. Build a local Transformers image with `docker build --build-arg RUSA_INSTALL_LOCAL_MODEL=1 -t rusa-ai-local-model .`; this installs the optional `[model]` extra. The vLLM dependency is isolated in `requirements-vllm.txt` and must be installed in a deployment-specific image/environment with a mutually compatible CUDA, PyTorch, vLLM, NVIDIA Container Toolkit, and host-driver combination. This repository does not currently provide a GPU Compose override for the current mainline service topology. vLLM provides continuous batching and paged KV-cache management. Configure:
+The optional vLLM dependency and local Transformers image remain legacy development adapters in this repository. Production GPU/CPU inference runtime selection, model loading and serving belong to RusaModels. RusaAi should configure only the authenticated Model Server URL, model ID and dedicated inference token. Do not install a second model-serving engine inside the RusaAi Control Plane.
 - RUSA_MAX_MODEL_LEN
 - RUSA_MAX_NUM_SEQS
 - RUSA_MAX_NUM_BATCHED_TOKENS
@@ -41,32 +41,133 @@ auto is a convenience selection mode, not a substitute for an explicit productio
 |---|---|---|
 | ENVIRONMENT | Controls production fail-closed behavior | production |
 | RUSA_API_KEY | Service API credential | Secret manager; 48+ random bytes |
-| RUSA_MODEL_PATH or RUSA_LOCAL_MODEL_PATH | Mounted model directory | /models |
-| RUSA_MODEL_MANIFEST_SHA256 | Pinned artifact manifest digest | Exact SHA-256 from manifest generator |
-| RUSA_MODEL_NAME | OpenAI API model identifier | rusa-ai-v1 |
-| RUSA_INFERENCE_BACKEND | Backend selection | vllm after validation |
+| RUSA_MODEL_BASE_URL | Authenticated RusaModels Model Server URL | `https://<model-server-host>/openai/v1` |
+| RUSA_MODEL_API_KEY | Dedicated RusaModels `inference` role token | Secret manager; never Manager/Administrator |
+| RUSA_MODEL_NAME | Exact registered RusaModels model ID | `rusa-general-4b` only for the current smoke profile |
+| RUSA_LOCAL_MODEL_PATH / RUSA_MODEL_PATH | Legacy local model directory | Development only; forbidden in production |
 | RUSA_MAX_MODEL_LEN | Maximum prompt + output context | Never above verified model limit |
 | RUSA_GENERATION_TIMEOUT_SECONDS | Per-generation timeout | 180; tune to workload |
-| RUSA_MAX_CONCURRENT_REQUESTS | Active API generation admission | 8; tune per backend |
-| RUSA_MAX_QUEUED_REQUESTS | Bounded waiting queue | 32 |
-| RUSA_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 10 |
+| RUSA_MAX_CONCURRENT_INFERENCES | Active API generations | 1 on the CPU-first baseline |
+| RUSA_MAX_WAITING_INFERENCES | Bounded waiting API requests | 3 on 16-GB; 1 on 8-GB |
+| RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS | Maximum wait for an inference slot | 60 |
 | RUSA_MAX_NUM_SEQS | vLLM maximum active sequences | 16 |
 | RUSA_MAX_NUM_BATCHED_TOKENS | vLLM batch token budget | 8192 |
 | RUSA_TENSOR_PARALLEL_SIZE | Number of GPUs in tensor parallel group | 1 |
 | RUSA_GPU_MEMORY_UTILIZATION | vLLM GPU memory target | 0.90 |
 
-Values above are initial configuration examples, not capacity guarantees. Measure the exact checkpoint on the target host. The Compose startup grace period defaults to 30 minutes because loading large local weights occurs before the API starts serving; increase RUSA_START_PERIOD for larger artifacts.
+Values above are initial configuration examples, not capacity guarantees. Measure the exact model in RusaModels on the target host. The RusaAi gateway does not load weights; its readiness check calls the authenticated RusaModels model-list endpoint. Configure startup grace periods in the Model Plane according to actual artifact loading time.
+
+The OpenAI-compatible chat request also accepts an optional body field deadline_ms (1–3,600,000 ms); this is a per-request budget, not an environment variable.
+
+### Request deadline behavior
+
+The OpenAI-compatible /v1/chat/completions request accepts an optional integer deadline_ms from 1 to 3,600,000. The budget starts when the API handler begins processing the validated request and covers both inference-slot admission and generation.
+
+- If the deadline expires while waiting for a slot, the API returns HTTP 504 and removes the waiter from the FIFO queue.
+- If a non-streaming generation exceeds the remaining budget, the API cancels the provider coroutine, releases its slot, and returns HTTP 504.
+- If the request task is cancelled (for example, after client disconnect), the API cancels and awaits the provider coroutine before its admission slot is released.
+- If streaming has already started, the API emits an SSE timeout_error event followed by data: [DONE]; it cancels the pending provider iteration and releases the slot.
+- If deadline_ms is omitted, the existing queue timeout and provider timeout behavior remains unchanged.
+- A queue-capacity rejection remains HTTP 429. A queue timeout that occurs before the request deadline also remains HTTP 429.
+- The CPU Compose profile routes autonomous worker requests through the same RusaAi API endpoint with a tenant-scoped API key and a configured worker inference deadline. RusaAi then calls RusaModels using its dedicated `inference` role token; the Worker never receives that token or a direct llama.cpp URL.
+- When `RUSA_API_DATABASE_URL` is configured, the PostgreSQL-backed scheduler shares FIFO state and active slots across API replicas. The in-memory scheduler is a development fallback only.
+
+### Durable PostgreSQL admission scheduler
+
+When `RUSA_API_DATABASE_URL` is configured, the API uses the PostgreSQL-backed
+scheduler instead of the in-memory admission controller. All API replicas that
+serve the same model endpoint therefore share one FIFO queue and one set of
+active-generation slots.
+
+- Apply `migrations/010_inference_admission.sql` after migrations 001-009 before
+  deploying the API. The migration grants access only to `rusa_api_runtime`;
+  the worker runtime receives no direct scheduler-table access.
+- The scheduler persists request IDs, state, queue expiry, slot ownership, and
+  lease expiry only. It does not store prompts, completions, or tenant payloads.
+- The migration defaults are one active slot, three waiting requests, a 60-second
+  queue timeout, and a 30-second lease. The database config row
+  `rusa_inference_admission_config` must match
+  `RUSA_MAX_CONCURRENT_INFERENCES`,
+  `RUSA_MAX_WAITING_INFERENCES`,
+  `RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS`, and
+  `RUSA_INFERENCE_LEASE_SECONDS` on every API replica. Startup fails closed if
+  they differ.
+- To change the active slot count, update the config row during a maintenance
+  window and provision exactly one row per slot in
+  `rusa_inference_admission_slots` before restarting API replicas. Do not
+  increase `max_active` beyond the model server's tested capacity.
+- Active requests renew their lease every third of the lease interval. If an API
+  process crashes, a later request reclaims an expired slot. If a live process
+  cannot renew its lease, the associated generation task is cancelled.
+- Streaming responses rebind lease ownership to the task that consumes the SSE
+  body; lease loss therefore cancels the actual stream/generation task rather
+  than the already-completed route handler. A stream whose lease is lost before
+  its body starts fails closed without invoking the model provider.
+- Lease renewal takes the same scheduler advisory lock as release and expiry
+  before touching slot/request rows. This keeps row-lock order consistent and
+  prevents a heartbeat/release deadlock.
+- Scheduler database connections use a five-second connection timeout, five-second
+  lock/statement timeouts, and a ten-second idle-in-transaction timeout. A stalled
+  database therefore fails closed instead of holding admission or heartbeat work
+  indefinitely.
+- Waiting requests are claimed in database FIFO order. Queue-full, queue-timeout,
+  request-deadline, cancellation, and stale-lease states are recorded separately.
+- The API readiness/startup path checks the migration, database role privileges,
+  scheduler configuration, and slot rows. Missing schema or privilege errors
+  prevent the API from starting.
+
+For a 16-GB CPU profile, the default scheduler row is one active and three
+waiting. For an 8-GB profile, set `max_waiting=1` in both the database config
+row and the environment. Keep the same settings across all replicas.
+
+For example, changing to two active slots and one waiting request requires a
+maintenance window with API traffic drained, then a database-owner transaction
+such as:
+
+```sql
+BEGIN;
+UPDATE public.rusa_inference_admission_config
+SET max_active = 2,
+    max_waiting = 1,
+    queue_timeout_ms = 60000,
+    lease_seconds = 30,
+    updated_at = clock_timestamp()
+WHERE singleton_id = 1;
+INSERT INTO public.rusa_inference_admission_slots(slot_id)
+SELECT generate_series(0, 1)::smallint
+ON CONFLICT (slot_id) DO NOTHING;
+COMMIT;
+```
+
+Set the same values in the environment before starting the API replicas. Only
+increase active slots after the model backend has passed a concurrency and
+memory-capacity test for that target hardware.
+
+### Worker-to-API inference gateway
+
+For the CPU Compose profile, the RusaAi API is the only RusaAi component that connects to the RusaModels Model Server. The Worker connects to the RusaAi OpenAI-compatible gateway and supplies the API key mapped to the current task tenant. RusaAi uses its separate RusaModels `inference` role token upstream. The Worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
+
+- Set `RUSA_WORKER_INFERENCE_GATEWAY=true`.
+- Set `RUSA_WORKER_INFERENCE_BASE_URL` to the API gateway URL. Production requires credential-free HTTPS with certificate validation.
+- Mount the internal CA bundle read-only into the worker and set `SSL_CERT_FILE` to the in-container bundle path. The production Compose overlay requires `RUSA_INTERNAL_CA_BUNDLE` as the host-side source path.
+- Set `RUSA_WORKER_INFERENCE_API_KEYS` to a tenant-to-secret mapping. Keep raw keys in the secret manager; each key's SHA-256 digest must resolve to a principal in `RUSA_API_KEYS_JSON` with the same tenant and an inference-capable role.
+- Set `RUSA_WORKER_INFERENCE_DEADLINE_MS` to a bounded request budget. The API enforces that budget across queue wait and generation.
+- The worker provider sends `X-API-Key` and a JSON-object response-format requirement. The API validates the request and forwards the response format to the model backend.
+- The worker gateway does not automatically retry HTTP capacity/deadline errors or transport failures; this avoids duplicate model generations. Task-level retry remains controlled by the durable queue and its idempotency policy.
+- API replicas share FIFO state and active slots through the PostgreSQL admission scheduler when configured. RusaModels' runtime parallel-slot limit remains a final capacity guard; do not increase RusaAi active slots beyond the Model Server's tested capacity.
+
+The local CPU Compose route uses private-network HTTP for development/staging only. Do not copy that URL into production configuration.
 
 ## 4. Startup and health checks
 
-1. Start the API with the model directory mounted read-only. Model loading occurs before the application reports ready; configure the orchestrator startup grace period for the expected artifact size.
-2. Confirm logs state that the selected backend and verified model loaded successfully. Logs must not contain prompts, completions, API keys, or secret values.
-3. GET /health/live confirms only that the process responds.
-4. GET /health/ready must return HTTP 200 and report model_loaded, model_manifest_verified, authentication_configured, and task_schema_loaded as true.
-5. GET /v1/models with X-API-Key must return the expected configured model ID.
-6. Run one non-streaming request and one streaming request using a controlled test prompt.
-7. Confirm response usage counts are present and streaming terminates with data: [DONE].
-8. The manifest generator and runtime accept safetensors weights only; convert any pickle-based checkpoint through a trusted, isolated conversion workflow before intake.
+1. Start and verify the RusaModels Model Server first. Its authenticated `GET /openai/v1/models` must return the exact configured model ID using the dedicated `inference` token.
+2. Start the RusaAi API with `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME` and `RUSA_MODEL_API_KEY` configured. Do not mount a model directory into the RusaAi API.
+3. GET `/health/live` confirms only that the RusaAi process responds.
+4. GET `/health/ready` must return HTTP 200 after the RusaAi gateway has checked its upstream model endpoint, authentication and task schema.
+5. GET `/v1/models` with a tenant-authorized RusaAi API key must return the configured model ID.
+6. Run one non-streaming request and one streaming request through the RusaAi API using a controlled test prompt.
+7. Confirm response usage counts are present and streaming terminates with `data: [DONE]`.
+8. Model manifest and GGUF/safetensors verification are RusaModels responsibilities. Convert untrusted pickle checkpoints only through a trusted, isolated Model Plane intake workflow.
 
 If any readiness check fails, keep the instance out of the load balancer. The API returns 503 rather than generating a substitute answer when the model is missing or unverified.
 
@@ -77,12 +178,12 @@ If any readiness check fails, keep the instance out of the load balancer. The AP
     curl --fail-with-body http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
+      -d '{"model":"rusaai-cpu-smoke-test","messages":[{"role":"user","content":"Sebutkan tiga fungsi utama sistem pernapasan."}],"temperature":0,"max_tokens":128}'
 
     curl --no-buffer http://127.0.0.1:8000/v1/chat/completions \
       -H "X-API-Key: $RUSA_API_KEY" \
       -H "Content-Type: application/json" \
-      -d '{"model":"rusa-ai-v1","messages":[{"role":"user","content":"Jelaskan energi terbarukan."}],"temperature":0,"max_tokens":128,"stream":true}'
+      -d '{"model":"rusaai-cpu-smoke-test","messages":[{"role":"user","content":"Jelaskan energi terbarukan."}],"temperature":0,"max_tokens":128,"stream":true}'
 
 ## 6. Reproducible benchmark
 
@@ -154,10 +255,10 @@ Do not infer concurrency safety from a passing unit test. Capacity is specific t
 
 Until every applicable item is evidenced, the service remains a production candidate, not production-certified.
 
-## 11. CPU-only GGUF serving
+## 11. CPU-only Model Plane
 
-For a CPU-only server, use the separate llama.cpp GGUF deployment described in [CPU inference operations](CPU_INFERENCE_OPERATIONS.md). The API talks to llama.cpp through the existing OpenAI-compatible provider. This keeps agent orchestration, task queues, policy checks, audit, and RAG boundaries independent from the inference engine.
+For CPU-only deployment, run the llama.cpp GGUF and embedding runtimes in RusaModels using its [CPU inference runbook](https://github.com/StrategyG/RusaModels/blob/main/docs/CPU_INFERENCE.md). RusaAi calls the authenticated RusaModels Model Server through `RUSA_MODEL_BASE_URL`; it does not start llama.cpp, mount GGUF files or verify model artifacts itself.
 
-The Transformers backend remains available for validated safetensors artifacts. The GGUF path does not use the safetensors-only model manifest generator; record the approved GGUF source revision and SHA-256 checksum separately. Do not add model weights to Git.
+The RusaModels Model Server exposes the OpenAI-compatible `/openai/v1` boundary. Use a dedicated `inference` role token and ensure `RUSA_MODEL_NAME` exactly matches the configured Model Server alias. Keep the RusaAi worker routed through the RusaAi API gateway so tenant policy, deadline enforcement and shared admission remain authoritative.
 
 Set inference concurrency conservatively on CPU (initially one active generation), use a bounded waiting queue, and increase limits only after a benchmark on the exact model, CPU, RAM, context size, and prompt distribution. Tool calling and structured JSON output must be tested with the chosen model before enabling agent workflows.

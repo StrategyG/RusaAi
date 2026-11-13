@@ -1,4 +1,6 @@
 project: llm-project
+scope: legacy_aicode_worker_contract_only
+core_model_for_rusaai_edge: false
 status: t4_qlora_experiment_ready_training_not_run
 
 model:
@@ -58,6 +60,7 @@ hardware_target:
   minimum_vram_gib: 14
   precision: fp16
   notes:
+  - This Qwen3-4B T4 experiment is isolated to the six-role AICode worker contract; it is not the RusaAi-Edge neural core. The v2.0 non-Qwen core checkpoint remains unselected.
     - This is a constrained experimental profile for a 16 GB T4, not a guarantee against out-of-memory errors.
     - If CUDA OOM occurs, reduce max_seq_length to 1024 and LoRA rank to 4 in a separately reviewed run.
     - Keep the evaluation split held out and do not promote an adapter unless the configured evaluation gates pass.

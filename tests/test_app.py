@@ -1,11 +1,19 @@
+import asyncio
 import hashlib
+import inspect
 import json
+import time
 import uuid
 from types import SimpleNamespace
 
-from app import app, set_inference_provider
+import pytest
+from app import _await_with_deadline, app, set_inference_provider
 from fastapi.testclient import TestClient
 
+from rusa_agents.inference_admission import (
+    InferenceAdmissionController,
+    InferenceDeadlineTimeout,
+)
 from rusa_agents.providers import InferenceStreamEvent
 
 client = TestClient(app)
@@ -43,6 +51,54 @@ def test_chat_completions_uses_injected_inference_provider():
         assert response.json()["choices"][0]["message"]["content"] == "real provider response"
     finally:
         set_inference_provider(None)
+
+
+def test_chat_completions_validates_and_forwards_json_response_format(monkeypatch):
+    captured = {}
+
+    class StubInferenceProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            captured.update(parameters)
+            return '{"done": true}'
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    set_inference_provider(StubInferenceProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Return JSON"}],
+                "response_format": {"type": "json_object"},
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert captured["response_format"] == {"type": "json_object"}
+
+
+def test_chat_completions_rejects_unsupported_response_format():
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "Hello"}],
+            "response_format": {"type": "text"},
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_validate_task_endpoint_valid():
@@ -575,3 +631,284 @@ def test_aicode_task_list_rejects_unknown_status(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
     )
     assert response.status_code == 422
+
+
+
+def test_readiness_fails_closed_when_provider_reports_not_ready():
+    class NotReadyInferenceProvider:
+        async def check_ready(self):
+            return False
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("A not-ready provider must not generate")
+
+    set_inference_provider(NotReadyInferenceProvider())
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Inference backend is not ready"
+    finally:
+        set_inference_provider(None)
+
+
+
+def test_chat_completions_enforces_generation_deadline_and_releases_slot(monkeypatch):
+    class SlowProvider:
+        cancelled = False
+
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            try:
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            return "too late"
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    controller = InferenceAdmissionController(max_active=1, max_waiting=1, queue_timeout=1)
+    monkeypatch.setattr(app.state, "inference_admission", controller, raising=False)
+    provider = SlowProvider()
+    set_inference_provider(provider)
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "deadline_ms": 100,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Inference request deadline exceeded"
+    assert provider.cancelled is True
+    assert controller.active_count == 0
+    assert controller.waiting_count == 0
+
+
+def test_chat_completions_stream_emits_timeout_and_releases_slot(monkeypatch):
+    class SlowStreamingProvider:
+        cancelled = False
+
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "unused"
+
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content="partial")
+            try:
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            yield InferenceStreamEvent(finish_reason="stop")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    controller = InferenceAdmissionController(max_active=1, max_waiting=1, queue_timeout=1)
+    monkeypatch.setattr(app.state, "inference_admission", controller, raising=False)
+    provider = SlowStreamingProvider()
+    set_inference_provider(provider)
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "deadline_ms": 200,
+                "stream": True,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert '"content":"partial"' in response.text
+    assert '"type":"timeout_error"' in response.text
+    assert response.text.rstrip().endswith("data: [DONE]")
+    assert provider.cancelled is True
+    assert controller.active_count == 0
+    assert controller.waiting_count == 0
+
+
+def test_chat_completion_deadline_ms_is_bounded():
+    for deadline_ms in (0, 3_600_001):
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "messages": [{"role": "user", "content": "Hello"}],
+                "deadline_ms": deadline_ms,
+            },
+        )
+        assert response.status_code == 422
+
+
+
+def test_chat_completions_queue_deadline_returns_gateway_timeout(monkeypatch):
+    class ExpiredAdmission:
+        async def acquire(self, *, timeout_seconds=None):
+            assert timeout_seconds is not None
+            raise InferenceDeadlineTimeout("request deadline expired")
+
+        async def release(self):
+            raise AssertionError("a slot was never acquired")
+
+    class MustNotGenerate:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            raise AssertionError("provider must not run after admission deadline")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    monkeypatch.setattr(app.state, "inference_admission", ExpiredAdmission(), raising=False)
+    set_inference_provider(MustNotGenerate())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "deadline_ms": 100,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "Inference request deadline exceeded"
+
+
+
+def test_expired_generation_deadline_closes_unstarted_coroutine():
+    async def scenario():
+        started = False
+
+        async def generation():
+            nonlocal started
+            started = True
+            return "too late"
+
+        pending = generation()
+        with pytest.raises(InferenceDeadlineTimeout):
+            await _await_with_deadline(pending, time.monotonic() - 1)
+
+        assert started is False
+        assert inspect.getcoroutinestate(pending) == inspect.CORO_CLOSED
+
+    asyncio.run(scenario())
+
+
+
+def test_cancelled_request_cancels_provider_coroutine():
+    async def scenario():
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def generation():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        request = asyncio.create_task(
+            _await_with_deadline(generation(), time.monotonic() + 10)
+        )
+        await started.wait()
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+        assert cancelled.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_streaming_response_rebinds_durable_admission_owner_task(monkeypatch):
+    class LeaseAwareAdmission:
+        def __init__(self):
+            self.bound = False
+            self.released = False
+
+        async def acquire(self, *, timeout_seconds=None):
+            return None
+
+        def bind_owner_task(self):
+            self.bound = True
+            return True
+
+        async def release(self):
+            self.released = True
+
+    class StreamingProvider:
+        async def check_ready(self):
+            return True
+
+        async def complete(self, messages, **parameters):
+            return "unused"
+
+        async def stream(self, messages, **parameters):
+            yield InferenceStreamEvent(content="streamed")
+            yield InferenceStreamEvent(finish_reason="stop")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("RUSA_API_KEYS", raising=False)
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "config",
+        SimpleNamespace(environment="development", model_name="rusaai-cpu-smoke-test"),
+        raising=False,
+    )
+    admission = LeaseAwareAdmission()
+    monkeypatch.setattr(app.state, "inference_admission", admission, raising=False)
+    set_inference_provider(StreamingProvider())
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "rusaai-cpu-smoke-test",
+                "messages": [{"role": "user", "content": "Stream"}],
+                "stream": True,
+            },
+        )
+    finally:
+        set_inference_provider(None)
+
+    assert response.status_code == 200
+    assert '"content":"streamed"' in response.text
+    assert admission.bound is True
+    assert admission.released is True
+

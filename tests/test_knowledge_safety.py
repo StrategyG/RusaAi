@@ -51,3 +51,45 @@ def test_rejects_metadata_over_utf8_byte_limit():
 def test_rejects_provider_api_credentials():
     with pytest.raises(ValueError, match="provider API credential"):
         reject_credential_material("embedding_api_key=sk-proj-" + ("x" * 36))
+
+
+def test_agent_specific_metadata_requires_explicit_valid_agent_scope():
+    with pytest.raises(ValueError, match="knowledge_scope must be explicit"):
+        validate_document_metadata(
+            "file:///guide.txt", "Guide", {"agent_ids": ["aicode-analyst"]}
+        )
+    with pytest.raises(ValueError, match="requires at least one agent_id"):
+        validate_document_metadata(
+            "file:///guide.txt", "Guide", {"knowledge_scope": "agent_specific"}
+        )
+
+
+def test_agent_and_project_scope_metadata_is_validated():
+    validate_document_metadata(
+        "file:///guide.txt",
+        "Guide",
+        {
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst", "aicode-security"],
+            "project_id": "strategyg--rusaai",
+        },
+    )
+    with pytest.raises(ValueError, match="unique array"):
+        validate_document_metadata(
+            "file:///guide.txt",
+            "Guide",
+            {
+                "knowledge_scope": "agent_specific",
+                "agent_ids": ["aicode-analyst", "aicode-analyst"],
+            },
+        )
+    with pytest.raises(ValueError, match="project_id"):
+        validate_document_metadata(
+            "file:///guide.txt",
+            "Guide",
+            {
+                "knowledge_scope": "agent_specific",
+                "agent_ids": ["aicode-analyst"],
+                "project_id": "../tenant-b",
+            },
+        )

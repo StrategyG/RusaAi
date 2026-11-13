@@ -272,3 +272,162 @@ def test_inference_provider_treats_model_loading_as_not_ready():
 
     with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(provider.check_ready())
+
+
+def test_worker_provider_routes_requests_with_tenant_scoped_gateway_credentials(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "45000")
+    captured = {}
+
+    def handler(request):
+        captured["headers"] = request.headers
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"done": true}'}}]},
+            request=request,
+        )
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    tenant_provider = provider.for_tenant("tenant-a")
+    result = asyncio.run(
+        tenant_provider.complete(system_prompt="system", user_prompt="task")
+    )
+
+    assert result == '{"done": true}'
+    assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
+    assert captured["headers"]["Authorization"] == "Bearer tenant-a-secret"
+    assert captured["payload"]["deadline_ms"] == 45000
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+def test_worker_provider_fails_closed_without_tenant_gateway_credential(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    provider = OpenAICompatibleProvider(base_url="https://api.internal/v1")
+
+    with pytest.raises(PermissionError, match="tenant-b"):
+        provider.for_tenant("tenant-b")
+
+
+def test_model_provider_forwards_validated_json_response_format():
+    captured = {}
+
+    def handler(request):
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"ok": true}'}}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.internal/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    result = asyncio.run(
+        provider.complete(
+            [{"role": "user", "content": "Return JSON"}],
+            response_format={"type": "json_object"},
+        )
+    )
+
+    assert result == '{"ok": true}'
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+
+
+def test_worker_gateway_does_not_retry_deadline_or_capacity_responses(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(504, json={"detail": "deadline exceeded"}, request=request)
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+        max_retries=2,
+    ).for_tenant("tenant-a")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        asyncio.run(provider.complete(system_prompt="system", user_prompt="task"))
+
+    assert calls == 1
+
+
+
+def test_worker_gateway_stream_uses_tenant_auth_deadline_and_json_mode(monkeypatch):
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "tenant-a-secret"})
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "45000")
+    captured = {}
+
+    def handler(request):
+        captured["headers"] = request.headers
+        captured["payload"] = json.loads(request.content)
+        body = (
+            b'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            b"data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body,
+            request=request,
+        )
+
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.internal/v1",
+        transport=httpx.MockTransport(handler),
+    ).for_tenant("tenant-a")
+
+    async def collect():
+        return [event async for event in provider.stream(
+            [{"role": "user", "content": "Return JSON"}]
+        )]
+
+    events = asyncio.run(collect())
+
+    assert events[0].content == "{}"
+    assert captured["headers"]["X-API-Key"] == "tenant-a-secret"
+    assert captured["payload"]["deadline_ms"] == 45000
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+
+def test_rusamodels_readiness_rejects_unserved_configured_model():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/openai/v1/models"
+        assert request.headers["Authorization"] == "Bearer inference-token"
+        assert request.headers["X-API-Key"] == "inference-token"
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "rusa-general-4b"}]},
+            request=request,
+        )
+
+    provider = OpenAIChatInferenceProvider(
+        base_url="https://model.internal/openai/v1",
+        api_key="inference-token",
+        default_model="rusaai-edge-1.54b",
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(RuntimeError, match="not served by the RusaModels Model Server"):
+        asyncio.run(provider.check_ready())

@@ -89,22 +89,75 @@ class OpenAICompatibleProvider:
         max_response_bytes: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
-        self.base_url = (base_url or os.getenv("RUSA_MODEL_BASE_URL", "")).rstrip("/")
-        self.model = model or os.getenv("RUSA_MODEL_NAME", "rusa-ai")
+        self.base_url = (
+            base_url
+            or os.getenv("RUSA_WORKER_INFERENCE_BASE_URL")
+            or os.getenv("RUSA_MODEL_BASE_URL", "")
+        ).rstrip("/")
+        self.model = model or os.getenv("RUSA_MODEL_NAME", "rusaai-cpu-smoke-test")
         self.api_key = api_key or os.getenv("RUSA_MODEL_API_KEY")
         self.timeout_seconds = _provider_timeout(timeout_seconds)
         self.max_retries = max_retries
         self.max_response_bytes = _response_limit(max_response_bytes)
         self.transport = transport
+        gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
+        if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ValueError("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")
+        self.gateway_mode = gateway_value in {"1", "true", "yes", "on"}
+        try:
+            tenant_keys = json.loads(os.getenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("RUSA_WORKER_INFERENCE_API_KEYS must be a JSON object") from exc
+        if not isinstance(tenant_keys, dict) or any(
+            not isinstance(tenant, str)
+            or not tenant.strip()
+            or not isinstance(key, str)
+            or not key.strip()
+            for tenant, key in tenant_keys.items()
+        ):
+            raise ValueError(
+                "RUSA_WORKER_INFERENCE_API_KEYS must map tenant IDs to non-empty API keys"
+            )
+        self.tenant_api_keys = tenant_keys
+        try:
+            self.gateway_deadline_ms = int(
+                os.getenv("RUSA_WORKER_INFERENCE_DEADLINE_MS", "270000")
+            )
+        except ValueError as exc:
+            raise ValueError("RUSA_WORKER_INFERENCE_DEADLINE_MS must be an integer") from exc
+        if not 1 <= self.gateway_deadline_ms <= 3_600_000:
+            raise ValueError(
+                "RUSA_WORKER_INFERENCE_DEADLINE_MS must be between 1 and 3600000"
+            )
         if max_retries < 0:
             raise ValueError("Provider timeout must be positive and max_retries cannot be negative")
         if not self.base_url:
             raise ValueError("RUSA_MODEL_BASE_URL must point to an OpenAI-compatible chat endpoint")
 
+    def for_tenant(self, tenant_id: str) -> OpenAICompatibleProvider:
+        """Return a tenant-scoped gateway client without changing the worker contract."""
+        if not self.gateway_mode:
+            return self
+        api_key = self.tenant_api_keys.get(tenant_id)
+        if not api_key:
+            raise PermissionError(
+                f"No worker inference credential is configured for tenant {tenant_id!r}"
+            )
+        return OpenAICompatibleProvider(
+            base_url=self.base_url,
+            model=self.model,
+            api_key=api_key,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            max_response_bytes=self.max_response_bytes,
+            transport=self.transport,
+        )
+
     async def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -115,6 +168,8 @@ class OpenAICompatibleProvider:
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
         }
+        if self.gateway_mode:
+            payload["deadline_ms"] = self.gateway_deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
@@ -128,7 +183,11 @@ class OpenAICompatibleProvider:
                         headers=headers,
                         json=payload,
                     ) as response:
-                        if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries:
+                        if (
+                            not self.gateway_mode
+                            and response.status_code in {429, 500, 502, 503, 504}
+                            and attempt < self.max_retries
+                        ):
                             retry = True
                         else:
                             response.raise_for_status()
@@ -144,7 +203,7 @@ class OpenAICompatibleProvider:
                         raise RuntimeError("Model provider returned an empty or non-text response")
                     return content
                 except (httpx.TimeoutException, httpx.TransportError):
-                    if attempt >= self.max_retries:
+                    if self.gateway_mode or attempt >= self.max_retries:
                         raise
                     await asyncio.sleep(min(2 ** attempt, 8))
         raise RuntimeError("Model provider request failed")
@@ -174,6 +233,8 @@ class OpenAICompatibleProvider:
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            response_format={"type": "json_object"} if self.gateway_mode else None,
+            deadline_ms=self.gateway_deadline_ms if self.gateway_mode else None,
         ):
             yield event
 
@@ -184,7 +245,7 @@ class OpenAIChatInferenceProvider:
     def __init__(
         self,
         base_url: str,
-        default_model: str = "rusa-ai",
+        default_model: str = "rusaai-cpu-smoke-test",
         api_key: str | None = None,
         timeout_seconds: float = 120.0,
         max_response_bytes: int | None = None,
@@ -205,6 +266,7 @@ class OpenAIChatInferenceProvider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-API-Key"] = self.api_key
         return headers
 
     async def check_ready(self) -> bool:
@@ -215,6 +277,25 @@ class OpenAIChatInferenceProvider:
         ) as client:
             async with client.stream("GET", readiness_url, headers=self._headers()) as response:
                 response.raise_for_status()
+                if self.readiness_url is None:
+                    # The authenticated Model Server model-list route is the
+                    # default readiness contract. A healthy endpoint is not
+                    # sufficient if it does not serve the configured model ID.
+                    body = await _read_limited_json(response, self.max_response_bytes)
+                    entries = body.get("data") if isinstance(body, dict) else None
+                    if not isinstance(entries, list):
+                        raise RuntimeError(
+                            "Model Server readiness response is missing its model data list"
+                        )
+                    model_ids = {
+                        entry.get("id")
+                        for entry in entries
+                        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                    }
+                    if self.default_model not in model_ids:
+                        raise RuntimeError(
+                            "Configured RUSA_MODEL_NAME is not served by the RusaModels Model Server"
+                        )
             return True
 
     async def complete(
@@ -225,6 +306,8 @@ class OpenAIChatInferenceProvider:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 1024,
+        response_format: dict[str, str] | None = None,
+        deadline_ms: int | None = None,
     ) -> str:
         payload = {
             "model": model or self.default_model,
@@ -234,6 +317,10 @@ class OpenAIChatInferenceProvider:
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if deadline_ms is not None:
+            payload["deadline_ms"] = deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport
@@ -262,6 +349,8 @@ class OpenAIChatInferenceProvider:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_tokens: int = 1024,
+        response_format: dict[str, str] | None = None,
+        deadline_ms: int | None = None,
     ) -> AsyncIterator[InferenceStreamEvent]:
         """Stream bounded OpenAI-compatible SSE deltas without buffering the full response."""
         payload = {
@@ -273,6 +362,10 @@ class OpenAIChatInferenceProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if deadline_ms is not None:
+            payload["deadline_ms"] = deadline_ms
         timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
         async with httpx.AsyncClient(
             timeout=timeout, follow_redirects=False, transport=self.transport

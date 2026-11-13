@@ -38,6 +38,35 @@ def validate_document_metadata(source_uri: str, title: str, metadata: dict) -> s
     """Validate metadata before embedding or persistence; never store embedded credentials."""
     if not isinstance(metadata, dict):
         raise ValueError("document metadata must be a JSON object")
+    if "agent_ids" in metadata and metadata.get("agent_ids") and "knowledge_scope" not in metadata:
+        raise ValueError("knowledge_scope must be explicit when agent_ids are present")
+    knowledge_scope = metadata.get("knowledge_scope", "shared")
+    if not isinstance(knowledge_scope, str) or knowledge_scope not in {"shared", "agent_specific"}:
+        raise ValueError("knowledge_scope must be shared or agent_specific")
+    agent_ids = metadata.get("agent_ids", [])
+    if (
+        not isinstance(agent_ids, list)
+        or len(agent_ids) > 100
+        or any(
+            not isinstance(agent_id, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", agent_id)
+            for agent_id in agent_ids
+        )
+        or len(set(agent_ids)) != len(agent_ids)
+    ):
+        raise ValueError("agent_ids must be a unique array of valid agent identifiers")
+    if knowledge_scope == "agent_specific" and not agent_ids:
+        raise ValueError("agent_specific knowledge requires at least one agent_id")
+    if knowledge_scope == "shared" and agent_ids:
+        raise ValueError("shared knowledge must not declare agent_ids")
+    project_id = metadata.get("project_id")
+    if project_id is not None and knowledge_scope != "agent_specific":
+        raise ValueError("project_id requires agent_specific knowledge_scope")
+    if project_id is not None and (
+        not isinstance(project_id, str)
+        or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", project_id)
+    ):
+        raise ValueError("project_id must be a valid bounded project identifier")
     try:
         parsed = urlsplit(source_uri)
     except ValueError as exc:

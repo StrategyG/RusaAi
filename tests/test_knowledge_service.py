@@ -264,3 +264,46 @@ def test_from_env_rejects_384d_embedding_without_e5_input_types(monkeypatch):
         assert "query/passage" in str(exc)
     else:
         raise AssertionError("384d E5 configuration without query/passage mode was accepted")
+
+
+
+def test_from_env_1536d_defaults_to_authenticated_rusamodels_model_plane(monkeypatch):
+    import rusa_knowledge.service as service_module
+
+    captured = {}
+
+    class Provider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+            self.input_type_enabled = kwargs["input_type_enabled"]
+
+    class Store:
+        def __init__(self, dsn, **kwargs):
+            captured["store"] = {"dsn": dsn, **kwargs}
+            self.dimensions = kwargs["dimensions"]
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("RUSA_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://models.example.test/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "dedicated-model-token")
+    monkeypatch.delenv("RUSA_EMBEDDING_BASE_URL", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_INPUT_TYPE_ENABLED", raising=False)
+    monkeypatch.setattr(service_module, "OpenAICompatibleEmbeddingProvider", Provider)
+    monkeypatch.setattr(service_module, "PostgresKnowledgeStore", Store)
+
+    service = service_module.KnowledgeService.from_env(
+        check_ready=False,
+        database_url="postgresql://worker@db.example/rusa",
+    )
+
+    assert captured["provider"]["base_url"] == "https://models.example.test/openai/v1"
+    assert captured["provider"]["model"] == "text-embedding-3-small"
+    assert captured["provider"]["api_key"] == "dedicated-model-token"
+    assert captured["provider"]["dimensions"] == 1536
+    assert captured["provider"]["input_type_enabled"] is False
+    assert captured["store"]["dimensions"] == 1536
+    assert service.embeddings.input_type_enabled is False

@@ -1,4 +1,6 @@
 project: llm-project
+scope: legacy_aicode_worker_contract_only
+core_model_for_rusaai_edge: false
 status: curated_seed_dataset_ready_training_not_run
 
 model:
@@ -55,6 +57,7 @@ evaluation:
   max_blocked_false_positive_rate: 0.10
 
 notes:
+  - This Qwen3-4B experiment is isolated to the six-role AICode worker contract; it is not the RusaAi-Edge neural core. The v2.0 non-Qwen core checkpoint remains unselected.
   - A 120-example synthetic seed training split and 36-example held-out evaluation split are committed; the QLoRA run has not been executed and no fine-tuned weights are included.
   - The seed corpus is synthetic and documented in llm-project/data/curated/PROVENANCE.md; review and expand it with authorized examples before production promotion.
   - Curated training and evaluation datasets must be reviewed, licensed, redacted, and split without leakage.

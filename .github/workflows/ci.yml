@@ -5,7 +5,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -60,7 +59,7 @@ jobs:
             --train-file llm-project/data/curated/train.jsonl \
             --eval-file llm-project/data/curated/eval.jsonl
       - name: Tests
-        run: python -m pytest -q
+        run: python -m pytest -vv -o faulthandler_timeout=60
 
   docker-build:
     name: Build, test, and scan production images
@@ -195,10 +194,15 @@ jobs:
           RUSA_WORKER_DATABASE_URL: postgresql://rusa_worker_login:secret@db.internal/rusa?sslmode=verify-full
           RUSA_API_KEYS_JSON: '{"1dbdfd8c1b7b7919e3fa6e9d4a29d28b44159be70dcdd8d0312f313122a3e8fb":{"subject":"ci-service","tenant_id":"tenant-ci","roles":["tenant_admin"]}}'
           RUSA_METRICS_API_KEY: long_random_ci_metrics_key_12345678901234567890
+          RUSA_INTERNAL_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+          RUSA_WORKER_INFERENCE_BASE_URL: https://api.internal/v1
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"tenant-ci":"worker-inference-secret-ci-12345678901234567890"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
+          RUSA_INFERENCE_LEASE_SECONDS: "30"
           RUSA_TENANT_REPOSITORIES: '{"tenant-ci":["StrategyG/RusaAi"]}'
-          RUSA_MODEL_BASE_URL: https://model.internal/v1
-          RUSA_MODEL_NAME: rusa-ai
-          RUSA_MODEL_API_KEY: ci-model-key
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
           RUSA_AUDIT_HMAC_KEY: long_random_ci_audit_key_12345678901234567890
           RUSA_GITHUB_TOKEN: github_pat_ci_only_12345678901234567890
           RUSA_SANDBOX_IMAGE: example.invalid/rusa-ai-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -219,18 +223,14 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
-          RUSA_GGUF_MODEL_PATH: /srv/rusa/models/model.gguf
-          RUSA_GGUF_MODEL_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
-          LLAMA_CPP_IMAGE: ghcr.io/ggml-org/llama.cpp:server
-          RUSA_MODEL_NAME: rusa-cpu
-          RUSA_MODEL_CONTEXT: "4096"
-          RUSA_CPU_THREADS: "4"
-          RUSA_MODEL_PARALLEL: "1"
-          RUSA_MODEL_MEMORY_LIMIT: 8g
-          RUSA_MODEL_CPU_LIMIT: "4.0"
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
           RUSA_MAX_CONCURRENT_INFERENCES: "1"
-          RUSA_MAX_WAITING_INFERENCES: "4"
+          RUSA_MAX_WAITING_INFERENCES: "3"
           RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"development":"local-dev-key"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
           RUSA_GENERATION_TIMEOUT_SECONDS: "300"
           RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
           RUSA_DOCKER_GID: "1000"
@@ -239,6 +239,27 @@ jobs:
         run: |
           touch .env
           docker compose -f docker-compose.yml -f docker-compose.cpu.yml config --quiet
+      - name: Validate 8-GB CPU Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
+          RUSA_MODEL_BASE_URL: https://model.internal/openai/v1
+          RUSA_MODEL_NAME: rusa-general-4b
+          RUSA_MODEL_API_KEY: ci-model-inference-token-12345678901234567890
+          RUSA_MAX_CONCURRENT_INFERENCES: "1"
+          RUSA_MAX_WAITING_INFERENCES: "1"
+          RUSA_INFERENCE_QUEUE_TIMEOUT_SECONDS: "60"
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"development":"local-dev-key"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
+          RUSA_GENERATION_TIMEOUT_SECONDS: "300"
+          RUSA_MAX_PARALLEL_WORKERS: "1"
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+        run: |
+          touch .env
+          docker compose -f docker-compose.yml -f docker-compose.cpu.yml -f docker-compose.cpu-8gb.yml config --quiet
 
   rag-mcp:
     name: RAG and MCP integration tests

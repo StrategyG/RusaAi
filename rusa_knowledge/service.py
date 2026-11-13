@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from typing import Any, Literal
 
 from .chunking import chunk_text, normalize_text
 from .embeddings import OpenAICompatibleEmbeddingProvider
 from .safety import reject_credential_material, validate_document_metadata
 from .store import PostgresKnowledgeStore
+
+AGENT_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+PROJECT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 
 
 class KnowledgeService:
@@ -47,19 +51,20 @@ class KnowledgeService:
         if dimensions == 384 and not input_type_enabled:
             raise ValueError("384-dimensional RusaModels E5 embeddings require query/passage input types")
 
-        default_base_url = (
-            os.getenv("RUSA_MODEL_BASE_URL", "")
-            if dimensions == 384
-            else "https://api.openai.com/v1"
-        )
+        # The Model Plane is the default embedding endpoint for both vector
+        # spaces. An explicit RUSA_EMBEDDING_BASE_URL may select a separately
+        # approved OpenAI-compatible embedding route.
+        default_base_url = os.getenv("RUSA_MODEL_BASE_URL", "")
         base_url = os.getenv("RUSA_EMBEDDING_BASE_URL") or default_base_url
         if not base_url:
-            raise RuntimeError("RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for 384-dimensional embeddings")
+            raise RuntimeError(
+                "RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for embeddings"
+            )
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=base_url,
             api_key=(
                 os.getenv("RUSA_EMBEDDING_API_KEY")
-                or (os.getenv("RUSA_MODEL_API_KEY", "") if dimensions == 384 else "")
+                or os.getenv("RUSA_MODEL_API_KEY", "")
             ),
             model=os.getenv(
                 "RUSA_EMBEDDING_MODEL",
@@ -84,10 +89,14 @@ class KnowledgeService:
             if not ready:
                 store.close()
                 required_migrations = (
-                    "migrations/007_rag_knowledge_pgvector.sql and "
-                    "migrations/009_knowledge_embedding_384.sql"
+                    "migrations/007_rag_knowledge_pgvector.sql, "
+                    "migrations/009_knowledge_embedding_384.sql, "
+                    "migrations/011_rag_agent_project_scope.sql, and "
+                    "migrations/012_rag_knowledge_version_history.sql"
                     if dimensions == 384
-                    else "migrations/007_rag_knowledge_pgvector.sql"
+                    else "migrations/007_rag_knowledge_pgvector.sql, "
+                    "migrations/011_rag_agent_project_scope.sql, and "
+                    "migrations/012_rag_knowledge_version_history.sql"
                 )
                 raise RuntimeError(
                     f"knowledge database is not ready; apply {required_migrations}"
@@ -174,9 +183,19 @@ class KnowledgeService:
         collection: str,
         query: str,
         limit: int = 5,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not isinstance(query, str) or not query.strip() or len(query) > 2000:
             raise ValueError("query must contain 1 to 2000 characters")
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
         reject_credential_material(query)
         vector = self._embed([query], "query")[0]
         return self.store.search(
@@ -185,6 +204,8 @@ class KnowledgeService:
             query=query,
             query_embedding=vector,
             limit=limit,
+            agent_id=agent_id,
+            project_id=project_id,
         )
 
     def get_document(
@@ -194,16 +215,84 @@ class KnowledgeService:
         collection: str,
         document_id: str,
         max_chars: int = 20_000,
+        agent_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
         return self.store.get_document(
             tenant_id=tenant_id,
             collection=collection,
             document_id=document_id,
             max_chars=max_chars,
+            agent_id=agent_id,
+            project_id=project_id,
         )
 
-    def list_collections(self, *, tenant_id: str) -> list[dict[str, Any]]:
-        return self.store.list_collections(tenant_id=tenant_id)
+    def list_document_versions(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        return self.store.list_document_versions(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    def get_document_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        return self.store.get_document_version(
+            tenant_id=tenant_id,
+            collection=collection,
+            document_id=document_id,
+            version_id=version_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            max_chars=max_chars,
+        )
+
+    def list_collections(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if agent_id is not None and (
+            not isinstance(agent_id, str) or not AGENT_PATTERN.fullmatch(agent_id)
+        ):
+            raise ValueError("agent_id is invalid")
+        if project_id is not None and (
+            not isinstance(project_id, str) or not PROJECT_PATTERN.fullmatch(project_id)
+        ):
+            raise ValueError("project_id is invalid")
+        return self.store.list_collections(
+            tenant_id=tenant_id, agent_id=agent_id, project_id=project_id
+        )
 
     def close(self) -> None:
         self.store.close()

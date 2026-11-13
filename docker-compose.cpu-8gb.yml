@@ -1,0 +1,25 @@
+# Conservative resource overlay for the rusa-edge-8 (8-GB) RusaAi Control Plane.
+# Apply after docker-compose.yml and docker-compose.cpu.yml.
+# These limits cover only RusaAi Control Plane containers. The RusaModels Model
+# Plane runs separately and must be budgeted so the combined host retains >=2 GiB free RAM.
+
+services:
+  postgres:
+    mem_limit: 384m
+    cpus: 0.25
+
+  api:
+    mem_limit: 512m
+    cpus: 0.50
+    environment:
+      RUSA_MAX_WAITING_INFERENCES: ${RUSA_MAX_WAITING_INFERENCES:-1}
+
+  worker:
+    mem_limit: 768m
+    cpus: 0.75
+    environment:
+      RUSA_MAX_PARALLEL_WORKERS: ${RUSA_MAX_PARALLEL_WORKERS:-1}
+
+  web:
+    mem_limit: 384m
+    cpus: 0.25

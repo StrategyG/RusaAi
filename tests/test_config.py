@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import pytest
 
 from rusa_agents.config import RuntimeConfig
@@ -18,8 +21,11 @@ def set_api_environment(monkeypatch):
     monkeypatch.delenv("RUSA_API_KEY", raising=False)
     monkeypatch.setenv("RUSA_METRICS_API_KEY", "m" * 40)
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
 
 
 def set_worker_environment(monkeypatch):
@@ -37,8 +43,32 @@ def set_worker_environment(monkeypatch):
         "registry.internal/sandbox@sha256:" + "a" * 64,
     )
     monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-a":["StrategyG/RusaAi"]}')
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
-    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+    # The Worker reaches inference only through the RusaAi gateway.
+    # It must not receive the Model Plane endpoint or its service credential.
+    monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
+    monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
+    monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
+    worker_key = "w" * 48
+    worker_key_digest = hashlib.sha256(worker_key.encode("utf-8")).hexdigest()
+    monkeypatch.setenv(
+        "RUSA_API_KEYS_JSON",
+        json.dumps({
+            worker_key_digest: {
+                "subject": "rusa-worker-tenant-a",
+                "tenant_id": "tenant-a",
+                "roles": ["developer"],
+            }
+        }),
+    )
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_GATEWAY", "true")
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_BASE_URL", "https://api.internal/v1"
+    )
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": worker_key})
+    )
 
 
 def test_production_api_accepts_dedicated_tls_database_role(monkeypatch):
@@ -144,11 +174,19 @@ def test_production_api_rejects_plain_http_model_endpoint(monkeypatch):
         RuntimeConfig.from_env().validate_api()
 
 
-def test_production_worker_rejects_plain_http_model_endpoint(monkeypatch):
+def test_production_worker_rejects_direct_model_server_url(monkeypatch):
     set_worker_environment(monkeypatch)
-    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "http://llama-cpp:8080/v1")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/openai/v1")
 
-    with pytest.raises(RuntimeError, match="credential-free HTTPS"):
+    with pytest.raises(RuntimeError, match="must not be provided to the Worker"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_model_server_inference_token(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
+
+    with pytest.raises(RuntimeError, match="only the API gateway holds"):
         RuntimeConfig.from_env().validate_worker()
 
 
@@ -159,8 +197,94 @@ def test_production_api_rejects_missing_model_gateway_token(monkeypatch):
         RuntimeConfig.from_env().validate_api()
 
 
-def test_production_worker_rejects_placeholder_model_gateway_token(monkeypatch):
+def test_production_worker_does_not_receive_model_gateway_secret(monkeypatch):
     set_worker_environment(monkeypatch)
-    monkeypatch.setenv("RUSA_MODEL_API_KEY", "replace-with-model-token")
-    with pytest.raises(RuntimeError, match="RUSA_MODEL_API_KEY"):
+    monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_missing_tenant_inference_credential(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_API_KEYS", "{}")
+    with pytest.raises(RuntimeError, match="missing tenant tenant-a"):
         RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_inference_key_not_bound_to_tenant(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_API_KEYS", json.dumps({"tenant-a": "x" * 48}))
+    with pytest.raises(RuntimeError, match="tenant-bound inference principal"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_unknown_inference_key_tenants(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_WORKER_INFERENCE_API_KEYS",
+        json.dumps({"tenant-a": "w" * 48, "tenant-b": "x" * 48}),
+    )
+    with pytest.raises(RuntimeError, match="outside RUSA_TENANT_REPOSITORIES"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_requires_tls_api_gateway(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_WORKER_INFERENCE_BASE_URL", "http://api:8000/v1")
+    with pytest.raises(RuntimeError, match="RUSA_WORKER_INFERENCE_BASE_URL"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+
+def test_default_model_name_uses_safe_smoke_alias_until_checkpoint_is_approved(monkeypatch):
+    monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
+    assert RuntimeConfig.from_env().model_name == "rusaai-cpu-smoke-test"
+
+@pytest.mark.parametrize("variable", ["RUSA_LOCAL_MODEL_PATH", "RUSA_MODEL_PATH"])
+def test_production_api_rejects_local_model_artifact_paths(monkeypatch, variable):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(variable, "/srv/rusa/models/local-checkpoint")
+
+    with pytest.raises(RuntimeError, match="RusaModels owns model artifact loading"):
+        RuntimeConfig.from_env().validate_api()
+
+@pytest.mark.parametrize("validator", ["validate_api", "validate_worker"])
+def test_production_requires_explicit_model_server_identity(monkeypatch, validator):
+    if validator == "validate_api":
+        set_api_environment(monkeypatch)
+    else:
+        set_worker_environment(monkeypatch)
+    monkeypatch.delenv("RUSA_MODEL_NAME", raising=False)
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
+        getattr(RuntimeConfig.from_env(), validator)()
+
+def test_production_api_rejects_angle_bracket_model_host_placeholder(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv(
+        "RUSA_MODEL_BASE_URL", "https://<model-server-host>/openai/v1"
+    )
+
+    with pytest.raises(RuntimeError, match="real model host"):
+        RuntimeConfig.from_env().validate_api()
+
+def test_production_api_rejects_placeholder_model_id(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_NAME", "replace-with-registered-rusamodels-model-id")
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_NAME"):
+        RuntimeConfig.from_env().validate_api()
+
+def test_production_api_requires_rusamodels_openai_v1_endpoint(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://model.internal/v1")
+
+    with pytest.raises(RuntimeError, match="RusaModels /openai/v1 endpoint"):
+        RuntimeConfig.from_env().validate_api()
+
+
+def test_production_api_rejects_custom_readiness_override(monkeypatch):
+    set_api_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_MODEL_HEALTH_URL", "https://model.internal/health")
+
+    with pytest.raises(RuntimeError, match="RUSA_MODEL_HEALTH_URL override is forbidden"):
+        RuntimeConfig.from_env().validate_api()
