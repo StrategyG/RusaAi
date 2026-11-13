@@ -35,6 +35,7 @@ class AICodeRuntime:
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
             raise RuntimeError("Production worker requires DOCKER_HOST connected to a dedicated rootless sandbox daemon")
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
+        self.agent_runtime: AgentRuntimeV1 | None = None
         self.queue = PostgresTaskQueue(self.config.worker_database_url)
         self.memory = PostgresMemory(self.config.worker_database_url)
         if not self.config.audit_hmac_key:
