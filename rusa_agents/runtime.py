@@ -154,7 +154,12 @@ class AICodeRuntime:
             trusted_tenant_id=job.tenant_id,
             cancellation_event=cancellation_event,
         )
-        if not cancellation_event.is_set():
+        if cancellation_event.is_set():
+            if result.status.value != "cancelled":
+                raise LeaseLostError(
+                    "Queue lease was revoked before DAG completion could be accepted"
+                )
+        else:
             await self._assert_lease(job, cancellation_event)
         return result
 
