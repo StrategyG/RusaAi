@@ -16,7 +16,7 @@ from rusa_agents.capability_registry import (
     RegistryValidationError,
 )
 from rusa_agents.capability_router import CapabilityRouter, RouteRequest
-from rusa_agents.contracts import WorkerRole
+from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.queue import Job
 from rusa_agents.runtime import AICodeRuntime
