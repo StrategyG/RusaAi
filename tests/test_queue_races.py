@@ -177,16 +177,17 @@ def test_lease_bound_operation_refuses_expired_lease_before_checkpoint():
         assert queue.enqueue(
             task_id, tenant, {"objective": "stale checkpoint"}, priority=2**31 - 1
         )
-        job = queue.claim("checkpoint-stale-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
-        expire_lease(job.id, tenant)
+        job_id, lease_token = claim_specific_task(
+            task_id, tenant, "checkpoint-stale-worker"
+        )
+        expire_lease(job_id, tenant)
 
         with pytest.raises(LeaseLostError, match="active task lease"):
             queue.with_lease_owned(
-                job.id,
+                job_id,
                 tenant,
                 "checkpoint-stale-worker",
-                job.lease_token,
+                lease_token,
                 lambda: called.append("checkpointed"),
             )
         assert called == []
@@ -221,16 +222,17 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
         assert queue.enqueue(
             task_id, tenant, {"objective": "fenced checkpoint"}, priority=2**31 - 1
         )
-        job = queue.claim("checkpoint-fence-worker", lease_seconds=30)
-        assert job and job.task_id == task_id
+        job_id, lease_token = claim_specific_task(
+            task_id, tenant, "checkpoint-fence-worker"
+        )
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             checkpoint = pool.submit(
                 queue.with_lease_owned,
-                job.id,
+                job_id,
                 tenant,
                 "checkpoint-fence-worker",
-                job.lease_token,
+                lease_token,
                 bounded_checkpoint,
                 lease_seconds=30,
             )
@@ -244,7 +246,7 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
             with psycopg.connect(DSN) as connection:
                 skipped = connection.execute(
                     "SELECT id FROM aicode_jobs WHERE id=%s FOR UPDATE SKIP LOCKED",
-                    (job.id,),
+                    (job_id,),
                 ).fetchone()
             assert skipped is None, "SKIP LOCKED did not skip the checkpoint-locked task"
             release_checkpoint.set()
@@ -262,9 +264,9 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
                   AND lease_until < NOW()
                 RETURNING lease_token::text
                 """,
-                (replacement_token, job.id, tenant),
+                (replacement_token, job_id, tenant),
             ).fetchone()
-        assert replacement and replacement[0] != job.lease_token
+        assert replacement and replacement[0] != lease_token
     finally:
         release_checkpoint.set()
         remove_task(task_id, tenant)
