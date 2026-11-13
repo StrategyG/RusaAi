@@ -32,6 +32,12 @@ def test_queue_readiness_policy_names_match_the_canonical_rls_migration():
     assert "aicode_task_policy_events_worker_insert" in audit_migration
     assert "BEFORE UPDATE OR DELETE" in audit_migration
     assert "BEFORE TRUNCATE" in audit_migration
+    queue = Path("rusa_agents/queue.py").read_text(encoding="utf-8")
+    approval_migration = Path("migrations/015_aicode_task_approval.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "task.approve" in queue
+    assert "'task.approve'" in approval_migration
 
 
 def test_rls_integration_fixture_applies_migrations_once_in_version_order():
