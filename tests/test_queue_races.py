@@ -174,7 +174,9 @@ def test_lease_bound_operation_refuses_expired_lease_before_checkpoint():
     task_id = str(uuid4())
     called = []
     try:
-        assert queue.enqueue(task_id, tenant, {"objective": "stale checkpoint"})
+        assert queue.enqueue(
+            task_id, tenant, {"objective": "stale checkpoint"}, priority=2**31 - 1
+        )
         job = queue.claim("checkpoint-stale-worker", lease_seconds=30)
         assert job and job.task_id == task_id
         expire_lease(job.id, tenant)
@@ -216,7 +218,9 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
         return "checkpoint-saved"
 
     try:
-        assert queue.enqueue(task_id, tenant, {"objective": "fenced checkpoint"})
+        assert queue.enqueue(
+            task_id, tenant, {"objective": "fenced checkpoint"}, priority=2**31 - 1
+        )
         job = queue.claim("checkpoint-fence-worker", lease_seconds=30)
         assert job and job.task_id == task_id
 
