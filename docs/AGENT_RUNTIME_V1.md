@@ -149,11 +149,12 @@ evidence before publication. The API and worker both enforce tenant repository
 allowlists and per-role tool/permission boundaries.
 
 A live PostgreSQL queue-to-DAG end-to-end acceptance test, canonical source
-crosswalk approval, human approval recording/fulfilment, handler-side
-idempotency for retried side effects, and broader core-agent/DevOps handlers
-remain mandatory before activating new Agent/Worker roles. High/critical risk
-and production-target nodes intentionally remain blocked for human review; the
-current queue retry operation does not itself satisfy that approval.
+crosswalk approval, handler-side idempotency for retried side effects, and
+broader core-agent/DevOps handlers remain mandatory before activating new
+Agent/Worker roles. High/critical risk and production-target nodes intentionally
+remain blocked for human review until a tenant/platform administrator uses the
+explicit approval endpoint. Queue retry is not an approval and cannot satisfy a
+policy gate.
 
 ## API and worker-process integration
 
@@ -208,7 +209,13 @@ role/tool/permission set and quality-gate dependencies, and enqueues an
 `execution_mode=agent_runtime_v1` payload only when the registry reports
 `execution_enabled=true`. Draft registries remain preview-only and receive
 HTTP 409 on task intake. The endpoint supports the existing idempotency-key
-contract and never accepts caller-supplied tenant identity.
+contract and never accepts caller-supplied tenant identity. Tenant and platform
+administrators can approve a node through
+`POST /v1/agent-runtime/tasks/{task_id}/approve`, supplying the exact plan
+fingerprint, eligible node IDs, and a rationale. The queue accepts approvals
+only for nodes currently recorded as `needs_approval`; stale fingerprints,
+completed nodes, CI failures, and hard policy denials are rejected. Approval
+metadata is stored in the tenant-scoped task result and a policy audit event.
 
 The worker's `run_once()` branches on the explicit execution mode. It
 revalidates the queue lease and task-execution authorization, parses the
@@ -220,7 +227,9 @@ worker's fixed role permissions; requested actions are checked by the
 centralized role permission registry and the autonomy policy. A missing
 adapter, inactive registry, unsupported role, or incomplete approval state
 fails closed and moves the job to `awaiting_approval` rather than falling back
-to the legacy pipeline.
+to the legacy pipeline. Human approval is bound to the exact plan fingerprint
+and node IDs when the job is reclaimed; it can satisfy a review gate but never
+override a hard policy denial.
 
 For implementation plans, tester and security nodes are mandatory and must
 depend on every developer node. Their evidence is checked independently before
