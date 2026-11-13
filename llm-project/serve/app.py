@@ -696,6 +696,26 @@ def _get_agent_runtime(request: Request) -> AgentRuntimeV1:
     return runtime
 
 
+def _agent_task_nodes(
+    nodes: list[AgentTaskNodePreviewRequest],
+) -> tuple[TaskNode, ...]:
+    """Convert the strict API model into immutable executor contracts."""
+    tuple_fields = (
+        "acceptance_criteria",
+        "dependencies",
+        "tool_allowlist",
+        "requested_permissions",
+        "context_refs",
+    )
+    converted = []
+    for node in nodes:
+        values = node.model_dump()
+        for field_name in tuple_fields:
+            values[field_name] = tuple(values[field_name])
+        converted.append(TaskNode(**values))
+    return tuple(converted)
+
+
 def require_task_permission(permission: str):
     def dependency(
         request: Request,
@@ -1204,6 +1224,100 @@ def preview_agent_task_plan(
         "execution_enabled": registry_status["execution_enabled"],
         "execution_dispatched": False,
     }
+
+
+@app.post(
+    "/v1/agent-runtime/tasks",
+    response_model=AgentRuntimeTaskResponse,
+    status_code=202,
+)
+def create_agent_runtime_task(
+    body: AgentTaskPlanCreateRequest,
+    http_request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    tenant_id: str = Depends(require_task_permission("task:create")),
+):
+    """Validate and enqueue a tenant-bound DAG only after registry activation."""
+    config = RuntimeConfig.from_env()
+    if not config.aicode_enabled:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=503, detail="Agent Runtime task intake is disabled")
+
+    runtime = _get_agent_runtime(http_request)
+    registry_status = runtime.status()
+    if not registry_status["execution_enabled"]:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(
+            status_code=409,
+            detail="Agent Runtime execution is not activated; use plan-preview until approval",
+        )
+
+    queue = getattr(http_request.app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+
+    task_id = str(uuid4())
+    plan = TaskPlan(
+        root_task_id=task_id,
+        tenant_id=tenant_id,
+        objective=body.objective,
+        nodes=_agent_task_nodes(body.nodes),
+    )
+    try:
+        runtime.validate_plan(plan)
+    except (KeyError, ValueError) as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    payload = {
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": body.objective,
+            "nodes": [
+                node.model_dump(exclude_none=True)
+                for node in body.nodes
+            ],
+        },
+    }
+    status_value = "queued"
+    try:
+        if idempotency_key is not None:
+            task_id, _, status_value = queue.enqueue_idempotent(
+                task_id,
+                tenant_id,
+                payload,
+                idempotency_key,
+                audit_actor=_api_task_actor(http_request),
+            )
+            accepted = True
+        else:
+            accepted = queue.enqueue(
+                task_id,
+                tenant_id,
+                payload,
+                audit_actor=_api_task_actor(http_request),
+            )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Could not enqueue Agent Runtime task")
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
+    audit_api_task(
+        http_request, tenant_id, task_id, "task.create", accepted, persist=False
+    )
+    if not accepted:
+        raise HTTPException(status_code=409, detail="Task identifier conflict")
+    return AgentRuntimeTaskResponse(
+        task_id=task_id,
+        status=status_value,
+        tenant_id=tenant_id,
+        execution_enabled=True,
+    )
 
 
 @app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
