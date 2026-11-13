@@ -149,6 +149,14 @@ orchestrator remains responsible for execution and its evidence/repair gates.
 The registry's draft state does not block existing AICode tasks, and it does
 not authorize any new role dispatch.
 
+After role approval and adapter review, `AICodeRuntime.build_agent_execution_engine()`
+composes the generic DAG engine with the existing `PostgresMemory` checkpoint
+store and the active `Job` lease. It refuses a job owned by another worker and
+uses `LeaseBoundCheckpointStore` so checkpoint I/O is fenced by that job's
+lease. Policy authorization and independent result verification remain
+explicit injected adapters; this method does not make the draft registry
+dispatchable or add a queue task dispatcher.
+
 The API route preview and worker startup checks share the same JSON package
 data and JSON Schema validator. A missing or invalid registry causes the
 corresponding control-plane operation to fail closed.
