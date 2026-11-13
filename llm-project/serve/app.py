@@ -538,6 +538,8 @@ class AgentTaskPlanCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective: str = Field(min_length=1, max_length=8000)
+    repository: RepositoryInput
+    context: str = Field(default="", max_length=20000)
     nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
 
     @field_validator("objective")
@@ -1242,6 +1244,13 @@ def create_agent_runtime_task(
     if not config.aicode_enabled:
         audit_api_task(http_request, tenant_id, "*", "task.create", False)
         raise HTTPException(status_code=503, detail="Agent Runtime task intake is disabled")
+    allowed_repositories = config.tenant_repositories.get(tenant_id)
+    if config.environment == "production" and not allowed_repositories:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
+    if allowed_repositories is not None and body.repository.full_name not in allowed_repositories:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
 
     runtime = _get_agent_runtime(http_request)
     registry_status = runtime.status()
@@ -1272,6 +1281,8 @@ def create_agent_runtime_task(
 
     payload = {
         "execution_mode": "agent_runtime_v1",
+        "repository": body.repository.model_dump(),
+        "context": body.context,
         "agent_runtime_plan": {
             "schema_version": "1.0",
             "objective": body.objective,
