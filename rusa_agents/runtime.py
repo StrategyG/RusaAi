@@ -420,7 +420,11 @@ class AICodeRuntime:
             or len(set(approved_ids)) != len(approved_ids)
             or not set(approved_ids).issubset(plan_node_ids)
             or not isinstance(approval.get("approved_by"), str)
-            or not approval.get("approved_by")
+            or not approval.get("approved_by", "").startswith("api:")
+            or not isinstance(approval.get("rationale"), str)
+            or not approval.get("rationale", "").strip()
+            or not isinstance(approval.get("approved_at"), str)
+            or not approval.get("approved_at")
         ):
             raise ValueError("Agent Runtime approval does not match the current plan or node set")
         approved_node_ids = frozenset(approved_ids)
