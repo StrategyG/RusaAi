@@ -1538,6 +1538,10 @@ def approve_agent_runtime_task(
     if not config.aicode_enabled:
         audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
         raise HTTPException(status_code=503, detail="Agent Runtime task execution is disabled")
+    runtime = _get_agent_runtime(http_request)
+    if not runtime.status()["execution_enabled"]:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=409, detail="Agent Runtime registry is not active")
     queue = getattr(http_request.app.state, "queue", None)
     if queue is None:
         audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
