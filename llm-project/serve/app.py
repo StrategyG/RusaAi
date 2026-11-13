@@ -45,6 +45,7 @@ from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvi
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
 from rusa_agents.runtime_v1 import AgentRuntimeV1
+from rusa_agents.task_decomposer import TaskNode, TaskPlan
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -479,6 +480,50 @@ class AgentRoutePreviewRequest(BaseModel):
         if len(normalized) != len(set(normalized)):
             raise ValueError("Capability IDs must be unique")
         return normalized
+
+
+class AgentTaskNodePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(min_length=1, max_length=128)
+    selected_role_id: str = Field(
+        min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    scope: Literal["agent", "worker"]
+    objective: str = Field(min_length=1, max_length=8000)
+    delegated_by_role_id: str = Field(
+        min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
+    dependencies: list[str] = Field(default_factory=list, max_length=64)
+    parent_task_id: str | None = Field(default=None, max_length=128)
+    workspace_ref: str | None = Field(default=None, max_length=512)
+    deadline_at: str | None = Field(default=None, max_length=64)
+    retry_limit: int = Field(default=1, ge=0, le=5)
+    tool_allowlist: list[str] = Field(default_factory=list, max_length=32)
+    requested_permissions: list[str] = Field(default_factory=list, max_length=32)
+    risk_class: Literal["low", "medium", "high", "critical"] = "low"
+    context_refs: list[str] = Field(default_factory=list, max_length=64)
+    change_id: str | None = Field(default=None, max_length=128)
+    target_environment: Literal["development", "staging", "production"] | None = None
+    release_or_change_version: str | None = Field(default=None, max_length=128)
+    lifecycle_gate: str | None = Field(default=None, max_length=128)
+    rollback_stop_condition: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("acceptance_criteria")
+    @classmethod
+    def validate_acceptance_criteria(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() for item in value):
+            raise ValueError("Acceptance criteria cannot contain blank items")
+        return value
+
+
+class AgentTaskPlanPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_task_id: str = Field(min_length=1, max_length=128)
+    objective: str = Field(min_length=1, max_length=8000)
+    nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
@@ -1098,6 +1143,68 @@ def preview_agent_route(
             for candidate in decision.candidates
         ],
         "tool_grants": list(decision.tool_grants),
+    }
+
+
+@app.post("/v1/agent-runtime/plan-preview")
+def preview_agent_task_plan(
+    body: AgentTaskPlanPreviewRequest,
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Validate a proposed DAG using the authenticated tenant, without enqueueing it."""
+    runtime = _get_agent_runtime(request)
+    nodes = tuple(
+        TaskNode(
+            task_id=node.task_id,
+            selected_role_id=node.selected_role_id,
+            scope=node.scope,
+            objective=node.objective,
+            delegated_by_role_id=node.delegated_by_role_id,
+            acceptance_criteria=tuple(node.acceptance_criteria),
+            dependencies=tuple(node.dependencies),
+            parent_task_id=node.parent_task_id,
+            workspace_ref=node.workspace_ref,
+            deadline_at=node.deadline_at,
+            retry_limit=node.retry_limit,
+            tool_allowlist=tuple(node.tool_allowlist),
+            requested_permissions=tuple(node.requested_permissions),
+            risk_class=node.risk_class,
+            context_refs=tuple(node.context_refs),
+            change_id=node.change_id,
+            target_environment=node.target_environment,
+            release_or_change_version=node.release_or_change_version,
+            lifecycle_gate=node.lifecycle_gate,
+            rollback_stop_condition=node.rollback_stop_condition,
+        )
+        for node in body.nodes
+    )
+    plan = TaskPlan(
+        root_task_id=body.root_task_id,
+        tenant_id=tenant_id,
+        objective=body.objective,
+        nodes=nodes,
+    )
+    try:
+        validation = runtime.validate_plan(plan)
+    except (KeyError, ValueError) as exc:
+        audit_api_task(request, tenant_id, body.root_task_id, "agent_runtime.plan_preview", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    registry_status = runtime.status()
+    audit_api_task(request, tenant_id, body.root_task_id, "agent_runtime.plan_preview", True)
+    return {
+        "root_task_id": plan.root_task_id,
+        "tenant_id": tenant_id,
+        "node_count": len(plan.nodes),
+        "topological_order": list(validation.topological_order),
+        "effective_dependencies": {
+            task_id: list(dependencies)
+            for task_id, dependencies in validation.effective_dependencies.items()
+        },
+        "approval_required_node_ids": list(validation.approval_required_node_ids),
+        "registry_status": registry_status["status"],
+        "execution_enabled": registry_status["execution_enabled"],
+        "execution_dispatched": False,
     }
 
 
