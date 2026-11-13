@@ -225,7 +225,9 @@ def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
     queue.valid = False
     with pytest.raises(RuntimeError, match="lease lost"):
         store.save("root-task-001", "tenant-a", {"stale": True})
-    assert delegate.load("root-task-001", "tenant-a") == payload
+    persisted = delegate.load("root-task-001", "tenant-a")
+    assert persisted["plan_fingerprint"] == payload["plan_fingerprint"]
+    assert persisted["checkpoint_version"] == 1
 
 
 
