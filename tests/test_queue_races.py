@@ -238,7 +238,7 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
             )
             assert checkpointing.wait(timeout=5)
 
-            expiry = pool.submit(expire_while_locked, job.id)
+            expiry = pool.submit(expire_while_locked, job_id)
             assert expiry_started.wait(timeout=5)
             time.sleep(0.1)
             assert not expiry.done(), "lease row was not locked during checkpoint"
