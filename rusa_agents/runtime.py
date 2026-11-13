@@ -10,31 +10,69 @@ import time
 from collections.abc import Coroutine, Mapping
 from typing import Any
 
+from .agent_tools import ROLE_TOOL_ALLOWLIST
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .capability_registry import RegistryNotActivatedError
 from .config import RuntimeConfig
-from .contracts import CodingTask, RepositoryTarget, TaskState
+from .contracts import CodingTask, RepositoryTarget, TaskState, WorkerRole
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
+from .policy import AutonomyPolicy, RiskLevel
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .runtime_v1 import AgentRuntimeV1
 from .task_decomposer import TaskNode, TaskPlan
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 from .worker_execution import (
+    AICodeWorkerAdapter,
     LeaseBoundCheckpointStore,
     PolicyAuthorizer,
+    PolicyDecision as AgentPolicyDecision,
     ResultVerifier,
     TaskExecutionResult,
     TaskMemoryCheckpointStore,
+    VerificationDecision,
     WorkerExecutionEngine,
     WorkerHandler,
+    WorkerOutput,
 )
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
+
+
+class _ScopedAICodeWorkerHandler:
+    """Apply a task-node tool allowlist on top of the worker's fixed role boundary."""
+
+    def __init__(self, worker: Any, repository: RepositoryTarget, tenant_id: str, context: str):
+        self.worker = worker
+        self.repository = repository
+        self.tenant_id = tenant_id
+        self.context = context
+
+    async def execute(self, node: TaskNode, dependency_results: Mapping[str, Any]) -> WorkerOutput:
+        if node.selected_role_id != self.worker.role.value:
+            raise PermissionError("Agent Runtime node role does not match its worker adapter")
+        allowed_tools = frozenset(node.tool_allowlist) if node.tool_allowlist else ROLE_TOOL_ALLOWLIST[self.worker.role]
+        if not allowed_tools.issubset(ROLE_TOOL_ALLOWLIST[self.worker.role]):
+            raise PermissionError(
+                f"Task tool allowlist exceeds the registered {self.worker.role.value} role permissions"
+            )
+        scoped_worker = AutonomousCodeWorker(
+            self.worker.role,
+            self.worker.provider,
+            self.worker.gateway,
+            max_steps=self.worker.max_steps,
+            max_actions_per_step=self.worker.max_actions_per_step,
+            max_output_chars=self.worker.max_output_chars,
+            allowed_tools=allowed_tools,
+        )
+        adapter = AICodeWorkerAdapter(
+            scoped_worker, self.repository, self.tenant_id, self.context
+        )
+        return await adapter.execute(node, dependency_results)
 
 
 class AICodeRuntime:
@@ -101,6 +139,9 @@ class AICodeRuntime:
         handlers: Mapping[str, WorkerHandler],
         policy_authorizer: PolicyAuthorizer,
         result_verifier: ResultVerifier,
+        *,
+        workspace: str | None = None,
+        coding_task: CodingTask | None = None,
     ) -> None:
         """Inject reviewed Agent Runtime adapters; no handler is enabled by default."""
         if not isinstance(handlers, Mapping) or not handlers:
@@ -115,10 +156,14 @@ class AICodeRuntime:
             for role_id, handler in normalized.items()
         ):
             raise TypeError("Every Agent Runtime handler must expose an async execute method")
+        if (workspace is None) != (coding_task is None):
+            raise ValueError("Agent Runtime publication requires both workspace and coding_task")
         self._agent_runtime_dispatch = {
             "handlers": normalized,
             "policy_authorizer": policy_authorizer,
             "result_verifier": result_verifier,
+            "workspace": workspace,
+            "coding_task": coding_task,
         }
 
     @staticmethod
@@ -207,6 +252,154 @@ class AICodeRuntime:
             nodes=tuple(nodes),
         )
 
+    def _agent_runtime_coding_task(self, job: Job, plan: TaskPlan) -> CodingTask:
+        repository = job.payload.get("repository")
+        if not isinstance(repository, dict) or set(repository) - {"full_name", "base_branch"}:
+            raise ValueError("Agent Runtime queue payload requires a valid repository target")
+        full_name = repository.get("full_name")
+        base_branch = repository.get("base_branch", "main")
+        if not isinstance(full_name, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", full_name
+        ) or any(part in {".", ".."} for part in full_name.split("/", 1)):
+            raise ValueError("Agent Runtime repository must use a valid owner/name identifier")
+        if not isinstance(base_branch, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._/-]{0,180}", base_branch
+        ) or ".." in base_branch or "//" in base_branch or base_branch.endswith("/"):
+            raise ValueError("Agent Runtime base branch is invalid")
+
+        allowed_repositories = getattr(self.config, "tenant_repositories", {}).get(job.tenant_id)
+        if getattr(self.config, "environment", "development") == "production" and not allowed_repositories:
+            raise PermissionError("Tenant has no configured repository permissions")
+        if allowed_repositories is not None and full_name not in allowed_repositories:
+            raise PermissionError("Tenant is not authorized for this repository")
+
+        context = job.payload.get("context", "")
+        if not isinstance(context, str) or len(context) > 20000:
+            raise ValueError("Agent Runtime context must be text of at most 20000 characters")
+        acceptance_criteria = list(dict.fromkeys(
+            criterion for node in plan.nodes for criterion in node.acceptance_criteria
+        ))
+        lease_suffix = job.lease_token.replace("-", "")[:8]
+        return CodingTask(
+            objective=plan.objective,
+            repository=RepositoryTarget(
+                full_name=full_name,
+                base_branch=base_branch,
+                work_branch=f"feature/aicode/{job.task_id[:12]}-{lease_suffix}",
+            ),
+            acceptance_criteria=acceptance_criteria,
+            context=context,
+            task_id=job.task_id,
+            metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
+        )
+
+    @staticmethod
+    def _agent_runtime_policy_authorizer(node: TaskNode, tenant_id: str) -> AgentPolicyDecision:
+        role_permissions = {
+            "analyst": frozenset({"repo_read"}),
+            "architect": frozenset({"repo_read"}),
+            "developer": frozenset({"repo_read", "workspace_write"}),
+            "debugger": frozenset({"repo_read", "test_run"}),
+            "tester": frozenset({"repo_read", "test_run"}),
+            "security": frozenset({"repo_read", "test_run", "audit_read"}),
+        }
+        allowed = role_permissions.get(node.selected_role_id)
+        if allowed is None:
+            return AgentPolicyDecision(
+                allowed=False, reason="No reviewed policy mapping exists for this worker role"
+            )
+        requested = frozenset(node.requested_permissions) or allowed
+        if not requested.issubset(allowed):
+            return AgentPolicyDecision(
+                allowed=False,
+                reason="Requested permissions exceed the selected worker role policy",
+            )
+        policy = AutonomyPolicy()
+        risk = RiskLevel(node.risk_class)
+        decisions = [policy.evaluate(action, risk) for action in sorted(requested)]
+        approval = next((decision for decision in decisions if decision.requires_approval), None)
+        if approval is not None:
+            return AgentPolicyDecision(
+                allowed=False, requires_approval=True, reason=approval.reason
+            )
+        denied = next((decision for decision in decisions if not decision.allowed), None)
+        if denied is not None:
+            return AgentPolicyDecision(allowed=False, reason=denied.reason)
+        return AgentPolicyDecision(allowed=True, reason="Allowed by the reviewed AICode worker policy")
+
+    @staticmethod
+    def _agent_runtime_result_verifier(
+        node: TaskNode, output: WorkerOutput
+    ) -> VerificationDecision:
+        if not isinstance(output.summary, str) or not output.summary.strip():
+            return VerificationDecision(False, "Worker output must include a non-empty summary")
+        checks = output.tests_or_checks
+        if not isinstance(checks, Mapping):
+            return VerificationDecision(False, "Worker validation evidence must be an object")
+        for key, evidence in checks.items():
+            if str(key).startswith("check:") and (
+                not isinstance(evidence, Mapping)
+                or type(evidence.get("exit_code")) is not int
+                or evidence.get("exit_code") != 0
+            ):
+                return VerificationDecision(False, f"Validation evidence failed or is malformed: {key}")
+        required_checks = {
+            "tester": ("check:pytest",),
+            "security": ("check:bandit", "check:ruff", "check:compile"),
+        }.get(node.selected_role_id, ())
+        for key in required_checks:
+            evidence = checks.get(key)
+            if (
+                not isinstance(evidence, Mapping)
+                or type(evidence.get("exit_code")) is not int
+                or evidence.get("exit_code") != 0
+            ):
+                return VerificationDecision(False, f"Required verification evidence is missing or failed: {key}")
+        if node.selected_role_id == "developer" and not output.artifacts:
+            return VerificationDecision(False, "Developer worker must return at least one changed artifact")
+        return VerificationDecision(True, "Worker output and required evidence passed verification")
+
+    async def _build_agent_runtime_dispatch(
+        self, job: Job, plan: TaskPlan
+    ) -> dict[str, Any]:
+        if self.agent_runtime is None:
+            self._load_agent_runtime_registry()
+        if self.agent_runtime is None or not self.agent_runtime.status()["execution_enabled"]:
+            raise RegistryNotActivatedError(
+                "Agent Runtime execution is disabled until the registry is approved and activated"
+            )
+        supported_roles = {role.value for role in AICodeOrchestrator.PIPELINE}
+        unsupported = sorted({node.selected_role_id for node in plan.nodes} - supported_roles)
+        if unsupported:
+            raise RegistryNotActivatedError(
+                "No reviewed execution adapter is available for roles: " + ", ".join(unsupported)
+            )
+        await self._assert_lease(job, asyncio.Event())
+        task = self._agent_runtime_coding_task(job, plan)
+        orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+        handlers: dict[str, WorkerHandler] = {}
+        for role_id in sorted({node.selected_role_id for node in plan.nodes}):
+            role = WorkerRole(role_id)
+            worker = orchestrator.workers.get(role)
+            if worker is None:
+                try:
+                    await asyncio.to_thread(self.workspace_manager.cleanup, task, job.tenant_id)
+                except Exception:
+                    logger.exception("Could not clean unsupported Agent Runtime workspace %s", task.task_id)
+                raise RegistryNotActivatedError(
+                    f"No initialized AICode worker adapter exists for role {role_id!r}"
+                )
+            handlers[role_id] = _ScopedAICodeWorkerHandler(
+                worker, task.repository, job.tenant_id, task.context
+            )
+        return {
+            "handlers": handlers,
+            "policy_authorizer": self._agent_runtime_policy_authorizer,
+            "result_verifier": self._agent_runtime_result_verifier,
+            "workspace": workspace,
+            "coding_task": task,
+        }
+
     async def _await_agent_runtime_approval(
         self,
         job: Job,
@@ -241,19 +434,22 @@ class AICodeRuntime:
         job: Job,
         cancellation_event: asyncio.Event,
     ) -> str:
-        """Execute one explicitly typed DAG job; never fall back to legacy coding mode."""
+        """Execute one explicitly typed DAG job and publish only verified output."""
         plan = self._agent_runtime_plan_from_job(job)
         dispatch = getattr(self, "_agent_runtime_dispatch", None)
         if dispatch is None:
-            return await self._await_agent_runtime_approval(
-                job,
-                "Agent Runtime dispatch adapters are not configured; operator review is required",
-                {
-                    "execution_mode": "agent_runtime_v1",
-                    "plan_schema_version": "1.0",
-                    "dispatch_configured": False,
-                },
-            )
+            try:
+                dispatch = await self._build_agent_runtime_dispatch(job, plan)
+            except RegistryNotActivatedError as exc:
+                return await self._await_agent_runtime_approval(
+                    job,
+                    str(exc),
+                    {
+                        "execution_mode": "agent_runtime_v1",
+                        "plan_schema_version": "1.0",
+                        "activation_blocked": True,
+                    },
+                )
 
         try:
             result = await self.execute_agent_plan(
@@ -275,6 +471,8 @@ class AICodeRuntime:
                 },
             )
 
+        coding_task = dispatch.get("coding_task")
+        workspace = dispatch.get("workspace")
         result_payload = {
             "execution_mode": "agent_runtime_v1",
             "plan_status": result.status.value,
@@ -282,6 +480,9 @@ class AICodeRuntime:
             "topological_order": list(result.topological_order),
             "node_results": [item.to_dict() for item in result.node_results],
         }
+        if coding_task is not None:
+            result_payload["branch"] = coding_task.repository.work_branch
+
         if result.status.value in {"needs_approval", "blocked"}:
             relevant = [
                 item.error or item.summary
@@ -295,6 +496,96 @@ class AICodeRuntime:
         if result.status.value == "cancelled":
             return "lease_lost"
         if result.status.value == "completed":
+            if (workspace is None) != (coding_task is None):
+                raise RuntimeError("Agent Runtime publication context is incomplete")
+            if workspace is None and self.config.environment == "production":
+                return await self._await_agent_runtime_approval(
+                    job,
+                    "Production Agent Runtime requires a repository workspace and publication adapter",
+                    result_payload,
+                )
+            if workspace is not None and coding_task is not None:
+                await self._assert_lease(job, cancellation_event)
+                commit_sha = await asyncio.to_thread(
+                    self.queue.publish_if_lease_owned,
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
+                    lambda: self.publisher.commit_and_push(
+                        workspace,
+                        coding_task.repository.full_name,
+                        coding_task.repository.work_branch,
+                        f"feat(agent-runtime): {coding_task.objective[:120]}",
+                    ),
+                    lease_seconds=900,
+                )
+                await self._assert_lease(job, cancellation_event)
+                pr_url = await self._await_with_lease(
+                    self.publisher.create_or_get_draft_pr(
+                        coding_task.repository.full_name,
+                        coding_task.repository.work_branch,
+                        coding_task.repository.base_branch,
+                        f"Agent Runtime: {coding_task.objective[:180]}",
+                        (
+                            "## Agent Runtime implementation\n\n"
+                            f"Task ID: {job.task_id}\n\n"
+                            f"Plan fingerprint: {result.plan_fingerprint}\n\n"
+                            f"Workspace commit: {commit_sha}\n\n"
+                            "Acceptance criteria:\n"
+                            + "\n".join(f"- {item}" for item in coding_task.acceptance_criteria)
+                            + "\n\nAutomated checks were independently verified. This pull request is draft "
+                            "and requires human review before merge."
+                        ),
+                    ),
+                    cancellation_event,
+                )
+                await asyncio.to_thread(
+                    self.audit.record,
+                    "pull_request.created",
+                    job.task_id,
+                    self.worker_id,
+                    {"pull_request_url": pr_url, "commit_sha": commit_sha, "execution_mode": "agent_runtime_v1"},
+                    tenant_id=job.tenant_id,
+                )
+                try:
+                    ci_timeout = int(os.getenv("RUSA_CI_TIMEOUT_SECONDS", "900"))
+                    ci_poll = int(os.getenv("RUSA_CI_POLL_SECONDS", "15"))
+                except ValueError as exc:
+                    raise ValueError("CI timeout and poll interval must be integers") from exc
+                if not 60 <= ci_timeout <= 3600 or not 5 <= ci_poll <= 60:
+                    raise ValueError("CI timeout must be 60-3600s and poll interval 5-60s")
+                ci_ok, ci_reason = await self._await_with_lease(
+                    self.publisher.wait_for_ci(
+                        coding_task.repository.full_name,
+                        commit_sha,
+                        timeout_seconds=ci_timeout,
+                        poll_seconds=ci_poll,
+                    ),
+                    cancellation_event,
+                )
+                result_payload.update({
+                    "commit_sha": commit_sha,
+                    "pull_request_url": pr_url,
+                })
+                if not ci_ok:
+                    return await self._await_agent_runtime_approval(
+                        job, ci_reason, result_payload
+                    )
+                await asyncio.to_thread(
+                    self.audit.record,
+                    "ci.verified",
+                    job.task_id,
+                    self.worker_id,
+                    {
+                        "commit_sha": commit_sha,
+                        "pull_request_url": pr_url,
+                        "result": ci_reason,
+                        "execution_mode": "agent_runtime_v1",
+                    },
+                    tenant_id=job.tenant_id,
+                )
+
             completed = await asyncio.to_thread(
                 self.queue.complete,
                 job.id,
@@ -315,14 +606,20 @@ class AICodeRuntime:
                 {
                     "plan_fingerprint": result.plan_fingerprint,
                     "node_count": len(result.node_results),
+                    "pull_request_url": result_payload.get("pull_request_url"),
                 },
                 tenant_id=job.tenant_id,
             )
+            if workspace is not None and coding_task is not None:
+                try:
+                    await asyncio.to_thread(
+                        self.workspace_manager.cleanup, coding_task, job.tenant_id
+                    )
+                except Exception:
+                    logger.exception("Could not clean successful Agent Runtime workspace %s", job.task_id)
             return "success"
 
-        errors = [
-            item.error for item in result.node_results if item.error
-        ]
+        errors = [item.error for item in result.node_results if item.error]
         reason = "; ".join(errors) or f"Agent Runtime plan ended in {result.status.value}"
         failed = await asyncio.to_thread(
             self.queue.fail,
