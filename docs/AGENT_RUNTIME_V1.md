@@ -174,9 +174,20 @@ After role approval and adapter review, `AICodeRuntime.build_agent_execution_eng
 composes the generic DAG engine with the existing `PostgresMemory` checkpoint
 store and the active `Job` lease. It refuses a job owned by another worker and
 uses `LeaseBoundCheckpointStore` so checkpoint I/O is fenced by that job's
-lease. Policy authorization and independent result verification remain
-explicit injected adapters; this method does not make the draft registry
-dispatchable or add a queue task dispatcher.
+lease.
+
+`AICodeRuntime.execute_agent_plan()` is the queue-lease-aware execution
+boundary for a caller that already claimed a job and prepared a validated
+`TaskPlan` plus worker handlers. It binds the plan root and tenant to the
+claimed job, verifies lease ownership before and after execution, and forwards
+the worker heartbeat's cancellation event into the DAG executor. It does not
+complete/fail the queue row; the caller retains that responsibility. Generic
+plan payload intake and automatic dispatch are still not wired into
+`AICodeRuntime.run_once()`.
+
+Policy authorization and independent result verification remain explicit
+injected adapters. These methods do not make the draft registry dispatchable
+or grant any new role/tool permission.
 
 The API route preview and worker startup checks share the same JSON package
 data and JSON Schema validator. A missing or invalid registry causes the
