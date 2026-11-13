@@ -1,7 +1,6 @@
 """Tests for the staged Agent Runtime v1.0 registry, router, DAG and executor."""
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 
