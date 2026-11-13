@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .capability_registry import AgentWorkerRegistry, RoleDefinition
+from .capability_registry import AgentWorkerRegistry
 
 
 @dataclass(frozen=True)
