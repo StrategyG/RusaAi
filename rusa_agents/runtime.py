@@ -7,7 +7,7 @@ import os
 import re
 import socket
 import time
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 from typing import Any
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
@@ -21,13 +21,16 @@ from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .runtime_v1 import AgentRuntimeV1
+from .task_decomposer import TaskPlan
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 from .worker_execution import (
     LeaseBoundCheckpointStore,
     PolicyAuthorizer,
     ResultVerifier,
+    TaskExecutionResult,
     TaskMemoryCheckpointStore,
     WorkerExecutionEngine,
+    WorkerHandler,
 )
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
@@ -123,6 +126,37 @@ class AICodeRuntime:
             result_verifier,
             worker_parallelism=1,
         )
+
+    async def execute_agent_plan(
+        self,
+        job: Job,
+        plan: TaskPlan,
+        handlers: Mapping[str, WorkerHandler],
+        policy_authorizer: PolicyAuthorizer,
+        result_verifier: ResultVerifier,
+        cancellation_event: asyncio.Event,
+    ) -> TaskExecutionResult:
+        """Run one validated DAG under the caller's live queue lease signal.
+
+        The caller remains responsible for queue completion/failure. This
+        method only executes the plan and never bypasses the registry,
+        policy, verifier, tenant, or lease gates.
+        """
+        if plan.root_task_id != job.task_id:
+            raise PermissionError("Agent Runtime plan root does not match the claimed queue task")
+        if plan.tenant_id != job.tenant_id:
+            raise PermissionError("Agent Runtime plan tenant does not match the claimed queue tenant")
+        await self._assert_lease(job, cancellation_event)
+        engine = self.build_agent_execution_engine(job, policy_authorizer, result_verifier)
+        result = await engine.execute(
+            plan,
+            handlers,
+            trusted_tenant_id=job.tenant_id,
+            cancellation_event=cancellation_event,
+        )
+        if not cancellation_event.is_set():
+            await self._assert_lease(job, cancellation_event)
+        return result
 
     def initialize(self) -> None:
         self._load_agent_runtime_registry()
