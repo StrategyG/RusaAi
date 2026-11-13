@@ -12,6 +12,7 @@ from typing import Any
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
+from .capability_registry import RegistryNotActivatedError
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
@@ -21,7 +22,7 @@ from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .runtime_v1 import AgentRuntimeV1
-from .task_decomposer import TaskPlan
+from .task_decomposer import TaskNode, TaskPlan
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 from .worker_execution import (
     LeaseBoundCheckpointStore,
@@ -94,6 +95,249 @@ class AICodeRuntime:
             compatibility["dispatchable"],
         )
         return compatibility
+
+    def configure_agent_runtime_dispatch(
+        self,
+        handlers: Mapping[str, WorkerHandler],
+        policy_authorizer: PolicyAuthorizer,
+        result_verifier: ResultVerifier,
+    ) -> None:
+        """Inject reviewed Agent Runtime adapters; no handler is enabled by default."""
+        if not isinstance(handlers, Mapping) or not handlers:
+            raise ValueError("Agent Runtime dispatch requires a non-empty handler mapping")
+        if not callable(policy_authorizer) or not callable(result_verifier):
+            raise TypeError("Agent Runtime policy and verifier adapters must be callable")
+        normalized = dict(handlers)
+        if any(
+            not isinstance(role_id, str)
+            or not role_id
+            or not callable(getattr(handler, "execute", None))
+            for role_id, handler in normalized.items()
+        ):
+            raise TypeError("Every Agent Runtime handler must expose an async execute method")
+        self._agent_runtime_dispatch = {
+            "handlers": normalized,
+            "policy_authorizer": policy_authorizer,
+            "result_verifier": result_verifier,
+        }
+
+    @staticmethod
+    def _agent_runtime_plan_from_job(job: Job) -> TaskPlan:
+        """Parse the versioned queue payload without trusting caller tenant/root IDs."""
+        payload = job.payload
+        if not isinstance(payload, dict):
+            raise ValueError("Agent Runtime queue payload must be an object")
+        raw_plan = payload.get("agent_runtime_plan")
+        if not isinstance(raw_plan, dict):
+            raise ValueError("Agent Runtime queue payload requires agent_runtime_plan")
+        if set(raw_plan) - {"schema_version", "objective", "nodes"}:
+            raise ValueError("Agent Runtime plan contains unsupported top-level fields")
+        if raw_plan.get("schema_version", "1.0") != "1.0":
+            raise ValueError("Unsupported Agent Runtime plan schema_version")
+        objective = raw_plan.get("objective")
+        raw_nodes = raw_plan.get("nodes")
+        if not isinstance(objective, str) or not objective.strip():
+            raise ValueError("Agent Runtime plan objective is required")
+        if not isinstance(raw_nodes, list) or not 1 <= len(raw_nodes) <= 64:
+            raise ValueError("Agent Runtime plan must contain between 1 and 64 nodes")
+
+        tuple_fields = {
+            "acceptance_criteria",
+            "dependencies",
+            "tool_allowlist",
+            "requested_permissions",
+            "context_refs",
+        }
+        required_fields = {
+            "task_id",
+            "selected_role_id",
+            "scope",
+            "objective",
+            "delegated_by_role_id",
+            "acceptance_criteria",
+        }
+        allowed_fields = set(TaskNode.__dataclass_fields__)
+        nodes: list[TaskNode] = []
+        for index, raw_node in enumerate(raw_nodes):
+            if not isinstance(raw_node, dict):
+                raise ValueError(f"Agent Runtime node {index} must be an object")
+            unknown = set(raw_node) - allowed_fields
+            if unknown:
+                raise ValueError(
+                    f"Agent Runtime node {index} contains unsupported fields: "
+                    + ", ".join(sorted(unknown))
+                )
+            missing = required_fields - set(raw_node)
+            if missing:
+                raise ValueError(
+                    f"Agent Runtime node {index} is missing required fields: "
+                    + ", ".join(sorted(missing))
+                )
+            normalized = dict(raw_node)
+            for field_name in tuple_fields:
+                if field_name in normalized:
+                    value = normalized[field_name]
+                    if not isinstance(value, list) or any(
+                        not isinstance(item, str) for item in value
+                    ):
+                        raise ValueError(
+                            f"Agent Runtime node {index} field {field_name} must be an array of strings"
+                        )
+                    normalized[field_name] = tuple(value)
+            for field_name in required_fields - {"acceptance_criteria"}:
+                if not isinstance(normalized[field_name], str):
+                    raise ValueError(
+                        f"Agent Runtime node {index} field {field_name} must be a string"
+                    )
+            for field_name in allowed_fields - required_fields - tuple_fields:
+                if field_name in normalized and normalized[field_name] is not None:
+                    if field_name == "retry_limit":
+                        if type(normalized[field_name]) is not int:
+                            raise ValueError("Agent Runtime retry_limit must be an integer")
+                    elif not isinstance(normalized[field_name], str):
+                        raise ValueError(
+                            f"Agent Runtime node {index} field {field_name} must be a string or null"
+                        )
+            nodes.append(TaskNode(**normalized))
+
+        return TaskPlan(
+            root_task_id=job.task_id,
+            tenant_id=job.tenant_id,
+            objective=objective,
+            nodes=tuple(nodes),
+        )
+
+    async def _await_agent_runtime_approval(
+        self,
+        job: Job,
+        reason: str,
+        result: dict[str, Any] | None = None,
+    ) -> str:
+        updated = await asyncio.to_thread(
+            self.queue.await_approval,
+            job.id,
+            job.tenant_id,
+            self.worker_id,
+            job.lease_token,
+            reason,
+            result,
+        )
+        if not updated:
+            raise LeaseLostError(
+                "Queue rejected Agent Runtime approval transition because the lease was lost"
+            )
+        await asyncio.to_thread(
+            self.audit.record,
+            "task.awaiting_approval",
+            job.task_id,
+            self.worker_id,
+            {"reason": reason[:2000], "execution_mode": "agent_runtime_v1"},
+            tenant_id=job.tenant_id,
+        )
+        return "awaiting_approval"
+
+    async def _dispatch_agent_runtime_job(
+        self,
+        job: Job,
+        cancellation_event: asyncio.Event,
+    ) -> str:
+        """Execute one explicitly typed DAG job; never fall back to legacy coding mode."""
+        dispatch = getattr(self, "_agent_runtime_dispatch", None)
+        if dispatch is None:
+            return await self._await_agent_runtime_approval(
+                job,
+                "Agent Runtime dispatch adapters are not configured; operator review is required",
+                {"execution_mode": "agent_runtime_v1", "dispatch_configured": False},
+            )
+
+        plan = self._agent_runtime_plan_from_job(job)
+        try:
+            result = await self.execute_agent_plan(
+                job,
+                plan,
+                dispatch["handlers"],
+                dispatch["policy_authorizer"],
+                dispatch["result_verifier"],
+                cancellation_event,
+            )
+        except RegistryNotActivatedError as exc:
+            return await self._await_agent_runtime_approval(
+                job,
+                str(exc),
+                {
+                    "execution_mode": "agent_runtime_v1",
+                    "plan_schema_version": "1.0",
+                    "activation_blocked": True,
+                },
+            )
+
+        result_payload = {
+            "execution_mode": "agent_runtime_v1",
+            "plan_status": result.status.value,
+            "plan_fingerprint": result.plan_fingerprint,
+            "topological_order": list(result.topological_order),
+            "node_results": [item.to_dict() for item in result.node_results],
+        }
+        if result.status.value == "needs_approval":
+            reason = "; ".join(
+                item.error or item.summary
+                for item in result.node_results
+                if item.status.value == "needs_approval"
+            ) or "Agent Runtime plan requires human approval"
+            return await self._await_agent_runtime_approval(job, reason, result_payload)
+        if result.status.value == "cancelled":
+            return "lease_lost"
+        if result.status.value == "completed":
+            completed = await asyncio.to_thread(
+                self.queue.complete,
+                job.id,
+                job.tenant_id,
+                self.worker_id,
+                job.lease_token,
+                result_payload,
+            )
+            if not completed:
+                raise LeaseLostError(
+                    "Queue rejected Agent Runtime completion because the lease was lost"
+                )
+            await asyncio.to_thread(
+                self.audit.record,
+                "agent_runtime.completed",
+                job.task_id,
+                self.worker_id,
+                {
+                    "plan_fingerprint": result.plan_fingerprint,
+                    "node_count": len(result.node_results),
+                },
+                tenant_id=job.tenant_id,
+            )
+            return "success"
+
+        errors = [
+            item.error for item in result.node_results if item.error
+        ]
+        reason = "; ".join(errors) or f"Agent Runtime plan ended in {result.status.value}"
+        failed = await asyncio.to_thread(
+            self.queue.fail,
+            job.id,
+            job.tenant_id,
+            self.worker_id,
+            job.lease_token,
+            reason,
+        )
+        if not failed:
+            raise LeaseLostError(
+                "Queue rejected Agent Runtime failure transition because the lease was lost"
+            )
+        await asyncio.to_thread(
+            self.audit.record,
+            "agent_runtime.failed",
+            job.task_id,
+            self.worker_id,
+            {"plan_status": result.status.value, "reason": reason[:2000]},
+            tenant_id=job.tenant_id,
+        )
+        return "failed"
 
     def build_agent_execution_engine(
         self,
@@ -338,6 +582,33 @@ class AICodeRuntime:
         authorized = False
         policy_audited = False
         try:
+            execution_mode = job.payload.get("execution_mode")
+            if execution_mode == "agent_runtime_v1":
+                await self._assert_lease(job, lost_lease)
+                authorized = await asyncio.to_thread(
+                    self.queue.authorize_execution,
+                    job.id,
+                    job.task_id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
+                )
+                policy_audited = True
+                record_task_policy(
+                    job.tenant_id,
+                    job.task_id,
+                    f"worker:{self.worker_id}",
+                    "task.execute",
+                    authorized,
+                )
+                if not authorized:
+                    lost_lease.set()
+                    raise RuntimeError("Agent Runtime worker is not authorized by the current task lease")
+                outcome = await self._dispatch_agent_runtime_job(job, lost_lease)
+                return True
+            if execution_mode not in {None, "aicode"}:
+                raise ValueError(f"Unsupported queue execution_mode: {execution_mode!r}")
+
             task = self._task(job)
             allowed_repositories = self.config.tenant_repositories.get(job.tenant_id)
             if allowed_repositories is not None and task.repository.full_name not in allowed_repositories:
