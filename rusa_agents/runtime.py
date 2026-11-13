@@ -30,7 +30,6 @@ from .worker_execution import (
     AICodeWorkerAdapter,
     LeaseBoundCheckpointStore,
     PolicyAuthorizer,
-    PolicyDecision as AgentPolicyDecision,
     ResultVerifier,
     TaskExecutionResult,
     TaskMemoryCheckpointStore,
@@ -39,6 +38,7 @@ from .worker_execution import (
     WorkerHandler,
     WorkerOutput,
 )
+from .worker_execution import PolicyDecision as AgentPolicyDecision
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
