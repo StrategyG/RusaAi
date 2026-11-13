@@ -27,6 +27,7 @@ class Job:
     max_attempts: int
     lease_owner: str
     lease_token: str
+    result: dict[str, Any] | None = None
 
 
 class PostgresTaskQueue:
@@ -69,7 +70,7 @@ class PostgresTaskQueue:
         if not isinstance(actor, str) or len(actor) > 128:
             raise ValueError("Task policy audit actor is invalid")
         if actor.startswith("api:"):
-            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.cancel"}:
+            if action not in {"task.create", "task.read", "task.list", "task.retry", "task.cancel", "task.approve"}:
                 raise ValueError("API task policy audit action is invalid")
         elif actor.startswith("worker:"):
             if action != "task.execute":
@@ -386,12 +387,16 @@ class PostgresTaskQueue:
                 FROM candidate
                 WHERE job.id=candidate.id
                 RETURNING job.id, job.task_id::text, job.tenant_id, job.payload,
-                          job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text
+                          job.attempts, job.max_attempts, job.lease_owner, job.lease_token::text,
+                          job.result
             """, (worker_id, lease_token, lease_seconds)).fetchone()
         if row is None:
             return None
         payload = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7])
+        result = row[8] if isinstance(row[8], dict) else (
+            json.loads(row[8]) if row[8] is not None else None
+        )
+        return Job(row[0], row[1], row[2], payload, row[4], row[5], row[6], row[7], result)
 
     def heartbeat(
         self, job_id: int, tenant_id: str, worker_id: str,
@@ -683,6 +688,101 @@ class PostgresTaskQueue:
                 )
             """, (job_id, tenant_id, worker_id, lease_token)).fetchone()
         return bool(row and row[0])
+
+    def approve(
+        self,
+        task_id: str,
+        tenant_id: str,
+        plan_fingerprint: str,
+        approved_node_ids: list[str] | tuple[str, ...],
+        rationale: str,
+        *,
+        audit_actor: str | None = None,
+    ) -> bool:
+        """Approve only currently blocked DAG nodes for the exact reviewed plan."""
+        import re
+
+        if (
+            not isinstance(task_id, str) or not task_id
+            or not isinstance(tenant_id, str) or not tenant_id
+            or not isinstance(plan_fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", plan_fingerprint)
+            or not isinstance(approved_node_ids, (list, tuple))
+            or not approved_node_ids
+            or len(approved_node_ids) > 64
+            or any(not isinstance(item, str) or not item.strip() or len(item) > 128 for item in approved_node_ids)
+            or len(set(approved_node_ids)) != len(approved_node_ids)
+            or not isinstance(rationale, str) or not rationale.strip() or len(rationale) > 2000
+        ):
+            raise ValueError("Agent Runtime approval identity, node IDs, fingerprint, and rationale are invalid")
+        if audit_actor is not None and not audit_actor.startswith("api:"):
+            raise ValueError("Task approval requires an authenticated API actor")
+        self._require_policy_audit_actor(audit_actor)
+
+        approved = False
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            row = conn.execute(
+                """
+                SELECT id, result, status
+                FROM public.aicode_jobs
+                WHERE task_id=%s AND tenant_id=%s
+                FOR UPDATE
+                """,
+                (task_id, tenant_id),
+            ).fetchone()
+            if row is not None:
+                result = row[1] if isinstance(row[1], dict) else (
+                    json.loads(row[1]) if row[1] is not None else None
+                )
+                eligible_node_ids = {
+                    item.get("task_id")
+                    for item in (result.get("node_results", []) if isinstance(result, dict) else [])
+                    if isinstance(item, dict) and item.get("status") == "needs_approval"
+                }
+                requested_node_ids = set(approved_node_ids)
+                if (
+                    row[2] == "awaiting_approval"
+                    and isinstance(result, dict)
+                    and result.get("plan_fingerprint") == plan_fingerprint
+                    and requested_node_ids.issubset(eligible_node_ids)
+                ):
+                    updated = conn.execute(
+                        """
+                        UPDATE public.aicode_jobs
+                        SET status='queued', attempts=0, available_at=NOW(),
+                            result=jsonb_set(
+                                COALESCE(result, '{}'::jsonb),
+                                '{approval}',
+                                jsonb_build_object(
+                                    'plan_fingerprint', %s,
+                                    'approved_node_ids', %s::jsonb,
+                                    'approved_by', %s,
+                                    'rationale', %s,
+                                    'approved_at', NOW()::text
+                                ),
+                                true
+                            ),
+                            lease_owner=NULL, lease_until=NULL, lease_token=NULL,
+                            last_error=NULL, updated_at=NOW()
+                        WHERE id=%s AND tenant_id=%s AND status='awaiting_approval'
+                          AND result->>'plan_fingerprint'=%s
+                        RETURNING id
+                        """,
+                        (
+                            plan_fingerprint,
+                            json.dumps(sorted(requested_node_ids)),
+                            audit_actor or "api:development",
+                            rationale.strip(),
+                            row[0], tenant_id, plan_fingerprint,
+                        ),
+                    ).fetchone()
+                    approved = updated is not None
+            self._record_policy_event(
+                conn, tenant_id, task_id, audit_actor, "task.approve",
+                "allow" if approved else "deny",
+            )
+        return approved
 
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
