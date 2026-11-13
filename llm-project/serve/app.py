@@ -454,6 +454,14 @@ class AICodeTaskResponse(BaseModel):
     work_branch_prefix: str
 
 
+class AgentRuntimeTaskResponse(BaseModel):
+    task_id: str
+    status: str
+    tenant_id: str
+    execution_mode: Literal["agent_runtime_v1"] = "agent_runtime_v1"
+    execution_enabled: bool = True
+
+
 class AgentRoutePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -524,6 +532,20 @@ class AgentTaskPlanPreviewRequest(BaseModel):
     root_task_id: str = Field(min_length=1, max_length=128)
     objective: str = Field(min_length=1, max_length=8000)
     nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
+
+
+class AgentTaskPlanCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(min_length=1, max_length=8000)
+    nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
+
+    @field_validator("objective")
+    @classmethod
+    def validate_objective(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Objective cannot be blank")
+        return value
 
 
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
@@ -1154,31 +1176,7 @@ def preview_agent_task_plan(
 ):
     """Validate a proposed DAG using the authenticated tenant, without enqueueing it."""
     runtime = _get_agent_runtime(request)
-    nodes = tuple(
-        TaskNode(
-            task_id=node.task_id,
-            selected_role_id=node.selected_role_id,
-            scope=node.scope,
-            objective=node.objective,
-            delegated_by_role_id=node.delegated_by_role_id,
-            acceptance_criteria=tuple(node.acceptance_criteria),
-            dependencies=tuple(node.dependencies),
-            parent_task_id=node.parent_task_id,
-            workspace_ref=node.workspace_ref,
-            deadline_at=node.deadline_at,
-            retry_limit=node.retry_limit,
-            tool_allowlist=tuple(node.tool_allowlist),
-            requested_permissions=tuple(node.requested_permissions),
-            risk_class=node.risk_class,
-            context_refs=tuple(node.context_refs),
-            change_id=node.change_id,
-            target_environment=node.target_environment,
-            release_or_change_version=node.release_or_change_version,
-            lifecycle_gate=node.lifecycle_gate,
-            rollback_stop_condition=node.rollback_stop_condition,
-        )
-        for node in body.nodes
-    )
+    nodes = _agent_task_nodes(body.nodes)
     plan = TaskPlan(
         root_task_id=body.root_task_id,
         tenant_id=tenant_id,
