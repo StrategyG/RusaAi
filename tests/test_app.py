@@ -179,6 +179,7 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
         json={
             "objective": "Execute a validated Agent Runtime DAG",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
             "nodes": [{
                 "task_id": "task-analyst",
                 "selected_role_id": "analyst",
@@ -200,6 +201,7 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
     assert queue.created[0] == data["task_id"]
     assert queue.created[1] == "tenant-alpha"
     assert queue.created[2]["execution_mode"] == "agent_runtime_v1"
+    assert queue.created[2]["repository"] == {"full_name": "StrategyG/RusaAi", "base_branch": "main"}
     assert "tenant_id" not in queue.created[2]["agent_runtime_plan"]
     assert queue.created[2]["agent_runtime_plan"]["nodes"][0]["task_id"] == "task-analyst"
 
@@ -222,6 +224,7 @@ def test_agent_runtime_task_intake_fails_closed_while_registry_is_draft(monkeypa
         headers={"X-API-Key": "tenant-key"},
         json={
             "objective": "Do not enqueue before registry activation",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
             "nodes": [{
                 "task_id": "task-analyst",
                 "selected_role_id": "analyst",
@@ -246,6 +249,7 @@ def test_agent_runtime_task_intake_rejects_caller_tenant_override(monkeypatch):
         json={
             "tenant_id": "tenant-attacker",
             "objective": "Attempt to override authenticated tenant",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
             "nodes": [{
                 "task_id": "task-analyst",
                 "selected_role_id": "analyst",
@@ -281,6 +285,7 @@ def test_agent_runtime_task_intake_respects_kill_switch(monkeypatch):
         headers={"X-API-Key": "tenant-key"},
         json={
             "objective": "Respect the task intake kill switch",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
             "nodes": [{
                 "task_id": "task-analyst",
                 "selected_role_id": "analyst",
