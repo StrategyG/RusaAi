@@ -735,10 +735,15 @@ class PostgresTaskQueue:
                 result = row[1] if isinstance(row[1], dict) else (
                     json.loads(row[1]) if row[1] is not None else None
                 )
+                node_results = result.get("node_results", []) if isinstance(result, dict) else []
+                if not isinstance(node_results, list):
+                    node_results = []
                 eligible_node_ids = {
                     item.get("task_id")
-                    for item in (result.get("node_results", []) if isinstance(result, dict) else [])
-                    if isinstance(item, dict) and item.get("status") == "needs_approval"
+                    for item in node_results
+                    if isinstance(item, dict)
+                    and isinstance(item.get("task_id"), str)
+                    and item.get("status") == "needs_approval"
                 }
                 requested_node_ids = set(approved_node_ids)
                 if (
