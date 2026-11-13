@@ -580,6 +580,7 @@ def test_agent_runtime_approval_is_bound_to_plan_fingerprint_and_node_id() -> No
             "approved_node_ids": ["node-high-risk"],
             "approved_by": "api:tenant-admin",
             "rationale": "Reviewed and approved for this change",
+            "approved_at": "2026-11-13T09:00:00Z",
         },
     })
     runtime = AICodeRuntime.__new__(AICodeRuntime)
@@ -629,6 +630,8 @@ def test_agent_runtime_approval_is_bound_to_plan_fingerprint_and_node_id() -> No
             "plan_fingerprint": hard_denial_fingerprint,
             "approved_node_ids": ["node-hard-denial"],
             "approved_by": "api:tenant-admin",
+            "rationale": "Review recorded but policy denial remains",
+            "approved_at": "2026-11-13T09:00:00Z",
         },
     })
     deny_dispatch = {
