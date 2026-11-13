@@ -534,6 +534,17 @@ class WorkerExecutionEngine:
                 continue
             if not isinstance(decision, PolicyDecision):
                 raise TypeError("policy_authorizer must return PolicyDecision")
+            if not decision.allowed and not decision.requires_approval:
+                results[task_id] = NodeExecutionResult(
+                    task_id=task_id,
+                    role_id=node.selected_role_id,
+                    status=NodeStatus.BLOCKED,
+                    error=decision.reason or "Policy Engine denied this task",
+                )
+                checkpoint_version = await self._save_checkpoint(
+                    plan, fingerprint, results, "blocked", checkpoint_version
+                )
+                continue
             approval_required = decision.requires_approval or node.approval_required
             if approval_required and not decision.approval_satisfied:
                 results[task_id] = NodeExecutionResult(
