@@ -22,6 +22,13 @@ from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .runtime_v1 import AgentRuntimeV1
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
+from .worker_execution import (
+    LeaseBoundCheckpointStore,
+    PolicyAuthorizer,
+    ResultVerifier,
+    TaskMemoryCheckpointStore,
+    WorkerExecutionEngine,
+)
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
@@ -84,6 +91,37 @@ class AICodeRuntime:
             compatibility["dispatchable"],
         )
         return compatibility
+
+    def build_agent_execution_engine(
+        self,
+        job: Job,
+        policy_authorizer: PolicyAuthorizer,
+        result_verifier: ResultVerifier,
+    ) -> WorkerExecutionEngine:
+        """Compose the staged DAG engine with tenant memory and the live queue lease."""
+        if job.lease_owner != self.worker_id:
+            raise PermissionError("Agent Runtime job lease belongs to a different worker")
+        if not job.tenant_id or not job.lease_token:
+            raise ValueError("Agent Runtime job requires a tenant and lease token")
+        if self.agent_runtime is None:
+            self._load_agent_runtime_registry()
+        if self.agent_runtime is None:
+            raise RuntimeError("Agent Runtime registry failed to initialize")
+
+        checkpoint_store = LeaseBoundCheckpointStore(
+            TaskMemoryCheckpointStore(self.memory),
+            self.queue,
+            job.id,
+            job.tenant_id,
+            self.worker_id,
+            job.lease_token,
+        )
+        return self.agent_runtime.build_execution_engine(
+            checkpoint_store,
+            policy_authorizer,
+            result_verifier,
+            worker_parallelism=1,
+        )
 
     def initialize(self) -> None:
         self._load_agent_runtime_registry()
