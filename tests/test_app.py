@@ -206,6 +206,45 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
     assert queue.created[2]["agent_runtime_plan"]["nodes"][0]["task_id"] == "task-analyst"
 
 
+def test_agent_runtime_task_intake_rejects_repository_outside_tenant_allowlist(monkeypatch):
+    class ActiveRuntime:
+        def status(self):
+            return {"execution_enabled": True}
+
+    class Queue:
+        called = False
+
+        def enqueue(self, *args, **kwargs):
+            self.called = True
+            return True
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["Other/Repo"]}')
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Reject a repository outside the tenant scope",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+
+    assert response.status_code == 403
+    assert queue.called is False
+
+
 def test_agent_runtime_task_intake_fails_closed_while_registry_is_draft(monkeypatch):
     class Queue:
         called = False
