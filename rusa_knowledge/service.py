@@ -68,6 +68,12 @@ class KnowledgeService:
         else:
             raise ValueError("RUSA_KNOWLEDGE_REQUIRE_PUBLICATION must be a boolean value")
 
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment in {"staging", "production"} and not require_publication:
+            raise ValueError(
+                "RUSA_KNOWLEDGE_REQUIRE_PUBLICATION cannot be disabled in staging or production"
+            )
+
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=base_url,
             api_key=(
