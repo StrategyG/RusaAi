@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import re
@@ -397,6 +398,51 @@ class AICodeRuntime:
             return VerificationDecision(False, "Developer worker must return at least one changed artifact")
         return VerificationDecision(True, "Worker output and required evidence passed verification")
 
+    def _agent_runtime_approval_authorizer(
+        self, job: Job, plan: TaskPlan, dispatch: Mapping[str, Any]
+    ) -> tuple[PolicyAuthorizer, dict[str, Any] | None]:
+        """Bind an API approval to this exact plan fingerprint and its gated nodes."""
+        result = job.result if isinstance(job.result, dict) else None
+        approval = result.get("approval") if isinstance(result, dict) else None
+        base_authorizer = dispatch["policy_authorizer"]
+        if approval is None:
+            return base_authorizer, None
+        if not isinstance(approval, dict):
+            raise ValueError("Agent Runtime approval record must be an object")
+        fingerprint = WorkerExecutionEngine._fingerprint(plan)
+        approved_ids = approval.get("approved_node_ids")
+        plan_node_ids = {node.task_id for node in plan.nodes}
+        if (
+            approval.get("plan_fingerprint") != fingerprint
+            or not isinstance(approved_ids, list)
+            or not approved_ids
+            or any(not isinstance(item, str) for item in approved_ids)
+            or len(set(approved_ids)) != len(approved_ids)
+            or not set(approved_ids).issubset(plan_node_ids)
+            or not isinstance(approval.get("approved_by"), str)
+            or not approval.get("approved_by")
+        ):
+            raise ValueError("Agent Runtime approval does not match the current plan or node set")
+        approved_node_ids = frozenset(approved_ids)
+        approved_by = approval["approved_by"]
+
+        async def authorize(node: TaskNode, tenant_id: str) -> AgentPolicyDecision:
+            decision = base_authorizer(node, tenant_id)
+            if inspect.isawaitable(decision):
+                decision = await decision
+            if node.task_id in approved_node_ids and (
+                decision.requires_approval or node.approval_required
+            ):
+                return AgentPolicyDecision(
+                    allowed=True,
+                    requires_approval=True,
+                    approval_satisfied=True,
+                    reason=f"Human approval recorded by {approved_by}",
+                )
+            return decision
+
+        return authorize, approval
+
     async def _build_agent_runtime_dispatch(
         self, job: Job, plan: TaskPlan, cancellation_event: asyncio.Event
     ) -> dict[str, Any]:
@@ -498,12 +544,29 @@ class AICodeRuntime:
                     },
                 )
 
+        policy_authorizer, approval_record = self._agent_runtime_approval_authorizer(
+            job, plan, dispatch
+        )
+        if approval_record is not None:
+            await asyncio.to_thread(
+                self.audit.record,
+                "agent_runtime.approval_applied",
+                job.task_id,
+                self.worker_id,
+                {
+                    "plan_fingerprint": approval_record["plan_fingerprint"],
+                    "approved_node_ids": approval_record["approved_node_ids"],
+                    "approved_by": approval_record["approved_by"],
+                    "rationale": approval_record.get("rationale", ""),
+                },
+                tenant_id=job.tenant_id,
+            )
         try:
             result = await self.execute_agent_plan(
                 job,
                 plan,
                 dispatch["handlers"],
-                dispatch["policy_authorizer"],
+                policy_authorizer,
                 dispatch["result_verifier"],
                 cancellation_event,
             )
