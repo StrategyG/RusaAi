@@ -5,6 +5,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -396,6 +397,226 @@ def _authorizer(node, tenant_id):
 
 def _verifier(node, output):
     return VerificationDecision(accepted=bool(output.evidence_refs), reason="evidence required")
+
+
+def _agent_runtime_queue_job(payload: dict) -> Job:
+    return Job(
+        id=901,
+        task_id="root-task-queue",
+        tenant_id="tenant-a",
+        payload=payload,
+        attempts=1,
+        max_attempts=3,
+        lease_owner="worker-queue",
+        lease_token="00000000-0000-4000-8000-000000000901",
+    )
+
+
+def test_agent_runtime_queue_payload_is_parsed_with_trusted_job_identity() -> None:
+    job = _agent_runtime_queue_job({
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": "Execute an approved queue plan",
+            "nodes": [{
+                "task_id": "node_queue_plan",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the queue task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return evidence"],
+                "dependencies": [],
+            }],
+        },
+    })
+
+    plan = AICodeRuntime._agent_runtime_plan_from_job(job)
+
+    assert plan.root_task_id == job.task_id
+    assert plan.tenant_id == job.tenant_id
+    assert plan.nodes[0].task_id == "node_queue_plan"
+    assert plan.nodes[0].dependencies == ()
+
+
+def test_agent_runtime_queue_payload_rejects_unknown_fields() -> None:
+    job = _agent_runtime_queue_job({
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "objective": "Reject unsupported payload fields",
+            "nodes": [{
+                "task_id": "node_queue_plan",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the queue task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return evidence"],
+                "unreviewed_tool_grant": ["shell"],
+            }],
+        },
+    })
+
+    with pytest.raises(ValueError, match="unsupported fields"):
+        AICodeRuntime._agent_runtime_plan_from_job(job)
+
+
+@pytest.mark.asyncio
+async def test_run_once_dispatches_explicit_agent_runtime_queue_job(tmp_path, monkeypatch) -> None:
+    job = _agent_runtime_queue_job({
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": "Run a queue-integrated Agent Runtime DAG",
+            "nodes": [{
+                "task_id": "node_queue_dispatch",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the task and return verified evidence",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified evidence"],
+            }],
+        },
+    })
+
+    class Queue:
+        def __init__(self):
+            self.completed = None
+            self.approval = None
+            self.failed = None
+
+        def claim(self, worker_id, lease_seconds):
+            assert worker_id == "worker-queue"
+            assert lease_seconds == 180
+            return job
+
+        def owns_lease(self, job_id, tenant_id, worker_id, lease_token):
+            return (
+                job_id == job.id
+                and tenant_id == job.tenant_id
+                and worker_id == "worker-queue"
+                and lease_token == job.lease_token
+            )
+
+        def authorize_execution(self, job_id, task_id, tenant_id, worker_id, lease_token):
+            return self.owns_lease(job_id, tenant_id, worker_id, lease_token)
+
+        def with_lease_owned(
+            self, job_id, tenant_id, worker_id, lease_token, operation, *, lease_seconds
+        ):
+            assert self.owns_lease(job_id, tenant_id, worker_id, lease_token)
+            return operation()
+
+        def complete(self, job_id, tenant_id, worker_id, lease_token, result):
+            self.completed = result
+            return True
+
+        def await_approval(self, *args):
+            self.approval = args
+            return True
+
+        def fail(self, *args):
+            self.failed = args
+            return True
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.config = SimpleNamespace(
+        aicode_enabled=True,
+        environment="development",
+        tenant_repositories={},
+    )
+    runtime.worker_id = "worker-queue"
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.memory = SQLiteMemory(str(tmp_path / "queue-agent-runtime.sqlite3"))
+    runtime.queue = Queue()
+    runtime.audit = AuditLog(str(tmp_path / "queue-agent-runtime-audit.jsonl"))
+    runtime.configure_agent_runtime_dispatch(
+        {"analyst": _Handler()},
+        _authorizer,
+        _verifier,
+    )
+
+    async def idle_heartbeat(claimed_job, lost_lease):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime, "_heartbeat", idle_heartbeat)
+    monkeypatch.setattr(
+        "rusa_agents.runtime.record_task_policy",
+        lambda *args, **kwargs: None,
+    )
+
+    processed = await runtime.run_once()
+
+    assert processed is True
+    assert runtime.queue.completed["execution_mode"] == "agent_runtime_v1"
+    assert runtime.queue.completed["plan_status"] == "completed"
+    assert runtime.queue.approval is None
+    assert runtime.queue.failed is None
+    checkpoint = runtime.memory.get(job.task_id, tenant_id=job.tenant_id)
+    assert checkpoint["state"] == "agent_runtime_checkpoint"
+    assert checkpoint["checkpoint_version"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_run_once_holds_agent_runtime_job_for_review_without_adapters(
+    tmp_path, monkeypatch
+) -> None:
+    job = _agent_runtime_queue_job({
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "objective": "Keep dispatch disabled until adapters are configured",
+            "nodes": [{
+                "task_id": "node_queue_hold",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Wait for reviewed adapters",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Remain unexecuted"],
+            }],
+        },
+    })
+
+    class Queue:
+        def __init__(self):
+            self.approval = None
+
+        def claim(self, worker_id, lease_seconds):
+            return job
+
+        def owns_lease(self, job_id, tenant_id, worker_id, lease_token):
+            return True
+
+        def authorize_execution(self, *args):
+            return True
+
+        def await_approval(self, *args):
+            self.approval = args
+            return True
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.config = SimpleNamespace(
+        aicode_enabled=True,
+        environment="development",
+        tenant_repositories={},
+    )
+    runtime.worker_id = "worker-queue"
+    runtime.agent_runtime = AgentRuntimeV1(_registry())
+    runtime.queue = Queue()
+    runtime.audit = AuditLog(str(tmp_path / "queue-agent-runtime-hold-audit.jsonl"))
+
+    async def idle_heartbeat(claimed_job, lost_lease):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime, "_heartbeat", idle_heartbeat)
+    monkeypatch.setattr(
+        "rusa_agents.runtime.record_task_policy",
+        lambda *args, **kwargs: None,
+    )
+
+    processed = await runtime.run_once()
+
+    assert processed is True
+    assert runtime.queue.approval is not None
+    assert "not configured" in runtime.queue.approval[4]
+    assert runtime.agent_runtime.status()["execution_enabled"] is False
 
 
 def test_aicode_runtime_composes_dag_engine_with_live_queue_lease() -> None:
