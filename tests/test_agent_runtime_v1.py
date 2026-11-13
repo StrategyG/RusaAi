@@ -1,5 +1,4 @@
 """Tests for the staged Agent Runtime v1.0 registry, router, DAG and executor."""
-# ruff: noqa: I001
 from __future__ import annotations
 
 import json
