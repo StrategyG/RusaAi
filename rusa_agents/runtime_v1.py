@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
-from .capability_registry import AgentWorkerRegistry, RegistryNotActivatedError
+from .capability_registry import (
+    AgentWorkerRegistry,
+    RegistryNotActivatedError,
+    RegistryValidationError,
+)
 from .capability_router import CapabilityRouter, RouteDecision, RouteRequest
 from .task_decomposer import TaskDecomposer, TaskPlan, TaskPlanValidation
 from .worker_execution import (
@@ -25,6 +30,30 @@ class AgentRuntimeV1:
 
     def status(self) -> dict[str, Any]:
         return self.registry.summary()
+
+    def validate_aicode_worker_bindings(
+        self, worker_role_ids: Iterable[str]
+    ) -> dict[str, Any]:
+        """Verify that the legacy AICode pipeline maps to registered v1 worker roles.
+
+        This compatibility check does not activate roles or grant capabilities.
+        """
+        role_ids = tuple(worker_role_ids)
+        if not role_ids or len(role_ids) != len(set(role_ids)):
+            raise ValueError("AICode worker role IDs must be non-empty and unique")
+        validated: list[str] = []
+        for role_id in role_ids:
+            role = self.registry.get_role(role_id)
+            if role.identity_type != "aicode_worker" or role.scope != "worker":
+                raise RegistryValidationError(
+                    f"AICode pipeline role {role_id!r} is not registered as an AICode worker"
+                )
+            validated.append(role_id)
+        return {
+            "compatible": True,
+            "worker_role_ids": list(validated),
+            "dispatchable": all(self.registry.is_dispatchable(role_id) for role_id in validated),
+        }
 
     def preview_route(self, request: RouteRequest) -> RouteDecision:
         return self.router.route(request)
