@@ -30,6 +30,7 @@ def apply_database_migrations():
             "004_aicode_tenant_rls.sql",
             "005_aicode_task_policy_audit.sql",
             "006_aicode_idempotency.sql",
+            "013_aicode_memory_checkpoint_cas.sql",
         ):
             conn.execute(
                 (migration_root / migration_name).read_text(encoding="utf-8"),
