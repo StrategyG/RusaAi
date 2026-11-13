@@ -156,6 +156,7 @@ class LeaseBoundCheckpointStore:
         checkpoint_store: CheckpointStore,
         queue: Any,
         job_id: int,
+        task_id: str,
         tenant_id: str,
         worker_id: str,
         lease_token: str,
@@ -164,12 +165,17 @@ class LeaseBoundCheckpointStore:
         self.checkpoint_store = checkpoint_store
         self.queue = queue
         self.job_id = job_id
+        self.task_id = task_id
         self.tenant_id = tenant_id
         self.worker_id = worker_id
         self.lease_token = lease_token
         self.lease_seconds = lease_seconds
 
-    def _run_with_lease(self, tenant_id: str, operation: Callable[[], Any]) -> Any:
+    def _run_with_lease(
+        self, task_id: str, tenant_id: str, operation: Callable[[], Any]
+    ) -> Any:
+        if task_id != self.task_id:
+            raise PermissionError("Checkpoint task does not match the active queue job")
         if tenant_id != self.tenant_id:
             raise PermissionError("Checkpoint tenant does not match the active queue lease")
         return self.queue.with_lease_owned(
@@ -183,11 +189,12 @@ class LeaseBoundCheckpointStore:
 
     def load(self, task_id: str, tenant_id: str) -> Mapping[str, Any] | None:
         return self._run_with_lease(
-            tenant_id, lambda: self.checkpoint_store.load(task_id, tenant_id)
+            task_id, tenant_id, lambda: self.checkpoint_store.load(task_id, tenant_id)
         )
 
     def save(self, task_id: str, tenant_id: str, payload: Mapping[str, Any]) -> None:
         self._run_with_lease(
+            task_id,
             tenant_id,
             lambda: self.checkpoint_store.save(task_id, tenant_id, payload),
         )
