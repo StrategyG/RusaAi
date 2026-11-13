@@ -23,7 +23,11 @@ runtime or replace the existing AICode orchestrator.
 The checked-in registry is a compact runtime projection of the reviewed
 registry proposal. It contains 10 core agents, 6 AICode workers, and 8 DevOps
 lifecycle profiles. Every role remains `not_verified` / disabled and the
-registry remains `draft_proposed_not_activated`.
+registry remains `draft_proposed_not_activated`. The 34 `RUSA-AW-*` values
+are registry-local capability IDs, not corpus chunk IDs. A role-level
+crosswalk references 24 existing `RUSA-KB-*` candidates from Batch 015 and
+Batch 033; it creates zero new chunk content. The crosswalk status remains
+`candidate_crosswalk_pending_review`.
 
 Therefore:
 
@@ -45,10 +49,12 @@ registry-local capability IDs (`RUSA-AW-*`) or an explicit role ID. These
 identifiers are routing keys, not canonical knowledge chunk IDs. At this
 revision, 34 provisional capability IDs exist but **zero canonical RUSA-KB
 source chunk references are linked**. The router does not infer a semantic
-match from draft text and always returns an empty `tool_grants` list. Before
-activation, each capability must be reconciled to approved canonical source
-chunk IDs and exact source locators. Do not count these routing IDs as corpus
-chunks. The Policy Engine and Tool Gateway remain the only authority for tool execution.
+match from draft text and always returns an empty `tool_grants` list. Before activation, the role-level crosswalk must pass technical/source-fidelity,
+rights, exact/near-dedup and human review, then be marked `approved_for_routing`.
+Batch 033 index-only overlaps KB-859, KB-860 and KB-862 are excluded from the
+crosswalk. The 24 references are existing candidate IDs, not 24 newly created
+or approved corpus units. Do not count the 34 routing IDs or the crosswalk
+references as new corpus chunks. The Policy Engine and Tool Gateway remain the only authority for tool execution.
 
 Example:
 
@@ -88,10 +94,10 @@ deterministic validation.
 
 The executor:
 
-1. Requires a trusted tenant context, an active verified registry, an active delegating agent, and a handler bound to the same tenant for every selected role.
+1. Requires a trusted tenant context, an approved source crosswalk, an active verified registry, an active delegating agent, and a handler bound to the same tenant for every selected role.
 2. Calls an injected Policy Engine authorizer before each worker.
 3. Stops for human approval on high/critical risk and production targets; proceeds only when the policy adapter confirms that the required approval is satisfied.
-4. Runs one worker at a time on the CPU-first profile.
+4. Enforces node deadlines around policy authorization, worker execution and independent verification, and runs one worker at a time on the CPU-first profile.
 5. Calls an injected independent verifier before marking a node complete.
 6. Persists a fingerprinted checkpoint after each node and supports resume.
 7. Blocks dependants when an upstream node fails or is not completed.

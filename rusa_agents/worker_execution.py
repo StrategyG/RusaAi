@@ -6,6 +6,7 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from typing import Any, Protocol
@@ -182,6 +183,23 @@ class WorkerExecutionEngine:
         return await value if inspect.isawaitable(value) else value
 
     @staticmethod
+    def _deadline_remaining_seconds(node: TaskNode) -> float | None:
+        if not node.deadline_at:
+            return None
+        deadline = datetime.fromisoformat(node.deadline_at.replace("Z", "+00:00"))
+        if deadline.tzinfo is None or deadline.utcoffset() is None:
+            raise ValueError(f"{node.task_id} deadline_at must include a timezone")
+        return (deadline - datetime.now(timezone.utc)).total_seconds()
+
+    async def _resolve_before_deadline(self, value: Any, node: TaskNode) -> Any:
+        remaining = self._deadline_remaining_seconds(node)
+        if remaining is None:
+            return await self._resolve(value)
+        if remaining <= 0:
+            raise TimeoutError("Task node deadline expired")
+        return await asyncio.wait_for(self._resolve(value), timeout=remaining)
+
+    @staticmethod
     def _fingerprint(plan: TaskPlan) -> str:
         payload = {
             "root_task_id": plan.root_task_id,
@@ -291,9 +309,22 @@ class WorkerExecutionEngine:
                 await self._save_checkpoint(plan, fingerprint, results, "blocked")
                 continue
 
-            decision = await self._resolve(
-                self.policy_authorizer(node, trusted_tenant_id)
-            )
+            try:
+                decision = await self._resolve_before_deadline(
+                    self.policy_authorizer(node, trusted_tenant_id), node
+                )
+            except TimeoutError:
+                remaining = self._deadline_remaining_seconds(node)
+                if remaining is None or remaining > 0:
+                    raise
+                results[task_id] = NodeExecutionResult(
+                    task_id=task_id,
+                    role_id=node.selected_role_id,
+                    status=NodeStatus.FAILED,
+                    error="Task node deadline expired while awaiting policy authorization",
+                )
+                await self._save_checkpoint(plan, fingerprint, results, "failed")
+                continue
             if not isinstance(decision, PolicyDecision):
                 raise TypeError("policy_authorizer must return PolicyDecision")
             approval_required = decision.requires_approval or node.approval_required
@@ -321,13 +352,14 @@ class WorkerExecutionEngine:
             completed_result: NodeExecutionResult | None = None
             for attempt in range(1, node.retry_limit + 2):
                 try:
-                    output = await handlers[node.selected_role_id].execute(
-                        node, dependency_results
+                    output = await self._resolve_before_deadline(
+                        handlers[node.selected_role_id].execute(node, dependency_results),
+                        node,
                     )
                     if not isinstance(output, WorkerOutput):
                         raise TypeError("Worker handler must return WorkerOutput")
-                    verification = await self._resolve(
-                        self.result_verifier(node, output)
+                    verification = await self._resolve_before_deadline(
+                        self.result_verifier(node, output), node
                     )
                     if not isinstance(verification, VerificationDecision):
                         raise TypeError("result_verifier must return VerificationDecision")
@@ -364,11 +396,14 @@ class WorkerExecutionEngine:
                     raise
                 except Exception as exc:
                     last_error = f"{type(exc).__name__}: {str(exc)[:1000]}"
+                    remaining = self._deadline_remaining_seconds(node)
+                    if remaining is not None and remaining <= 0:
+                        break
             results[task_id] = completed_result or NodeExecutionResult(
                 task_id=task_id,
                 role_id=node.selected_role_id,
                 status=NodeStatus.FAILED,
-                attempts=node.retry_limit + 1,
+                attempts=attempt,
                 error=last_error or "Worker execution failed",
             )
             await self._save_checkpoint(

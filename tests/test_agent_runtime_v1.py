@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -33,13 +34,14 @@ def _registry(active: bool = False) -> AgentWorkerRegistry:
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     if active:
         data["status"] = "active"
+        data["source_chunk_map_status"] = "approved_for_routing"
         for index, role in enumerate(data["roles"], start=900):
             role["registration_status"] = "registered"
             role["runtime_status"] = "verified"
             role["activation_state"] = "active"
             # Test-only source IDs exercise the active-registry validation gate.
             role["source_chunk_ids"] = [f"RUSA-KB-{index:03d}"]
-        data["counts"]["source_chunks_total"] = len(data["roles"])
+        data["counts"]["source_chunk_refs_total"] = len(data["roles"])
     return AgentWorkerRegistry.from_mapping(data, schema)
 
 
@@ -50,6 +52,7 @@ def _node(
     *,
     risk_class: str = "low",
     parent_task_id: str | None = None,
+    deadline_at: str | None = None,
     delegated_by_role_id: str = "supreme_orchestrator",
 ) -> TaskNode:
     return TaskNode(
@@ -61,6 +64,7 @@ def _node(
         acceptance_criteria=("Return verified evidence",),
         dependencies=dependencies,
         parent_task_id=parent_task_id,
+        deadline_at=deadline_at,
         risk_class=risk_class,
     )
 
@@ -84,11 +88,29 @@ def test_default_registry_is_structurally_valid_but_not_active() -> None:
     assert summary["dispatchable_roles"] == 0
     assert summary["execution_enabled"] is False
     assert summary["provisional_capability_id_count"] == 34
-    assert summary["source_chunk_count"] == 0
+    assert summary["source_chunk_map_status"] == "candidate_crosswalk_pending_review"
+    assert summary["source_chunk_reference_count"] == 24
 
 
 
 def test_registry_rejects_activation_without_canonical_source_chunks() -> None:
+    registry = _registry()
+    data = registry.raw_data
+    data["status"] = "active"
+    data["source_chunk_map_status"] = "approved_for_routing"
+    data["counts"]["source_chunk_refs_total"] = 0
+    for role in data["roles"]:
+        role["registration_status"] = "registered"
+        role["runtime_status"] = "verified"
+        role["activation_state"] = "active"
+        role["source_chunk_ids"] = []
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(RegistryValidationError, match="canonical source_chunk_ids"):
+        AgentWorkerRegistry.from_mapping(data, schema)
+
+
+
+def test_registry_rejects_activation_before_source_crosswalk_approval() -> None:
     registry = _registry()
     data = registry.raw_data
     data["status"] = "active"
@@ -97,7 +119,7 @@ def test_registry_rejects_activation_without_canonical_source_chunks() -> None:
         role["runtime_status"] = "verified"
         role["activation_state"] = "active"
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    with pytest.raises(RegistryValidationError, match="canonical source_chunk_ids"):
+    with pytest.raises(RegistryValidationError, match="source_chunk_map_status"):
         AgentWorkerRegistry.from_mapping(data, schema)
 
 
@@ -259,6 +281,25 @@ async def test_worker_engine_executes_dag_and_checkpoints_results() -> None:
     checkpoint = store.load(plan.root_task_id, plan.tenant_id)
     assert checkpoint["plan_fingerprint"] == result.plan_fingerprint
 
+
+
+
+@pytest.mark.asyncio
+async def test_worker_engine_rejects_expired_deadline_before_starting_worker() -> None:
+    engine = WorkerExecutionEngine(
+        _registry(active=True), InMemoryCheckpointStore(), _authorizer, _verifier
+    )
+    handler = _Handler()
+    expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    result = await engine.execute(
+        _plan(_node("task-expired", "analyst", deadline_at=expired)),
+        {"analyst": handler},
+        trusted_tenant_id="tenant-a",
+    )
+    assert result.status == PlanStatus.FAILED
+    assert result.node_results[0].status == NodeStatus.FAILED
+    assert "deadline expired" in (result.node_results[0].error or "").lower()
+    assert handler.calls == 0
 
 
 @pytest.mark.asyncio

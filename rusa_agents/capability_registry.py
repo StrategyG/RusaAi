@@ -136,9 +136,13 @@ class AgentWorkerRegistry:
         }
         if self._data["counts"]["provisional_capability_ids_total"] != len(capability_ids):
             raise RegistryValidationError("provisional_capability_ids_total is inconsistent")
-        if self._data["counts"]["source_chunks_total"] != len(source_chunk_ids):
-            raise RegistryValidationError("source_chunks_total is inconsistent")
+        if self._data["counts"]["source_chunk_refs_total"] != len(source_chunk_ids):
+            raise RegistryValidationError("source_chunk_refs_total is inconsistent")
         if self._data["status"] == "active":
+            if self._data["source_chunk_map_status"] != "approved_for_routing":
+                raise RegistryValidationError(
+                    "An active registry requires source_chunk_map_status=approved_for_routing"
+                )
             unlinked = [
                 item["role_id"] for item in roles if not item["source_chunk_ids"]
             ]
@@ -250,7 +254,8 @@ class AgentWorkerRegistry:
                 for role in self.roles.values()
                 for capability_id in role.capability_ids
             }),
-            "source_chunk_count": len({
+            "source_chunk_map_status": self._data["source_chunk_map_status"],
+            "source_chunk_reference_count": len({
                 chunk_id
                 for role in self.roles.values()
                 for chunk_id in role.source_chunk_ids
