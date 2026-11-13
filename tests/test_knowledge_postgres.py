@@ -20,6 +20,7 @@ def knowledge_store():
     embedding_migration = open("migrations/009_knowledge_embedding_384.sql", encoding="utf-8").read()
     scope_migration = open("migrations/011_rag_agent_project_scope.sql", encoding="utf-8").read()
     version_migration = open("migrations/012_rag_knowledge_version_history.sql", encoding="utf-8").read()
+    governance_migration = open("migrations/013_rag_knowledge_governance.sql", encoding="utf-8").read()
     role_name = "rusa_knowledge_test_" + uuid.uuid4().hex[:12]
     role_password = secrets.token_urlsafe(32)
 
@@ -30,6 +31,7 @@ def knowledge_store():
         admin.execute(embedding_migration)
         admin.execute(scope_migration)
         admin.execute(version_migration)
+        admin.execute(governance_migration)
         admin.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOBYPASSRLS PASSWORD {}").format(
                 sql.Identifier(role_name),
@@ -58,6 +60,23 @@ def knowledge_store():
                 "public.rusa_knowledge_version_chunks TO {}"
             ).format(sql.Identifier(role_name))
         )
+        admin.execute(
+            sql.SQL(
+                "GRANT SELECT ON public.rusa_knowledge_publication_events TO {}"
+            ).format(sql.Identifier(role_name))
+        )
+        admin.execute(
+            sql.SQL(
+                "GRANT EXECUTE ON FUNCTION "
+                "public.rusa_knowledge_version_is_published(TEXT, UUID, UUID) TO {}"
+            ).format(sql.Identifier(role_name))
+        )
+        admin.execute(
+            sql.SQL(
+                "GRANT EXECUTE ON FUNCTION "
+                "public.rusa_knowledge_version_attribution(TEXT, UUID, UUID) TO {}"
+            ).format(sql.Identifier(role_name))
+        )
 
     connection_options = conninfo_to_dict(DSN)
     connection_options["user"] = role_name
@@ -71,6 +90,7 @@ def knowledge_store():
         min_pool_size=1,
         max_pool_size=2,
         db_role=role_name,
+        require_publication=False,
     )
     try:
         assert store.check_ready() is True
@@ -84,11 +104,77 @@ def knowledge_store():
                 )
             )
             admin.execute(
+                sql.SQL("REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM {}").format(
+                    sql.Identifier(role_name)
+                )
+            )
+            admin.execute(
                 sql.SQL("REVOKE ALL PRIVILEGES ON SCHEMA public FROM {}").format(
                     sql.Identifier(role_name)
                 )
             )
             admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role_name)))
+
+
+@pytest.fixture
+def governance_stores(knowledge_store):
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    from rusa_knowledge.store import PostgresKnowledgeStore
+
+    _, _ = knowledge_store
+    role_names = {
+        "reviewer": "rusa_knowledge_reviewer_login_" + uuid.uuid4().hex[:10],
+        "approver": "rusa_knowledge_approver_login_" + uuid.uuid4().hex[:10],
+        "publisher": "rusa_knowledge_publisher_login_" + uuid.uuid4().hex[:10],
+    }
+    role_passwords = {key: secrets.token_urlsafe(32) for key in role_names}
+    role_memberships = {
+        "reviewer": "rusa_knowledge_reviewer",
+        "approver": "rusa_knowledge_approver",
+        "publisher": "rusa_knowledge_publisher",
+    }
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        for key, login_name in role_names.items():
+            admin.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
+                    sql.Identifier(login_name),
+                    sql.Literal(role_passwords[key]),
+                )
+            )
+            admin.execute(
+                sql.SQL("GRANT {} TO {}").format(
+                    sql.Identifier(role_memberships[key]),
+                    sql.Identifier(login_name),
+                )
+            )
+
+    connection_options = conninfo_to_dict(DSN)
+    stores = {}
+    dsns = {}
+    try:
+        for key, login_name in role_names.items():
+            options = dict(connection_options)
+            options["user"] = login_name
+            options["password"] = role_passwords[key]
+            dsns[key] = make_conninfo(**options)
+            stores[key] = PostgresKnowledgeStore(
+                dsns[key],
+                min_pool_size=1,
+                max_pool_size=2,
+                db_role=role_memberships[key],
+                require_publication=True,
+            )
+            assert stores[key].check_ready() is True
+        yield stores, dsns
+    finally:
+        for store in stores.values():
+            store.close()
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            for login_name in role_names.values():
+                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(login_name)))
 
 
 def _unit_vector(index: int) -> list[float]:
@@ -197,6 +283,7 @@ def test_pgvector_384d_backfill_preserves_legacy_vectors(knowledge_store):
         min_pool_size=1,
         max_pool_size=2,
         db_role=legacy_store.db_role,
+        require_publication=False,
     )
     try:
         assert e5_store.check_ready() is True
@@ -513,6 +600,27 @@ def test_document_versions_are_immutable_and_idempotent(knowledge_store):
     assert versions[0]["is_current"] is True
     assert versions[1]["is_current"] is False
 
+    # Re-ingesting a historical fingerprint must not roll current_version_id
+    # back from version 2 to version 1.
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://versions/guide",
+        title="Versioned guide",
+        content_hash="a" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["original immutable content"],
+        embeddings=[_unit_vector(0)],
+    )
+    after_historical_reingest = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert [item["version_number"] for item in after_historical_reingest] == [2, 1]
+    assert after_historical_reingest[0]["is_current"] is True
+    assert after_historical_reingest[1]["is_current"] is False
+
     original = store.get_document_version(
         tenant_id=tenant_id,
         collection="agent",
@@ -605,6 +713,156 @@ def test_agent_scoped_version_history_preserves_version_visibility(knowledge_sto
     ) is None
 
 
+def test_chunk_content_participates_in_immutable_version_fingerprint(knowledge_store):
+    store, _ = knowledge_store
+    tenant_id = "tenant-chunk-fingerprint"
+    document_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://chunk-fingerprint/guide",
+        title="Fingerprint guide",
+        content_hash="a" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["original immutable chunk"],
+        embeddings=[_unit_vector(0)],
+    )
+    first = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )[0]
+
+    # A caller cannot reuse a claimed source hash to replace content in-place.
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://chunk-fingerprint/guide",
+        title="Fingerprint guide",
+        content_hash="a" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["different chunk with the same claimed source hash"],
+        embeddings=[_unit_vector(1)],
+    )
+    versions = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert len(versions) == 2
+    assert versions[0]["version_id"] != first["version_id"]
+
+    # A changed embedding snapshot also receives a new version identity.
+    store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://chunk-fingerprint/guide",
+        title="Fingerprint guide",
+        content_hash="a" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["different chunk with the same claimed source hash"],
+        embeddings=[_unit_vector(2)],
+    )
+    versions = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert len(versions) == 3
+    assert versions[0]["version_id"] != versions[1]["version_id"]
+
+    current = store.get_document_version(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        version_id=versions[0]["version_id"],
+    )
+    historical = store.get_document_version(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        version_id=first["version_id"],
+    )
+    assert current["content"] == "different chunk with the same claimed source hash"
+    assert historical["content"] == "original immutable chunk"
+
+
+def test_answer_scope_and_metadata_use_immutable_version_snapshot(knowledge_store):
+    store, _ = knowledge_store
+    tenant_id = "tenant-immutable-scope"
+    document_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://immutable-scope/guide",
+        title="Immutable scope guide",
+        content_hash="c" * 64,
+        metadata={
+            "knowledge_scope": "agent_specific",
+            "agent_ids": ["aicode-analyst"],
+            "project_id": "project-alpha",
+        },
+        chunks=["immutable agent-specific source passage"],
+        embeddings=[_unit_vector(0)],
+    )
+
+    # Mutable document metadata cannot downgrade the immutable version's scope
+    # or replace the title/source shown in answer-facing results.
+    with store._pool.connection() as connection:
+        store._set_tenant(connection, tenant_id)
+        connection.execute(
+            """
+            UPDATE public.rusa_knowledge_documents
+            SET collection='tampered', source_uri='kb://tampered/guide',
+                title='Tampered title',
+                metadata='{"knowledge_scope":"shared"}'::jsonb
+            WHERE tenant_id=%s AND document_id=%s::uuid
+            """,
+            (tenant_id, document_id),
+        )
+
+    assert store.search(
+        tenant_id=tenant_id,
+        collection="agent",
+        query="immutable source passage",
+        query_embedding=_unit_vector(0),
+    ) == []
+    assert store.get_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    ) is None
+    assert store.list_collections(tenant_id=tenant_id) == []
+
+    results = store.search(
+        tenant_id=tenant_id,
+        collection="agent",
+        query="immutable source passage",
+        query_embedding=_unit_vector(0),
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    )
+    assert len(results) == 1
+    assert results[0]["title"] == "Immutable scope guide"
+    assert results[0]["source_uri"] == "kb://immutable-scope/guide"
+    assert results[0]["metadata"]["knowledge_scope"] == "agent_specific"
+
+    document = store.get_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    )
+    assert document is not None
+    assert document["title"] == "Immutable scope guide"
+    assert document["source_uri"] == "kb://immutable-scope/guide"
+    assert document["content"] == "immutable agent-specific source passage"
+    assert store.list_collections(
+        tenant_id=tenant_id,
+        agent_id="aicode-analyst",
+        project_id="project-alpha",
+    ) == [{"collection": "agent", "document_count": 1}]
+
+
 def test_384d_ingestion_records_version_in_its_own_vector_space(knowledge_store):
     from rusa_knowledge.store import PostgresKnowledgeStore
 
@@ -615,6 +873,7 @@ def test_384d_ingestion_records_version_in_its_own_vector_space(knowledge_store)
         min_pool_size=1,
         max_pool_size=2,
         db_role=legacy_store.db_role,
+        require_publication=False,
     )
     try:
         tenant_id = "tenant-384-version-history"
@@ -653,3 +912,455 @@ def test_384d_ingestion_records_version_in_its_own_vector_space(knowledge_store)
         assert historical["content"] == "384-dimensional original passage"
     finally:
         store.close()
+
+
+def test_publication_requires_cleared_rights_reviews_distinct_approval_and_publisher(
+    knowledge_store, governance_stores
+):
+    import psycopg
+    from psycopg import sql
+
+    from rusa_knowledge.store import PostgresKnowledgeStore
+
+    store, restricted_dsn = knowledge_store
+    governance, governance_dsns = governance_stores
+    tenant_id = "tenant-publication-gate"
+    document_id = store.ingest_document(
+        tenant_id=tenant_id,
+        collection="agent",
+        source_uri="kb://governance/guide",
+        title="Governance guide",
+        content_hash="f" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["governance lifecycle source rights review approval publication"],
+        embeddings=[_unit_vector(0)],
+    )
+    versions = store.list_document_versions(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+    )
+    version_id = versions[0]["version_id"]
+
+    candidate = governance["reviewer"].get_review_candidate_version(
+        tenant_id=tenant_id,
+        collection="agent",
+        document_id=document_id,
+        version_id=version_id,
+    )
+    assert candidate is not None
+    assert candidate["publication_status"] == "candidate_only"
+    assert "governance lifecycle" in candidate["content"]
+    with pytest.raises(PermissionError, match="reviewer database role"):
+        store.get_review_candidate_version(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+            version_id=version_id,
+        )
+
+    answer_store = PostgresKnowledgeStore(
+        restricted_dsn,
+        min_pool_size=1,
+        max_pool_size=2,
+        db_role=store.db_role,
+        require_publication=True,
+    )
+    try:
+        assert answer_store.check_ready() is True
+        assert answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        ) == []
+        assert answer_store.get_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        ) is None
+        assert answer_store.list_collections(tenant_id=tenant_id) == []
+
+        reviewer = governance["reviewer"]
+        with reviewer._pool.connection() as connection:
+            reviewer._set_tenant(connection, tenant_id)
+            reviewer_login = connection.execute("SELECT session_user").fetchone()[0]
+
+        # A single human login cannot combine reviewer and approver duties.
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("GRANT rusa_knowledge_approver TO {}").format(
+                    sql.Identifier(reviewer_login)
+                )
+            )
+        try:
+            with pytest.raises(Exception, match="exclusive reviewer role membership"):
+                reviewer.record_review_finding(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    version_id=version_id,
+                    review_type="qa",
+                    decision="needs_changes",
+                    finding_text="multi-role login must be rejected",
+                )
+        finally:
+            with psycopg.connect(DSN, autocommit=True) as admin:
+                admin.execute(
+                    sql.SQL("REVOKE rusa_knowledge_approver FROM {}").format(
+                        sql.Identifier(reviewer_login)
+                    )
+                )
+
+        with reviewer._pool.connection() as connection:
+            reviewer._set_tenant(connection, tenant_id)
+            connection.execute(
+                """
+                INSERT INTO public.rusa_knowledge_rights_attestations (
+                    tenant_id, document_id, version_id, rights_status, source_owner,
+                    license_id, internal_storage_allowed, extraction_allowed,
+                    derivative_allowed, embedding_allowed, retrieval_allowed,
+                    retention_policy, evidence_uri, attested_by
+                ) VALUES (
+                    %s, %s::uuid, %s::uuid, 'unknown', 'RUSA owner',
+                    'pending-review', FALSE, FALSE, FALSE, FALSE, FALSE,
+                    'pending rights review', 'evidence://pending', 'rusa_knowledge_reviewer'
+                )
+                """,
+                (tenant_id, document_id, version_id),
+            )
+            stored_rights_actor = connection.execute(
+                """
+                SELECT attested_by FROM public.rusa_knowledge_rights_attestations
+                WHERE tenant_id=%s AND document_id=%s::uuid AND version_id=%s::uuid
+                ORDER BY rights_id DESC LIMIT 1
+                """,
+                (tenant_id, document_id, version_id),
+            ).fetchone()[0]
+            assert stored_rights_actor == reviewer_login
+
+        reviewer.record_rights_attestation(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            rights_status="cleared",
+            source_owner="RUSA project owner",
+            license_id="internal-owner-authorized",
+            attribution_required=True,
+            attribution_text="Source: RUSA project owner, authorized internal knowledge base.",
+            internal_storage_allowed=True,
+            extraction_allowed=True,
+            derivative_allowed=True,
+            embedding_allowed=True,
+            retrieval_allowed=True,
+            retention_policy="retain while owner authorization remains valid",
+            evidence_uri="approval://rights/guide-v1",
+        )
+        with reviewer._pool.connection() as connection:
+            reviewer._set_tenant(connection, tenant_id)
+            connection.execute(
+                """
+                INSERT INTO public.rusa_knowledge_review_findings (
+                    tenant_id, document_id, version_id, review_type, decision,
+                    finding_text, reviewer_principal
+                ) VALUES (
+                    %s, %s::uuid, %s::uuid, 'technical', 'needs_changes',
+                    'actor identity override test', 'rusa_knowledge_reviewer'
+                )
+                """,
+                (tenant_id, document_id, version_id),
+            )
+            stored_review_actor = connection.execute(
+                """
+                SELECT reviewer_principal FROM public.rusa_knowledge_review_findings
+                WHERE tenant_id=%s AND document_id=%s::uuid AND version_id=%s::uuid
+                ORDER BY review_id DESC LIMIT 1
+                """,
+                (tenant_id, document_id, version_id),
+            ).fetchone()[0]
+            reviewer_login = connection.execute("SELECT session_user").fetchone()[0]
+            assert stored_review_actor == reviewer_login
+
+        approver = governance["approver"]
+        approver.record_human_approval(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            decision="approved",
+            approval_reference="pre-review-approval-ticket",
+        )
+
+        for review_type in ("technical", "source_fidelity", "security", "qa"):
+            reviewer.record_review_finding(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                version_id=version_id,
+                review_type=review_type,
+                decision="passed",
+                finding_text=f"{review_type} review passed for the pinned version",
+                evidence_uri=f"review://{review_type}/guide-v1",
+            )
+
+        publisher = governance["publisher"]
+        with pytest.raises(Exception, match="human approval must follow the latest rights and review evidence"):
+            publisher.publish_version(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                version_id=version_id,
+                manifest_uri="manifest://tenant-publication/guide-v1",
+                manifest_sha256="a" * 64,
+            )
+
+        with approver._pool.connection() as connection:
+            approver._set_tenant(connection, tenant_id)
+            approver_login = connection.execute("SELECT session_user").fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO public.rusa_knowledge_human_approvals (
+                    tenant_id, document_id, version_id, decision,
+                    approval_reference, approver_principal
+                ) VALUES (
+                    %s, %s::uuid, %s::uuid, 'rejected',
+                    'spoofed-role-principal-test', 'rusa_knowledge_approver'
+                )
+                """,
+                (tenant_id, document_id, version_id),
+            )
+            stored_approver_actor = connection.execute(
+                """
+                SELECT approver_principal FROM public.rusa_knowledge_human_approvals
+                WHERE tenant_id=%s AND document_id=%s::uuid AND version_id=%s::uuid
+                  AND approval_reference='spoofed-role-principal-test'
+                """,
+                (tenant_id, document_id, version_id),
+            ).fetchone()[0]
+            assert stored_approver_actor == approver_login
+
+        with pytest.raises(Exception, match="distinct human approver"):
+            publisher.publish_version(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                version_id=version_id,
+                manifest_uri="manifest://tenant-publication/guide-v1",
+                manifest_sha256="a" * 64,
+            )
+
+        approver.record_human_approval(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            decision="approved",
+            approval_reference="human-approval-ticket-001",
+        )
+        publication_event_id = publisher.publish_version(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            manifest_uri="manifest://tenant-publication/guide-v1",
+            manifest_sha256="a" * 64,
+        )
+        assert publication_event_id > 0
+        with publisher._pool.connection() as connection:
+            publisher._set_tenant(connection, tenant_id)
+            publisher_login = connection.execute("SELECT session_user").fetchone()[0]
+            stored_publisher_actor = connection.execute(
+                """
+                SELECT publisher_principal FROM public.rusa_knowledge_publication_events
+                WHERE tenant_id=%s AND publication_event_id=%s
+                """,
+                (tenant_id, publication_event_id),
+            ).fetchone()[0]
+            assert stored_publisher_actor == publisher_login
+
+        results = answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        )
+        assert len(results) == 1
+        assert results[0]["document_id"] == document_id
+        assert results[0]["attribution_required"] is True
+        assert results[0]["attribution_text"] == (
+            "Source: RUSA project owner, authorized internal knowledge base."
+        )
+        published_document = answer_store.get_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        )
+        assert published_document is not None
+        assert published_document["content"] == (
+            "governance lifecycle source rights review approval publication"
+        )
+        assert published_document["attribution_required"] is True
+        assert published_document["attribution_text"] == results[0]["attribution_text"]
+
+        published_versions = store.list_document_versions(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        )
+        published_version = answer_store.get_document_version(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+            version_id=published_versions[0]["version_id"],
+        )
+        assert published_version is not None
+        assert published_version["attribution_required"] is True
+        assert published_version["attribution_text"] == results[0]["attribution_text"]
+
+        # The worker's mutable current-chunk table cannot override the immutable
+        # content snapshot pinned by the published version.
+        with store._pool.connection() as connection:
+            store._set_tenant(connection, tenant_id)
+            connection.execute(
+                """
+                UPDATE public.rusa_knowledge_chunks
+                SET content=%s
+                WHERE tenant_id=%s AND document_id=%s::uuid AND chunk_index=0
+                """,
+                ("tampered mutable chunk must not be served", tenant_id, document_id),
+            )
+        assert answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        ) == []
+        immutable_document = answer_store.get_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        )
+        assert immutable_document is not None
+        assert immutable_document["content"] == published_document["content"]
+
+        with store._pool.connection() as connection:
+            store._set_tenant(connection, tenant_id)
+            connection.execute(
+                """
+                UPDATE public.rusa_knowledge_chunks
+                SET content=%s
+                WHERE tenant_id=%s AND document_id=%s::uuid AND chunk_index=0
+                """,
+                (published_document["content"], tenant_id, document_id),
+            )
+        assert answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        )
+
+        assert answer_store.list_collections(tenant_id=tenant_id) == [
+            {"collection": "agent", "document_count": 1}
+        ]
+        assert len(
+            answer_store.list_document_versions(
+                tenant_id=tenant_id,
+                collection="agent",
+                document_id=document_id,
+            )
+        ) == 1
+
+        # A worker cannot roll the current pointer back to a superseded
+        # version and reactivate its old publication event.
+        store.ingest_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            source_uri="kb://governance/guide",
+            title="Governance guide",
+            content_hash="9" * 64,
+            metadata={"knowledge_scope": "shared"},
+            chunks=["newer unpublished governance source version"],
+            embeddings=[_unit_vector(1)],
+        )
+        with store._pool.connection() as connection:
+            store._set_tenant(connection, tenant_id)
+            connection.execute(
+                """
+                UPDATE public.rusa_knowledge_documents
+                SET current_version_id=%s::uuid
+                WHERE tenant_id=%s AND document_id=%s::uuid
+                """,
+                (version_id, tenant_id, document_id),
+            )
+            old_version_eligible = connection.execute(
+                """
+                SELECT public.rusa_knowledge_version_is_published(
+                    %s, %s::uuid, %s::uuid
+                )
+                """,
+                (tenant_id, document_id, version_id),
+            ).fetchone()[0]
+            assert old_version_eligible is False
+
+        # A later failed review invalidates the old publication immediately,
+        # even before a publisher appends an explicit withdrawal event.
+        reviewer.record_review_finding(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            review_type="security",
+            decision="failed",
+            finding_text="New security evidence requires quarantine",
+            evidence_uri="review://security/guide-v1-followup",
+        )
+        assert answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        ) == []
+        assert answer_store.get_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        ) is None
+
+        publisher.withdraw_version(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            reason="owner requested withdrawal",
+        )
+        assert answer_store.search(
+            tenant_id=tenant_id,
+            collection="agent",
+            query="governance lifecycle",
+            query_embedding=_unit_vector(0),
+        ) == []
+        assert answer_store.get_document(
+            tenant_id=tenant_id,
+            collection="agent",
+            document_id=document_id,
+        ) is None
+        assert answer_store.list_collections(tenant_id=tenant_id) == []
+
+        with psycopg.connect(governance_dsns["publisher"]) as connection:
+            connection.execute("SELECT set_config('role', %s, true)", ("rusa_knowledge_publisher",))
+            connection.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            audit = connection.execute(
+                """
+                SELECT actor_principal, actor_role, action
+                FROM public.rusa_knowledge_audit_events
+                WHERE tenant_id=%s
+                ORDER BY audit_event_id
+                """,
+                (tenant_id,),
+            ).fetchall()
+        principals = {row[0] for row in audit}
+        actor_roles = {row[1] for row in audit}
+        assert len(principals) == 3
+        assert actor_roles == {
+            "rusa_knowledge_reviewer",
+            "rusa_knowledge_approver",
+            "rusa_knowledge_publisher",
+        }
+        assert any(row[2] == "rusa_knowledge_rights_attestations.insert" for row in audit)
+        assert any(row[2] == "rusa_knowledge_review_findings.insert" for row in audit)
+        assert any(row[2] == "rusa_knowledge_human_approvals.insert" for row in audit)
+        assert sum(row[2] == "rusa_knowledge_publication_events.insert" for row in audit) == 2
+    finally:
+        answer_store.close()

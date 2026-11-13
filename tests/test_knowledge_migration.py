@@ -47,3 +47,51 @@ def test_document_version_history_migration_is_append_only_and_dimension_aware()
     assert "GRANT DELETE" not in migration
     assert "REVOKE DELETE ON public.rusa_knowledge_documents" in migration
     assert "current_version_id" in migration
+
+
+def test_governance_migration_separates_reviewer_approver_and_publisher():
+    migration = Path("migrations/013_rag_knowledge_governance.sql").read_text(
+        encoding="utf-8"
+    )
+    for table in (
+        "rusa_knowledge_rights_attestations",
+        "rusa_knowledge_review_findings",
+        "rusa_knowledge_human_approvals",
+        "rusa_knowledge_publication_events",
+        "rusa_knowledge_audit_events",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS public.{table}" in migration
+        assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY" in migration
+        assert f"ALTER TABLE public.{table} FORCE ROW LEVEL SECURITY" in migration
+    assert "rusa_knowledge_reviewer" in migration
+    assert "rusa_knowledge_approver" in migration
+    assert "rusa_knowledge_publisher" in migration
+    assert "session_user" in migration
+    assert "rusa_publish_knowledge_version" in migration
+    assert "rusa_withdraw_knowledge_version" in migration
+    assert "rusa_knowledge_version_is_published" in migration
+    assert "rusa_knowledge_version_attribution" in migration
+    assert "GRANT EXECUTE ON FUNCTION public.rusa_knowledge_version_attribution" in migration
+    assert "rusa_knowledge_governance_audit_insert" in migration
+    assert "rusa_knowledge_governance_set_actor" in migration
+    assert "NEW.approver_principal := session_user" in migration
+    assert "reviewer login must have exclusive reviewer role membership" in migration
+    assert "approver login must have exclusive approver role membership" in migration
+    assert "publisher login must have exclusive publisher role membership" in migration
+    assert "rolcanlogin AND NOT rolsuper AND NOT rolbypassrls" in migration
+    assert "MAX(v_latest.version_number)" in migration
+    assert "pg_advisory_xact_lock" in migration
+    assert "NEW.created_at := clock_timestamp()" in migration
+    assert "ORDER BY created_at DESC, publication_event_id DESC" in migration
+    assert "v_approval_created_at <= v_latest_preapproval_evidence_at" in migration
+    assert "publication failed its post-insert governance eligibility check" in migration
+    assert "v_rights.attested_at >= v_publication_created_at" in migration
+    assert migration.count("CREATE OR REPLACE FUNCTION public.rusa_publish_knowledge_version") == 1
+    assert migration.count("CREATE OR REPLACE FUNCTION public.rusa_withdraw_knowledge_version") == 1
+    assert migration.count("CREATE OR REPLACE FUNCTION public.rusa_knowledge_version_is_published") == 1
+    assert migration.count("COMMIT;") == 1
+    assert migration.count("DROP TRIGGER IF EXISTS rusa_knowledge_") == 8
+    assert "manifest_sha256 IS NOT NULL" in migration
+    assert "SECURITY DEFINER" in migration
+    assert "GRANT UPDATE" not in migration
+    assert "GRANT DELETE" not in migration

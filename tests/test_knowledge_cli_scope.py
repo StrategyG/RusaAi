@@ -87,3 +87,94 @@ def test_version_history_cli_requires_document_and_version_scope():
     )
     assert version.command == "get-version"
     assert version.max_chars == 20_000
+
+
+def test_governance_cli_exposes_separate_rights_review_approval_and_publication_steps():
+    parser = build_parser()
+    rights = parser.parse_args(
+        [
+            "attest-rights",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--rights-status", "cleared",
+            "--source-owner", "RUSA project owner",
+            "--license-id", "internal-owner-authorized",
+            "--internal-storage-allowed",
+            "--extraction-allowed",
+            "--derivative-allowed",
+            "--embedding-allowed",
+            "--retrieval-allowed",
+            "--retention-policy", "owner authorization",
+            "--evidence-uri", "approval://rights/001",
+        ]
+    )
+    assert rights.command == "attest-rights"
+    assert rights.rights_status == "cleared"
+    assert rights.embedding_allowed is True
+
+    review = parser.parse_args(
+        [
+            "review-version",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--review-type", "security",
+            "--decision", "passed",
+            "--finding", "Security review passed",
+        ]
+    )
+    assert review.command == "review-version"
+    assert review.review_type == "security"
+
+    approval = parser.parse_args(
+        [
+            "approve-version",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--decision", "approved",
+            "--approval-reference", "ticket-001",
+        ]
+    )
+    assert approval.command == "approve-version"
+    assert approval.approval_reference == "ticket-001"
+
+    publication = parser.parse_args(
+        [
+            "publish-version",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--manifest-uri", "manifest://tenant-a/001",
+            "--manifest-sha256", "a" * 64,
+        ]
+    )
+    assert publication.command == "publish-version"
+
+    withdrawal = parser.parse_args(
+        [
+            "withdraw-version",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--reason", "source owner request",
+        ]
+    )
+    assert withdrawal.command == "withdraw-version"
+
+
+def test_review_candidate_cli_is_a_separate_permissioned_path():
+    args = build_parser().parse_args(
+        [
+            "get-review-candidate",
+            "--tenant-id", "tenant-a",
+            "--document-id", "00000000-0000-0000-0000-000000000001",
+            "--version-id", "00000000-0000-0000-0000-000000000002",
+            "--agent-id", "aicode-analyst",
+            "--project-id", "project-alpha",
+        ]
+    )
+    assert args.command == "get-review-candidate"
+    assert args.collection == "agent"
+    assert args.max_chars == 20_000

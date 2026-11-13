@@ -22,12 +22,14 @@ def _document_fingerprint(
     title: str,
     content_hash: str,
     metadata: dict[str, Any],
+    chunk_snapshot_sha256: str,
 ) -> str:
     payload = json.dumps(
         {
             "source_uri": source_uri,
             "title": title,
             "content_hash": content_hash,
+            "chunk_snapshot_sha256": chunk_snapshot_sha256,
             "metadata": metadata,
         },
         ensure_ascii=False,
@@ -61,6 +63,7 @@ class PostgresKnowledgeStore:
         min_pool_size: int = 1,
         max_pool_size: int = 10,
         db_role: str | None = None,
+        require_publication: bool = True,
     ) -> None:
         if not dsn:
             raise ValueError("knowledge database DSN is required")
@@ -70,7 +73,10 @@ class PostgresKnowledgeStore:
             raise ValueError("database pool limits are invalid")
         if db_role is not None and not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", db_role):
             raise ValueError("knowledge database role name is invalid")
+        if not isinstance(require_publication, bool):
+            raise ValueError("require_publication must be a boolean")
         self.db_role = db_role
+        self.require_publication = require_publication
         try:
             from psycopg_pool import ConnectionPool
         except ImportError as exc:
@@ -190,9 +196,6 @@ class PostgresKnowledgeStore:
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_document_versions', 'SELECT'
                     ),
-                    has_table_privilege(
-                        current_user, 'public.rusa_knowledge_document_versions', 'INSERT'
-                    ),
                     NOT has_table_privilege(
                         current_user, 'public.rusa_knowledge_document_versions', 'UPDATE'
                     ),
@@ -202,14 +205,69 @@ class PostgresKnowledgeStore:
                     has_table_privilege(
                         current_user, 'public.rusa_knowledge_version_chunks', 'SELECT'
                     ),
-                    has_table_privilege(
-                        current_user, 'public.rusa_knowledge_version_chunks', 'INSERT'
-                    ),
                     NOT has_table_privilege(
                         current_user, 'public.rusa_knowledge_version_chunks', 'UPDATE'
                     ),
                     NOT has_table_privilege(
                         current_user, 'public.rusa_knowledge_version_chunks', 'DELETE'
+                    ),
+                    to_regclass('public.rusa_knowledge_publication_latest_idx') IS NOT NULL,
+                    has_table_privilege(
+                        current_user, 'public.rusa_knowledge_publication_events', 'SELECT'
+                    ),
+                    (
+                        SELECT count(*) = 5 AND bool_and(relrowsecurity AND relforcerowsecurity)
+                        FROM pg_class
+                        WHERE oid IN (
+                            to_regclass('public.rusa_knowledge_rights_attestations'),
+                            to_regclass('public.rusa_knowledge_review_findings'),
+                            to_regclass('public.rusa_knowledge_human_approvals'),
+                            to_regclass('public.rusa_knowledge_publication_events'),
+                            to_regclass('public.rusa_knowledge_audit_events')
+                        )
+                    ),
+                    (
+                        SELECT count(*) = 5
+                        FROM pg_policies
+                        WHERE schemaname='public'
+                          AND policyname IN (
+                              'rusa_knowledge_rights_tenant_isolation',
+                              'rusa_knowledge_reviews_tenant_isolation',
+                              'rusa_knowledge_approvals_tenant_isolation',
+                              'rusa_knowledge_publications_tenant_isolation',
+                              'rusa_knowledge_audit_tenant_isolation'
+                          )
+                    ),
+                    (
+                        SELECT count(*) = 3
+                        FROM pg_roles
+                        WHERE rolname IN (
+                            'rusa_knowledge_reviewer',
+                            'rusa_knowledge_approver',
+                            'rusa_knowledge_publisher'
+                        )
+                    ),
+                    to_regprocedure(
+                        'public.rusa_publish_knowledge_version(text,uuid,uuid,text,text)'
+                    ) IS NOT NULL,
+                    to_regprocedure(
+                        'public.rusa_withdraw_knowledge_version(text,uuid,uuid,text)'
+                    ) IS NOT NULL,
+                    to_regprocedure(
+                        'public.rusa_knowledge_version_is_published(text,uuid,uuid)'
+                    ) IS NOT NULL,
+                    has_function_privilege(
+                        current_user,
+                        'public.rusa_knowledge_version_is_published(text,uuid,uuid)',
+                        'EXECUTE'
+                    ),
+                    to_regprocedure(
+                        'public.rusa_knowledge_version_attribution(text,uuid,uuid)'
+                    ) IS NOT NULL,
+                    has_function_privilege(
+                        current_user,
+                        'public.rusa_knowledge_version_attribution(text,uuid,uuid)',
+                        'EXECUTE'
                     )
                 """,
                 (f"vector({self.dimensions})", self.embedding_column),
@@ -250,9 +308,6 @@ class PostgresKnowledgeStore:
             raise ValueError("document metadata exceeds 16 KiB")
 
         current_metadata = json.loads(metadata_json)
-        current_fingerprint = _document_fingerprint(
-            source_uri, title, content_hash, current_metadata
-        )
         rows = []
         for index, (content, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             if not content.strip() or len(content) > 20_000:
@@ -265,6 +320,16 @@ class PostgresKnowledgeStore:
                     json.dumps({"chunk_index": index}, ensure_ascii=False),
                 )
             )
+        chunk_snapshot_sha256 = hashlib.sha256(
+            json.dumps(
+                [{"content": row[1], "embedding": row[2]} for row in rows],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        current_fingerprint = _document_fingerprint(
+            source_uri, title, content_hash, current_metadata, chunk_snapshot_sha256
+        )
 
         from psycopg import sql
 
@@ -320,7 +385,7 @@ class PostgresKnowledgeStore:
 
             existing_version = connection.execute(
                 """
-                SELECT version_id
+                SELECT version_id, version_number
                 FROM rusa_knowledge_document_versions
                 WHERE tenant_id=%s AND document_id=%s::uuid AND version_fingerprint=%s
                 """,
@@ -360,6 +425,18 @@ class PostgresKnowledgeStore:
                         ],
                     )
             else:
+                latest_version_number = connection.execute(
+                    """
+                    SELECT COALESCE(MAX(version_number), 0)
+                    FROM rusa_knowledge_document_versions
+                    WHERE tenant_id=%s AND document_id=%s::uuid
+                    """,
+                    (tenant_id, document_id),
+                ).fetchone()[0]
+                if int(existing_version[1]) < int(latest_version_number):
+                    # Re-ingesting a historical snapshot must not roll the
+                    # document pointer or mutable index back to a superseded version.
+                    return document_id
                 version_id = str(existing_version[0])
 
             connection.execute(
@@ -419,20 +496,49 @@ class PostgresKnowledgeStore:
                 FROM rusa_knowledge_chunks c
                 JOIN rusa_knowledge_documents d
                   ON d.tenant_id=c.tenant_id AND d.document_id=c.document_id
+                LEFT JOIN rusa_knowledge_document_versions v
+                  ON v.tenant_id=d.tenant_id
+                 AND v.document_id=d.document_id
+                 AND v.version_id=d.current_version_id
+                LEFT JOIN rusa_knowledge_version_chunks vc
+                  ON vc.tenant_id=c.tenant_id
+                 AND vc.version_id=d.current_version_id
+                 AND vc.chunk_index=c.chunk_index
                 WHERE c.tenant_id=%s AND c.collection=%s
                   AND (
-                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
-                      OR (
-                          COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
-                          AND %s::text IS NOT NULL
-                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                      (
+                          d.current_version_id IS NOT NULL
+                          AND v.version_id IS NOT NULL
+                          AND vc.version_id IS NOT NULL
+                          AND c.collection=v.collection
+                          AND c.content=vc.content
+                          AND c.metadata=vc.metadata
                           AND (
-                              d.metadata->>'project_id' IS NULL
+                              vc.{embedding_column} IS NULL
+                              OR c.{embedding_column} IS NOT DISTINCT FROM vc.{embedding_column}
+                          )
+                      )
+                      OR (d.current_version_id IS NULL AND NOT %s::boolean)
+                  )
+                  AND (
+                      COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(COALESCE(v.metadata, d.metadata)->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              COALESCE(v.metadata, d.metadata)->>'project_id' IS NULL
                               OR (
                                   %s::text IS NOT NULL
-                                  AND d.metadata->>'project_id' = %s
+                                  AND COALESCE(v.metadata, d.metadata)->>'project_id' = %s
                               )
                           )
+                      )
+                  )
+                  AND (
+                      NOT %s::boolean
+                      OR public.rusa_knowledge_version_is_published(
+                          d.tenant_id, d.document_id, d.current_version_id
                       )
                   )
             ),
@@ -462,19 +568,29 @@ class PostgresKnowledgeStore:
                 FULL OUTER JOIN lexical_candidates l ON v.chunk_id = l.chunk_id
             )
             SELECT c.chunk_id, c.document_id, c.chunk_index, c.content,
-                   d.title, d.source_uri, d.metadata, combined.rrf_score,
-                   COALESCE(1 - (c.{embedding_column} <=> %s::vector), 0.0) AS vector_similarity
+                   COALESCE(v.title, d.title), COALESCE(v.source_uri, d.source_uri),
+                    COALESCE(v.metadata, d.metadata), combined.rrf_score,
+                   COALESCE(1 - (c.{embedding_column} <=> %s::vector), 0.0) AS vector_similarity,
+                   attribution.attribution_required, attribution.attribution_text
             FROM combined
             JOIN rusa_knowledge_chunks c
               ON c.chunk_id = combined.chunk_id AND c.tenant_id=%s
             JOIN rusa_knowledge_documents d
               ON d.document_id=c.document_id AND d.tenant_id=c.tenant_id
+            LEFT JOIN rusa_knowledge_document_versions v
+              ON v.tenant_id=d.tenant_id
+             AND v.document_id=d.document_id
+             AND v.version_id=d.current_version_id
+            LEFT JOIN LATERAL public.rusa_knowledge_version_attribution(
+                d.tenant_id, d.document_id, d.current_version_id
+            ) attribution ON TRUE
             ORDER BY combined.rrf_score DESC
             LIMIT %s
             """
         ).format(embedding_column=sql.Identifier(self.embedding_column))
         params = (
-            tenant_id, collection, agent_id, agent_id, project_id, project_id,
+            tenant_id, collection, self.require_publication,
+            agent_id, agent_id, project_id, project_id, self.require_publication,
             vector, vector, candidate_limit,
             query, query, query, candidate_limit,
             vector, tenant_id, limit,
@@ -493,6 +609,8 @@ class PostgresKnowledgeStore:
                 "metadata": row[6],
                 "score": float(row[7]),
                 "vector_similarity": float(row[8]),
+                "attribution_required": bool(row[9]) if row[9] is not None else False,
+                "attribution_text": row[10],
             }
             for row in rows
         ]
@@ -599,37 +717,71 @@ class PostgresKnowledgeStore:
             self._set_tenant(connection, tenant_id)
             document = connection.execute(
                 """
-                SELECT document_id, title, source_uri, metadata, content_hash, created_at, updated_at
-                FROM rusa_knowledge_documents
-                WHERE tenant_id=%s AND collection=%s AND document_id=%s::uuid
+                SELECT d.document_id, COALESCE(v.title, d.title),
+                       COALESCE(v.source_uri, d.source_uri),
+                       COALESCE(v.metadata, d.metadata),
+                       COALESCE(v.content_hash, d.content_hash),
+                       d.created_at, d.updated_at, d.current_version_id,
+                       attribution.attribution_required, attribution.attribution_text
+                FROM rusa_knowledge_documents d
+                LEFT JOIN rusa_knowledge_document_versions v
+                  ON v.tenant_id=d.tenant_id
+                 AND v.document_id=d.document_id
+                 AND v.version_id=d.current_version_id
+                LEFT JOIN LATERAL public.rusa_knowledge_version_attribution(
+                    d.tenant_id, d.document_id, d.current_version_id
+                ) attribution ON TRUE
+                WHERE d.tenant_id=%s
+                  AND COALESCE(v.collection, d.collection)=%s
+                  AND d.document_id=%s::uuid
+                  AND (d.current_version_id IS NULL OR v.version_id IS NOT NULL)
                   AND (
-                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'shared'
                       OR (
-                          COALESCE(metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'agent_specific'
                           AND %s::text IS NOT NULL
-                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND COALESCE(COALESCE(v.metadata, d.metadata)->'agent_ids', '[]'::jsonb) ? %s
                           AND (
-                              metadata->>'project_id' IS NULL
+                              COALESCE(v.metadata, d.metadata)->>'project_id' IS NULL
                               OR (
                                   %s::text IS NOT NULL
-                                  AND metadata->>'project_id' = %s
+                                  AND COALESCE(v.metadata, d.metadata)->>'project_id' = %s
                               )
                           )
                       )
                   )
+                  AND (
+                      NOT %s::boolean
+                      OR public.rusa_knowledge_version_is_published(
+                          d.tenant_id, d.document_id, d.current_version_id
+                      )
+                  )
                 """,
-                (tenant_id, collection, document_id, agent_id, agent_id, project_id, project_id),
+                (
+                    tenant_id, collection, document_id,
+                    agent_id, agent_id, project_id, project_id, self.require_publication,
+                ),
             ).fetchone()
             if document is None:
                 return None
-            chunks = connection.execute(
-                """
-                SELECT content FROM rusa_knowledge_chunks
-                WHERE tenant_id=%s AND collection=%s AND document_id=%s::uuid
-                ORDER BY chunk_index
-                """,
-                (tenant_id, collection, document_id),
-            ).fetchall()
+            if document[7] is None and not self.require_publication:
+                chunks = connection.execute(
+                    """
+                    SELECT content FROM rusa_knowledge_chunks
+                    WHERE tenant_id=%s AND collection=%s AND document_id=%s::uuid
+                    ORDER BY chunk_index
+                    """,
+                    (tenant_id, collection, document_id),
+                ).fetchall()
+            else:
+                chunks = connection.execute(
+                    """
+                    SELECT content FROM rusa_knowledge_version_chunks
+                    WHERE tenant_id=%s AND version_id=%s::uuid
+                    ORDER BY chunk_index
+                    """,
+                    (tenant_id, document[7]),
+                ).fetchall()
         content = "\n\n".join(row[0] for row in chunks)[:max_chars]
         return {
             "document_id": str(document[0]),
@@ -641,6 +793,8 @@ class PostgresKnowledgeStore:
             "updated_at": document[6].isoformat() if document[6] else None,
             "content": content,
             "truncated": sum(len(row[0]) for row in chunks) > max_chars,
+            "attribution_required": bool(document[8]) if document[8] is not None else False,
+            "attribution_text": document[9],
         }
 
     def list_document_versions(
@@ -697,13 +851,20 @@ class PostgresKnowledgeStore:
                           )
                       )
                   )
+                  AND (
+                      NOT %s::boolean
+                      OR public.rusa_knowledge_version_is_published(
+                          v.tenant_id, v.document_id, v.version_id
+                      )
+                  )
                 ORDER BY v.version_number DESC
                 LIMIT %s
                 """,
                 (
                     tenant_id, collection, document_id,
                     agent_id, agent_id, project_id, project_id,
-                    agent_id, agent_id, project_id, project_id, limit,
+                    agent_id, agent_id, project_id, project_id,
+                    self.require_publication, limit,
                 ),
             ).fetchall()
         return [
@@ -739,6 +900,106 @@ class PostgresKnowledgeStore:
             UUID(version_id)
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValueError("document_id and version_id must be UUIDs") from exc
+        if type(max_chars) is not int or not 1 <= max_chars <= 50_000:
+            raise ValueError("max_chars must be between 1 and 50000")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            version = connection.execute(
+                """
+                SELECT v.version_id, v.version_number, v.document_id, v.title,
+                       v.source_uri, v.content_hash, v.metadata, v.created_at,
+                       (v.version_id = d.current_version_id) AS is_current,
+                       attribution.attribution_required, attribution.attribution_text
+                FROM rusa_knowledge_document_versions v
+                JOIN rusa_knowledge_documents d
+                  ON d.tenant_id=v.tenant_id AND d.document_id=v.document_id
+                LEFT JOIN LATERAL public.rusa_knowledge_version_attribution(
+                    v.tenant_id, v.document_id, v.version_id
+                ) attribution ON TRUE
+                WHERE v.tenant_id=%s AND v.collection=%s
+                  AND v.document_id=%s::uuid AND v.version_id=%s::uuid
+                  AND (
+                      COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(d.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(d.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              d.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND d.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                  AND (
+                      COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'shared'
+                      OR (
+                          COALESCE(v.metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          AND %s::text IS NOT NULL
+                          AND COALESCE(v.metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND (
+                              v.metadata->>'project_id' IS NULL
+                              OR (%s::text IS NOT NULL AND v.metadata->>'project_id' = %s)
+                          )
+                      )
+                  )
+                  AND (
+                      NOT %s::boolean
+                      OR public.rusa_knowledge_version_is_published(
+                          v.tenant_id, v.document_id, v.version_id
+                      )
+                  )
+                """,
+                (
+                    tenant_id, collection, document_id, version_id,
+                    agent_id, agent_id, project_id, project_id,
+                    agent_id, agent_id, project_id, project_id,
+                    self.require_publication,
+                ),
+            ).fetchone()
+            if version is None:
+                return None
+            chunks = connection.execute(
+                """
+                SELECT content FROM rusa_knowledge_version_chunks
+                WHERE tenant_id=%s AND version_id=%s::uuid
+                ORDER BY chunk_index
+                """,
+                (tenant_id, version_id),
+            ).fetchall()
+        content = "\n\n".join(row[0] for row in chunks)[:max_chars]
+        return {
+            "version_id": str(version[0]),
+            "version_number": int(version[1]),
+            "document_id": str(version[2]),
+            "title": version[3],
+            "source_uri": version[4],
+            "content_hash": str(version[5]).strip(),
+            "metadata": version[6],
+            "created_at": version[7].isoformat() if version[7] else None,
+            "is_current": bool(version[8]),
+            "content": content,
+            "truncated": sum(len(row[0]) for row in chunks) > max_chars,
+            "attribution_required": bool(version[9]) if version[9] is not None else False,
+            "attribution_text": version[10],
+        }
+
+    def get_review_candidate_version(
+        self,
+        *,
+        tenant_id: str,
+        collection: str,
+        document_id: str,
+        version_id: str,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        max_chars: int = 20_000,
+    ) -> dict[str, Any] | None:
+        if self.db_role != "rusa_knowledge_reviewer":
+            raise PermissionError("unpublished candidate reads require the reviewer database role")
+        self._validate_scope(tenant_id, collection)
+        self._validate_agent_id(agent_id)
+        self._validate_project_id(project_id)
+        self._validate_document_version_ids(document_id, version_id)
         if type(max_chars) is not int or not 1 <= max_chars <= 50_000:
             raise ValueError("max_chars must be between 1 and 50000")
         with self._pool.connection() as connection:
@@ -807,7 +1068,228 @@ class PostgresKnowledgeStore:
             "is_current": bool(version[8]),
             "content": content,
             "truncated": sum(len(row[0]) for row in chunks) > max_chars,
+            "publication_status": "candidate_only",
         }
+
+    @staticmethod
+    def _validate_document_version_ids(document_id: str, version_id: str) -> None:
+        try:
+            UUID(document_id)
+            UUID(version_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("document_id and version_id must be UUIDs") from exc
+
+    def record_rights_attestation(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        rights_status: str,
+        source_owner: str,
+        license_id: str,
+        internal_storage_allowed: bool,
+        extraction_allowed: bool,
+        derivative_allowed: bool,
+        embedding_allowed: bool,
+        retrieval_allowed: bool,
+        retention_policy: str,
+        evidence_uri: str,
+        attribution_required: bool = False,
+        attribution_text: str | None = None,
+    ) -> int:
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        self._validate_document_version_ids(document_id, version_id)
+        if rights_status not in {"unknown", "cleared", "restricted", "denied"}:
+            raise ValueError("rights_status is invalid")
+        flags = (
+            internal_storage_allowed,
+            extraction_allowed,
+            derivative_allowed,
+            embedding_allowed,
+            retrieval_allowed,
+            attribution_required,
+        )
+        if any(type(flag) is not bool for flag in flags):
+            raise ValueError("rights permission flags must be booleans")
+        bounded = (
+            (source_owner, 512, "source_owner"),
+            (license_id, 256, "license_id"),
+            (retention_policy, 2048, "retention_policy"),
+            (evidence_uri, 2048, "evidence_uri"),
+        )
+        for value, maximum, label in bounded:
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+                raise ValueError(f"{label} must contain 1 to {maximum} characters")
+        if attribution_text is not None and (
+            not isinstance(attribution_text, str) or len(attribution_text) > 2048
+        ):
+            raise ValueError("attribution_text exceeds 2048 characters")
+        if attribution_required and not (attribution_text or "").strip():
+            raise ValueError("attribution_text is required when attribution is required")
+        if rights_status == "cleared" and not all(
+            (internal_storage_allowed, extraction_allowed, derivative_allowed,
+             embedding_allowed, retrieval_allowed)
+        ):
+            raise ValueError("cleared rights require all storage, extraction, derivative, embedding and retrieval permissions")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            row = connection.execute(
+                """
+                INSERT INTO rusa_knowledge_rights_attestations (
+                    tenant_id, document_id, version_id, rights_status, source_owner,
+                    license_id, internal_storage_allowed, extraction_allowed,
+                    derivative_allowed, embedding_allowed, retrieval_allowed,
+                    attribution_required, attribution_text, retention_policy, evidence_uri
+                )
+                VALUES (
+                    %s, %s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                RETURNING rights_id
+                """,
+                (
+                    tenant_id, document_id, version_id, rights_status, source_owner,
+                    license_id, internal_storage_allowed, extraction_allowed,
+                    derivative_allowed, embedding_allowed, retrieval_allowed,
+                    attribution_required, attribution_text, retention_policy, evidence_uri,
+                ),
+            ).fetchone()
+        return int(row[0])
+
+    def record_review_finding(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        review_type: str,
+        decision: str,
+        finding_text: str,
+        evidence_uri: str | None = None,
+    ) -> int:
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        self._validate_document_version_ids(document_id, version_id)
+        if review_type not in {"technical", "source_fidelity", "security", "qa"}:
+            raise ValueError("review_type is invalid")
+        if decision not in {"passed", "needs_changes", "failed"}:
+            raise ValueError("review decision is invalid")
+        if not isinstance(finding_text, str) or not finding_text.strip() or len(finding_text) > 10_000:
+            raise ValueError("finding_text must contain 1 to 10000 characters")
+        if evidence_uri is not None and (
+            not isinstance(evidence_uri, str) or len(evidence_uri) > 2048
+        ):
+            raise ValueError("evidence_uri exceeds 2048 characters")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            row = connection.execute(
+                """
+                INSERT INTO rusa_knowledge_review_findings (
+                    tenant_id, document_id, version_id, review_type, decision,
+                    finding_text, evidence_uri
+                )
+                VALUES (%s, %s::uuid, %s::uuid, %s, %s, %s, %s)
+                RETURNING review_id
+                """,
+                (
+                    tenant_id, document_id, version_id, review_type,
+                    decision, finding_text, evidence_uri,
+                ),
+            ).fetchone()
+        return int(row[0])
+
+    def record_human_approval(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        decision: str,
+        approval_reference: str,
+    ) -> int:
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        self._validate_document_version_ids(document_id, version_id)
+        if decision not in {"approved", "rejected", "revoked"}:
+            raise ValueError("approval decision is invalid")
+        if (
+            not isinstance(approval_reference, str)
+            or not approval_reference.strip()
+            or len(approval_reference) > 512
+        ):
+            raise ValueError("approval_reference must contain 1 to 512 characters")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            row = connection.execute(
+                """
+                INSERT INTO rusa_knowledge_human_approvals (
+                    tenant_id, document_id, version_id, decision, approval_reference
+                )
+                VALUES (%s, %s::uuid, %s::uuid, %s, %s)
+                RETURNING approval_id
+                """,
+                (tenant_id, document_id, version_id, decision, approval_reference),
+            ).fetchone()
+        return int(row[0])
+
+    def publish_version(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        manifest_uri: str,
+        manifest_sha256: str,
+    ) -> int:
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        self._validate_document_version_ids(document_id, version_id)
+        if (
+            not isinstance(manifest_uri, str)
+            or not manifest_uri.strip()
+            or len(manifest_uri) > 2048
+            or not isinstance(manifest_sha256, str)
+            or len(manifest_sha256) != 64
+            or re.search(r"[^0-9a-f]", manifest_sha256)
+        ):
+            raise ValueError("publication manifest URI or SHA-256 is invalid")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            row = connection.execute(
+                """
+                SELECT public.rusa_publish_knowledge_version(
+                    %s, %s::uuid, %s::uuid, %s, %s
+                )
+                """,
+                (tenant_id, document_id, version_id, manifest_uri, manifest_sha256),
+            ).fetchone()
+        return int(row[0])
+
+    def withdraw_version(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> int:
+        if not isinstance(tenant_id, str) or not TENANT_PATTERN.fullmatch(tenant_id):
+            raise ValueError("tenant_id is invalid")
+        self._validate_document_version_ids(document_id, version_id)
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 2048:
+            raise ValueError("withdrawal reason must contain 1 to 2048 characters")
+        with self._pool.connection() as connection:
+            self._set_tenant(connection, tenant_id)
+            row = connection.execute(
+                """
+                SELECT public.rusa_withdraw_knowledge_version(
+                    %s, %s::uuid, %s::uuid, %s
+                )
+                """,
+                (tenant_id, document_id, version_id, reason),
+            ).fetchone()
+        return int(row[0])
 
     def list_collections(
         self,
@@ -824,29 +1306,41 @@ class PostgresKnowledgeStore:
             self._set_tenant(connection, tenant_id)
             rows = connection.execute(
                 """
-                SELECT collection, COUNT(*) AS document_count
-                FROM rusa_knowledge_documents
-                WHERE tenant_id=%s
+                SELECT COALESCE(v.collection, d.collection) AS collection,
+                       COUNT(*) AS document_count
+                FROM rusa_knowledge_documents d
+                LEFT JOIN rusa_knowledge_document_versions v
+                  ON v.tenant_id=d.tenant_id
+                 AND v.document_id=d.document_id
+                 AND v.version_id=d.current_version_id
+                WHERE d.tenant_id=%s
+                  AND (d.current_version_id IS NULL OR v.version_id IS NOT NULL)
                   AND (
-                      COALESCE(metadata->>'knowledge_scope', 'shared') = 'shared'
+                      COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'shared'
                       OR (
-                          COALESCE(metadata->>'knowledge_scope', 'shared') = 'agent_specific'
+                          COALESCE(COALESCE(v.metadata, d.metadata)->>'knowledge_scope', 'shared') = 'agent_specific'
                           AND %s::text IS NOT NULL
-                          AND COALESCE(metadata->'agent_ids', '[]'::jsonb) ? %s
+                          AND COALESCE(COALESCE(v.metadata, d.metadata)->'agent_ids', '[]'::jsonb) ? %s
                           AND (
-                              metadata->>'project_id' IS NULL
+                              COALESCE(v.metadata, d.metadata)->>'project_id' IS NULL
                               OR (
                                   %s::text IS NOT NULL
-                                  AND metadata->>'project_id' = %s
+                                  AND COALESCE(v.metadata, d.metadata)->>'project_id' = %s
                               )
                           )
                       )
                   )
-                GROUP BY collection
-                ORDER BY collection
+                  AND (
+                      NOT %s::boolean
+                      OR public.rusa_knowledge_version_is_published(
+                          d.tenant_id, d.document_id, d.current_version_id
+                      )
+                  )
+                GROUP BY COALESCE(v.collection, d.collection)
+                ORDER BY COALESCE(v.collection, d.collection)
                 LIMIT 100
                 """,
-                (tenant_id, agent_id, agent_id, project_id, project_id),
+                (tenant_id, agent_id, agent_id, project_id, project_id, self.require_publication),
             ).fetchall()
         return [{"collection": row[0], "document_count": int(row[1])} for row in rows]
 
