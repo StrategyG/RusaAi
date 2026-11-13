@@ -9,7 +9,6 @@ from datetime import datetime
 
 from .capability_registry import AgentWorkerRegistry
 
-
 _ROLE_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _TOOL_ID = re.compile(r"^[a-z][a-z0-9_.:-]{0,63}$")
 _RISK_CLASSES = {"low", "medium", "high", "critical"}
