@@ -994,7 +994,7 @@ def test_publication_requires_cleared_rights_reviews_distinct_approval_and_publi
                 )
             )
         try:
-            with pytest.raises(Exception, match="exclusive reviewer role membership"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege, match="inherit only its assigned role"):
                 reviewer.record_review_finding(
                     tenant_id=tenant_id,
                     document_id=document_id,
@@ -1364,3 +1364,114 @@ def test_publication_requires_cleared_rights_reviews_distinct_approval_and_publi
         assert sum(row[2] == "rusa_knowledge_publication_events.insert" for row in audit) == 2
     finally:
         answer_store.close()
+
+
+def test_governance_principals_reject_extra_memberships_and_privileged_logins(governance_stores):
+    import psycopg
+    from psycopg import sql
+
+    stores, _ = governance_stores
+    assigned_roles = {
+        "reviewer": "rusa_knowledge_reviewer",
+        "approver": "rusa_knowledge_approver",
+        "publisher": "rusa_knowledge_publisher",
+    }
+    logins = {}
+    for key, assigned_role in assigned_roles.items():
+        with stores[key]._pool.connection() as connection:
+            login = connection.execute("SELECT session_user").fetchone()[0]
+            connection.execute(
+                "SELECT public.rusa_knowledge_assert_governance_principal(%s::name, %s::name)",
+                (login, assigned_role),
+            )
+            logins[key] = login
+
+    reviewer = stores["reviewer"]
+    reviewer_login = logins["reviewer"]
+
+    # A direct additional group membership must be rejected.
+    direct_extra = "rusa_extra_direct_" + uuid.uuid4().hex[:10]
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(direct_extra)))
+        admin.execute(
+            sql.SQL("GRANT {} TO {}").format(
+                sql.Identifier(direct_extra), sql.Identifier(reviewer_login)
+            )
+        )
+    try:
+        with reviewer._pool.connection() as connection:
+            with pytest.raises(
+                psycopg.errors.InsufficientPrivilege,
+                match="inherit only its assigned role",
+            ):
+                connection.execute(
+                    "SELECT public.rusa_knowledge_assert_governance_principal(%s::name, %s::name)",
+                    (reviewer_login, "rusa_knowledge_reviewer"),
+                )
+    finally:
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("REVOKE {} FROM {}").format(
+                    sql.Identifier(direct_extra), sql.Identifier(reviewer_login)
+                )
+            )
+            admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(direct_extra)))
+
+    # A group role that inherits another role is also outside the approved closure.
+    transitive_extra = "rusa_extra_nested_" + uuid.uuid4().hex[:10]
+    with psycopg.connect(DSN, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(transitive_extra)))
+        admin.execute(
+            sql.SQL("GRANT {} TO rusa_knowledge_reviewer").format(
+                sql.Identifier(transitive_extra)
+            )
+        )
+    try:
+        with reviewer._pool.connection() as connection:
+            with pytest.raises(
+                psycopg.errors.InsufficientPrivilege,
+                match="inherit only its assigned role",
+            ):
+                connection.execute(
+                    "SELECT public.rusa_knowledge_assert_governance_principal(%s::name, %s::name)",
+                    (reviewer_login, "rusa_knowledge_reviewer"),
+                )
+    finally:
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("REVOKE {} FROM rusa_knowledge_reviewer").format(
+                    sql.Identifier(transitive_extra)
+                )
+            )
+            admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(transitive_extra)))
+
+    # Administrative and NOINHERIT login attributes are not acceptable for a human actor.
+    for attribute, reset in (
+        ("CREATEROLE", "NOCREATEROLE"),
+        ("CREATEDB", "NOCREATEDB"),
+        ("REPLICATION", "NOREPLICATION"),
+        ("NOINHERIT", "INHERIT"),
+    ):
+        with psycopg.connect(DSN, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("ALTER ROLE {} {}").format(
+                    sql.Identifier(reviewer_login), sql.SQL(attribute)
+                )
+            )
+        try:
+            with reviewer._pool.connection() as connection:
+                with pytest.raises(
+                    psycopg.errors.InsufficientPrivilege,
+                    match="least-privileged LOGIN",
+                ):
+                    connection.execute(
+                        "SELECT public.rusa_knowledge_assert_governance_principal(%s::name, %s::name)",
+                        (reviewer_login, "rusa_knowledge_reviewer"),
+                    )
+        finally:
+            with psycopg.connect(DSN, autocommit=True) as admin:
+                admin.execute(
+                    sql.SQL("ALTER ROLE {} {}").format(
+                        sql.Identifier(reviewer_login), sql.SQL(reset)
+                    )
+                )

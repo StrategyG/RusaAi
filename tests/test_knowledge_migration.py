@@ -74,11 +74,14 @@ def test_governance_migration_separates_reviewer_approver_and_publisher():
     assert "GRANT EXECUTE ON FUNCTION public.rusa_knowledge_version_attribution" in migration
     assert "rusa_knowledge_governance_audit_insert" in migration
     assert "rusa_knowledge_governance_set_actor" in migration
+    assert "rusa_knowledge_assert_governance_principal" in migration
+    assert "WITH RECURSIVE inherited_roles" in migration
+    assert "governance LOGIN must inherit only its assigned role" in migration
+    assert "NOT r.rolcreaterole" in migration
+    assert "NOT r.rolcreatedb" in migration
+    assert "NOT r.rolreplication" in migration
+    assert "m.roleid = v_expected_role_oid" in migration
     assert "NEW.approver_principal := session_user" in migration
-    assert "reviewer login must have exclusive reviewer role membership" in migration
-    assert "approver login must have exclusive approver role membership" in migration
-    assert "publisher login must have exclusive publisher role membership" in migration
-    assert "rolcanlogin AND NOT rolsuper AND NOT rolbypassrls" in migration
     assert "MAX(v_latest.version_number)" in migration
     assert "pg_advisory_xact_lock" in migration
     assert "NEW.created_at := clock_timestamp()" in migration

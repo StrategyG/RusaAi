@@ -305,20 +305,103 @@ GRANT SELECT ON public.rusa_knowledge_audit_events
 TO rusa_knowledge_reviewer, rusa_knowledge_approver, rusa_knowledge_publisher;
 
 
+CREATE OR REPLACE FUNCTION public.rusa_knowledge_assert_governance_principal(
+    p_principal NAME,
+    p_expected_role NAME
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $rusa$
+DECLARE
+    v_principal_oid OID;
+    v_expected_role_oid OID;
+BEGIN
+    v_principal_oid := pg_catalog.to_regrole(p_principal::text)::oid;
+    v_expected_role_oid := pg_catalog.to_regrole(p_expected_role::text)::oid;
+    IF v_principal_oid IS NULL OR v_expected_role_oid IS NULL THEN
+        RAISE EXCEPTION 'governance principal or assigned role is not configured'
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles r
+        WHERE r.oid = v_principal_oid
+          AND r.rolcanlogin
+          AND r.rolinherit
+          AND NOT r.rolsuper
+          AND NOT r.rolbypassrls
+          AND NOT r.rolcreaterole
+          AND NOT r.rolcreatedb
+          AND NOT r.rolreplication
+    ) THEN
+        RAISE EXCEPTION 'governance principal must be a least-privileged LOGIN role'
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles r
+        WHERE r.oid = v_expected_role_oid
+          AND NOT r.rolcanlogin
+          AND NOT r.rolsuper
+          AND NOT r.rolbypassrls
+          AND NOT r.rolcreaterole
+          AND NOT r.rolcreatedb
+          AND NOT r.rolreplication
+    ) THEN
+        RAISE EXCEPTION 'governance group role must remain a least-privileged NOLOGIN role'
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members m
+        WHERE m.member = v_principal_oid
+          AND m.roleid = v_expected_role_oid
+          AND NOT m.admin_option
+    ) THEN
+        RAISE EXCEPTION 'governance LOGIN must be a direct member of its assigned role without admin option'
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- Recheck the complete transitive membership closure. A governance login
+    -- must inherit only its assigned NOLOGIN role, including at decision time.
+    IF EXISTS (
+        WITH RECURSIVE inherited_roles(role_oid) AS (
+            SELECT m.roleid
+            FROM pg_catalog.pg_auth_members m
+            WHERE m.member = v_principal_oid
+            UNION
+            SELECT m.roleid
+            FROM pg_catalog.pg_auth_members m
+            JOIN inherited_roles inherited
+              ON m.member = inherited.role_oid
+        )
+        SELECT 1
+        FROM inherited_roles
+        WHERE role_oid <> v_expected_role_oid
+    ) THEN
+        RAISE EXCEPTION 'governance LOGIN must inherit only its assigned role'
+            USING ERRCODE = '42501';
+    END IF;
+END
+$rusa$;
+
+REVOKE ALL ON FUNCTION public.rusa_knowledge_assert_governance_principal(NAME, NAME)
+    FROM PUBLIC, rusa_knowledge_worker;
+GRANT EXECUTE ON FUNCTION public.rusa_knowledge_assert_governance_principal(NAME, NAME)
+    TO rusa_knowledge_reviewer, rusa_knowledge_approver, rusa_knowledge_publisher;
+
+
 CREATE OR REPLACE FUNCTION public.rusa_knowledge_governance_set_actor()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $rusa$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_roles
-        WHERE rolname=session_user AND rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
-    ) THEN
-        RAISE EXCEPTION 'governance actor must use a non-privileged login role'
-            USING ERRCODE = '42501';
-    END IF;
-
     -- Serialize governance events per version so sequence allocation order
     -- cannot misidentify the latest committed evidence under concurrency.
     PERFORM pg_advisory_xact_lock(
@@ -329,39 +412,27 @@ BEGIN
     );
 
     IF TG_TABLE_NAME = 'rusa_knowledge_rights_attestations' THEN
-        IF NOT pg_has_role(session_user, 'rusa_knowledge_reviewer'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_approver'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_publisher'::name, 'member') THEN
-            RAISE EXCEPTION 'reviewer login must have exclusive reviewer role membership'
-                USING ERRCODE = '42501';
-        END IF;
+        PERFORM public.rusa_knowledge_assert_governance_principal(
+            session_user, 'rusa_knowledge_reviewer'
+        );
         NEW.attested_by := session_user;
         NEW.attested_at := clock_timestamp();
     ELSIF TG_TABLE_NAME = 'rusa_knowledge_review_findings' THEN
-        IF NOT pg_has_role(session_user, 'rusa_knowledge_reviewer'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_approver'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_publisher'::name, 'member') THEN
-            RAISE EXCEPTION 'reviewer login must have exclusive reviewer role membership'
-                USING ERRCODE = '42501';
-        END IF;
+        PERFORM public.rusa_knowledge_assert_governance_principal(
+            session_user, 'rusa_knowledge_reviewer'
+        );
         NEW.reviewer_principal := session_user;
         NEW.created_at := clock_timestamp();
     ELSIF TG_TABLE_NAME = 'rusa_knowledge_human_approvals' THEN
-        IF NOT pg_has_role(session_user, 'rusa_knowledge_approver'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_reviewer'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_publisher'::name, 'member') THEN
-            RAISE EXCEPTION 'approver login must have exclusive approver role membership'
-                USING ERRCODE = '42501';
-        END IF;
+        PERFORM public.rusa_knowledge_assert_governance_principal(
+            session_user, 'rusa_knowledge_approver'
+        );
         NEW.approver_principal := session_user;
         NEW.created_at := clock_timestamp();
     ELSIF TG_TABLE_NAME = 'rusa_knowledge_publication_events' THEN
-        IF NOT pg_has_role(session_user, 'rusa_knowledge_publisher'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_reviewer'::name, 'member')
-           OR pg_has_role(session_user, 'rusa_knowledge_approver'::name, 'member') THEN
-            RAISE EXCEPTION 'publisher login must have exclusive publisher role membership'
-                USING ERRCODE = '42501';
-        END IF;
+        PERFORM public.rusa_knowledge_assert_governance_principal(
+            session_user, 'rusa_knowledge_publisher'
+        );
         NEW.publisher_principal := session_user;
         NEW.created_at := clock_timestamp();
     ELSE
@@ -370,32 +441,6 @@ BEGIN
     RETURN NEW;
 END;
 $rusa$;
-
-REVOKE ALL ON FUNCTION public.rusa_knowledge_governance_set_actor() FROM PUBLIC;
-
-DROP TRIGGER IF EXISTS rusa_knowledge_rights_actor_guard
-    ON public.rusa_knowledge_rights_attestations;
-CREATE TRIGGER rusa_knowledge_rights_actor_guard
-BEFORE INSERT ON public.rusa_knowledge_rights_attestations
-FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
-
-DROP TRIGGER IF EXISTS rusa_knowledge_review_actor_guard
-    ON public.rusa_knowledge_review_findings;
-CREATE TRIGGER rusa_knowledge_review_actor_guard
-BEFORE INSERT ON public.rusa_knowledge_review_findings
-FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
-
-DROP TRIGGER IF EXISTS rusa_knowledge_approval_actor_guard
-    ON public.rusa_knowledge_human_approvals;
-CREATE TRIGGER rusa_knowledge_approval_actor_guard
-BEFORE INSERT ON public.rusa_knowledge_human_approvals
-FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
-
-DROP TRIGGER IF EXISTS rusa_knowledge_publication_actor_guard
-    ON public.rusa_knowledge_publication_events;
-CREATE TRIGGER rusa_knowledge_publication_actor_guard
-BEFORE INSERT ON public.rusa_knowledge_publication_events
-FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
 
 
 CREATE OR REPLACE FUNCTION public.rusa_knowledge_governance_audit_insert()
@@ -660,20 +705,9 @@ DECLARE
     v_approval_created_at TIMESTAMPTZ;
     v_latest_preapproval_evidence_at TIMESTAMPTZ;
 BEGIN
-    IF NOT pg_has_role(session_user, 'rusa_knowledge_publisher', 'member') THEN
-        RAISE EXCEPTION 'publisher role membership is required' USING ERRCODE = '42501';
-    END IF;
-    IF pg_has_role(session_user, 'rusa_knowledge_reviewer', 'member')
-       OR pg_has_role(session_user, 'rusa_knowledge_approver', 'member') THEN
-        RAISE EXCEPTION 'publisher login must not hold reviewer or approver membership'
-            USING ERRCODE = '42501';
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_roles
-        WHERE rolname=session_user AND rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
-    ) THEN
-        RAISE EXCEPTION 'publisher must use a non-privileged login role';
-    END IF;
+    PERFORM public.rusa_knowledge_assert_governance_principal(
+        session_user, 'rusa_knowledge_publisher'
+    );
     IF current_setting('rusa.tenant_id', true) IS DISTINCT FROM p_tenant_id THEN
         RAISE EXCEPTION 'tenant context does not match publication request' USING ERRCODE = '42501';
     END IF;
@@ -767,22 +801,9 @@ BEGIN
     IF v_approval_created_at <= v_latest_preapproval_evidence_at THEN
         RAISE EXCEPTION 'human approval must follow the latest rights and review evidence';
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_roles
-        WHERE rolname=v_approver_principal::name
-          AND rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
-    ) THEN
-        RAISE EXCEPTION 'approval principal must be a non-privileged login role';
-    END IF;
-    IF NOT pg_has_role(
-        v_approver_principal::name, 'rusa_knowledge_approver'::name, 'member'
-    ) THEN
-        RAISE EXCEPTION 'approval principal is not a member of the approver role';
-    END IF;
-    IF pg_has_role(v_approver_principal::name, 'rusa_knowledge_reviewer'::name, 'member')
-       OR pg_has_role(v_approver_principal::name, 'rusa_knowledge_publisher'::name, 'member') THEN
-        RAISE EXCEPTION 'approver login must not hold reviewer or publisher membership';
-    END IF;
+    PERFORM public.rusa_knowledge_assert_governance_principal(
+        v_approver_principal::name, 'rusa_knowledge_approver'::name
+    );
 
     SELECT publication_event_id, action, manifest_sha256 INTO v_existing
     FROM public.rusa_knowledge_publication_events
@@ -835,9 +856,9 @@ DECLARE
     v_latest RECORD;
     v_event_id BIGINT;
 BEGIN
-    IF NOT pg_has_role(session_user, 'rusa_knowledge_publisher', 'member') THEN
-        RAISE EXCEPTION 'publisher role membership is required' USING ERRCODE = '42501';
-    END IF;
+    PERFORM public.rusa_knowledge_assert_governance_principal(
+        session_user, 'rusa_knowledge_publisher'
+    );
     IF current_setting('rusa.tenant_id', true) IS DISTINCT FROM p_tenant_id THEN
         RAISE EXCEPTION 'tenant context does not match withdrawal request' USING ERRCODE = '42501';
     END IF;

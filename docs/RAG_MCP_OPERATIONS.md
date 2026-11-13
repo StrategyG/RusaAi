@@ -126,8 +126,9 @@ Answer-facing retrieval is publication-gated. The runtime defaults
 `RUSA_KNOWLEDGE_REQUIRE_PUBLICATION=true`; candidate documents without a
 current published version are not returned by search, document reads,
 collection counts or version-history reads. Do not disable this setting in a
-production environment. The false setting is reserved for disposable tests
-and isolated development.
+production environment. The service rejects the false setting whenever
+`ENVIRONMENT=staging` or `ENVIRONMENT=production`; false is reserved for
+disposable tests and isolated development.
 
 The governance migration creates separate non-login database roles:
 
@@ -142,7 +143,7 @@ A DBA must grant each human's distinct database login membership in exactly
 the required no-login role. Do not share one login across reviewer, approver
 and publisher. Database triggers overwrite caller-supplied actor columns with
 the authenticated `session_user` and reject inserts from the wrong role.
-All governance actors must be non-superuser, non-BYPASSRLS login roles.
+All governance actors must be least-privileged LOGIN roles: no SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB, REPLICATION or NOINHERIT. The database rechecks the complete direct and transitive membership closure for every governance event and publication/withdrawal call; each login must inherit only its assigned no-login governance role, with no additional group memberships or admin option.
 Audit rows also record the database `session_user` and active role;
 actor identity is not accepted from model output or CLI arguments.
 
