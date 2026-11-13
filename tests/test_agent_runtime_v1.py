@@ -694,6 +694,129 @@ async def test_run_once_dispatches_explicit_agent_runtime_queue_job(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_run_once_publishes_agent_runtime_changes_only_after_ci(tmp_path, monkeypatch):
+    job = _agent_runtime_queue_job({
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": "Publish a verified Agent Runtime change",
+            "nodes": [{
+                "task_id": "node_publish",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return a verified analysis"],
+            }],
+        },
+    })
+
+    class Queue:
+        def __init__(self):
+            self.completed = None
+            self.approval = None
+            self.failed = None
+            self.published = False
+
+        def claim(self, worker_id, lease_seconds):
+            return job
+
+        def owns_lease(self, *args):
+            return True
+
+        def authorize_execution(self, *args):
+            return True
+
+        def publish_if_lease_owned(self, *args, **kwargs):
+            publish = args[4]
+            self.published = True
+            return publish()
+
+        def complete(self, job_id, tenant_id, worker_id, lease_token, result):
+            self.completed = result
+            return True
+
+        def await_approval(self, *args):
+            self.approval = args
+            return True
+
+        def fail(self, *args):
+            self.failed = args
+            return True
+
+    class Publisher:
+        def __init__(self):
+            self.committed = None
+            self.pr_created = False
+            self.ci_checked = False
+
+        def commit_and_push(self, workspace, repository, branch, message):
+            self.committed = (workspace, repository, branch, message)
+            return "commit-agent-runtime"
+
+        async def create_or_get_draft_pr(self, repository, branch, base_branch, title, body):
+            self.pr_created = True
+            return "https://github.com/StrategyG/RusaAi/pull/999"
+
+        async def wait_for_ci(self, repository, commit_sha, *, timeout_seconds, poll_seconds):
+            self.ci_checked = True
+            return True, "all required checks passed"
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.config = SimpleNamespace(
+        aicode_enabled=True, environment="development", tenant_repositories={}
+    )
+    runtime.worker_id = "worker-queue"
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.queue = Queue()
+    runtime.audit = AuditLog(str(tmp_path / "agent-runtime-publish-audit.jsonl"))
+    runtime.publisher = Publisher()
+    runtime.workspace_manager = SimpleNamespace(cleanup=lambda task, tenant_id: None)
+    coding_task = CodingTask(
+        objective="Publish a verified Agent Runtime change",
+        repository=RepositoryTarget(
+            "StrategyG/RusaAi", "main", "feature/agent-runtime/publish-test"
+        ),
+        acceptance_criteria=["Return a verified analysis"],
+        task_id=job.task_id,
+        metadata={"tenant_id": job.tenant_id},
+    )
+    runtime.configure_agent_runtime_dispatch(
+        {"analyst": _Handler()}, _authorizer, _verifier,
+        workspace="/tmp/agent-runtime-publish-workspace", coding_task=coding_task,
+    )
+
+    async def completed_plan(*args):
+        return SimpleNamespace(
+            status=SimpleNamespace(value="completed"),
+            plan_fingerprint="plan-fingerprint",
+            topological_order=("node_publish",),
+            node_results=(SimpleNamespace(to_dict=lambda: {"task_id": "node_publish"}),),
+        )
+
+    async def idle_heartbeat(claimed_job, lost_lease):
+        await asyncio.Event().wait()
+
+    runtime.execute_agent_plan = completed_plan
+    monkeypatch.setattr(runtime, "_heartbeat", idle_heartbeat)
+    monkeypatch.setattr("rusa_agents.runtime.record_task_policy", lambda *args, **kwargs: None)
+
+    processed = await runtime.run_once()
+
+    assert processed is True
+    assert runtime.queue.published is True
+    assert runtime.publisher.committed[1:3] == (
+        "StrategyG/RusaAi", "feature/agent-runtime/publish-test"
+    )
+    assert runtime.publisher.pr_created is True
+    assert runtime.publisher.ci_checked is True
+    assert runtime.queue.completed["commit_sha"] == "commit-agent-runtime"
+    assert runtime.queue.completed["pull_request_url"].endswith("/pull/999")
+    assert runtime.queue.approval is None
+    assert runtime.queue.failed is None
+
+
+@pytest.mark.asyncio
 async def test_run_once_holds_agent_runtime_job_for_review_without_adapters(
     tmp_path, monkeypatch
 ) -> None:
