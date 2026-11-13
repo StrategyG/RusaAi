@@ -282,12 +282,15 @@ class AICodeRuntime:
             "topological_order": list(result.topological_order),
             "node_results": [item.to_dict() for item in result.node_results],
         }
-        if result.status.value == "needs_approval":
-            reason = "; ".join(
+        if result.status.value in {"needs_approval", "blocked"}:
+            relevant = [
                 item.error or item.summary
                 for item in result.node_results
-                if item.status.value == "needs_approval"
-            ) or "Agent Runtime plan requires human approval"
+                if item.status.value in {"needs_approval", "blocked"}
+            ]
+            reason = "; ".join(relevant) or (
+                "Agent Runtime plan was blocked by policy or unmet dependencies"
+            )
             return await self._await_agent_runtime_approval(job, reason, result_payload)
         if result.status.value == "cancelled":
             return "lease_lost"
