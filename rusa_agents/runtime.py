@@ -20,6 +20,7 @@ from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
+from .runtime_v1 import AgentRuntimeV1
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
@@ -68,7 +69,23 @@ class AICodeRuntime:
             self.knowledge_service.close()
             self.knowledge_service = None
 
+    def _load_agent_runtime_registry(self) -> dict[str, Any]:
+        """Load the v1 registry and verify the existing six-worker AICode binding."""
+        runtime = AgentRuntimeV1()
+        compatibility = runtime.validate_aicode_worker_bindings(
+            role.value for role in AICodeOrchestrator.PIPELINE
+        )
+        self.agent_runtime = runtime
+        logger.info(
+            "Agent Runtime v1 registry loaded: status=%s roles=%s dispatchable=%s",
+            runtime.status()["status"],
+            runtime.status()["role_count"],
+            compatibility["dispatchable"],
+        )
+        return compatibility
+
     def initialize(self) -> None:
+        self._load_agent_runtime_registry()
         self.queue.initialize()
         self.memory.initialize()
         self.audit.initialize()
