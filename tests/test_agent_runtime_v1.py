@@ -401,7 +401,9 @@ def _verifier(node, output):
     return VerificationDecision(accepted=bool(output.evidence_refs), reason="evidence required")
 
 
-def _agent_runtime_queue_job(payload: dict) -> Job:
+def _agent_runtime_queue_job(
+    payload: dict, result: dict | None = None
+) -> Job:
     return Job(
         id=901,
         task_id="root-task-queue",
@@ -411,6 +413,7 @@ def _agent_runtime_queue_job(payload: dict) -> Job:
         max_attempts=3,
         lease_owner="worker-queue",
         lease_token="00000000-0000-4000-8000-000000000901",
+        result=result,
     )
 
 
@@ -548,6 +551,61 @@ async def test_agent_runtime_builds_tenant_scoped_handlers_with_narrow_tool_allo
     )
     with pytest.raises(PermissionError, match="exceeds"):
         await dispatch["handlers"]["analyst"].execute(escalated, {})
+
+
+def test_agent_runtime_approval_is_bound_to_plan_fingerprint_and_node_id() -> None:
+    payload = {
+        "execution_mode": "agent_runtime_v1",
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": "Approve a high-risk node",
+            "nodes": [{
+                "task_id": "node-high-risk",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Review a high-risk operation",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return a reviewed decision"],
+                "risk_class": "high",
+            }],
+        },
+    }
+    base_job = _agent_runtime_queue_job(payload)
+    plan = AICodeRuntime._agent_runtime_plan_from_job(base_job)
+    fingerprint = WorkerExecutionEngine._fingerprint(plan)
+    job = _agent_runtime_queue_job(payload, result={
+        "plan_fingerprint": fingerprint,
+        "approval": {
+            "plan_fingerprint": fingerprint,
+            "approved_node_ids": ["node-high-risk"],
+            "approved_by": "api:tenant-admin",
+            "rationale": "Reviewed and approved for this change",
+        },
+    })
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    dispatch = {
+        "policy_authorizer": lambda node, tenant_id: PolicyDecision(
+            allowed=False, requires_approval=True, reason="high risk"
+        )
+    }
+
+    authorizer, approval = runtime._agent_runtime_approval_authorizer(job, plan, dispatch)
+    decision = asyncio.run(authorizer(plan.nodes[0], job.tenant_id))
+
+    assert approval["approved_by"] == "api:tenant-admin"
+    assert decision.allowed is True
+    assert decision.requires_approval is True
+    assert decision.approval_satisfied is True
+
+    stale_job = _agent_runtime_queue_job(payload, result={
+        "approval": {
+            "plan_fingerprint": "0" * 64,
+            "approved_node_ids": ["node-high-risk"],
+            "approved_by": "api:tenant-admin",
+        },
+    })
+    with pytest.raises(ValueError, match="does not match"):
+        runtime._agent_runtime_approval_authorizer(stale_job, plan, dispatch)
 
 
 def test_agent_runtime_queue_payload_is_parsed_with_trusted_job_identity() -> None:
