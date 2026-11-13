@@ -7,7 +7,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from hashlib import sha256
-from typing import Any, Awaitable, Callable, Mapping, Protocol
+from typing import Any, Protocol
+from collections.abc import Awaitable, Callable, Mapping
 
 from .capability_registry import AgentWorkerRegistry, RegistryNotActivatedError
 from .task_decomposer import TaskDecomposer, TaskNode, TaskPlan, TaskPlanValidation
@@ -73,7 +74,7 @@ class NodeExecutionResult:
         return value
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "NodeExecutionResult":
+    def from_dict(cls, value: Mapping[str, Any]) -> NodeExecutionResult:
         return cls(
             task_id=str(value["task_id"]),
             role_id=str(value["role_id"]),
@@ -402,7 +403,7 @@ class AICodeWorkerAdapter:
     ) -> WorkerOutput:
         from .contracts import CodingTask, WorkerResult, WorkerRole
 
-        role = WorkerRole(node.selected_role_id)
+        WorkerRole(node.selected_role_id)
         prior_results = []
         for result in dependency_results.values():
             try:
