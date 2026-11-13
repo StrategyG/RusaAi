@@ -166,6 +166,17 @@ class PostgresTaskQueue:
                 }
                 if not required_policies.issubset(policy_names):
                     raise RuntimeError("Production tenant RLS policies are missing; apply migrations/004_aicode_tenant_rls.sql")
+                approval_action = conn.execute("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid=to_regclass('public.aicode_task_policy_events')
+                      AND conname='aicode_task_policy_events_action_check'
+                """).fetchone()
+                if not approval_action or "'task.approve'" not in approval_action[0]:
+                    raise RuntimeError(
+                        "Production task approval audit migration is missing; "
+                        "apply migrations/015_aicode_task_approval.sql"
+                    )
 
                 roles = conn.execute("""
                     SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
