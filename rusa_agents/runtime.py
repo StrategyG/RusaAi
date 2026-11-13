@@ -112,6 +112,7 @@ class AICodeRuntime:
             TaskMemoryCheckpointStore(self.memory),
             self.queue,
             job.id,
+            job.task_id,
             job.tenant_id,
             self.worker_id,
             job.lease_token,
