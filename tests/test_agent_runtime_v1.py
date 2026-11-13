@@ -663,6 +663,9 @@ async def test_queue_lease_bound_engine_uses_atomic_checkpoint_cas(tmp_path) -> 
             self.calls = 0
             self.valid = True
 
+        def owns_lease(self, job_id, tenant_id, worker_id, lease_token):
+            return self.valid
+
         def with_lease_owned(
             self, job_id, tenant_id, worker_id, lease_token, operation, *, lease_seconds
         ):
@@ -686,12 +689,14 @@ async def test_queue_lease_bound_engine_uses_atomic_checkpoint_cas(tmp_path) -> 
         lease_owner="worker-cas",
         lease_token="00000000-0000-4000-8000-000000000077",
     )
-    engine = runtime.build_agent_execution_engine(job, _authorizer, _verifier)
     plan = _plan(_node("task-queue-cas", "analyst"))
-    result = await engine.execute(
+    result = await runtime.execute_agent_plan(
+        job,
         plan,
         {"analyst": _Handler()},
-        trusted_tenant_id="tenant-a",
+        _authorizer,
+        _verifier,
+        asyncio.Event(),
     )
 
     assert result.status == PlanStatus.COMPLETED
@@ -699,6 +704,73 @@ async def test_queue_lease_bound_engine_uses_atomic_checkpoint_cas(tmp_path) -> 
     record = runtime.memory.get(plan.root_task_id, tenant_id="tenant-a")
     assert record["state"] == "agent_runtime_checkpoint"
     assert record["checkpoint_version"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_worker_runtime_propagates_queue_lease_loss_to_dag_cancellation(tmp_path) -> None:
+    cancellation = asyncio.Event()
+
+    class StubLeaseQueue:
+        def __init__(self):
+            self.valid = True
+            self.checkpoint_calls = 0
+
+        def owns_lease(self, job_id, tenant_id, worker_id, lease_token):
+            return self.valid
+
+        def with_lease_owned(
+            self, job_id, tenant_id, worker_id, lease_token, operation, *, lease_seconds
+        ):
+            self.checkpoint_calls += 1
+            if not self.valid:
+                raise RuntimeError("lease revoked")
+            return operation()
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.memory = SQLiteMemory(str(tmp_path / "queue-cancel.sqlite3"))
+    runtime.queue = StubLeaseQueue()
+    runtime.worker_id = "worker-cancel"
+    job = Job(
+        id=88,
+        task_id="root-task-001",
+        tenant_id="tenant-a",
+        payload={},
+        attempts=1,
+        max_attempts=3,
+        lease_owner="worker-cancel",
+        lease_token="00000000-0000-4000-8000-000000000088",
+    )
+
+    class LeaseCancellingHandler:
+        def __init__(self):
+            self.cancelled = False
+
+        async def execute(self, node, dependency_results):
+            cancellation.set()
+            runtime.queue.valid = False
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    handler = LeaseCancellingHandler()
+    plan = _plan(_node("task-queue-cancel", "analyst"))
+    result = await runtime.execute_agent_plan(
+        job,
+        plan,
+        {"analyst": handler},
+        _authorizer,
+        _verifier,
+        cancellation,
+    )
+
+    assert result.status == PlanStatus.CANCELLED
+    assert result.node_results[0].status == NodeStatus.CANCELLED
+    assert handler.cancelled is True
+    assert runtime.memory.get(plan.root_task_id, tenant_id="tenant-a") is None
+    assert runtime.queue.checkpoint_calls == 1  # only the initial lease-fenced read
 
 
 @pytest.mark.asyncio
