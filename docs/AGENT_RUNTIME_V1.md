@@ -125,6 +125,12 @@ Both require the existing `task:read` permission and emit policy-audit events:
   capability IDs or a role ID and returns candidate roles. It never dispatches
   a worker and always returns an empty `tool_grants` list.
 
+- `POST /v1/agent-runtime/plan-preview` validates a proposed task DAG,
+  including topological order, dependency edges, role/scope ownership, deadlines,
+  DevOps change metadata, and approval-required nodes. Tenant identity is taken
+  from the authenticated API principal; the request schema rejects a caller-
+  supplied tenant. It never enqueues or executes the plan.
+
 The production `AICodeRuntime.initialize()` loads the same packaged registry
 before starting its queue and sandbox services. It validates that the existing
 six-role AICode pipeline (`analyst`, `architect`, `developer`, `debugger`,
