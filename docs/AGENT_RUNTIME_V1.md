@@ -129,6 +129,13 @@ PostgreSQL row-lock lease fence and checkpoint CAS are complementary: the
 lease prevents takeover during the bounded I/O operation, while CAS prevents
 lost updates across independent reads/writes and recovery attempts.
 
+The tenant-scoped approval endpoint records `task.approve` in the append-only
+policy audit ledger and stores the approved node IDs beside the exact plan
+fingerprint in the existing task-result JSONB column. Apply
+`015_aicode_task_approval.sql` after `005_aicode_task_policy_audit.sql`; the
+production queue startup check refuses to start if the approval audit action
+is not installed. No new approval table or tenant-RLS bypass is introduced.
+
 `WorkerExecutionEngine.execute()` accepts an optional cancellation event.
 When it is set, the executor cancels an in-flight policy/worker/verifier
 awaitable, marks the active and not-yet-started nodes cancelled, and does not
