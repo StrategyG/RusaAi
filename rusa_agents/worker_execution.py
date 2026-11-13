@@ -356,6 +356,9 @@ class WorkerExecutionEngine:
                 )
             return await operation
         finally:
+            if not operation.done():
+                operation.cancel()
+                await asyncio.gather(operation, return_exceptions=True)
             if not cancellation.done():
                 cancellation.cancel()
             await asyncio.gather(cancellation, return_exceptions=True)
@@ -501,6 +504,20 @@ class WorkerExecutionEngine:
                 )
                 cancelled = True
                 break
+            except asyncio.CancelledError:
+                results[task_id] = NodeExecutionResult(
+                    task_id=task_id,
+                    role_id=node.selected_role_id,
+                    status=NodeStatus.CANCELLED,
+                    error="Execution coroutine was cancelled during policy authorization",
+                )
+                try:
+                    checkpoint_version = await self._save_checkpoint(
+                        plan, fingerprint, results, "cancelled", checkpoint_version
+                    )
+                except LeaseLostError:
+                    pass
+                raise
             except TimeoutError:
                 remaining = self._deadline_remaining_seconds(node)
                 if remaining is None or remaining > 0:
