@@ -119,11 +119,30 @@ bounded checkpoint read/write runs, so
 guard is for short checkpoint I/O only, never model inference, Git operations,
 or other network work.
 
-This adds lease fencing to checkpoint I/O, but it does not yet connect generic
-DAG plan intake/dispatch to `AICodeRuntime.run_once()`, nor does it add
-checkpoint compare-and-set/version conflict handling or generic DAG cancellation
-semantics. Those controls and a complete queue-to-DAG end-to-end acceptance
-test remain mandatory before activating new Agent/Worker roles.
+Checkpoint persistence is versioned with the monotonic
+`aicode_memory.checkpoint_version` column (migration
+`014_aicode_memory_checkpoint_cas.sql`). Every DAG checkpoint write uses an
+atomic compare-and-set against the version read at execution start or after the
+previous successful write. A stale worker receives
+`CheckpointConflictError` and cannot overwrite a newer checkpoint. The
+PostgreSQL row-lock lease fence and checkpoint CAS are complementary: the
+lease prevents takeover during the bounded I/O operation, while CAS prevents
+lost updates across independent reads/writes and recovery attempts.
+
+`WorkerExecutionEngine.execute()` accepts an optional cancellation event.
+When it is set, the executor cancels an in-flight policy/worker/verifier
+awaitable, marks the active and not-yet-started nodes cancelled, and does not
+attempt a checkpoint write after queue cancellation or lease revocation. The
+queue's durable cancelled/lease state remains authoritative. If the Python
+execution coroutine itself is cancelled while the lease is still valid, the
+executor attempts a final cancelled checkpoint; if the lease has already been
+lost, that write is rejected and ignored rather than bypassing the fence.
+
+Generic DAG plan intake/dispatch is still not connected to
+`AICodeRuntime.run_once()`. Production Policy Engine/verifier adapters,
+role/source-crosswalk approvals, handler-side idempotency for external side
+effects, and a live PostgreSQL queue-to-DAG end-to-end acceptance test remain
+mandatory before activating new Agent/Worker roles.
 
 ## API and worker-process integration
 
