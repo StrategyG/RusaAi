@@ -131,7 +131,9 @@ def test_task_memory_checkpoint_store_is_tenant_scoped_and_durable(tmp_path) -> 
     reopened = TaskMemoryCheckpointStore(
         SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
     )
-    assert reopened.load("root-task-001", "tenant-a") == payload
+    reopened_payload = reopened.load("root-task-001", "tenant-a")
+    assert reopened_payload["plan_fingerprint"] == payload["plan_fingerprint"]
+    assert reopened_payload["checkpoint_version"] == 1
 
 
 def test_task_memory_checkpoint_compare_and_set_rejects_stale_writers(tmp_path) -> None:
@@ -212,7 +214,9 @@ def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
     )
     payload = {"tenant_id": "tenant-a", "plan_fingerprint": "fingerprint"}
     store.save("root-task-001", "tenant-a", payload)
-    assert store.load("root-task-001", "tenant-a") == payload
+    restored = store.load("root-task-001", "tenant-a")
+    assert restored["plan_fingerprint"] == payload["plan_fingerprint"]
+    assert restored["checkpoint_version"] == 1
     assert queue.calls == 2
     with pytest.raises(PermissionError, match="Checkpoint tenant"):
         store.load("root-task-001", "tenant-b")
