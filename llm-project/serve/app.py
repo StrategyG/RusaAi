@@ -641,8 +641,16 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     if limiter is not None:
         if request.url.path == "/v1/chat/completions":
             limit = int(os.getenv("RUSA_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
-        elif request.method == "POST" and request.url.path == "/v1/aicode/tasks":
+        elif request.method == "POST" and request.url.path in {
+            "/v1/aicode/tasks", "/v1/agent-runtime/tasks"
+        }:
             limit = int(os.getenv("RUSA_RATE_LIMIT_TASKS_PER_MINUTE", "10"))
+        elif (
+            request.method == "POST"
+            and request.url.path.startswith("/v1/agent-runtime/tasks/")
+            and request.url.path.endswith("/approve")
+        ):
+            limit = int(os.getenv("RUSA_RATE_LIMIT_TASK_APPROVALS_PER_MINUTE", "20"))
         else:
             limit = int(os.getenv("RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
         try:
