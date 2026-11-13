@@ -1,1 +1,2 @@
-"""RusaAi Control Plane agent runtime package."""
+"""RUSA-AI autonomous coding agent framework."""
+__version__ = "0.1.0"
