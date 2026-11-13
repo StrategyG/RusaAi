@@ -77,6 +77,72 @@ def test_agent_runtime_route_preview_rejects_unknown_capability(monkeypatch):
     assert response.status_code == 422
 
 
+def test_agent_runtime_plan_preview_validates_dag_and_uses_authenticated_tenant(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/plan-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "root_task_id": "plan-root-001",
+            "objective": "Preview a small coding DAG",
+            "nodes": [
+                {
+                    "task_id": "task-analyst",
+                    "selected_role_id": "analyst",
+                    "scope": "worker",
+                    "objective": "Analyze the requested change",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return a scoped analysis"],
+                },
+                {
+                    "task_id": "task-developer",
+                    "selected_role_id": "developer",
+                    "scope": "worker",
+                    "objective": "Implement the approved change",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return a code change"],
+                    "dependencies": ["task-analyst"],
+                },
+                {
+                    "task_id": "task-tester",
+                    "selected_role_id": "tester",
+                    "scope": "worker",
+                    "objective": "Verify the implementation",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return test evidence"],
+                    "dependencies": ["task-developer"],
+                    "risk_class": "high",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tenant_id"] == "tenant-alpha"
+    assert data["topological_order"] == [
+        "task-analyst", "task-developer", "task-tester"
+    ]
+    assert data["approval_required_node_ids"] == ["task-tester"]
+    assert data["registry_status"] == "draft_proposed_not_activated"
+    assert data["execution_enabled"] is False
+    assert data["execution_dispatched"] is False
+
+
+def test_agent_runtime_plan_preview_rejects_caller_supplied_tenant(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/plan-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "root_task_id": "plan-root-tenant",
+            "tenant_id": "tenant-attacker",
+            "objective": "Attempt to override tenant context",
+            "nodes": [],
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_agent_runtime_status_requires_task_read_permission(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
