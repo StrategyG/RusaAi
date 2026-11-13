@@ -418,6 +418,64 @@ def test_agent_runtime_task_intake_respects_kill_switch(monkeypatch):
     assert queue.called is False
 
 
+def test_agent_runtime_task_approval_is_tenant_admin_scoped(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+
+    class Queue:
+        def __init__(self):
+            self.args = None
+            self.kwargs = None
+
+        def approve(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            return True
+
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent-runtime/tasks/{task_id}/approve",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "plan_fingerprint": "a" * 64,
+            "approved_node_ids": ["node-high-risk"],
+            "rationale": "Reviewed the risk and approved this exact plan",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["task_id"] == task_id
+    assert response.json()["status"] == "queued"
+    assert queue.args[:4] == (
+        task_id, "tenant-alpha", "a" * 64, ["node-high-risk"]
+    )
+    assert queue.kwargs["rationale"] == "Reviewed the risk and approved this exact plan"
+    assert queue.kwargs["audit_actor"].startswith("api:")
+
+
+def test_agent_runtime_task_approval_rejects_stale_or_ineligible_nodes(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+
+    class Queue:
+        def approve(self, *args, **kwargs):
+            return False
+
+    monkeypatch.setattr(app.state, "queue", Queue(), raising=False)
+    response = client.post(
+        f"/v1/agent-runtime/tasks/{uuid.uuid4()}/approve",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "plan_fingerprint": "b" * 64,
+            "approved_node_ids": ["node-completed"],
+            "rationale": "Attempt to approve a node that is not awaiting approval",
+        },
+    )
+    assert response.status_code == 409
+
+
 def test_agent_runtime_status_requires_task_read_permission(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
