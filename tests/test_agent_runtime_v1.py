@@ -13,9 +13,12 @@ from rusa_agents.capability_registry import (
     RegistryValidationError,
 )
 from rusa_agents.capability_router import CapabilityRouter, RouteRequest
+from rusa_agents.memory import SQLiteMemory
+from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
 from rusa_agents.worker_execution import (
     InMemoryCheckpointStore,
+    TaskMemoryCheckpointStore,
     NodeStatus,
     PlanStatus,
     PolicyDecision,
@@ -90,6 +93,39 @@ def test_default_registry_is_structurally_valid_but_not_active() -> None:
     assert summary["provisional_capability_id_count"] == 34
     assert summary["source_chunk_map_status"] == "candidate_crosswalk_pending_review"
     assert summary["source_chunk_reference_count"] == 24
+
+
+def test_runtime_validates_existing_aicode_worker_bindings_without_activation() -> None:
+    runtime = AgentRuntimeV1()
+    result = runtime.validate_aicode_worker_bindings(
+        ("analyst", "architect", "developer", "debugger", "tester", "security")
+    )
+    assert result["compatible"] is True
+    assert result["dispatchable"] is False
+    assert result["worker_role_ids"] == [
+        "analyst", "architect", "developer", "debugger", "tester", "security"
+    ]
+    with pytest.raises(RegistryValidationError, match="not registered as an AICode worker"):
+        runtime.validate_aicode_worker_bindings(("supreme_orchestrator",))
+
+
+def test_task_memory_checkpoint_store_is_tenant_scoped_and_durable(tmp_path) -> None:
+    memory = SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
+    store = TaskMemoryCheckpointStore(memory)
+    payload = {
+        "schema_version": "1.0",
+        "tenant_id": "tenant-a",
+        "plan_fingerprint": "fingerprint-a",
+        "node_results": [],
+    }
+    store.save("root-task-001", "tenant-a", payload)
+    restored = store.load("root-task-001", "tenant-a")
+    assert restored == payload
+    assert store.load("root-task-001", "tenant-b") is None
+    reopened = TaskMemoryCheckpointStore(
+        SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
+    )
+    assert reopened.load("root-task-001", "tenant-a") == payload
 
 
 
@@ -423,6 +459,24 @@ async def test_worker_engine_rejects_checkpoint_for_different_plan() -> None:
     changed = _plan(_node("task-a", "analyst", risk_class="medium"))
     with pytest.raises(ValueError, match="fingerprint"):
         await engine.execute(changed, {"analyst": _Handler()}, trusted_tenant_id="tenant-a")
+
+
+@pytest.mark.asyncio
+async def test_worker_engine_persists_checkpoints_through_existing_task_memory(tmp_path) -> None:
+    memory = SQLiteMemory(str(tmp_path / "agent-runtime-memory.sqlite3"))
+    store = TaskMemoryCheckpointStore(memory)
+    engine = WorkerExecutionEngine(_registry(active=True), store, _authorizer, _verifier)
+    plan = _plan(_node("task-memory", "analyst"))
+    result = await engine.execute(
+        plan,
+        {"analyst": _Handler()},
+        trusted_tenant_id="tenant-a",
+    )
+    assert result.status == PlanStatus.COMPLETED
+    record = memory.get(plan.root_task_id, tenant_id="tenant-a")
+    assert record["state"] == "agent_runtime_checkpoint"
+    assert record["payload"]["plan_fingerprint"] == result.plan_fingerprint
+    assert memory.get(plan.root_task_id, tenant_id="tenant-b") is None
 
 
 @pytest.mark.asyncio
