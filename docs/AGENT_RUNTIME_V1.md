@@ -109,10 +109,19 @@ executor does not expose shell, network, filesystem, or secret APIs.
 
 Use `TaskMemoryCheckpointStore` with the existing `SQLiteMemory` or
 `PostgresMemory` implementation for checkpoint persistence. The in-memory store
-is only for tests/development. This executor is not yet wired to the durable
-queue's claim/lease fencing, idempotency, cancellation and atomic checkpoint
-compare-and-set. Those controls remain mandatory before activation; task-memory
-persistence alone is not a worker lease.
+is only for tests/development. For a queue-backed worker, wrap the durable store
+with `LeaseBoundCheckpointStore`, passing the current queue job ID, tenant ID,
+worker ID, and lease token. Its `PostgresTaskQueue.with_lease_owned()` callback
+holds the task row lock while the bounded checkpoint read/write runs, so
+`SKIP LOCKED` claimers cannot take over the job during that operation. This
+guard is for short checkpoint I/O only, never model inference, Git operations,
+or other network work.
+
+This adds lease fencing to checkpoint I/O, but it does not yet connect generic
+DAG plan intake/dispatch to `AICodeRuntime.run_once()`, nor does it add
+checkpoint compare-and-set/version conflict handling or generic DAG cancellation
+semantics. Those controls and a complete queue-to-DAG end-to-end acceptance
+test remain mandatory before activating new Agent/Worker roles.
 
 ## API and worker-process integration
 
