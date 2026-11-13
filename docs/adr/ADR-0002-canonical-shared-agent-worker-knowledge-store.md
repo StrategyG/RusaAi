@@ -4,7 +4,7 @@
 - Status: Accepted by the project owner for implementation planning; production activation is not authorized
 - Decision owner: RUSA AI Project Owner
 - Scope: Shared Agent/Worker knowledge storage and retrieval in RusaAi
-- Related: ADR-0001 (RusaAi-Edge v2.0 CPU-first baseline, currently proposed in PR #107); RAG retrieval contract; RusaModels Model Plane API contract
+- Related: ADR-0001 (RusaAi-Edge v2.0 CPU-first baseline, currently proposed in PR #107); RAG retrieval contract; RusaModels Model Plane API contract; [Ecosystem architecture reconciliation](../architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md)
 
 ## Context
 
@@ -54,24 +54,28 @@ This ADR selects the store, not the final embedding model.
 
 ## Required implementation work
 
-### 1. Migration and branch reconciliation
+### 1. Current mainline and branch reconciliation
 
-The current main branch has migrations 001–009, including 008 and 009. Open integration work introduces additional migration files:
+At RusaAi main SHA `1adac8d340e5870570910168b6626fe285dd2cf2`, the repository contains migrations 001–012. The relevant current mainline migrations are:
 
-- PR #82 proposes migrations 008, 009 and 010 for RAG agent/project scope and version history.
-- PR #109 introduces migration 010 for inference admission.
-- PR #111 is a combined CPU/inference integration candidate and includes migration 010.
+- `010_inference_admission.sql` — shared inference admission controls.
+- `011_rag_agent_project_scope.sql` — agent/project scope lookup indexes.
+- `012_rag_knowledge_version_history.sql` — append-only document-version and version-chunk snapshots.
 
-Before any of these changes are integrated:
+PR #111 is **merged**. PR #82 remains an open draft based on an older main SHA and proposes older/overlapping migration filenames 008, 009 and 010. PR #109 remains open on a stacked architecture branch; its migration 010 proposal overlaps the current mainline migration inventory. Neither PR is an unmerged source of the current 010–012 mainline files.
 
-1. Rebase the RAG work onto the selected integration base.
-2. Produce one reviewed migration inventory with unique, ordered filenames and explicit dependencies.
-3. Resolve duplicate migration numbers and verify the actual applied migration history in the target database.
-4. Preserve additive/rollback-safe behavior; do not drop legacy vector columns or overwrite source provenance.
-5. Run migration tests in a disposable PostgreSQL/pgvector database.
+Before any further schema integration:
+
+1. Compare every candidate PR against the exact current main SHA; do not merge an old branch wholesale.
+2. Reconcile duplicate/overlapping migration filenames and dependencies into one reviewed, unique ordered inventory.
+3. Verify the actual applied migration history in the explicitly approved target database; file presence on GitHub does not prove a migration was applied.
+4. Run forward, rollback and restore tests in a disposable PostgreSQL/pgvector database.
+5. Preserve additive behavior and existing provenance/vector data. Do not drop legacy vector columns or overwrite source history.
 6. Do not apply migrations to staging or production as part of this ADR.
 
-No new production migration is authorized by this decision. The next schema migration must be assigned only after the open PR dependency graph and migration inventory are reconciled.
+RusaAi PR #115 proposes migration 013 for rights/review/approval/publication governance. It remains a draft/open change and must pass the same migration inventory, disposable-database, security and rollback review before integration.
+
+No production migration, ingestion, embedding, publication or deployment is authorized by this decision.
 
 ### 2. Knowledge governance lifecycle
 
@@ -93,13 +97,13 @@ A candidate record, embedding, vector point or database row is not publication a
 ### 3. Trusted scope and tenant isolation
 
 - Keep current tenant RLS and the restricted `rusa_knowledge_worker` role.
-- Add project and agent/worker scope only from authenticated runtime identity and the registered role/project grants.
+- Add project and agent/worker scope only from authenticated runtime identity and registered role/project grants.
 - Never trust model-generated `tenant_id`, `project_id`, `agent_id` or `worker_role` as an authorization source.
 - Enforce the same authorization policy for search, get, list, collection counts, version history and deletion.
 - Apply ACL predicates before candidate retrieval and validate returned evidence again before it reaches the model.
 - Treat retrieved content as untrusted evidence, never as system instructions or tool authority.
 
-PR #82 is a candidate implementation, not approved production code. It must be rebased and reviewed against this ADR, and its migration numbering must be reconciled before merge.
+PR #82 is a candidate implementation, not approved production code. It must be compared against the current main migrations and this ADR before any portion is reused.
 
 ### 4. Retrieval and evaluation
 
