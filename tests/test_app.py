@@ -206,6 +206,73 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
     assert queue.created[2]["agent_runtime_plan"]["nodes"][0]["task_id"] == "task-analyst"
 
 
+def test_agent_runtime_task_intake_rejects_unscoped_worker_tools(monkeypatch):
+    class ActiveRuntime:
+        def __init__(self):
+            self.validator = AgentRuntimeV1()
+
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            return self.validator.validate_plan(plan)
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Reject a worker tool escalation",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Attempt to write through the analyst role",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+                "tool_allowlist": ["write_file"],
+            }],
+        },
+    )
+    assert response.status_code == 422
+    assert "tool_allowlist" in response.json()["detail"]
+
+
+def test_agent_runtime_task_intake_requires_dependent_quality_gates_for_code_changes(monkeypatch):
+    class ActiveRuntime:
+        def __init__(self):
+            self.validator = AgentRuntimeV1()
+
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            return self.validator.validate_plan(plan)
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Require independent quality checks",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-developer",
+                "selected_role_id": "developer",
+                "scope": "worker",
+                "objective": "Implement the requested change",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return a code change"],
+            }],
+        },
+    )
+    assert response.status_code == 422
+    assert "tester and security" in response.json()["detail"]
+
+
 def test_agent_runtime_task_intake_rejects_repository_outside_tenant_allowlist(monkeypatch):
     class ActiveRuntime:
         def status(self):
