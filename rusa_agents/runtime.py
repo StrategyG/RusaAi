@@ -10,7 +10,7 @@ import time
 from collections.abc import Coroutine, Mapping
 from typing import Any
 
-from .agent_tools import ROLE_TOOL_ALLOWLIST
+from .agent_tools import ROLE_PERMISSION_ALLOWLIST, ROLE_TOOL_ALLOWLIST
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .capability_registry import RegistryNotActivatedError
@@ -335,15 +335,13 @@ class AICodeRuntime:
 
     @staticmethod
     def _agent_runtime_policy_authorizer(node: TaskNode, tenant_id: str) -> AgentPolicyDecision:
-        role_permissions = {
-            "analyst": frozenset({"repo_read"}),
-            "architect": frozenset({"repo_read"}),
-            "developer": frozenset({"repo_read", "workspace_write"}),
-            "debugger": frozenset({"repo_read", "test_run"}),
-            "tester": frozenset({"repo_read", "test_run"}),
-            "security": frozenset({"repo_read", "test_run", "audit_read"}),
-        }
-        allowed = role_permissions.get(node.selected_role_id)
+        try:
+            role = WorkerRole(node.selected_role_id)
+        except ValueError:
+            return AgentPolicyDecision(
+                allowed=False, reason="No reviewed policy mapping exists for this worker role"
+            )
+        allowed = ROLE_PERMISSION_ALLOWLIST.get(role)
         if allowed is None:
             return AgentPolicyDecision(
                 allowed=False, reason="No reviewed policy mapping exists for this worker role"
