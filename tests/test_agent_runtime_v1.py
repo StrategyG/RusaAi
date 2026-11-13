@@ -151,6 +151,7 @@ def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
         delegate,
         queue,
         job_id=7,
+        task_id="root-task-001",
         tenant_id="tenant-a",
         worker_id="worker-a",
         lease_token="lease-token",
@@ -161,6 +162,8 @@ def test_lease_bound_checkpoint_store_checks_tenant_and_lease() -> None:
     assert queue.calls == 2
     with pytest.raises(PermissionError, match="Checkpoint tenant"):
         store.load("root-task-001", "tenant-b")
+    with pytest.raises(PermissionError, match="Checkpoint task"):
+        store.load("other-task", "tenant-a")
     queue.valid = False
     with pytest.raises(RuntimeError, match="lease lost"):
         store.save("root-task-001", "tenant-a", {"stale": True})
@@ -354,6 +357,7 @@ def test_aicode_runtime_composes_dag_engine_with_live_queue_lease() -> None:
     engine = runtime.build_agent_execution_engine(job, _authorizer, _verifier)
     assert isinstance(engine.checkpoint_store, LeaseBoundCheckpointStore)
     assert engine.checkpoint_store.job_id == job.id
+    assert engine.checkpoint_store.task_id == job.task_id
     assert engine.checkpoint_store.tenant_id == job.tenant_id
     assert engine.checkpoint_store.worker_id == runtime.worker_id
     assert engine.checkpoint_store.lease_token == job.lease_token
