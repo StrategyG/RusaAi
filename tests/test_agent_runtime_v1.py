@@ -14,6 +14,8 @@ from rusa_agents.capability_registry import (
 )
 from rusa_agents.capability_router import CapabilityRouter, RouteRequest
 from rusa_agents.memory import SQLiteMemory
+from rusa_agents.queue import Job
+from rusa_agents.runtime import AICodeRuntime
 from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
 from rusa_agents.worker_execution import (
@@ -331,6 +333,45 @@ def _authorizer(node, tenant_id):
 
 def _verifier(node, output):
     return VerificationDecision(accepted=bool(output.evidence_refs), reason="evidence required")
+
+
+def test_aicode_runtime_composes_dag_engine_with_live_queue_lease() -> None:
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.agent_runtime = AgentRuntimeV1(_registry(active=True))
+    runtime.memory = object()
+    runtime.queue = object()
+    runtime.worker_id = "worker-a"
+    job = Job(
+        id=7,
+        task_id="root-task-001",
+        tenant_id="tenant-a",
+        payload={},
+        attempts=1,
+        max_attempts=3,
+        lease_owner="worker-a",
+        lease_token="00000000-0000-4000-8000-000000000001",
+    )
+    engine = runtime.build_agent_execution_engine(job, _authorizer, _verifier)
+    assert isinstance(engine.checkpoint_store, LeaseBoundCheckpointStore)
+    assert engine.checkpoint_store.job_id == job.id
+    assert engine.checkpoint_store.tenant_id == job.tenant_id
+    assert engine.checkpoint_store.worker_id == runtime.worker_id
+    assert engine.checkpoint_store.lease_token == job.lease_token
+    with pytest.raises(PermissionError, match="different worker"):
+        runtime.build_agent_execution_engine(
+            Job(
+                id=8,
+                task_id="root-task-002",
+                tenant_id="tenant-a",
+                payload={},
+                attempts=1,
+                max_attempts=3,
+                lease_owner="worker-b",
+                lease_token="00000000-0000-4000-8000-000000000002",
+            ),
+            _authorizer,
+            _verifier,
+        )
 
 
 @pytest.mark.asyncio
