@@ -419,7 +419,9 @@ def test_agent_runtime_task_intake_respects_kill_switch(monkeypatch):
 
 
 def test_agent_runtime_task_approval_is_tenant_admin_scoped(monkeypatch):
-    _configure_agent_runtime_api(monkeypatch)
+    _configure_agent_runtime_api(
+        monkeypatch, SimpleNamespace(status=lambda: {"execution_enabled": True})
+    )
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
 
     class Queue:
@@ -456,7 +458,9 @@ def test_agent_runtime_task_approval_is_tenant_admin_scoped(monkeypatch):
 
 
 def test_agent_runtime_task_approval_rejects_stale_or_ineligible_nodes(monkeypatch):
-    _configure_agent_runtime_api(monkeypatch)
+    _configure_agent_runtime_api(
+        monkeypatch, SimpleNamespace(status=lambda: {"execution_enabled": True})
+    )
     monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
 
     class Queue:
