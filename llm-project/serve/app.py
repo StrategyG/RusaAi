@@ -22,6 +22,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
 from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
+from rusa_agents.capability_registry import RegistryValidationError
+from rusa_agents.capability_router import RouteRequest
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.inference_admission import (
@@ -42,6 +44,7 @@ from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionC
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
+from rusa_agents.runtime_v1 import AgentRuntimeV1
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -450,6 +453,34 @@ class AICodeTaskResponse(BaseModel):
     work_branch_prefix: str
 
 
+class AgentRoutePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: Literal["agent", "worker"]
+    required_capability_ids: list[str] = Field(default_factory=list, max_length=16)
+    explicit_role_id: str | None = Field(
+        default=None, min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    identity_type: Literal[
+        "core_agent", "aicode_worker", "devops_lifecycle_profile"
+    ] | None = None
+    parent_role_id: str | None = Field(
+        default=None, min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    max_candidates: int = Field(default=5, ge=1, le=10)
+    require_all_capabilities: bool = True
+
+    @field_validator("required_capability_ids")
+    @classmethod
+    def validate_capability_ids(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("Capability IDs cannot be blank")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("Capability IDs must be unique")
+        return normalized
+
+
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
     return authenticate_api_key(request, api_key)
 
@@ -581,6 +612,21 @@ def _api_task_actor(request: Request) -> str:
     if principal is None:
         raise RuntimeError("Task API principal is missing after authentication")
     return f"api:{principal.subject}"
+
+
+def _get_agent_runtime(request: Request) -> AgentRuntimeV1:
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is not None:
+        return runtime
+    try:
+        runtime = AgentRuntimeV1()
+    except (OSError, ValueError, RegistryValidationError):
+        logger.exception("Agent Runtime registry could not be loaded")
+        raise HTTPException(
+            status_code=503, detail="Agent Runtime registry is unavailable"
+        ) from None
+    request.app.state.agent_runtime = runtime
+    return runtime
 
 
 def require_task_permission(permission: str):
@@ -998,6 +1044,61 @@ def validate_task_envelope(request: TaskValidationRequest):
     except Exception:
         logger.exception("Task schema validation failed")
         raise HTTPException(status_code=500, detail="Task schema validation failed") from None
+
+
+@app.get("/v1/agent-runtime/status")
+def get_agent_runtime_status(
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Return the staged Agent/Worker registry state without enabling execution."""
+    runtime = _get_agent_runtime(request)
+    audit_api_task(request, tenant_id, "*", "agent_runtime.status", True)
+    return runtime.status()
+
+
+@app.post("/v1/agent-runtime/route-preview")
+def preview_agent_route(
+    body: AgentRoutePreviewRequest,
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Preview deterministic role routing; this endpoint never dispatches work."""
+    runtime = _get_agent_runtime(request)
+    try:
+        decision = runtime.preview_route(
+            RouteRequest(
+                scope=body.scope,
+                required_capability_ids=tuple(body.required_capability_ids),
+                explicit_role_id=body.explicit_role_id,
+                identity_type=body.identity_type,
+                parent_role_id=body.parent_role_id,
+                max_candidates=body.max_candidates,
+                require_all_capabilities=body.require_all_capabilities,
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        audit_api_task(request, tenant_id, "*", "agent_runtime.route_preview", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    audit_api_task(request, tenant_id, "*", "agent_runtime.route_preview", True)
+    return {
+        "status": decision.status,
+        "selected_role_id": decision.selected_role_id,
+        "suggested_role_id": decision.suggested_role_id,
+        "candidates": [
+            {
+                "role_id": candidate.role_id,
+                "display_name": candidate.display_name,
+                "identity_type": candidate.identity_type,
+                "score": candidate.score,
+                "matched_capability_ids": list(candidate.matched_capability_ids),
+                "dispatchable": candidate.dispatchable,
+                "explanation": candidate.explanation,
+            }
+            for candidate in decision.candidates
+        ],
+        "tool_grants": list(decision.tool_grants),
+    }
 
 
 @app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
