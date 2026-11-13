@@ -451,7 +451,7 @@ def test_agent_runtime_task_approval_is_tenant_admin_scoped(monkeypatch):
     assert queue.args[:4] == (
         task_id, "tenant-alpha", "a" * 64, ["node-high-risk"]
     )
-    assert queue.kwargs["rationale"] == "Reviewed the risk and approved this exact plan"
+    assert queue.args[4] == "Reviewed the risk and approved this exact plan"
     assert queue.kwargs["audit_actor"].startswith("api:")
 
 
