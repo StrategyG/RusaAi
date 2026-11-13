@@ -1319,11 +1319,6 @@ def create_agent_runtime_task(
             detail="Agent Runtime execution is not activated; use plan-preview until approval",
         )
 
-    queue = getattr(http_request.app.state, "queue", None)
-    if queue is None:
-        audit_api_task(http_request, tenant_id, "*", "task.create", False)
-        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
-
     task_id = str(uuid4())
     plan = TaskPlan(
         root_task_id=task_id,
@@ -1337,6 +1332,11 @@ def create_agent_runtime_task(
     except (KeyError, ValueError) as exc:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    queue = getattr(http_request.app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
 
     payload = {
         "execution_mode": "agent_runtime_v1",
