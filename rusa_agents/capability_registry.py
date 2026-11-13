@@ -5,7 +5,8 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+from collections.abc import Mapping
 
 import jsonschema
 
@@ -81,7 +82,7 @@ class AgentWorkerRegistry:
         cls,
         registry_path: str | Path | None = None,
         schema_path: str | Path | None = None,
-    ) -> "AgentWorkerRegistry":
+    ) -> AgentWorkerRegistry:
         registry_file = Path(registry_path or cls.DEFAULT_REGISTRY_PATH)
         schema_file = Path(schema_path or cls.DEFAULT_SCHEMA_PATH)
         try:
