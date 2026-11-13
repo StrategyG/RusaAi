@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from collections.abc import Mapping
 
 import jsonschema
 
@@ -97,7 +97,7 @@ class AgentWorkerRegistry:
     @classmethod
     def from_mapping(
         cls, data: Mapping[str, Any], schema: Mapping[str, Any]
-    ) -> "AgentWorkerRegistry":
+    ) -> AgentWorkerRegistry:
         return cls(data, schema)
 
     def _validate(self) -> None:
