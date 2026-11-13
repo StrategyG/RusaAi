@@ -443,6 +443,31 @@ END;
 $rusa$;
 
 
+DROP TRIGGER IF EXISTS rusa_knowledge_rights_set_actor
+    ON public.rusa_knowledge_rights_attestations;
+CREATE TRIGGER rusa_knowledge_rights_set_actor
+BEFORE INSERT ON public.rusa_knowledge_rights_attestations
+FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
+
+DROP TRIGGER IF EXISTS rusa_knowledge_review_set_actor
+    ON public.rusa_knowledge_review_findings;
+CREATE TRIGGER rusa_knowledge_review_set_actor
+BEFORE INSERT ON public.rusa_knowledge_review_findings
+FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
+
+DROP TRIGGER IF EXISTS rusa_knowledge_approval_set_actor
+    ON public.rusa_knowledge_human_approvals;
+CREATE TRIGGER rusa_knowledge_approval_set_actor
+BEFORE INSERT ON public.rusa_knowledge_human_approvals
+FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
+
+DROP TRIGGER IF EXISTS rusa_knowledge_publication_set_actor
+    ON public.rusa_knowledge_publication_events;
+CREATE TRIGGER rusa_knowledge_publication_set_actor
+BEFORE INSERT ON public.rusa_knowledge_publication_events
+FOR EACH ROW EXECUTE FUNCTION public.rusa_knowledge_governance_set_actor();
+
+
 CREATE OR REPLACE FUNCTION public.rusa_knowledge_governance_audit_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
