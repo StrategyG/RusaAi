@@ -43,6 +43,7 @@ class WorkerOutput:
 class PolicyDecision:
     allowed: bool
     requires_approval: bool = False
+    approval_satisfied: bool = False
     reason: str = ""
 
 
@@ -281,7 +282,9 @@ class WorkerExecutionEngine:
             )
             if not isinstance(decision, PolicyDecision):
                 raise TypeError("policy_authorizer must return PolicyDecision")
-            if decision.requires_approval or node.approval_required:
+            if decision.requires_approval or (
+                node.approval_required and not decision.approval_satisfied
+            ):
                 results[task_id] = NodeExecutionResult(
                     task_id=task_id,
                     role_id=node.selected_role_id,
