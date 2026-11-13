@@ -1,5 +1,6 @@
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -370,3 +371,58 @@ def test_task_api_enforces_tenant_policy_under_runtime_roles(monkeypatch, caplog
         ("audit-b", "worker:policy-test-worker", "task.execute", "allow"),
         ("audit-b", "worker:policy-test-worker", "task.execute", "deny"),
     }.issubset(persisted_decisions)
+
+
+def test_worker_memory_checkpoint_compare_and_set_is_atomic_and_tenant_scoped():
+    from rusa_agents.memory import PostgresMemory
+
+    memory = PostgresMemory(DSN)
+    task_id = str(uuid4())
+    tenant_id = f"checkpoint-cas-{uuid4().hex}"
+    payloads = [
+        {"tenant_id": tenant_id, "plan_fingerprint": "writer-a"},
+        {"tenant_id": tenant_id, "plan_fingerprint": "writer-b"},
+    ]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(
+                lambda payload: memory.compare_and_set(
+                    task_id,
+                    "agent-runtime",
+                    "agent_runtime_checkpoint",
+                    payload,
+                    tenant_id,
+                    0,
+                ),
+                payloads,
+            ))
+        assert sorted(value for value in outcomes if value is not None) == [1]
+        assert sum(value is not None for value in outcomes) == 1
+
+        current = memory.get(task_id, tenant_id)
+        assert current is not None
+        assert current["checkpoint_version"] == 1
+        assert current["payload"]["plan_fingerprint"] in {"writer-a", "writer-b"}
+        assert memory.get(task_id, tenant_id + "-other") is None
+        assert memory.compare_and_set(
+            task_id,
+            "agent-runtime",
+            "agent_runtime_checkpoint",
+            {"tenant_id": tenant_id, "plan_fingerprint": "stale"},
+            tenant_id,
+            0,
+        ) is None
+        assert memory.compare_and_set(
+            task_id,
+            "agent-runtime",
+            "agent_runtime_checkpoint",
+            {"tenant_id": tenant_id, "plan_fingerprint": "writer-next"},
+            tenant_id,
+            1,
+        ) == 2
+    finally:
+        with connect() as conn:
+            conn.execute(
+                "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
