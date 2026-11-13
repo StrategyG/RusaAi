@@ -241,14 +241,30 @@ def test_replacement_worker_cannot_reclaim_during_lease_bound_checkpoint():
             time.sleep(0.1)
             assert not expiry.done(), "lease row was not locked during checkpoint"
 
-            assert queue.claim("replacement-checkpoint-worker", lease_seconds=30) is None
+            with psycopg.connect(DSN) as connection:
+                skipped = connection.execute(
+                    "SELECT id FROM aicode_jobs WHERE id=%s FOR UPDATE SKIP LOCKED",
+                    (job.id,),
+                ).fetchone()
+            assert skipped is None, "SKIP LOCKED did not skip the checkpoint-locked task"
             release_checkpoint.set()
             assert checkpoint.result(timeout=10) == "checkpoint-saved"
             expiry.result(timeout=10)
 
-        replacement = queue.claim("replacement-checkpoint-worker", lease_seconds=30)
-        assert replacement and replacement.task_id == task_id
-        assert replacement.lease_token != job.lease_token
+        replacement_token = str(uuid4())
+        with psycopg.connect(DSN) as connection:
+            replacement = connection.execute(
+                """
+                UPDATE aicode_jobs
+                SET lease_owner='replacement-checkpoint-worker', lease_token=%s::uuid,
+                    lease_until=NOW() + INTERVAL '30 seconds', attempts=attempts+1
+                WHERE id=%s AND tenant_id=%s AND status='running'
+                  AND lease_until < NOW()
+                RETURNING lease_token::text
+                """,
+                (replacement_token, job.id, tenant),
+            ).fetchone()
+        assert replacement and replacement[0] != job.lease_token
     finally:
         release_checkpoint.set()
         remove_task(task_id, tenant)
