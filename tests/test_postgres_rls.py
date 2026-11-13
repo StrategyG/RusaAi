@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -425,5 +426,123 @@ def test_worker_memory_checkpoint_compare_and_set_is_atomic_and_tenant_scoped():
             conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
             conn.execute(
                 "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
+
+
+@pytest.mark.asyncio
+async def test_postgres_queue_to_dag_execution_uses_live_lease_and_checkpoint_cas(tmp_path):
+    from rusa_agents.capability_registry import AgentWorkerRegistry
+    from rusa_agents.memory import PostgresMemory
+    from rusa_agents.queue import PostgresTaskQueue
+    from rusa_agents.runtime import AICodeRuntime
+    from rusa_agents.task_decomposer import TaskNode, TaskPlan
+    from rusa_agents.runtime_v1 import AgentRuntimeV1
+    from rusa_agents.worker_execution import (
+        PolicyDecision,
+        PlanStatus,
+        VerificationDecision,
+        WorkerOutput,
+    )
+
+    registry_dir = Path(__file__).resolve().parents[1] / "rusa_agents" / "data"
+    registry_data = json.loads((registry_dir / "agent_worker_registry.v1.json").read_text())
+    registry_schema = json.loads((registry_dir / "agent_worker_registry.v1.schema.json").read_text())
+    registry_data["status"] = "active"
+    registry_data["source_chunk_map_status"] = "approved_for_routing"
+    for index, role in enumerate(registry_data["roles"], start=900):
+        role["registration_status"] = "registered"
+        role["runtime_status"] = "verified"
+        role["activation_state"] = "active"
+        role["source_chunk_ids"] = [f"RUSA-KB-{index:03d}"]
+    registry_data["counts"]["source_chunk_refs_total"] = len(registry_data["roles"])
+    registry = AgentWorkerRegistry.from_mapping(registry_data, registry_schema)
+
+    queue = PostgresTaskQueue(DSN)
+    memory = PostgresMemory(DSN)
+    queue.initialize()
+    memory.initialize()
+    tenant_id = f"dag-e2e-{uuid4().hex}"
+    task_id = str(uuid4())
+    worker_id = f"dag-e2e-worker-{uuid4().hex[:8]}"
+    job = None
+
+    class Handler:
+        tenant_id = tenant_id
+
+        async def execute(self, node, dependency_results):
+            return WorkerOutput(
+                summary="PostgreSQL queue-to-DAG acceptance passed",
+                evidence_refs=("evidence://postgres-queue-dag",),
+            )
+
+    def authorize(node, trusted_tenant):
+        return PolicyDecision(allowed=True)
+
+    def verify(node, output):
+        return VerificationDecision(accepted=bool(output.evidence_refs))
+
+    runtime = AICodeRuntime.__new__(AICodeRuntime)
+    runtime.agent_runtime = AgentRuntimeV1(registry)
+    runtime.memory = memory
+    runtime.queue = queue
+    runtime.worker_id = worker_id
+
+    try:
+        assert queue.enqueue(
+            task_id,
+            tenant_id,
+            {"objective": "PostgreSQL queue-to-DAG acceptance"},
+            priority=2**31 - 1,
+        )
+        job = queue.claim(worker_id, lease_seconds=60)
+        assert job is not None and job.task_id == task_id
+
+        plan = TaskPlan(
+            root_task_id=task_id,
+            tenant_id=tenant_id,
+            objective="Verify queue lease, DAG execution, and atomic checkpoint persistence",
+            nodes=(
+                TaskNode(
+                    task_id="node-postgres-e2e",
+                    selected_role_id="analyst",
+                    scope="worker",
+                    objective="Run a bounded integration acceptance task",
+                    delegated_by_role_id="supreme_orchestrator",
+                    acceptance_criteria=("Persist versioned checkpoint",),
+                ),
+            ),
+        )
+        result = await runtime.execute_agent_plan(
+            job,
+            plan,
+            {"analyst": Handler()},
+            authorize,
+            verify,
+            asyncio.Event(),
+        )
+
+        assert result.status == PlanStatus.COMPLETED
+        record = memory.get(task_id, tenant_id)
+        assert record is not None
+        assert record["state"] == "agent_runtime_checkpoint"
+        assert record["checkpoint_version"] >= 2
+        assert queue.complete(
+            job.id,
+            tenant_id,
+            worker_id,
+            job.lease_token,
+            {"plan_status": result.status.value},
+        )
+        assert queue.get(task_id, tenant_id)["status"] == "succeeded"
+    finally:
+        with connect() as conn:
+            conn.execute("SELECT set_config('rusa.tenant_id', %s, true)", (tenant_id,))
+            conn.execute(
+                "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+                (task_id, tenant_id),
+            )
+            conn.execute(
+                "DELETE FROM aicode_jobs WHERE task_id=%s AND tenant_id=%s",
                 (task_id, tenant_id),
             )
