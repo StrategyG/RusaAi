@@ -154,6 +154,8 @@ def test_postgres_queue_approval_is_fingerprint_bound_and_claimed_by_worker():
         assert resumed.result["approval"]["plan_fingerprint"] == fingerprint
         assert resumed.result["approval"]["approved_node_ids"] == ["node-high-risk"]
         assert resumed.result["approval"]["approved_by"] == "api:tenant-admin"
+        assert resumed.result["approval"]["rationale"] == "Reviewed the exact high-risk change"
+        assert resumed.result["approval"]["approved_at"]
         assert queue.complete(
             resumed.id, tenant_id, "approval-resume-worker", resumed.lease_token,
             {"outcome": "approved-and-resumed"},
