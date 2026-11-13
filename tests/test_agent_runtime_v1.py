@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from rusa_agents.audit import AuditLog
 from rusa_agents.capability_registry import (
     AgentWorkerRegistry,
     RegistryNotActivatedError,
