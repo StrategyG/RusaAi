@@ -17,8 +17,9 @@ class FakeCursor:
 
 
 class FakeConnection(AbstractContextManager):
-    def __init__(self, *, select_row=None, update_row=(1,)):
+    def __init__(self, *, select_row=None, claim_row=None, update_row=(1,)):
         self.select_row = select_row
+        self.claim_row = claim_row
         self.update_row = update_row
         self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
 
@@ -30,6 +31,8 @@ class FakeConnection(AbstractContextManager):
 
     def execute(self, query: str, params=None):
         self.calls.append((query, params))
+        if "WITH candidate AS" in query:
+            return FakeCursor(self.claim_row)
         if "SELECT id, result, status" in query:
             return FakeCursor(self.select_row)
         if "UPDATE public.aicode_jobs" in query:
@@ -47,7 +50,7 @@ def test_queue_claim_exposes_durable_approval_result(monkeypatch):
     }
     result = {"plan_fingerprint": "a" * 64, "approval": approval}
     connection = FakeConnection(
-        select_row=(
+        claim_row=(
             10, "task-10", "tenant-a", {"execution_mode": "agent_runtime_v1"},
             1, 3, "worker-a", "00000000-0000-4000-8000-000000000010", result,
         )
