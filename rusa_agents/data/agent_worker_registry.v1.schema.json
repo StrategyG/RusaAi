@@ -60,7 +60,8 @@
           "const": 14
         },
         "source_chunks_total": {
-          "const": 0
+          "type": "integer",
+          "minimum": 0
         },
         "provisional_capability_ids_total": {
           "const": 34
