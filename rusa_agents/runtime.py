@@ -144,7 +144,7 @@ class AICodeRuntime:
         workspace: str | None = None,
         coding_task: CodingTask | None = None,
     ) -> None:
-        """Inject reviewed Agent Runtime adapters; no handler is enabled by default."""
+        """Inject an explicit reviewed adapter override for specialized deployments."""
         if not isinstance(handlers, Mapping) or not handlers:
             raise ValueError("Agent Runtime dispatch requires a non-empty handler mapping")
         if not callable(policy_authorizer) or not callable(result_verifier):
