@@ -23,7 +23,6 @@ from rusa_agents.worker_execution import (
     WorkerOutput,
 )
 
-
 DATA_DIR = Path(__file__).resolve().parents[1] / "rusa_agents" / "data"
 REGISTRY_PATH = DATA_DIR / "agent_worker_registry.v1.json"
 SCHEMA_PATH = DATA_DIR / "agent_worker_registry.v1.schema.json"
