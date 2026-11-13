@@ -293,6 +293,46 @@ class AICodeRuntime:
             metadata={"tenant_id": job.tenant_id, "lease_token": job.lease_token},
         )
 
+    def _validate_agent_runtime_quality_gates(self, plan: TaskPlan) -> None:
+        developer_ids = {
+            node.task_id for node in plan.nodes if node.selected_role_id == "developer"
+        }
+        if not developer_ids:
+            return
+        roles = {node.selected_role_id for node in plan.nodes}
+        missing = {"tester", "security"} - roles
+        if missing:
+            raise ValueError(
+                "Repository implementation plans require tester and security nodes; missing: "
+                + ", ".join(sorted(missing))
+            )
+        if self.agent_runtime is None:
+            self._load_agent_runtime_registry()
+        if self.agent_runtime is None:
+            raise RuntimeError("Agent Runtime registry is unavailable")
+        validation = self.agent_runtime.validate_plan(plan)
+        dependencies = validation.effective_dependencies
+
+        def ancestors(task_id: str) -> set[str]:
+            found: set[str] = set()
+            pending = list(dependencies[task_id])
+            while pending:
+                parent_id = pending.pop()
+                if parent_id in found:
+                    continue
+                found.add(parent_id)
+                pending.extend(dependencies[parent_id])
+            return found
+
+        for node in plan.nodes:
+            if node.selected_role_id in {"tester", "security"}:
+                missing_implementations = developer_ids - ancestors(node.task_id)
+                if missing_implementations:
+                    raise ValueError(
+                        f"{node.selected_role_id} node {node.task_id!r} must depend on every "
+                        "developer node before quality verification"
+                    )
+
     @staticmethod
     def _agent_runtime_policy_authorizer(node: TaskNode, tenant_id: str) -> AgentPolicyDecision:
         role_permissions = {
@@ -368,6 +408,7 @@ class AICodeRuntime:
             raise RegistryNotActivatedError(
                 "Agent Runtime execution is disabled until the registry is approved and activated"
             )
+        self._validate_agent_runtime_quality_gates(plan)
         supported_roles = {role.value for role in AICodeOrchestrator.PIPELINE}
         unsupported = sorted({node.selected_role_id for node in plan.nodes} - supported_roles)
         if unsupported:
@@ -404,6 +445,7 @@ class AICodeRuntime:
             "result_verifier": self._agent_runtime_result_verifier,
             "workspace": workspace,
             "coding_task": task,
+            "publish_changes": any(node.selected_role_id == "developer" for node in plan.nodes),
         }
 
     async def _await_agent_runtime_approval(
@@ -442,6 +484,7 @@ class AICodeRuntime:
     ) -> str:
         """Execute one explicitly typed DAG job and publish only verified output."""
         plan = self._agent_runtime_plan_from_job(job)
+        self._validate_agent_runtime_quality_gates(plan)
         dispatch = getattr(self, "_agent_runtime_dispatch", None)
         if dispatch is None:
             try:
@@ -479,6 +522,7 @@ class AICodeRuntime:
 
         coding_task = dispatch.get("coding_task")
         workspace = dispatch.get("workspace")
+        publish_changes = dispatch.get("publish_changes", workspace is not None)
         result_payload = {
             "execution_mode": "agent_runtime_v1",
             "plan_status": result.status.value,
@@ -510,7 +554,7 @@ class AICodeRuntime:
                     "Production Agent Runtime requires a repository workspace and publication adapter",
                     result_payload,
                 )
-            if workspace is not None and coding_task is not None:
+            if workspace is not None and coding_task is not None and publish_changes:
                 await self._assert_lease(job, cancellation_event)
                 commit_sha = await asyncio.to_thread(
                     self.queue.publish_if_lease_owned,
