@@ -30,10 +30,16 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+  const suppliedKey = request.headers.get("Idempotency-Key");
+  const idempotencyKey = suppliedKey === null ? randomUUID() : suppliedKey.trim();
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey)) {
+    return NextResponse.json({ error: "Idempotency-Key must be 1–128 safe ASCII characters." }, { status: 400 });
+  }
   const response = await backendFetch("/v1/aicode/tasks", session, {
     method: "POST",
-    headers: { "Idempotency-Key": randomUUID() },
-    body: JSON.stringify(body)
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+    signal: request.signal
   });
   return forwardJson(response);
 }

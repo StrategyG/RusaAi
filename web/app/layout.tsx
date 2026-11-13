@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./rusa-control-center.css";
 
 export const metadata: Metadata = {
-  title: "RUSA AI — Control Center",
-  description: "Tenant-scoped control center for RUSA AI inference and autonomous coding tasks."
+  title: "RUSA AI — Agentic Control Center",
+  description: "Architecture-aligned enterprise control center for RUSA AI agents, AICode tasks, governance, and observability."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

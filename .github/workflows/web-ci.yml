@@ -45,5 +45,14 @@ jobs:
           RUSA_API_BASE_URL: http://127.0.0.1:8000
           RUSA_WEB_SESSION_SECRET: ci-only-session-secret-change-this-value-123456789
         run: npm run build
+      - name: Install Chromium for browser smoke
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Functional BFF and browser UI smoke test
+        working-directory: web
+        env:
+          RUSA_WEB_SESSION_SECRET: ci-only-session-secret-change-this-value-123456789
+          RUSA_METRICS_API_KEY: metrics-smoke-key
+        run: npm run smoke
       - name: Build web container
         run: docker build --pull -f web/Dockerfile -t rusa-ai-web:${{ github.sha }} web
