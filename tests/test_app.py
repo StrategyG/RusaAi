@@ -15,6 +15,7 @@ from rusa_agents.inference_admission import (
     InferenceDeadlineTimeout,
 )
 from rusa_agents.providers import InferenceStreamEvent
+from rusa_agents.runtime_v1 import AgentRuntimeV1
 
 client = TestClient(app)
 
@@ -23,6 +24,65 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+
+def _configure_agent_runtime_api(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(app.state, "agent_runtime", AgentRuntimeV1(), raising=False)
+
+
+def test_agent_runtime_status_is_authenticated_and_reports_staged_registry(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.get(
+        "/v1/agent-runtime/status",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "draft_proposed_not_activated"
+    assert data["role_count"] == 24
+    assert data["dispatchable_roles"] == 0
+    assert data["execution_enabled"] is False
+
+
+def test_agent_runtime_route_preview_never_grants_tools_or_dispatches(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/route-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "scope": "worker",
+            "required_capability_ids": ["RUSA-AW-WORKER-001"],
+            "identity_type": "aicode_worker",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "PREVIEW_ONLY"
+    assert data["selected_role_id"] is None
+    assert data["suggested_role_id"] == "analyst"
+    assert data["tool_grants"] == []
+    assert data["candidates"][0]["dispatchable"] is False
+
+
+def test_agent_runtime_route_preview_rejects_unknown_capability(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/route-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={"scope": "worker", "required_capability_ids": ["UNKNOWN-CAPABILITY"]},
+    )
+    assert response.status_code == 422
+
+
+def test_agent_runtime_status_requires_task_read_permission(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    response = client.get("/v1/agent-runtime/status")
+    assert response.status_code == 401
 
 
 def test_chat_completions_fails_closed_without_backend():
