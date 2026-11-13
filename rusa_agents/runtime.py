@@ -242,15 +242,19 @@ class AICodeRuntime:
         cancellation_event: asyncio.Event,
     ) -> str:
         """Execute one explicitly typed DAG job; never fall back to legacy coding mode."""
+        plan = self._agent_runtime_plan_from_job(job)
         dispatch = getattr(self, "_agent_runtime_dispatch", None)
         if dispatch is None:
             return await self._await_agent_runtime_approval(
                 job,
                 "Agent Runtime dispatch adapters are not configured; operator review is required",
-                {"execution_mode": "agent_runtime_v1", "dispatch_configured": False},
+                {
+                    "execution_mode": "agent_runtime_v1",
+                    "plan_schema_version": "1.0",
+                    "dispatch_configured": False,
+                },
             )
 
-        plan = self._agent_runtime_plan_from_job(job)
         try:
             result = await self.execute_agent_plan(
                 job,
