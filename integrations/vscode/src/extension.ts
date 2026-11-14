@@ -68,7 +68,10 @@ async function answerWithRusaAI(
     return {};
   }
 
+  const controller = new AbortController();
+  const cancellation = token.onCancellationRequested(() => controller.abort());
   try {
+    if (token.isCancellationRequested) return {};
     const response = await fetch(baseUrl + "/chat/completions", {
       method: "POST",
       headers: {
@@ -82,7 +85,7 @@ async function answerWithRusaAI(
         max_tokens: 2048,
         stream: false
       }),
-      signal: token.isCancellationRequested ? AbortSignal.abort() : undefined
+      signal: controller.signal
     });
     if (!response.ok) {
       stream.markdown("RUSA AI request failed (" + response.status + "). Check the local service and API key.");
@@ -97,9 +100,11 @@ async function answerWithRusaAI(
       return {};
     }
     stream.markdown(answer);
-  } catch (error) {
+  } catch {
     if (token.isCancellationRequested) return {};
     stream.markdown("Could not reach the configured RUSA AI endpoint. Confirm the local service is running.");
+  } finally {
+    cancellation.dispose();
   }
   return {};
 }
