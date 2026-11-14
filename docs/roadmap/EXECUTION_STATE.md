@@ -21,7 +21,7 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 83 |
+| RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 85 |
 | RusaModels | main | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 pass | No | 7 |
 | RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 5/5 pass | No | 2 |
 
@@ -54,8 +54,8 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `e377c268e7356ece82ccd1dbc9c5ad1735e61070` | 3 checks in progress at recheck | Draft/open |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `ea4461d5084e5599107572b40be81a9416069bf0` | 2/2 pass | Draft/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 2/3 complete PASS; image build/scan in progress | Draft/open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 1/2 complete PASS; test job in progress | Draft/open |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 pass | Draft/open |
 
 PR #117 now includes:
@@ -65,7 +65,7 @@ PR #117 now includes:
 - ADR index and explicit duplicate ADR-0002 `OPEN_DECISION`.
 - Agent/Worker engineering contract as a proposed documentation-only specification.
 
-PR #24 clarifies that the RusaModels shared PostgreSQL registry is internal to Model Server and Quant Server, not the RusaAi ecosystem Control Plane.
+PR #24 clarifies that the RusaModels shared PostgreSQL registry is internal to Model Server and Quant Server, not the RusaAi ecosystem Control Plane. It also updates the FastAPI OpenAPI description so the API no longer labels RusaModels as the ecosystem Control Plane.
 
 PR #28 supersedes the stale no-selection language in the RAG_Cerdas ADR at PR-branch level, documents RusaAi canonical-store selection and preserves IM19 isolation.
 
@@ -95,16 +95,19 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - RusaModels main `rusamodels/api.py` exposes `/openai/v1/models`, `/openai/v1/chat/completions`, `/openai/v1/completions` and `/openai/v1/embeddings`.
 - RusaAi main `llm-project/serve/app.py` exposes the tenant-authenticated `/v1/models` and `/v1/chat/completions` gateway routes with admission control.
 - The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
-- PR #120's first exact-head CI attempt failed the cross-process FIFO admission test; a rerun passed 337 tests with 6 skipped. Treat this as a timing-sensitive test/race signal until repeated evidence exists.
+- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes 337 tests with 6 skipped in run 43552929727. RAG/MCP also passes; image build/scan is still running.
+- PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
+- PR #119's current head `fded768e` has test/lint/security and RAG/MCP checks passing; image build/scan is still running. PR #24's updated head `128343fe` has Windows script validation passing and its test job in progress.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
 
-- Three architecture-alignment PRs remain open/draft and require coordinated review; no merge approval has been given.
+- Three architecture-alignment PRs remain open/draft and require coordinated review; PR #117 has 2/3 checks complete, PR #24 has 1/2 complete, and PR #28 has 1/1 complete at this snapshot. No merge approval has been given.
 - RusaAi contains two ADR files with numeric identifier ADR-0002; the collision is explicitly an OPEN_DECISION and must be corrected in a dedicated reviewed change with repository-wide reference validation.
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
 - The current main branches report branch protection disabled.
+- PR #117 and PR #119 image build/scan checks and PR #24's test check are still in progress; do not report their CI as fully green until exact-head check-runs complete.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
 - RusaAi KnowledgeService is optional and the runtime activation flag defaults false.
