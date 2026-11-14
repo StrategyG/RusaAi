@@ -213,6 +213,8 @@ the pgvector migration and role grants have been applied. Configure:
 - `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_API_KEY`, and
   `RUSA_EMBEDDING_MODEL`
 
+**Production boundary:** this optional worker integration currently instantiates `KnowledgeService` inside the worker and sends embedding requests directly to the configured OpenAI-compatible Model Server endpoint. It therefore requires a Model Server API credential in the worker environment and bypasses the RusaAi chat-completion gateway. Keep `RUSA_RAG_ENABLED=false` on production workers; do not distribute `RUSA_EMBEDDING_API_KEY` or `RUSA_MODEL_API_KEY` to them. Production activation is blocked until a tenant-aware RusaAi embedding gateway or an equivalently reviewed brokered contract is implemented and tested. This optional direct path is suitable only for an explicitly isolated, approved non-production profile.
+
 The task tenant is taken from the authenticated queue lease and injected into
 the read-only agent tools. The model cannot provide or override `tenant_id`.
 The worker connects using its restricted worker login, then explicitly assumes
