@@ -35,6 +35,12 @@ The database directory must be persistent and writable only by the RusaAi API se
 
 These endpoints are disabled unless local install mode is explicitly enabled. Hosted deployments continue to use the existing centrally provisioned hashed `RUSA_API_KEYS_JSON` registry.
 
+## Web key management and VS Code preview
+
+After first-run setup, the web server establishes an encrypted HttpOnly dashboard session. Open `/keys` to create a separate `developer` or `read_only` key for each editor and revoke keys that are no longer used. The owner key is protected from accidental revocation; the API also prevents revoking the last active tenant administrator.
+
+A source preview of the VS Code Chat Participant is in `integrations/vscode`. It stores the API key in VS Code SecretStorage and discovers the configured model ID from `GET /v1/models` when the local model runtime is ready. The VSIX is not yet published or signed. This extension sends only the explicit chat prompt; it does not read workspace files or execute local tools.
+
 ## Editor compatibility
 
 The local gateway base URL is `http://127.0.0.1:8000/v1` in the current Compose development profile. Clients that support a custom OpenAI-compatible endpoint can use the base URL and a dedicated editor API key. Editors requiring proprietary protocols need a dedicated extension/adapter; compatibility is not assumed merely because an editor supports AI features.
