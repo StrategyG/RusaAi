@@ -94,17 +94,17 @@ release manifest.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | PR #107 passed; PR #109 exact-head CI running after 8-GB Compose environment fix |
+| Integration CI | All jobs green on the exact candidate SHA, including Docker/Trivy and RAG/MCP | Current main SHA `1adac8d` has 4/4 check runs passing. PR #107 has 3/3 passing on an older base SHA; PR #109 has 2 passing and 1 cancelled check on a stacked branch; PR #111 is merged with 4/4 observed checks passing. CI does not certify deployment. |
 | Inference contract integration | Endpoint and worker validate v1 request/response schemas, stable IDs, model identity, error semantics, and measured performance fields | Schema files exist, but README confirms the OpenAI-compatible endpoint does not yet consume them; blocked |
 | Local model artifact | Approved non-Qwen model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no production checkpoint; Bhineka-GPT is PILOT_ONLY pending audit |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
 | Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | PR #107 unit/integration CI passed; staging recovery drill still required |
-| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | PostgreSQL scheduler implemented in PR #109; exact-head CI and staging crash/restart drill pending |
+| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | Migration 010 and PostgreSQL scheduler are present on main; PR #109 remains open on a stacked branch and its security check was cancelled. Cross-process FIFO evidence and staging crash/restart drill remain required. |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Knowledge governance | Rights, source versions, review, human approval, publication, deletion and audit lifecycle | Initial governance is proposed in PR #115; purge, index-generation reconciliation and erasure remain open |
-| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | PR #111 adds migrations 011/012; exact-head and PostgreSQL ACL evidence required |
+| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | Migrations 011/012 are present on main and PR #111 is merged; deployed-database PostgreSQL ACL and cross-scope negative evidence are still required. |
 | Retrieval quality | Human-reviewed Indonesian/English gold set, citations, groundedness and security evaluation | Not measured |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
