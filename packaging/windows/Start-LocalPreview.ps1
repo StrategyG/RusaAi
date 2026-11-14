@@ -1,5 +1,3 @@
-[CmdletBinding()]
-
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $envPath = Join-Path $repoRoot ".env"
