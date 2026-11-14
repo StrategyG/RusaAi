@@ -101,8 +101,8 @@ export default function ApiKeysPage() {
         <a href="/" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white"><ArrowLeft size={15} /> RUSA AI dashboard</a>
         <header className="mt-7 flex items-center gap-3"><div className="rounded-xl bg-sky-400/10 p-3 text-sky-300"><KeyRound size={24} /></div><div><h1 className="text-2xl font-semibold">API Keys</h1><p className="text-sm text-slate-400">Create a separate least-privilege key for each editor or client.</p></div></header>
 
-        {error && <div className="mt-5 rounded-lg border border-rose-400/30 bg-rose-400/5 p-3 text-sm text-rose-100">{error}</div>}
-        {notice && <div className="mt-5 rounded-lg border border-emerald-400/30 bg-emerald-400/5 p-3 text-sm text-emerald-100">{notice}</div>}
+        {error && <div role="alert" className="mt-5 rounded-lg border border-rose-400/30 bg-rose-400/5 p-3 text-sm text-rose-100">{error}</div>}
+        {notice && <div role="status" aria-live="polite" className="mt-5 rounded-lg border border-emerald-400/30 bg-emerald-400/5 p-3 text-sm text-emerald-100">{notice}</div>}
 
         <section className="mt-6 rounded-xl border border-slate-700 bg-slate-900 p-5">
           <h2 className="font-semibold">Create editor API key</h2>
