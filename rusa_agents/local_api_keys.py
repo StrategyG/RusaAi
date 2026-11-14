@@ -12,10 +12,11 @@ import re
 import secrets
 import sqlite3
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from rusa_agents.config import ApiPrincipal
+from rusa_agents.config import ApiPrincipal, KNOWN_API_ROLES
 
 _KEY_PREFIX = "rusa_sk_"
 _ALLOWED_EDITOR_ROLES = {"developer", "read_only"}
@@ -146,7 +147,11 @@ class LocalApiKeyStore:
             roles = json.loads(row["roles_json"])
         except (TypeError, json.JSONDecodeError):
             return None
-        if not isinstance(roles, list) or not roles:
+        if (
+            not isinstance(roles, list)
+            or not roles
+            or any(not isinstance(role, str) or role not in KNOWN_API_ROLES for role in roles)
+        ):
             return None
         return ApiPrincipal(
             subject=row["subject"], tenant_id=row["tenant_id"], roles=tuple(roles)
@@ -240,3 +245,9 @@ class LocalApiKeyStore:
             connection.commit()
         self._secure_database_file()
         return True
+
+
+@lru_cache(maxsize=4)
+def get_local_api_key_store(database_path: str) -> LocalApiKeyStore:
+    """Reuse the stateless SQLite store wrapper without holding a DB connection."""
+    return LocalApiKeyStore(database_path)
