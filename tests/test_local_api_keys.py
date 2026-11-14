@@ -53,3 +53,16 @@ def test_last_admin_key_cannot_be_revoked(tmp_path):
     owner = store.initialize_owner()
     with pytest.raises(ValueError, match="last active"):
         store.revoke_key(key_id=owner["key_id"], tenant_id="local")
+
+
+def test_tampered_unknown_role_is_rejected(tmp_path):
+    import sqlite3
+
+    store = LocalApiKeyStore(tmp_path / "keys.sqlite3")
+    issued = store.initialize_owner()
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "UPDATE local_api_keys SET roles_json=? WHERE key_id=?",
+            ('["superadmin"]', issued["key_id"]),
+        )
+    assert store.authenticate(issued["api_key"]) is None
