@@ -94,7 +94,7 @@ export default function LocalSetupPage() {
           <h1 className="text-3xl font-semibold">RUSA AI is almost ready.</h1>
           <p className="mt-3 max-w-2xl leading-7 text-slate-300">
             Create the local owner credential once. The raw API key is shown only at creation time.
-            Keep it private and use separate least-privilege keys for individual editors.
+            Keep it private and use separate least-privilege keys for individual editors. After setup, sign in to manage those keys at /keys.
           </p>
 
           {status === "loading" && <div className="mt-8 text-sm text-slate-400">Checking local services…</div>}
