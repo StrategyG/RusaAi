@@ -49,6 +49,21 @@ async function configureConnection(context: vscode.ExtensionContext): Promise<vo
 
   await configuration.update(API_BASE_SETTING, endpoint, vscode.ConfigurationTarget.Global);
   await context.secrets.store(API_KEY_SECRET, apiKey);
+  try {
+    const response = await fetch(endpoint + "/models", {
+      headers: { "Authorization": "Bearer " + apiKey },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (response.ok) {
+      const payload = await response.json() as { data?: Array<{ id?: string }> };
+      const modelId = payload.data?.find((item) => typeof item.id === "string" && item.id)?.id;
+      if (modelId) {
+        await configuration.update(MODEL_SETTING, modelId, vscode.ConfigurationTarget.Global);
+      }
+    }
+  } catch {
+    // Keep the saved connection; the user can set the model alias when the runtime is ready.
+  }
   void vscode.window.showInformationMessage("RUSA AI connection saved securely in VS Code.");
 }
 
