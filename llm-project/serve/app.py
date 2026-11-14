@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -478,7 +479,7 @@ def _local_key_store() -> LocalApiKeyStore:
         raise HTTPException(status_code=503, detail="Local API key store is not configured")
     try:
         return get_local_api_key_store(database_path)
-    except (OSError, ValueError):
+    except (OSError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Local API key store is unavailable") from None
 
 
@@ -586,7 +587,10 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
             raise HTTPException(status_code=503, detail="Local API key store is not configured")
         if not api_key:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
-        principal = get_local_api_key_store(database_path).authenticate(api_key)
+        try:
+            principal = get_local_api_key_store(database_path).authenticate(api_key)
+        except (OSError, sqlite3.Error, ValueError):
+            raise HTTPException(status_code=503, detail="Local API key store is unavailable") from None
         if principal is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
     else:
