@@ -54,16 +54,17 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | Ready/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `ae67072e9476551533746d6c25e3f8b7e821f986` | CI IN_PROGRESS after final architecture/embedding-path documentation update (run 43558264080) | Ready/open |
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7480bb2fcf6139f283fada2c4a068747549fc709` | 1/1 PASS after documentation status refresh (run 43557286413) | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `3957ecad8e6ebba89048b2d0bb6e970c960d2bce` | 1/1 PASS after embedding-path qualification (run 43558123215) | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
 - Updated canonical knowledge ADR migration-state description.
 - Updated production-readiness migration-state description.
 - ADR index and explicit duplicate ADR-0002 `OPEN_DECISION`.
-- Agent/Worker engineering contract as a proposed documentation-only specification.
+- Current-main inference and embedding data-flow qualification, including the optional direct Worker → RusaModels embedding exception.
+- RAG/MCP operations warning that production Worker RAG remains disabled until embedding calls are brokered through an approved gateway.
 
 PR #24 clarifies that the RusaModels shared PostgreSQL registry is internal to Model Server and Quant Server, not the RusaAi ecosystem Control Plane. It also updates the FastAPI OpenAPI description so the API no longer labels RusaModels as the ecosystem Control Plane.
 
@@ -80,8 +81,8 @@ Scores below measure evidence-backed completion of the eight CHUNK 01 tasks in t
 | 1. Compare ADRs across all three repositories | 90 | PARTIAL | RusaAi, RusaModels and RAG_Cerdas ADRs inspected; RusaAi duplicate ADR-0002 identifier remains an explicit OPEN_DECISION |
 | 2. Confirm `rusa_knowledge` as canonical shared store | 100 | PASS — decision confirmation | Accepted RusaAi ADR-0002 confirmed; PR #28 aligns IM19 documentation without authorizing production activation |
 | 3. Reconcile RAG_Cerdas no-selection wording | 85 | PARTIAL | PR #28 updates ADR, README and roadmap on its branch; RAG_Cerdas main remains unchanged until review/merge |
-| 4. Define API, model, database, artifact, knowledge, worker and identity ownership | 95 | PARTIAL | Cross-repository ownership matrix and exact service boundaries documented; PR #24 also corrects RusaModels API description; all alignment PRs remain open and ready for review and ready for review; merge approval is still pending |
-| 5. Define cross-repository communication rules | 90 | PARTIAL | Provider/consumer routes and credentials documented; custom inference JSON schema is not yet consumed by the public endpoint and live E2E conformance is not verified |
+| 4. Define API, model, database, artifact, knowledge, worker and identity ownership | 95 | PARTIAL | Cross-repository ownership matrix and exact service boundaries documented; PR #24 also corrects RusaModels API description; all alignment PRs remain open and ready for review; merge approval is still pending |
+| 5. Define cross-repository communication rules | 90 | PARTIAL | Provider/consumer routes and credentials documented; direct worker embedding calls bypass the chat gateway and are now explicitly marked NOT_APPROVED for production; custom inference JSON schema is not yet consumed and live E2E conformance is not verified |
 | 6. Define data classification and trust boundaries | 95 | PASS — documentation evidence | Public/internal/tenant-confidential/restricted-secret/untrusted classes and fail-closed invariants documented; deployment enforcement remains unverified |
 | 7. Record unresolved decisions as OPEN_DECISION | 100 | PASS — documentation evidence | ADR numbering, embedding profile, IM19 inference path and production activation constraints are explicitly recorded |
 | 8. Create architecture decision matrix | 95 | PASS — documentation evidence | Selected, rejected, retained and open options documented with rationale and conditions |
@@ -94,15 +95,15 @@ Fixed weights from section 2.3 of the supplied roadmap are used. These are preli
 | Dimension | Weight | Score / 100 | Weighted contribution | Evidence and remaining gap |
 |---|---:|---:|---:|---|
 | Architecture and ownership | 10 | 70 | 7.00 | Control Plane/Model Plane and canonical-store decisions exist; ADR number collision and mainline cross-repository doc alignment remain open |
-| API contracts and integration | 15 | 50 | 7.50 | Authenticated Model Server and inference APIs exist; complete versioned provider/consumer contract and cross-repo E2E conformance are not verified |
-| Identity, security and tenant isolation | 15 | 55 | 8.25 | RLS, roles, worker allowlists and sandbox controls exist; all main branches lack protection, production gateway-only enforcement is not verified across profiles, and independent cross-tenant security evidence is absent |
+| API contracts and integration | 15 | 45 | 6.75 | Chat gateway is profile-dependent; optional KnowledgeService embedding calls bypass it and require Model Server credentials in the worker; complete versioned provider/consumer contract and cross-repo E2E conformance are not verified |
+| Identity, security and tenant isolation | 15 | 50 | 7.50 | RLS, roles, worker allowlists and sandbox controls exist; optional direct worker embedding path can expose a Model Server API credential, all main branches lack protection, and independent cross-tenant security evidence is absent |
 | Model and artifact readiness | 10 | 25 | 2.50 | Registry/runtime infrastructure exists; production RusaAi-Edge checkpoint, tokenizer, immutable GGUF artifact and target-device benchmark are absent |
 | Knowledge governance and provenance | 10 | 40 | 4.00 | Tenant/project retrieval and version history exist; complete rights/review/approval/publication/withdrawal/purge lifecycle is not on main |
 | Testing and evaluation quality | 10 | 60 | 6.00 | Exact-main and selected PR CI pass; reviewed retrieval qrels, held-out agent evaluation and system-building benchmarks are not verified |
 | Reliability and recovery | 10 | 50 | 5.00 | Queue/lease/checkpoint/retry foundations exist; staging failure injection, backup/restore and disaster-recovery drills are not evidenced |
 | Deployment and observability | 10 | 30 | 3.00 | Container/Compose/workflow assets exist; target staging deployment, soak, alerting and operational evidence are absent |
 | Release governance and evidence | 10 | 35 | 3.50 | Readiness gates and evidence workflows exist; main branch protection is disabled, PR backlog is large, and no release-owner certification exists |
-| **Total** | **100** | | **47.50 / 100** | **Rounded baseline: 48/100. Production remains NO-GO / NOT_VERIFIED.** |
+| **Total** | **100** | | **45.25 / 100** | **Rounded baseline: 45/100. Revised from 48 after source inspection exposed the optional direct worker embedding credential path. Production remains NO-GO / NOT_VERIFIED.** |
 
 The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaModels 78, RAG_Cerdas 70, ecosystem 58) are historical estimates and have not been re-scored by this baseline. Engineering maturity and production readiness remain separate measures.
 
@@ -110,10 +111,11 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 
 - RusaModels main `rusamodels/api.py` exposes `/openai/v1/models`, `/openai/v1/chat/completions`, `/openai/v1/completions` and `/openai/v1/embeddings`.
 - RusaAi main `llm-project/serve/app.py` exposes the tenant-authenticated `/v1/models` and `/v1/chat/completions` gateway routes with admission control.
-- The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
-- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes all 3/3 checks in run 43552929727, including 337 tests with 6 skipped. The image scan reports raw HIGH findings 103/118/117/103 across four images, 0 CRITICAL; the gate uses `--ignore-unfixed`.
+- The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults chat gateway mode off and supports a direct chat-call fallback; production-wide fail-closed enforcement is not verified.
+- When `RUSA_RAG_ENABLED=true`, `rusa_agents/runtime.py` constructs `KnowledgeService.from_env()` inside the worker. `rusa_knowledge/service.py` resolves the Model Server base URL and `RUSA_EMBEDDING_API_KEY` / `RUSA_MODEL_API_KEY`, then posts to `/embeddings`; RusaModels `/openai/v1/embeddings` accepts `inference`, `manager`, or `administrator` roles. This optional path bypasses the RusaAi chat gateway. The audited CPU Compose profile leaves RAG disabled by default; production Worker RAG must remain disabled until a tenant-aware embedding gateway/broker is implemented.
+- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; intermediate head `251a7d1f` passed 3/3 checks in run 43552929727, including 337 tests with 6 skipped, with raw Trivy HIGH findings 103/118/117/103 across four images and 0 CRITICAL. The latest head `ae67072e` adds the embedding-path qualification and is under CI in run 43558264080; do not transfer the earlier PASS to the new SHA.
 - PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
-- PR #119's current head `5772c23c` completed workflow 43554368639 with 3/3 checks passing. Its image scan reports raw Trivy HIGH counts 103/118/117/103 across API, agent-sandbox, worker and RAG/MCP images, 0 CRITICAL; the gate uses `--ignore-unfixed`, so this is not a zero-vulnerability result. PR #24's latest head `128343fe` passes 2/2 checks in run 43554181866; its earlier raw Trivy findings remain recorded in RSK-019.
+- PR #119's earlier head `5772c23c` completed workflow 43554368639 with 3/3 checks passing and raw Trivy HIGH counts 103/118/117/103 across API, agent-sandbox, worker and RAG/MCP images, 0 CRITICAL; the gate uses `--ignore-unfixed`. The current tracker head `69529cf6` is under CI in run 43558186649. PR #24's latest head `128343fe` passes 2/2 checks in run 43554181866; raw Trivy findings remain recorded in RSK-019.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
@@ -126,11 +128,11 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - PR #119 is a self-updating tracker. The last observed head before this refresh, `e41ea1d9fb2304296edbd7fa2be650ae08b458be`, had 2/3 checks complete and its production-image scan in progress in run 43557157903. This tracker update triggers a new run, so live PR metadata is authoritative for the latest SHA and CI. Its six changed paths remain documentation only.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
-- RusaAi KnowledgeService is optional and the runtime activation flag defaults false.
+- RusaAi KnowledgeService is optional and the runtime activation flag defaults false; its worker-side embedding provider currently bypasses the RusaAi chat gateway when enabled (RSK-020).
 - Production RusaAi-Edge model checkpoint, tokenizer, artifact and target-device evidence are absent.
 - Human-reviewed evaluation corpus, staging end-to-end evidence, backup/restore and release certification are absent.
 
-PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 and PR #120 engineering specifications overlap; RSK-018 requires one canonical Agent/Worker contract decision before CHUNK 10. See `OPEN_RISKS.md` for risk ownership and required resolution.
+PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 removed the overlapping Agent/Worker specification from its CHUNK 01 branch; PR #120 remains deferred for CHUNK 10 under RSK-018. RSK-020 records the optional direct Worker → RusaModels embedding path. See `OPEN_RISKS.md` for risk ownership and required resolution.
 
 ## 7. CHUNK 01 next actions
 
