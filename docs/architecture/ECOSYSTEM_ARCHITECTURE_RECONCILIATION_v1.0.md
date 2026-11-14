@@ -111,8 +111,12 @@ sequenceDiagram
 
 Rules:
 1. RusaAi resolves tenant identity from a verified credential. Caller-supplied or model-generated tenant/project/agent/worker identifiers are not authorization sources.
-2. RusaAi calls the RusaModels Model Server through the authenticated `/openai/v1` boundary with a dedicated principal whose role is `inference`.
-3. The worker receives only tenant-scoped RusaAi credentials. It never receives the RusaModels inference token, database credentials, object-store credentials or private runtime URL.
+2. For chat completion, RusaAi calls the RusaModels Model Server through the authenticated `/openai/v1` boundary with a dedicated principal whose role is `inference`.
+3. The tenant-scoped Worker → RusaAi gateway credential rule applies to the chat-completion path only. It does **not** currently cover the optional KnowledgeService embedding path described below; do not claim that all embedding requests pass through the RusaAi gateway.
+4. The worker must never receive RusaModels database credentials, object-store credentials or private runtime URLs. The optional direct embedding path currently requires a Model Server API credential and is not approved for production activation.
+5. RusaModels owns its registry database and artifact store. RusaAi consumes service APIs and must not connect directly to those stores.
+6. Knowledge evidence is returned only after RusaAi authorization and scope filtering. Knowledge content cannot override policy or grant tools.
+7. A passing CI run or documented endpoint does not establish live service availability or production deployment.
 4. RusaModels owns its registry database and artifact store. RusaAi consumes service APIs and must not connect directly to those stores.
 5. Knowledge evidence is returned only after RusaAi authorization and scope filtering. Knowledge content cannot override policy or grant tools.
 6. A passing CI run or documented endpoint does not establish live service availability or production deployment.
@@ -123,9 +127,12 @@ Static inspection of the recorded RusaAi main commit confirms that the gateway p
 
 - `llm-project/serve/app.py` exposes the RusaAi `GET /v1/models` and `POST /v1/chat/completions` routes, applies RusaAi API/inference permission checks, and uses the configured `OpenAIChatInferenceProvider` to call RusaModels.
 - The RusaAi CPU Compose profile sets `RUSA_WORKER_INFERENCE_GATEWAY=true`, routes the worker to `http://api:8000/v1`, supplies tenant-scoped RusaAi worker API keys, and clears the worker's direct `RUSA_MODEL_BASE_URL` and `RUSA_MODEL_API_KEY`. In this profile, the API service—not the worker—holds the dedicated RusaModels `inference` credential.
-- The generic `.env.example` defaults `RUSA_WORKER_INFERENCE_GATEWAY=false`, and `OpenAICompatibleProvider` can fall back to `RUSA_MODEL_BASE_URL` / `RUSA_MODEL_API_KEY` for a direct worker-to-provider call. That fallback is not the required production boundary.
+- The generic `.env.example` defaults `RUSA_WORKER_INFERENCE_GATEWAY=false`, and `OpenAICompatibleProvider` can fall back to `RUSA_MODEL_BASE_URL` / `RUSA_MODEL_API_KEY` for a direct worker-to-provider chat call. That fallback is not the required production boundary.
+- The optional KnowledgeService embedding path is a separate exception: `rusa_agents/runtime.py` constructs `KnowledgeService.from_env()` inside the worker when `RUSA_RAG_ENABLED=true`; `rusa_knowledge/service.py` resolves `RUSA_EMBEDDING_BASE_URL` or `RUSA_MODEL_BASE_URL`, and uses `RUSA_EMBEDDING_API_KEY` or falls back to `RUSA_MODEL_API_KEY`. `OpenAICompatibleEmbeddingProvider` appends `/embeddings`, so a Model Server base URL ending in `/openai/v1` results in a direct Worker → RusaModels `POST /openai/v1/embeddings` call.
+- RusaModels protects `/openai/v1/embeddings` with roles `inference`, `manager`, or `administrator`. The worker therefore needs a Model Server API credential for this optional path; it does not use the RusaAi `/v1/chat/completions` gateway.
+- The audited CPU Compose profile does not enable `RUSA_RAG_ENABLED`, and the worker runtime defaults it to `false`. However, `docs/RAG_MCP_OPERATIONS.md` documents enabling RAG in the worker and supplying `RUSA_EMBEDDING_API_KEY`. This optional path is implemented/documented but is not an approved production gateway path.
 
-Therefore the intended architecture is implemented in the CPU Compose profile, but it is not established as an unconditional invariant across every configuration. CHUNK 02/06 must verify that production startup fails closed unless gateway mode is enabled and direct RusaModels credentials are absent from the worker environment. The current profile configuration does not prove that a deployed production environment uses it.
+Therefore the intended chat-gateway architecture is implemented in the CPU Compose profile, but neither chat nor embeddings are established as unconditional gateway-only invariants across every configuration. Keep worker RAG disabled in production until an authenticated, tenant-aware RusaAi embedding gateway or equivalent brokered contract is implemented and verified. CHUNK 02/05/06 must fail closed on direct Model Plane credentials in production worker environments. The current profile configuration does not prove that a deployed production environment uses it.
 
 ### 4.2 Isolated IM19 pilot flow
 
@@ -152,7 +159,7 @@ flowchart LR
 | Contract / interface | Provider → consumer | Current status | Owner and constraints |
 |---|---|---|---|
 | RusaAi tenant API and task envelope | RusaAi → authorized caller/worker | Existing API and tenant-scoped worker runtime; production environment not independently inspected | RusaAi owns authentication, task state, tenant context and audit |
-| RusaAi KnowledgeService / read-only Knowledge MCP | RusaAi → authorized RusaAi worker/MCP client | Implemented optional tenant-scoped service; worker activation flag defaults false | RusaAi owns schema, RLS, scope, retrieval and publication policy |
+| RusaAi KnowledgeService / read-only Knowledge MCP | RusaAi → authorized RusaAi worker/MCP client | Implemented optional tenant-scoped service; worker activation flag defaults false. When enabled inside a worker, its embedding provider currently calls the configured Model Server `/embeddings` endpoint directly using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback; this bypasses the RusaAi chat gateway. | RusaAi owns schema, RLS, scope, retrieval and publication policy. Direct worker-to-Model-Server embedding credentials are not an approved production path; keep worker RAG disabled until a brokered embedding contract exists. |
 | OpenAI-compatible `GET /openai/v1/models`, `POST /openai/v1/chat/completions`, `POST /openai/v1/embeddings` | RusaModels → RusaAi | Implemented/documented API surface; live deployment and exact model compatibility NOT_VERIFIED | RusaModels owns provider API; RusaAi owns client, identity and task context |
 | RusaAi Model Access Gateway `GET /v1/models`, `POST /v1/chat/completions` | RusaAi API → tenant-scoped worker; upstream RusaModels Model Server | Mainline API routes and CPU Compose gateway profile exist; generic environment defaults gateway mode off, so production fail-closed enforcement is NOT_VERIFIED | RusaAi owns tenant auth, admission, gateway and API-side RusaModels credential; worker must use tenant-scoped RusaAi key |
 | RusaAi inference request/response JSON Schemas in `shared/contracts/inference_contract/` | RusaAi-owned schema; intended for inference boundary | Schemas exist, but current README states public OpenAI-compatible endpoint does not yet consume the envelope | RusaAi owns schema and adapter; conformance is NOT_IMPLEMENTED |
