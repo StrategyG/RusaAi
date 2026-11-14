@@ -75,16 +75,18 @@ PRs without a check-run lookup in this audit are marked “not verified” in `B
 
 **Status: PASS for the read-only baseline gate.** The baseline records exact main SHAs, check-run evidence, source blob SHAs, repository structure, relevant PRs and explicit unknowns. No source code or production state was changed.
 
-## 6. CHUNK 01 current branch verification — 2026-11-14
+## 6. CHUNK 01 branch verification snapshots — 2026-11-14
 
 The following statuses were queried against the exact current PR head SHA. A running check is not counted as PASS.
 
+PR #119 is the self-updating tracker PR. Its row below records an earlier exact-head snapshot (`fded768e`); subsequent tracker commits advanced its head. Always read the latest PR SHA and checks from live metadata before review or merge.
+
 | Repository / PR | Exact head SHA | Current check result | Workflow evidence |
 |---|---|---|---|
-| RusaAi #117 | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | Test/lint/security PASS; RAG/MCP PASS; image build/scan IN_PROGRESS | [Run 43552929727](https://github.com/StrategyG/RusaAi/actions/runs/43552929727) |
+| RusaAi #117 | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS; raw Trivy HIGH findings remain | [Run 43552929727](https://github.com/StrategyG/RusaAi/actions/runs/43552929727) |
 | RusaAi #119 | `fded768e80f1b0bc0257249f60a5b2b56a4cfe6c` | Test/lint/security PASS; RAG/MCP PASS; image build/scan IN_PROGRESS | [Run 43552911148](https://github.com/StrategyG/RusaAi/actions/runs/43552911148) |
 | RusaAi #120 | `ba04a0539f88dcdb91b3b63246353f72fac99d97` | 3/3 PASS on workflow attempt 2 | [Run 43504174547](https://github.com/StrategyG/RusaAi/actions/runs/43504174547) |
-| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | Windows script validation PASS; test IN_PROGRESS | [Run 43553234278](https://github.com/StrategyG/RusaModels/actions/runs/43553234278) |
+| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS; raw Trivy HIGH findings remain | [Run 43553234278](https://github.com/StrategyG/RusaModels/actions/runs/43553234278) |
 | RAG_Cerdas #28 | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 PASS | [Run 43551700624](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43551700624) |
 | RusaAi #116 | `faf686ac85875a930221ed92a357a9520a5947e5` | 3/3 PASS; raw HIGH Trivy findings remain | [Run 43403193633](https://github.com/StrategyG/RusaAi/actions/runs/43403193633) |
 
@@ -111,6 +113,8 @@ Skipped tests in the passing Python run: optional document parser dependencies u
 
 
 RusaModels PR #24 workflow 43553234278 completed 2/2 checks. Its raw Trivy scan reports 47 HIGH OS-package findings plus 1 HIGH Python-package finding in each of the Model Server and worker images, with 0 CRITICAL. The VEX statement is scoped only to the stale `setuptools@70.3.0` SBOM component; CI verifies runtime `setuptools` 84.2.1 before applying it. The gate also uses `--ignore-unfixed`, so the green result does not establish zero HIGH findings. See RSK-019 in `OPEN_RISKS.md`.
+
+PR #117's image scan in workflow 43552929727 completed with raw Trivy HIGH counts 103/118/117/103 across the API, agent-sandbox, worker and RAG/MCP images respectively, with 0 CRITICAL. The blocking gate passed with `--ignore-unfixed`; these findings remain security debt and are not an all-clear result.
 
 ### Relative-link validation
 
