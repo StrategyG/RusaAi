@@ -129,7 +129,11 @@ class LocalApiKeyStore:
         return {"key_id": key_id, "api_key": raw_key, "label": "Local owner", "created_at": now}
 
     def authenticate(self, raw_key: str | None) -> ApiPrincipal | None:
-        if not isinstance(raw_key, str) or not raw_key.startswith(_KEY_PREFIX):
+        if (
+            not isinstance(raw_key, str)
+            or len(raw_key) > 256
+            or not raw_key.startswith(_KEY_PREFIX)
+        ):
             return None
         digest = self._digest(raw_key)
         with self._connect() as connection:
