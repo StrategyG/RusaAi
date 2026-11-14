@@ -54,9 +54,9 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | CI QUEUED after MCP credential-boundary documentation update (run 43558557983) | Ready/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | Test/lint/security FAIL (FIFO waiter assertion); RAG/MCP PASS; image build/scan IN_PROGRESS (run 43558557983) | Ready/open |
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7780922e617702f9934899acffabc8a3bd1cf673` | CI QUEUED after MCP credential-boundary documentation update (run 43558570258) | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7780922e617702f9934899acffabc8a3bd1cf673` | 1/1 PASS after MCP credential-boundary documentation update (run 43558570258) | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
@@ -120,7 +120,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 
 ## 6. Current blockers
 
-- Three architecture-alignment PRs are open and ready for review, with no review submissions or inline review threads. Current exact-head CI is green: RusaAi #117 3/3, RusaModels #24 2/2, and RAG_Cerdas #28 1/1. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
+- Three architecture-alignment PRs are open and ready for review, with no review submissions or inline review threads. RusaModels #24 is green 2/2 and RAG_Cerdas #28 is green 1/1. RusaAi #117 current exact head has a failing FIFO waiter test (336 passed, 1 failed, 6 skipped), RAG/MCP integration PASS, and image build/scan still running. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
 - RusaAi contains two ADR files with numeric identifier ADR-0002; the collision is explicitly an OPEN_DECISION and must be corrected in a dedicated reviewed change with repository-wide reference validation.
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
