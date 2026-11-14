@@ -36,6 +36,8 @@ Required service boundary:
 
 RusaAi integration uses a dedicated RusaModels `inference` principal and the versioned API boundary. The worker must not receive the RusaModels token or direct runtime URL.
 
+The CPU Compose profile configures this boundary explicitly: worker gateway mode is enabled, the worker calls the RusaAi API using tenant-scoped RusaAi keys, and direct RusaModels credentials are cleared from the worker. The generic `.env.example` defaults gateway mode to false and the provider has a direct-call fallback. Therefore production fail-closed enforcement of gateway mode and absence of direct Model Plane credentials remains a CHUNK 02/06 requirement, not a universal property proven by source inspection.
+
 ### RAG_Cerdas / IM19 — Isolated Knowledge Intelligence pilot
 
 Owns within its isolated pilot:
@@ -92,6 +94,7 @@ The diagram describes the target boundary and currently implemented code surface
 | RusaAi migrations 011/012 | RusaAi | Knowledge service | Agent/project scope indexes and append-only document-version snapshots exist on main |
 | RusaAi migration 013 governance proposal | RusaAi | Knowledge service / reviewers | PR #115 only; not merged |
 | Model Server OpenAI-compatible API | RusaModels | RusaAi gateway | Authenticated Model Plane boundary; exact end-to-end release contract still needs reconciliation and verification |
+| RusaAi Model Access Gateway | RusaAi | Tenant-scoped RusaAi workers; upstream RusaModels Model Server | API routes and CPU Compose profile exist; generic environment defaults gateway mode off, so production enforcement is NOT_VERIFIED |
 | Model registry/manifests/artifacts | RusaModels | Model Server / Quant Server | Implemented infrastructure; production RusaAi-Edge checkpoint/artifact not selected or built |
 | IM19 private source/review pipeline | RAG_Cerdas | Pilot operators/reviewers | Isolated pilot; live external providers and production service are not verified |
 | Cataran event envelope snapshot | RAG_Cerdas PR #16 | Potential event consumers | Draft/provisional consumer snapshot; it does not establish the complete identity/task/approval/tool contract |
