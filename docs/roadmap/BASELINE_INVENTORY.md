@@ -1,7 +1,7 @@
 # RUSA AI Ecosystem — Baseline Inventory
 
 **Snapshot:** 2026-11-14  
-**Roadmap:** RUSA AI Ecosystem ChatGPT-First Engineering Roadmap v3.1  
+**Roadmap:** RUSA AI Ecosystem ChatGPT-First Engineering Roadmap v3.0  
 **Audit type:** read-only repository discovery and evidence inventory  
 **Coordinator repository:** `StrategyG/RusaAi`  
 **Scope:** `StrategyG/RusaAi`, `StrategyG/RusaModels`, `StrategyG/RAG_Cerdas`
@@ -12,12 +12,12 @@ All three repositories are reachable through the connected GitHub integration. T
 
 | Repository | Default branch | Verified main SHA | Branch protected | Open PRs returned |
 |---|---|---|---:|---:|
-| [RusaAi](https://github.com/StrategyG/RusaAi) | `main` | `1adac8d340e5870570910168b6626fe285dd2cf2` | No | 83 |
+| [RusaAi](https://github.com/StrategyG/RusaAi) | `main` | `1adac8d340e5870570910168b6626fe285dd2cf2` | No | 85 |
 | [RusaModels](https://github.com/StrategyG/RusaModels) | `main` | `12c49b1372b230f3656be6e1badeabad870bcfa1` | No | 7 |
 | [RAG_Cerdas](https://github.com/StrategyG/RAG_Cerdas) | `main` | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | No | 2 |
-| **Total** | | | | **92** |
+| **Total** | | | | **94** |
 
-The RusaAi ALE baseline draft PR #118 records 82 open PRs in its own snapshot. The current repository-scoped search returned 83. This inventory uses the current observed result and retains the discrepancy for reconciliation rather than silently overwriting the earlier record.
+The initial RusaAi repository-scoped search returned 83 open PRs. A follow-up search on 2026-11-14 returned 85 after PRs #119 and #120 were opened; RusaModels remained at 7 and RAG_Cerdas at 2 (94 total). PR #118's own ALE baseline records 82. These are time-stamped snapshots, not contradictory immutable counts.
 
 ### Exact-main CI evidence
 
@@ -110,7 +110,9 @@ The following are the open PRs identified as materially relevant to architecture
 | PR | Status | Base → head | Head SHA (short) | CI at inspected head | Relevance |
 |---|---|---|---|---|---|
 | [#118](https://github.com/StrategyG/RusaAi/pull/118) | Draft | `main` → `feat/ale-00-baseline-inventory-20261114` | `202a1c16` | 3 checks pass | Separate ALE baseline inventory; not merged |
-| [#117](https://github.com/StrategyG/RusaAi/pull/117) | Draft | `main` → `docs/chunk-01-architecture-adr-reconciliation-20261113` | `20087de3` | 3 checks pass | ADR index, duplicate ADR-0002 disclosure, RAG/Model Plane alignment |
+| [#119](https://github.com/StrategyG/RusaAi/pull/119) | Draft | `main` → `docs/roadmap-chunk-00-baseline-20261114` | Latest head recorded in PR metadata | CI re-run after documentation updates; see current PR checks | Roadmap v3.0 baseline, risks, dependency map, evidence and execution state; documentation only |
+| [#120](https://github.com/StrategyG/RusaAi/pull/120) | Draft | `main` → `docs/precision-agent-worker-chunk-framework-2026-11-14` | `ba04a053` | 3/3 pass after rerun; first test run failed one FIFO-ordering test | Agent/Worker chunk framework, PR #116 reconciliation and five-million knowledge chunk program; documentation only |
+| [#117](https://github.com/StrategyG/RusaAi/pull/117) | Draft | `main` → `docs/chunk-01-architecture-adr-reconciliation-20261113` | `ae33733c` | 3 checks: 2 pass, image build pending at recheck | ADR index, migration-state correction, ecosystem architecture, duplicate ADR-0002 disclosure |
 | [#116](https://github.com/StrategyG/RusaAi/pull/116) | Draft | `main` → `feature/agent-runtime-v1` | `faf686ac` | 3 checks pass | Staged capability registry and DAG executor; registry remains draft/disabled and preview-only |
 | [#115](https://github.com/StrategyG/RusaAi/pull/115) | Draft | `main` → `feat/rusa-knowledge-governance-lifecycle` | `d8e7a7c5` | 3 checks pass | Rights, review, human approval and publication gates; further lifecycle controls remain open |
 | [#82](https://github.com/StrategyG/RusaAi/pull/82) | Draft | Old main SHA `00aa9e4a` → `feat/rusa-knowledge-core-phase1` | `c882928e` | 3 checks pass | Project-scoped RAG and knowledge mining; base is behind current main and migration overlap must be reconciled |
