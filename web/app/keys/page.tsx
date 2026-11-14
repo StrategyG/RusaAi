@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 type ApiKey = {
@@ -24,7 +24,7 @@ export default function ApiKeysPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await fetch("/api/keys", { cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) {
@@ -34,11 +34,11 @@ export default function ApiKeysPage() {
     if (!response.ok) throw new Error(data.detail || data.error || "API key inventory is unavailable.");
     setAuthenticated(true);
     setKeys(data.items || []);
-  }
+  }, []);
 
   useEffect(() => {
     void refresh().catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load API keys."));
-  }, []);
+  }, [refresh]);
 
   async function createKey(event: FormEvent) {
     event.preventDefault();
