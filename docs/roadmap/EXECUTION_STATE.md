@@ -54,8 +54,8 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 2/3 complete PASS; image build/scan in progress | Draft/open |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 1/2 complete PASS; test job in progress | Draft/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | Draft/open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS | Draft/open |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 pass | Draft/open |
 
 PR #117 now includes:
@@ -111,7 +111,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - RusaModels main `rusamodels/api.py` exposes `/openai/v1/models`, `/openai/v1/chat/completions`, `/openai/v1/completions` and `/openai/v1/embeddings`.
 - RusaAi main `llm-project/serve/app.py` exposes the tenant-authenticated `/v1/models` and `/v1/chat/completions` gateway routes with admission control.
 - The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
-- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes 337 tests with 6 skipped in run 43552929727. RAG/MCP also passes; image build/scan is still running.
+- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes all 3/3 checks in run 43552929727, including 337 tests with 6 skipped. The image scan reports raw HIGH findings 103/118/117/103 across four images, 0 CRITICAL; the gate uses `--ignore-unfixed`.
 - PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
 - PR #119's tracker branch is self-updating; its latest commit triggers a fresh CI run, so query PR metadata before merge. PR #24's updated head `128343fe` passes 2/2 checks. Its Trivy scan still reports raw HIGH findings (47 OS + 1 Python per image, 0 CRITICAL) despite the scoped setuptools VEX and `--ignore-unfixed` gate; see RSK-019.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
