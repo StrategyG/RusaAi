@@ -39,7 +39,6 @@ class LocalApiKeyStore:
         connection = sqlite3.connect(self.path, timeout=5.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=5000")
-        connection.execute("PRAGMA journal_mode=DELETE")
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
@@ -53,6 +52,7 @@ class LocalApiKeyStore:
 
     def _initialize_schema(self) -> None:
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode=DELETE")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS local_api_keys (
