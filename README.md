@@ -224,3 +224,23 @@ The web interface does not add approve/reject actions because the current backen
 
 ## License
 No `LICENSE` file is currently present in this repository. Licensing is therefore unresolved; confirm the intended terms with the repository owner and commit the corresponding license file before redistribution.
+
+
+## Local-first desktop onboarding (implementation preview)
+
+The opt-in local installation profile now has a first-run API-key bootstrap foundation:
+
+- Enable `RUSA_LOCAL_INSTALL_MODE=true` and configure a persistent `RUSA_LOCAL_API_KEYS_DB` path.
+- The local setup capability is shared only between the API and server-side web process through `RUSA_LOCAL_SETUP_TOKEN`.
+- Open the web control center at `/setup` to create the one-time local owner API key.
+- Raw API keys are displayed only at creation; the SQLite key store persists SHA-256 digests only.
+- Dedicated editor keys are restricted to `developer` and `read_only` roles.
+- The local Compose profile reserves a persistent, service-owned volume for the key store.
+- A generic OpenAI-compatible endpoint is exposed at `http://127.0.0.1:8000/v1` in the current Compose development topology.
+
+This is a local onboarding/API foundation, not yet a signed consumer installer. The approved RusaAi-Edge model checkpoint and artifact are still unavailable, and the desktop bundle, automatic dependency installation, dynamic hardware-driven model provisioning, editor-specific extension certification, and end-to-end Hybrid Agent orchestration remain release blockers. Do not advertise local inference as ready until the exact model artifact and target-device acceptance evidence pass.
+
+See:
+- `docs/LOCAL_FIRST_RUN_API_KEYS_v1.0.md`
+- `docs/HYBRID_MCP_EXTERNAL_RAG_v1.0.md`
+- `packaging/windows/README.md`
