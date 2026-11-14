@@ -153,3 +153,29 @@ RusaAi PR #119 changes exactly six files: `docs/roadmap/ARCHITECTURE_DECISIONS.m
 RAG_Cerdas PR #28 advanced to head `7480bb2fcf6139f283fada2c4a068747549fc709` after correcting the parent RusaAi PR #117 status in `docs/RUSA_AI_ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md`. The corrected text now says PR #117 is open and ready for review but not merged. The PR remains documentation-only; its exact-head test workflow 43557286413 completed 1/1 PASS. The six changed files remain the same six documentation/instruction files; no runtime or data operation was introduced.
 
 Immediately before this tracker refresh, RusaAi PR #119 head `e41ea1d9fb2304296edbd7fa2be650ae08b458be` had two checks complete successfully and its production-image build/scan job still in progress in workflow 43557157903. Because PR #119 is a self-updating tracker, this ledger records that pre-refresh observation; live PR metadata is authoritative after the new commit.
+
+
+## 9. CHUNK 01 embedding-path security qualification — 2026-11-14
+
+Static source inspection found that the intended chat-completion gateway does not currently broker all embedding traffic. The following exact-main blobs establish the optional direct Worker → RusaModels embedding path:
+
+| Repository | Source path / ref | Blob SHA | Verified behavior |
+|---|---|---|---|
+| RusaAi | `rusa_agents/runtime.py` on main | `35f82db0a5a859b706e80b1141bf6fff5864116d` | When `RUSA_RAG_ENABLED=true`, worker runtime constructs `KnowledgeService.from_env()`; default flag is false |
+| RusaAi | `rusa_knowledge/service.py` on main | `cc8b0f6dffa0054afd0eb504cd2f2e86730dd26c` | Uses `RUSA_EMBEDDING_BASE_URL` or `RUSA_MODEL_BASE_URL`; API key is `RUSA_EMBEDDING_API_KEY` or fallback `RUSA_MODEL_API_KEY` |
+| RusaAi | `rusa_knowledge/embeddings.py` on main | `6707c87b246c62ad33ec3f1b450f73d9ff8bb3bf` | Constructs endpoint by appending `/embeddings` to configured base URL and sends bearer auth when configured |
+| RusaAi | `docs/RAG_MCP_OPERATIONS.md` on main | `e5334d8175eafbd8a844d45ecb0586271298f07d` | Documents enabling RAG in worker and supplying `RUSA_EMBEDDING_API_KEY` / base URL / model |
+| RusaAi | `rusa_mcp/server.py` on main | `e7c9aec4b66eda73b75d50b378544af477e309d7` | MCP server also obtains `KnowledgeService.from_env()` through its cached service factory |
+| RusaModels | `rusamodels/api.py` on main | `bd5e660c35c66b96e7e0733d89c4439f75bf2c9e` | `POST /openai/v1/embeddings` is protected by roles `inference`, `manager`, or `administrator` |
+
+**Finding:** when the worker-side RAG flag is enabled and the Model Server base URL is configured, the worker can post directly to RusaModels `/openai/v1/embeddings`. This bypasses the RusaAi chat gateway and requires a Model Server API credential in the worker environment. The audited CPU Compose profile does not enable `RUSA_RAG_ENABLED`; this optional path is therefore disabled in that profile, but the operational guide documents how to activate it.
+
+**Disposition:** RSK-020 / High. Keep worker RAG disabled in production and do not distribute Model Server credentials to production workers. A tenant-aware RusaAi embedding gateway or reviewed brokered contract, least-privilege identity, fail-closed configuration, and negative tests are required before activation. PR #117 and RAG_Cerdas PR #28 now document this exception and production boundary on their candidate branches; neither documentation PR changes runtime behavior.
+
+### Candidate PR verification after embedding-path documentation updates
+
+- RusaAi PR #117 candidate head `ae67072e9476551533746d6c25e3f8b7e821f986`: workflow 43558264080 was in progress at the latest check; its prior intermediate head `36747edad6106dfc1e210ecbf22d1e04aecb8080` had two checks PASS and image scan IN_PROGRESS. Do not transfer that status to the newer head.
+- RAG_Cerdas PR #28 candidate head `3957ecad8e6ebba89048b2d0bb6e970c960d2bce`: 1/1 PASS in workflow 43558123215; six documentation/instruction files, no runtime changes.
+- RusaModels PR #24 candidate head `128343fee6973fe19158182a4c8b40c5be5a72c2`: 2/2 PASS in workflow 43554181866; the only source-code edit is the FastAPI OpenAPI description string.
+- RusaAi PR #119 is self-updating. Its exact head and CI must be read from live PR metadata; the state update before this evidence append was head `78be5fe96fa6aeff2da1c1bb9e0355ad963a0a22` and its CI status was pending/in progress.
+
