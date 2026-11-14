@@ -71,6 +71,22 @@ PR #28 supersedes the stale no-selection language in the RAG_Cerdas ADR at PR-br
 
 **Merge status:** none of these PRs is merged. The current main branches remain unchanged. Explicit user approval is required before merging.
 
+### CHUNK 01 task-level scorecard
+
+Scores below measure evidence-backed completion of the eight CHUNK 01 tasks in the candidate documentation/source branches. They are not the ecosystem production-readiness score. An unresolved decision receives credit only when it is explicitly recorded and the affected implementation remains blocked. Mainline adoption is still pending.
+
+| Roadmap task | Score / 100 | Status | Evidence and remaining gap |
+|---|---:|---|---|
+| 1. Compare ADRs across all three repositories | 90 | PARTIAL | RusaAi, RusaModels and RAG_Cerdas ADRs inspected; RusaAi duplicate ADR-0002 identifier remains an explicit OPEN_DECISION |
+| 2. Confirm `rusa_knowledge` as canonical shared store | 100 | PASS — decision confirmation | Accepted RusaAi ADR-0002 confirmed; PR #28 aligns IM19 documentation without authorizing production activation |
+| 3. Reconcile RAG_Cerdas no-selection wording | 85 | PARTIAL | PR #28 updates ADR, README and roadmap on its branch; RAG_Cerdas main remains unchanged until review/merge |
+| 4. Define API, model, database, artifact, knowledge, worker and identity ownership | 95 | PARTIAL | Cross-repository ownership matrix and exact service boundaries documented; PR #24 also corrects RusaModels API description; all alignment PRs remain open |
+| 5. Define cross-repository communication rules | 90 | PARTIAL | Provider/consumer routes and credentials documented; custom inference JSON schema is not yet consumed by the public endpoint and live E2E conformance is not verified |
+| 6. Define data classification and trust boundaries | 95 | PASS — documentation evidence | Public/internal/tenant-confidential/restricted-secret/untrusted classes and fail-closed invariants documented; deployment enforcement remains unverified |
+| 7. Record unresolved decisions as OPEN_DECISION | 100 | PASS — documentation evidence | ADR numbering, embedding profile, IM19 inference path and production activation constraints are explicitly recorded |
+| 8. Create architecture decision matrix | 95 | PASS — documentation evidence | Selected, rejected, retained and open options documented with rationale and conditions |
+| **Candidate documentation completion** | **94 / 100** | **PARTIAL overall** | High document coverage does not satisfy merge, mainline consistency, integration or production gates |
+
 ## 5. Roadmap v3.0 production-readiness scorecard
 
 Fixed weights from section 2.3 of the supplied roadmap are used. These are preliminary evidence-based assessments, not certifications. A weighted score does not override a failed critical release gate.
