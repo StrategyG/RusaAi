@@ -56,7 +56,7 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 |---|---:|---|---|---|
 | RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | Ready/open |
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 PASS | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7480bb2fcf6139f283fada2c4a068747549fc709` | 1/1 PASS after documentation status refresh (run 43557286413) | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
@@ -123,7 +123,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
 - The current main branches report branch protection disabled.
-- PR #119 current head `5772c23c1cb7c6ec738925ce5b4663c79e17e029` has workflow 43554368639 completed successfully (3/3 checks). The tracker PR remains open and unmerged; its six changed paths are documentation only.
+- PR #119 is a self-updating tracker. The last observed head before this refresh, `e41ea1d9fb2304296edbd7fa2be650ae08b458be`, had 2/3 checks complete and its production-image scan in progress in run 43557157903. This tracker update triggers a new run, so live PR metadata is authoritative for the latest SHA and CI. Its six changed paths remain documentation only.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
 - RusaAi KnowledgeService is optional and the runtime activation flag defaults false.

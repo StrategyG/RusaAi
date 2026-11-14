@@ -150,7 +150,7 @@ The following are the open PRs identified as materially relevant to architecture
 
 | PR | Status | Base → head | Head SHA (short) | CI at inspected head | Relevance |
 |---|---|---|---|---|---|
-| [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready | `main` → `docs/chunk-01-canonical-store-alignment-20261113` | `65752d94` | 1 check passes | Aligns IM19 docs with RusaAi canonical-store decision and links parent architecture authority |
+| [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready | `main` → `docs/chunk-01-canonical-store-alignment-20261113` | `7480bb2f` | 1/1 PASS after documentation-only status refresh in workflow 43557286413 | Aligns IM19 docs with RusaAi canonical-store decision and links parent architecture authority |
 | [#16](https://github.com/StrategyG/RAG_Cerdas/pull/16) | Draft | Old main SHA `18f65b00` → `integration/cataran-contracts-v1-20261105` | `8e8bd2fc` | 3 checks pass | Provisional event-envelope snapshot; base is behind current main |
 
 The remaining open RusaAi PR backlog is not represented as merge-ready by this inventory. The 85-result follow-up search is the current repository-wide count; the table above identifies PRs with direct relevance to the current roadmap's architecture, knowledge, agent/worker, model, contract and release dependencies. Older or unrelated PRs require a separate deduplication and disposition pass before any merge.

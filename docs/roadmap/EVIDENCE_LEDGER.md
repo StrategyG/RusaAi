@@ -146,3 +146,10 @@ At the inspected snapshot, RusaAi #117, RusaModels #24, and RAG_Cerdas #28 are a
 ### CHUNK 00 PR scope verification
 
 RusaAi PR #119 changes exactly six files: `docs/roadmap/ARCHITECTURE_DECISIONS.md`, `BASELINE_INVENTORY.md`, `EVIDENCE_LEDGER.md`, `EXECUTION_STATE.md`, `OPEN_RISKS.md`, and `REPOSITORY_DEPENDENCY_MAP.md`. The changed-file list contains no source-code, migration, test, model-artifact, deployment, or production-data path.
+
+
+## 8. CHUNK 01 documentation-status refresh — 2026-11-14
+
+RAG_Cerdas PR #28 advanced to head `7480bb2fcf6139f283fada2c4a068747549fc709` after correcting the parent RusaAi PR #117 status in `docs/RUSA_AI_ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md`. The corrected text now says PR #117 is open and ready for review but not merged. The PR remains documentation-only; its exact-head test workflow 43557286413 completed 1/1 PASS. The six changed files remain the same six documentation/instruction files; no runtime or data operation was introduced.
+
+Immediately before this tracker refresh, RusaAi PR #119 head `e41ea1d9fb2304296edbd7fa2be650ae08b458be` had two checks complete successfully and its production-image build/scan job still in progress in workflow 43557157903. Because PR #119 is a self-updating tracker, this ledger records that pre-refresh observation; live PR metadata is authoritative after the new commit.
