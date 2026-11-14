@@ -1,0 +1,18 @@
+services:
+  api:
+    environment:
+      # First-run bootstrap must work before a model artifact is provisioned.
+      # This local profile deliberately disables all remote inference URLs.
+      RUSA_LOCAL_INSTALL_MODE: "true"
+      RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:?Generate RUSA_LOCAL_SETUP_TOKEN before starting}
+      RUSA_MODEL_BASE_URL: ""
+      RUSA_MODEL_API_KEY: ""
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+  web:
+    environment:
+      RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:?Generate RUSA_LOCAL_SETUP_TOKEN before starting}
