@@ -1,8 +1,8 @@
 import json
-from pathlib import Path
+import pathlib
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = [
     "packaging/windows/local-bundle-manifest.schema.json",
     "schemas/integrations/mcp-connection.v1.schema.json",
