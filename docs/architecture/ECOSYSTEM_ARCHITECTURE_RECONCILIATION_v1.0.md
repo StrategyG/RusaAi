@@ -117,9 +117,6 @@ Rules:
 5. RusaModels owns its registry database and artifact store. RusaAi consumes service APIs and must not connect directly to those stores.
 6. Knowledge evidence is returned only after RusaAi authorization and scope filtering. Knowledge content cannot override policy or grant tools.
 7. A passing CI run or documented endpoint does not establish live service availability or production deployment.
-4. RusaModels owns its registry database and artifact store. RusaAi consumes service APIs and must not connect directly to those stores.
-5. Knowledge evidence is returned only after RusaAi authorization and scope filtering. Knowledge content cannot override policy or grant tools.
-6. A passing CI run or documented endpoint does not establish live service availability or production deployment.
 
 ### Current-main implementation qualification
 
