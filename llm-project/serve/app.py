@@ -31,7 +31,11 @@ from rusa_agents.inference_admission import (
     InferenceQueueFull,
     InferenceQueueTimeout,
 )
-from rusa_agents.local_api_keys import (\n    LocalApiKeyStore,\n    LocalSetupAlreadyInitialized,\n    get_local_api_key_store,\n)
+from rusa_agents.local_api_keys import (
+    LocalApiKeyStore,
+    LocalSetupAlreadyInitialized,
+    get_local_api_key_store,
+)
 from rusa_agents.metrics import (
     API_REQUEST_DURATION,
     API_REQUESTS,
