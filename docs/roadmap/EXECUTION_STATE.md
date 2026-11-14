@@ -31,7 +31,7 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 | Chunk | Status | Evidence / note |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Six-file documentation PR #119; all 3/3 checks pass on exact PR head; no source code changed |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Six-file baseline artifact package complete; latest tracker refresh on PR #119 has triggered a new CI run, so recheck current head before merge; CHUNK 00 itself made no source-code changes |
 | 01 — Architecture Reconciliation and ADR Governance | PARTIAL | Alignment drafts #117, #24, #28 have passed their exact-head CI; architecture/ownership/trust docs prepared; PRs remain open/draft, and main branches have not yet been aligned |
 | 02 — Trusted Identity, Authorization, Tenant Security | NOT_STARTED | Depends on CHUNK 01 |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
