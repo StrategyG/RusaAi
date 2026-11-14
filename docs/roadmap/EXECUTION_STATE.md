@@ -118,28 +118,27 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 
 ## 6. Current blockers
 
-- Three architecture-alignment PRs remain open/draft and require coordinated review; PR #117 has 2/3 checks complete, PR #24 has 1/2 complete, and PR #28 has 1/1 complete at this snapshot. No merge approval has been given.
+- Three architecture-alignment PRs remain draft/open and have no review submissions or inline review threads. Current exact-head CI is green: RusaAi #117 3/3, RusaModels #24 2/2, and RAG_Cerdas #28 1/1. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
 - RusaAi contains two ADR files with numeric identifier ADR-0002; the collision is explicitly an OPEN_DECISION and must be corrected in a dedicated reviewed change with repository-wide reference validation.
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
 - The current main branches report branch protection disabled.
-- PR #117 and PR #119 image build/scan checks and PR #24's test check are still in progress; do not report their CI as fully green until exact-head check-runs complete.
+- PR #119 is the self-updating baseline tracker; latest head `3475dede04e240d14b92e89c19fde6f897d69531` has workflow 43554155465 in_progress. Recheck its latest head before merging the tracker PR; this does not change the completed CHUNK 01 PR checks.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
 - RusaAi KnowledgeService is optional and the runtime activation flag defaults false.
 - Production RusaAi-Edge model checkpoint, tokenizer, artifact and target-device evidence are absent.
 - Human-reviewed evaluation corpus, staging end-to-end evidence, backup/restore and release certification are absent.
 
-See `OPEN_RISKS.md` for risk ownership and required resolution.
+PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 and PR #120 engineering specifications overlap; RSK-018 requires one canonical Agent/Worker contract decision before CHUNK 10. See `OPEN_RISKS.md` for risk ownership and required resolution.
 
 ## 7. CHUNK 01 next actions
 
-1. Review the latest exact PR heads and check results again before any merge.
-2. Review all three PR diffs for consistent service ownership, canonical knowledge decision, IM19 isolation, API ownership and OPEN_DECISION labels.
-3. Correct the RusaAi ADR numeric collision only in a separate, reference-checked documentation change; preserve decision history.
-4. Confirm the architecture/contract diagrams match current source API routes and do not imply a live production deployment.
-5. Run link/reference validation and applicable CI on exact PR heads.
-6. Present the coordinated three-repository merge order and request explicit approval before merging. Do not proceed to CHUNK 02 until CHUNK 01 passes.
+1. Obtain explicit project-owner approval before marking the three draft PRs ready or merging them; no reviews or inline review threads are currently recorded.
+2. Proposed merge order: RusaModels #24, then RAG_Cerdas #28 (both align with already-accepted RusaAi main ADRs), then refresh RusaAi #117 wording to reflect the merged states, rerun its exact-head CI, and merge RusaAi #117 last.
+3. After the coordinated merges, verify all three new main SHAs and repeat the cross-repository documentation/link consistency check.
+4. Keep the duplicate RusaAi ADR-0002 identifier as an explicit OPEN_DECISION until its separate reference-checked numbering PR is reviewed; do not silently renumber.
+5. Close CHUNK 01 only after mainline consistency is verified; then proceed to CHUNK 02.
 
 ## 8. Resume rule
 
