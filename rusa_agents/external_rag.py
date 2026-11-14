@@ -69,10 +69,12 @@ def _validate_evidence(item: object) -> ExternalRAGEvidence:
     evidence_id, text = item["id"], item["text"]
     uri, title = source.get("uri"), source.get("title")
     revision, digest, locator = source.get("revision"), source.get("content_sha256"), source.get("locator")
+    parsed_uri = urlsplit(uri) if isinstance(uri, str) else None
     if (
         not isinstance(evidence_id, str) or not evidence_id or len(evidence_id) > 256
         or not isinstance(text, str) or not text.strip() or len(text) > 20_000
-        or not isinstance(uri, str) or urlsplit(uri).scheme != "https"
+        or parsed_uri is None or parsed_uri.scheme != "https" or not parsed_uri.hostname
+        or parsed_uri.username or parsed_uri.password
         or not isinstance(title, str) or not title.strip() or len(title) > 500
         or not isinstance(revision, str) or not revision.strip() or len(revision) > 256
         or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
@@ -128,7 +130,11 @@ class ExternalRAGClient:
         if type(top_k) is not int or not 1 <= top_k <= 20:
             raise ValueError("External RAG top_k must be between 1 and 20")
         filters = filters or {}
-        if not isinstance(filters, dict) or len(json.dumps(filters, ensure_ascii=False)) > 8000:
+        try:
+            encoded_filters = json.dumps(filters, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("External RAG filters must be finite JSON data") from exc
+        if not isinstance(filters, dict) or len(encoded_filters) > 8000:
             raise ValueError("External RAG filters are invalid or too large")
         payload = {"schema_version": "1.0", "query": query, "top_k": top_k, "filters": filters}
         headers = {
@@ -143,14 +149,17 @@ class ExternalRAGClient:
                 trust_env=False,
                 transport=self.transport,
             ) as client:
-                response = await client.post(self.endpoint, json=payload, headers=headers)
-                if len(response.content) > self.max_response_bytes:
-                    raise ExternalRAGError("External RAG response exceeded the configured size limit")
-                response.raise_for_status()
-                body = response.json()
+                async with client.stream("POST", self.endpoint, json=payload, headers=headers) as response:
+                    response.raise_for_status()
+                    body_bytes = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body_bytes.extend(chunk)
+                        if len(body_bytes) > self.max_response_bytes:
+                            raise ExternalRAGError("External RAG response exceeded the configured size limit")
+                    body = json.loads(bytes(body_bytes))
         except ExternalRAGError:
             raise
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, UnicodeDecodeError) as exc:
             raise ExternalRAGError("External RAG provider is unavailable or returned invalid JSON") from exc
 
         if (
