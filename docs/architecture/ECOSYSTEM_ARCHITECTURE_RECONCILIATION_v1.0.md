@@ -82,7 +82,7 @@ flowchart TB
 
 ## 4. Data-flow contracts
 
-### 4.1 RusaAi → RusaModels inference and embeddings
+### 4.1 RusaAi → RusaModels chat inference and embedding boundaries
 
 ```mermaid
 sequenceDiagram
@@ -99,12 +99,12 @@ sequenceDiagram
   A->>W: Queue task with trusted tenant/project scope
   W->>K: Authorized knowledge operation
   K-->>W: Scoped evidence and provenance
-  W->>G: Inference request
+  W->>G: Chat-completion request
   G->>M: HTTPS + dedicated inference principal
-  M->>R: Private runtime request
-  R-->>M: Model output
-  M-->>G: OpenAI-compatible response
-  G-->>W: Bounded inference result
+  M->>R: Private generation runtime
+  R-->>M: Generated chat output
+  M-->>G: OpenAI-compatible chat response
+  G-->>W: Bounded chat result
   W->>A: Task result, evidence and audit references
   A-->>C: Tenant-authorized response
 ```
