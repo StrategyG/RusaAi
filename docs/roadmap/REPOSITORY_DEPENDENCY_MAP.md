@@ -170,7 +170,7 @@ CHUNK 08 is a roadmap dependency, not an optional extra chunk. Its scope preserv
 
 ## 6. Current dependency blockers
 
-- CHUNK 01: RusaAi ADR-0002 identifier collision; RAG_Cerdas canonical-store ADR conflict; RusaModels shared-control-plane terminology ambiguity. Related drafts: RusaAi #117, RusaModels #24, RAG_Cerdas #28.
+- CHUNK 01: RusaAi PR #117 proposes cross-repository ownership, data-flow, trust-boundary and ADR reconciliation; RusaModels PR #24 proposes clarifying its internal registry/control store and now updates the FastAPI OpenAPI description; RAG_Cerdas PR #28 proposes aligning IM19 with the accepted RusaAi canonical-store decision. All remain draft/open, so mainline docs are still inconsistent. The RusaAi ADR-0002 numeric collision remains an explicit OPEN_DECISION. Related drafts: RusaAi #117, RusaModels #24, RAG_Cerdas #28.
 - CHUNK 03: canonical knowledge lifecycle is incomplete on main; RusaAi PR #115 remains open.
 - CHUNK 04/07: RusaAi-Edge checkpoint/tokenizer/artifact/target-device evidence is absent.
 - CHUNK 05/06: cross-repository API contract and exact end-to-end compatibility evidence require reconciliation.
