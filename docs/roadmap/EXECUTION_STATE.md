@@ -54,9 +54,9 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `ae33733cfc83178a01631f07b89d4e4220211717` | 3/3 pass | Draft/open |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `66a3fab5ea52aa31abfd88f69974938e3db3ec5a` | 2/2 pass | Draft/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `3e824d71e6ab8468eb620681fad67bff4a48d6c3` | 1/1 pass | Draft/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `e377c268e7356ece82ccd1dbc9c5ad1735e61070` | 3 checks in progress at recheck | Draft/open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `ea4461d5084e5599107572b40be81a9416069bf0` | 2/2 pass | Draft/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 pass | Draft/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
@@ -79,7 +79,7 @@ Fixed weights from section 2.3 of the supplied roadmap are used. These are preli
 |---|---:|---:|---:|---|
 | Architecture and ownership | 10 | 70 | 7.00 | Control Plane/Model Plane and canonical-store decisions exist; ADR number collision and mainline cross-repository doc alignment remain open |
 | API contracts and integration | 15 | 50 | 7.50 | Authenticated Model Server and inference APIs exist; complete versioned provider/consumer contract and cross-repo E2E conformance are not verified |
-| Identity, security and tenant isolation | 15 | 60 | 9.00 | RLS, roles, worker allowlists and sandbox controls exist; all main branches lack protection and independent cross-tenant security evidence is absent |
+| Identity, security and tenant isolation | 15 | 55 | 8.25 | RLS, roles, worker allowlists and sandbox controls exist; all main branches lack protection, production gateway-only enforcement is not verified across profiles, and independent cross-tenant security evidence is absent |
 | Model and artifact readiness | 10 | 25 | 2.50 | Registry/runtime infrastructure exists; production RusaAi-Edge checkpoint, tokenizer, immutable GGUF artifact and target-device benchmark are absent |
 | Knowledge governance and provenance | 10 | 40 | 4.00 | Tenant/project retrieval and version history exist; complete rights/review/approval/publication/withdrawal/purge lifecycle is not on main |
 | Testing and evaluation quality | 10 | 60 | 6.00 | Exact-main and selected PR CI pass; reviewed retrieval qrels, held-out agent evaluation and system-building benchmarks are not verified |
@@ -89,6 +89,14 @@ Fixed weights from section 2.3 of the supplied roadmap are used. These are preli
 | **Total** | **100** | | **47.50 / 100** | **Rounded baseline: 48/100. Production remains NO-GO / NOT_VERIFIED.** |
 
 The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaModels 78, RAG_Cerdas 70, ecosystem 58) are historical estimates and have not been re-scored by this baseline. Engineering maturity and production readiness remain separate measures.
+
+### Additional verified architecture evidence
+
+- RusaModels main `rusamodels/api.py` exposes `/openai/v1/models`, `/openai/v1/chat/completions`, `/openai/v1/completions` and `/openai/v1/embeddings`.
+- RusaAi main `llm-project/serve/app.py` exposes the tenant-authenticated `/v1/models` and `/v1/chat/completions` gateway routes with admission control.
+- The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
+- PR #120's first exact-head CI attempt failed the cross-process FIFO admission test; a rerun passed 337 tests with 6 skipped. Treat this as a timing-sensitive test/race signal until repeated evidence exists.
+- PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
 
