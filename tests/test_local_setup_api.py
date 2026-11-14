@@ -1,8 +1,4 @@
-from app import app
 from fastapi.testclient import TestClient
-
-
-client = TestClient(app)
 
 
 def configure_local_setup(monkeypatch, tmp_path):
@@ -16,6 +12,9 @@ def configure_local_setup(monkeypatch, tmp_path):
 
 def test_local_setup_status_and_one_time_owner_key(monkeypatch, tmp_path):
     configure_local_setup(monkeypatch, tmp_path)
+    from app import app
+
+    client = TestClient(app)
     status = client.get("/v1/local/setup/status")
     assert status.status_code == 200
     assert status.json() == {"enabled": True, "initialized": False}
@@ -48,6 +47,9 @@ def test_local_setup_status_and_one_time_owner_key(monkeypatch, tmp_path):
 
 def test_local_editor_key_is_least_privilege_and_tenant_scoped(monkeypatch, tmp_path):
     configure_local_setup(monkeypatch, tmp_path)
+    from app import app
+
+    client = TestClient(app)
     initialized = client.post(
         "/v1/local/setup/initialize",
         headers={"X-RUSA-Setup-Token": "setup-capability-" + ("x" * 40)},
