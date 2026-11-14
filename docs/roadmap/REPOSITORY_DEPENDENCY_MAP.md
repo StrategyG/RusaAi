@@ -36,7 +36,7 @@ Required service boundary:
 
 RusaAi integration uses a dedicated RusaModels `inference` principal and the versioned API boundary. The worker must not receive the RusaModels token or direct runtime URL.
 
-The CPU Compose profile configures this boundary explicitly: worker gateway mode is enabled, the worker calls the RusaAi API using tenant-scoped RusaAi keys, and direct RusaModels credentials are cleared from the worker. The generic `.env.example` defaults gateway mode to false and the provider has a direct-call fallback. Therefore production fail-closed enforcement of gateway mode and absence of direct Model Plane credentials remains a CHUNK 02/06 requirement, not a universal property proven by source inspection.
+The CPU Compose profile configures the chat-completion boundary explicitly: worker gateway mode is enabled, the worker calls the RusaAi API using tenant-scoped RusaAi keys, and direct chat Model Plane credentials are cleared from the worker. The generic `.env.example` defaults gateway mode to false and the provider has a direct-call fallback. Separately, when `RUSA_RAG_ENABLED=true`, the optional worker `KnowledgeService` creates an embedding client that posts directly to RusaModels `/openai/v1/embeddings` using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback. There is no RusaAi embedding gateway in current main. Keep worker RAG disabled in production until this path is brokered and tenant-aware. Therefore production fail-closed enforcement of both chat and embedding gateway boundaries remains a CHUNK 02/05/06 requirement, not a universal property proven by source inspection.
 
 ### RAG_Cerdas / IM19 — Isolated Knowledge Intelligence pilot
 
