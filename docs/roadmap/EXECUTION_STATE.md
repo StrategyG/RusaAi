@@ -31,8 +31,8 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 | Chunk | Status | Evidence / note |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Six-file baseline artifact package complete; latest tracker refresh on PR #119 has triggered a new CI run, so recheck current head before merge; CHUNK 00 itself made no source-code changes |
-| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | Alignment drafts #117, #24, #28 have passed their exact-head CI; architecture/ownership/trust docs prepared; PRs remain open/draft, and main branches have not yet been aligned |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Six-file baseline artifact package complete; PR #119 exact head `5772c23c1cb7c6ec738925ce5b4663c79e17e029` has 3/3 checks passing in run 43554368639; six changed files are roadmap documentation only; no source code changed |
+| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | PRs #117, #24 and #28 are open, ready for review, mergeable and green on their exact inspected heads; none is merged, no owner approval exists, and mainline documentation remains inconsistent |
 | 02 — Trusted Identity, Authorization, Tenant Security | NOT_STARTED | Depends on CHUNK 01 |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
@@ -54,9 +54,9 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | Draft/open |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS | Draft/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 pass | Draft/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | Ready/open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 PASS | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
@@ -80,7 +80,7 @@ Scores below measure evidence-backed completion of the eight CHUNK 01 tasks in t
 | 1. Compare ADRs across all three repositories | 90 | PARTIAL | RusaAi, RusaModels and RAG_Cerdas ADRs inspected; RusaAi duplicate ADR-0002 identifier remains an explicit OPEN_DECISION |
 | 2. Confirm `rusa_knowledge` as canonical shared store | 100 | PASS — decision confirmation | Accepted RusaAi ADR-0002 confirmed; PR #28 aligns IM19 documentation without authorizing production activation |
 | 3. Reconcile RAG_Cerdas no-selection wording | 85 | PARTIAL | PR #28 updates ADR, README and roadmap on its branch; RAG_Cerdas main remains unchanged until review/merge |
-| 4. Define API, model, database, artifact, knowledge, worker and identity ownership | 95 | PARTIAL | Cross-repository ownership matrix and exact service boundaries documented; PR #24 also corrects RusaModels API description; all alignment PRs remain open |
+| 4. Define API, model, database, artifact, knowledge, worker and identity ownership | 95 | PARTIAL | Cross-repository ownership matrix and exact service boundaries documented; PR #24 also corrects RusaModels API description; all alignment PRs remain open and ready for review and ready for review; merge approval is still pending |
 | 5. Define cross-repository communication rules | 90 | PARTIAL | Provider/consumer routes and credentials documented; custom inference JSON schema is not yet consumed by the public endpoint and live E2E conformance is not verified |
 | 6. Define data classification and trust boundaries | 95 | PASS — documentation evidence | Public/internal/tenant-confidential/restricted-secret/untrusted classes and fail-closed invariants documented; deployment enforcement remains unverified |
 | 7. Record unresolved decisions as OPEN_DECISION | 100 | PASS — documentation evidence | ADR numbering, embedding profile, IM19 inference path and production activation constraints are explicitly recorded |
@@ -113,17 +113,17 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
 - PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes all 3/3 checks in run 43552929727, including 337 tests with 6 skipped. The image scan reports raw HIGH findings 103/118/117/103 across four images, 0 CRITICAL; the gate uses `--ignore-unfixed`.
 - PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
-- PR #119's tracker branch is self-updating; its latest commit triggers a fresh CI run, so query PR metadata before merge. PR #24's updated head `128343fe` passes 2/2 checks. Its Trivy scan still reports raw HIGH findings (47 OS + 1 Python per image, 0 CRITICAL) despite the scoped setuptools VEX and `--ignore-unfixed` gate; see RSK-019.
+- PR #119's current head `5772c23c` completed workflow 43554368639 with 3/3 checks passing. Its image scan reports raw Trivy HIGH counts 103/118/117/103 across API, agent-sandbox, worker and RAG/MCP images, 0 CRITICAL; the gate uses `--ignore-unfixed`, so this is not a zero-vulnerability result. PR #24's latest head `128343fe` passes 2/2 checks in run 43554181866; its earlier raw Trivy findings remain recorded in RSK-019.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
 
-- Three architecture-alignment PRs remain draft/open and have no review submissions or inline review threads. Current exact-head CI is green: RusaAi #117 3/3, RusaModels #24 2/2, and RAG_Cerdas #28 1/1. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
+- Three architecture-alignment PRs are open and ready for review, with no review submissions or inline review threads. Current exact-head CI is green: RusaAi #117 3/3, RusaModels #24 2/2, and RAG_Cerdas #28 1/1. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
 - RusaAi contains two ADR files with numeric identifier ADR-0002; the collision is explicitly an OPEN_DECISION and must be corrected in a dedicated reviewed change with repository-wide reference validation.
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
 - The current main branches report branch protection disabled.
-- PR #119 is the self-updating baseline tracker; latest head `3475dede04e240d14b92e89c19fde6f897d69531` has workflow 43554155465 in_progress. Recheck its latest head before merging the tracker PR; this does not change the completed CHUNK 01 PR checks.
+- PR #119 current head `5772c23c1cb7c6ec738925ce5b4663c79e17e029` has workflow 43554368639 completed successfully (3/3 checks). The tracker PR remains open and unmerged; its six changed paths are documentation only.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
 - RusaAi KnowledgeService is optional and the runtime activation flag defaults false.
@@ -134,7 +134,7 @@ PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (R
 
 ## 7. CHUNK 01 next actions
 
-1. Obtain explicit project-owner approval before marking the three draft PRs ready or merging them; no reviews or inline review threads are currently recorded.
+1. The three PRs are already marked ready for review. Complete owner/maintainer review; obtain explicit project-owner approval before any merge. No reviews or inline review threads are currently recorded.
 2. Proposed merge order: RusaModels #24, then RAG_Cerdas #28 (both align with already-accepted RusaAi main ADRs), then refresh RusaAi #117 wording to reflect the merged states, rerun its exact-head CI, and merge RusaAi #117 last.
 3. After the coordinated merges, verify all three new main SHAs and repeat the cross-repository documentation/link consistency check.
 4. Keep the duplicate RusaAi ADR-0002 identifier as an explicit OPEN_DECISION until its separate reference-checked numbering PR is reviewed; do not silently renumber.

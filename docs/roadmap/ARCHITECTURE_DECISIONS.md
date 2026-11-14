@@ -18,11 +18,11 @@
 
 | Repository | PR | Status | Purpose | Current disposition |
 |---|---|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | Draft/open | Adds ADR index, records duplicate ADR-0002 collision and updates Model Plane/canonical-store references | Review; it deliberately does not renumber the records |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Draft/open | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Review terminology and links |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Draft/open | Adds a superseding alignment ADR and marks the old canonical-store proposal superseded for ecosystem selection | Review; preserve IM19 as an isolated pilot |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | Ready/open | Adds ADR index, records duplicate ADR-0002 collision and updates Model Plane/canonical-store references | Review; it deliberately does not renumber the records |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Ready/open | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Review terminology and links |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready/open | Adds a superseding alignment ADR and marks the old canonical-store proposal superseded for ecosystem selection | Review; preserve IM19 as an isolated pilot |
 
-RusaAi PR #117 (head `251a7d1f`) has 3/3 checks passing; its raw Trivy image reports still contain HIGH findings. RusaModels PR #24 (head `128343fe`) has 2/2 checks passing; its raw Trivy image reports also contain HIGH findings. RAG_Cerdas PR #28 (head `65752d94`) has 1/1 check passing. All three PRs remain open/draft and must not be treated as merged. Re-check exact heads before any merge.
+RusaAi PR #117 (head `251a7d1f`) is open and ready for review with 3/3 checks passing; its raw Trivy image reports still contain HIGH findings. RusaModels PR #24 (head `128343fe`) is open and ready for review with 2/2 checks passing in latest run 43554181866; its earlier raw Trivy image reports also contain HIGH findings. RAG_Cerdas PR #28 (head `65752d94`) is open and ready for review with 1/1 check passing. GitHub reports all three mergeable; no review submissions or inline review threads were present at the inspected snapshot. None is merged. Re-check exact heads before any merge.
 
 ## 3. Open architecture decisions
 

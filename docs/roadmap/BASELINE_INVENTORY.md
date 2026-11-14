@@ -110,9 +110,9 @@ The following are the open PRs identified as materially relevant to architecture
 | PR | Status | Base → head | Head SHA (short) | CI at inspected head | Relevance |
 |---|---|---|---|---|---|
 | [#118](https://github.com/StrategyG/RusaAi/pull/118) | Draft | `main` → `feat/ale-00-baseline-inventory-20261114` | `202a1c16` | 3 checks pass | Separate ALE baseline inventory; not merged |
-| [#119](https://github.com/StrategyG/RusaAi/pull/119) | Draft | `main` → `docs/roadmap-chunk-00-baseline-20261114` | Self-updating tracker branch; latest SHA must be read from PR metadata | Latest CI is pending/running after the tracker refresh; prior head `fded768e` had 2/3 checks complete PASS and image build/scan in progress | Roadmap v3.0 baseline, risks, dependency map, evidence and execution state; documentation only | Roadmap v3.0 baseline, risks, dependency map, evidence and execution state; documentation only |
+| [#119](https://github.com/StrategyG/RusaAi/pull/119) | Ready | `main` → `docs/roadmap-chunk-00-baseline-20261114` | `5772c23c` | 3/3 PASS in workflow 43554368639; raw Trivy HIGH 103/118/117/103, CRITICAL 0; gate uses `--ignore-unfixed` | Six roadmap documentation files only; no source-code changes | Six roadmap documentation files only; no source-code changes |
 | [#120](https://github.com/StrategyG/RusaAi/pull/120) | Draft | `main` → `docs/precision-agent-worker-chunk-framework-2026-11-14` | `ba04a053` | 3/3 pass on attempt 2; attempt 1 failed one FIFO-ordering test | Agent/Worker chunk framework, PR #116 reconciliation and five-million knowledge chunk program; documentation only |
-| [#117](https://github.com/StrategyG/RusaAi/pull/117) | Draft | `main` → `docs/chunk-01-architecture-adr-reconciliation-20261113` | `251a7d1f` | 3/3 pass; 337 passed / 6 skipped; raw image Trivy HIGH findings remain | ADR index, migration-state correction, ecosystem architecture, duplicate ADR-0002 disclosure |
+| [#117](https://github.com/StrategyG/RusaAi/pull/117) | Ready | `main` → `docs/chunk-01-architecture-adr-reconciliation-20261113` | `251a7d1f` | 3/3 pass; 337 passed / 6 skipped; raw image Trivy HIGH findings remain | ADR index, migration-state correction, ecosystem architecture, duplicate ADR-0002 disclosure |
 | [#116](https://github.com/StrategyG/RusaAi/pull/116) | Draft | `main` → `feature/agent-runtime-v1` | `faf686ac` | 3 checks pass; raw Trivy HIGH findings remain | Staged capability registry and DAG executor; registry remains draft/disabled and preview-only |
 | [#115](https://github.com/StrategyG/RusaAi/pull/115) | Draft | `main` → `feat/rusa-knowledge-governance-lifecycle` | `d8e7a7c5` | 3 checks pass | Rights, review, human approval and publication gates; further lifecycle controls remain open |
 | [#82](https://github.com/StrategyG/RusaAi/pull/82) | Draft | Old main SHA `00aa9e4a` → `feat/rusa-knowledge-core-phase1` | `c882928e` | 3 checks pass | Project-scoped RAG and knowledge mining; base is behind current main and migration overlap must be reconciled |
@@ -138,7 +138,7 @@ The following are the open PRs identified as materially relevant to architecture
 
 | PR | Status | Base → head | Head SHA (short) | CI at inspected head | Relevance |
 |---|---|---|---|---|---|
-| [#24](https://github.com/StrategyG/RusaModels/pull/24) | Draft | `main` → `docs/chunk-01-model-plane-terminology-20261113` | `128343fe` | 2/2 pass; raw image Trivy HIGH findings remain | Clarifies internal registry-store vs ecosystem Control Plane; updates FastAPI OpenAPI description to state Model Plane ownership |
+| [#24](https://github.com/StrategyG/RusaModels/pull/24) | Ready | `main` → `docs/chunk-01-model-plane-terminology-20261113` | `128343fe` | 2/2 pass; raw image Trivy HIGH findings remain | Clarifies internal registry-store vs ecosystem Control Plane; updates FastAPI OpenAPI description to state Model Plane ownership |
 | [#20](https://github.com/StrategyG/RusaModels/pull/20) | Draft | `carbon-cpu/from-scratch-v0.1` → `feat/phase3-neural-architecture-tokenizer` | `74ab40bd` | Not verified in this audit | Stacked neural architecture/tokenizer engine |
 | [#17](https://github.com/StrategyG/RusaModels/pull/17) | Ready | Old main SHA `c5ee2f0b` → `feat/phase2-dataset-engine-main` | `cb4e7b80` | Not verified in this audit | Dataset engineering engine |
 | [#18](https://github.com/StrategyG/RusaModels/pull/18) | Ready | Old main SHA `c5ee2f0b` → `feat/phase5-benchmark-engine` | `eedd2a52` | Not verified in this audit | Frozen benchmark/evaluation engine |
@@ -150,7 +150,7 @@ The following are the open PRs identified as materially relevant to architecture
 
 | PR | Status | Base → head | Head SHA (short) | CI at inspected head | Relevance |
 |---|---|---|---|---|---|
-| [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Draft | `main` → `docs/chunk-01-canonical-store-alignment-20261113` | `65752d94` | 1 check passes | Aligns IM19 docs with RusaAi canonical-store decision and links parent architecture authority |
+| [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready | `main` → `docs/chunk-01-canonical-store-alignment-20261113` | `65752d94` | 1 check passes | Aligns IM19 docs with RusaAi canonical-store decision and links parent architecture authority |
 | [#16](https://github.com/StrategyG/RAG_Cerdas/pull/16) | Draft | Old main SHA `18f65b00` → `integration/cataran-contracts-v1-20261105` | `8e8bd2fc` | 3 checks pass | Provisional event-envelope snapshot; base is behind current main |
 
 The remaining open RusaAi PR backlog is not represented as merge-ready by this inventory. The 85-result follow-up search is the current repository-wide count; the table above identifies PRs with direct relevance to the current roadmap's architecture, knowledge, agent/worker, model, contract and release dependencies. Older or unrelated PRs require a separate deduplication and disposition pass before any merge.

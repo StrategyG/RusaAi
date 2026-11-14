@@ -124,3 +124,25 @@ A repository-tree-based check of changed Markdown files found no broken relative
 - RAG_Cerdas PR #28: 6 Markdown files, 34 relative links, 0 broken.
 
 This check validates relative file targets only; it does not prove external HTTP links are reachable or semantically correct.
+
+
+## 7. Latest exact-head refresh — 2026-11-14
+
+| Repository / PR | Exact head SHA | Exact-head CI | Evidence |
+|---|---|---|---|
+| RusaAi #119 | `5772c23c1cb7c6ec738925ce5b4663c79e17e029` | 3/3 PASS: Test/lint/security, production image build/scan, and RAG/MCP integration | [Workflow 43554368639](https://github.com/StrategyG/RusaAi/actions/runs/43554368639) |
+| RusaAi #117 | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | 3/3 PASS | [Workflow 43552929727](https://github.com/StrategyG/RusaAi/actions/runs/43552929727) |
+| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS in latest run | [Workflow 43554181866](https://github.com/StrategyG/RusaModels/actions/runs/43554181866) |
+| RAG_Cerdas #28 | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 PASS | [Workflow 43551700624](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43551700624) |
+
+### PR #119 latest image-scan detail
+
+The completed image-scan job is job `132323826446` in workflow `43554368639`. Trivy reported raw HIGH findings by image: API 103, agent-sandbox 118, worker 117, and RAG/MCP 103; CRITICAL 0. The job's blocking command uses `--ignore-unfixed`. A green gate therefore does not mean zero HIGH findings or a clean security certification. These counts are scanner findings and are not, by themselves, confirmation of exploitability. The images were tagged with source revision `fa73d8ab89f17712e0064389a565ff32aa99ab5d`.
+
+### Current PR review state
+
+At the inspected snapshot, RusaAi #117, RusaModels #24, and RAG_Cerdas #28 are all open, marked ready for review, and reported mergeable. No review submissions or inline review threads were present. None has been merged. The exact base SHAs remain the three recorded main SHAs in Section 1; the candidate changes are not yet mainline.
+
+### CHUNK 00 PR scope verification
+
+RusaAi PR #119 changes exactly six files: `docs/roadmap/ARCHITECTURE_DECISIONS.md`, `BASELINE_INVENTORY.md`, `EVIDENCE_LEDGER.md`, `EXECUTION_STATE.md`, `OPEN_RISKS.md`, and `REPOSITORY_DEPENDENCY_MAP.md`. The changed-file list contains no source-code, migration, test, model-artifact, deployment, or production-data path.
