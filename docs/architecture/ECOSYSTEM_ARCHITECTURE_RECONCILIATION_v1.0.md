@@ -117,6 +117,16 @@ Rules:
 5. Knowledge evidence is returned only after RusaAi authorization and scope filtering. Knowledge content cannot override policy or grant tools.
 6. A passing CI run or documented endpoint does not establish live service availability or production deployment.
 
+### Current-main implementation qualification
+
+Static inspection of the recorded RusaAi main commit confirms that the gateway path exists, but it is profile-dependent:
+
+- `llm-project/serve/app.py` exposes the RusaAi `GET /v1/models` and `POST /v1/chat/completions` routes, applies RusaAi API/inference permission checks, and uses the configured `OpenAIChatInferenceProvider` to call RusaModels.
+- The RusaAi CPU Compose profile sets `RUSA_WORKER_INFERENCE_GATEWAY=true`, routes the worker to `http://api:8000/v1`, supplies tenant-scoped RusaAi worker API keys, and clears the worker's direct `RUSA_MODEL_BASE_URL` and `RUSA_MODEL_API_KEY`. In this profile, the API service—not the worker—holds the dedicated RusaModels `inference` credential.
+- The generic `.env.example` defaults `RUSA_WORKER_INFERENCE_GATEWAY=false`, and `OpenAICompatibleProvider` can fall back to `RUSA_MODEL_BASE_URL` / `RUSA_MODEL_API_KEY` for a direct worker-to-provider call. That fallback is not the required production boundary.
+
+Therefore the intended architecture is implemented in the CPU Compose profile, but it is not established as an unconditional invariant across every configuration. CHUNK 02/06 must verify that production startup fails closed unless gateway mode is enabled and direct RusaModels credentials are absent from the worker environment. The current profile configuration does not prove that a deployed production environment uses it.
+
 ### 4.2 Isolated IM19 pilot flow
 
 ```mermaid
@@ -144,6 +154,7 @@ flowchart LR
 | RusaAi tenant API and task envelope | RusaAi → authorized caller/worker | Existing API and tenant-scoped worker runtime; production environment not independently inspected | RusaAi owns authentication, task state, tenant context and audit |
 | RusaAi KnowledgeService / read-only Knowledge MCP | RusaAi → authorized RusaAi worker/MCP client | Implemented optional tenant-scoped service; worker activation flag defaults false | RusaAi owns schema, RLS, scope, retrieval and publication policy |
 | OpenAI-compatible `GET /openai/v1/models`, `POST /openai/v1/chat/completions`, `POST /openai/v1/embeddings` | RusaModels → RusaAi | Implemented/documented API surface; live deployment and exact model compatibility NOT_VERIFIED | RusaModels owns provider API; RusaAi owns client, identity and task context |
+| RusaAi Model Access Gateway `GET /v1/models`, `POST /v1/chat/completions` | RusaAi API → tenant-scoped worker; upstream RusaModels Model Server | Mainline API routes and CPU Compose gateway profile exist; generic environment defaults gateway mode off, so production fail-closed enforcement is NOT_VERIFIED | RusaAi owns tenant auth, admission, gateway and API-side RusaModels credential; worker must use tenant-scoped RusaAi key |
 | RusaAi inference request/response JSON Schemas in `shared/contracts/inference_contract/` | RusaAi-owned schema; intended for inference boundary | Schemas exist, but current README states public OpenAI-compatible endpoint does not yet consume the envelope | RusaAi owns schema and adapter; conformance is NOT_IMPLEMENTED |
 | Custom Model Plane contract v0.1 proposed in RusaAi PR #103 | Intended RusaAi consumer ↔ RusaModels provider | Draft/open PR; not merged and not proven on both sides | Keep as proposal; do not call it the production contract until provider/consumer contract tests pass |
 | IM19 → RusaAi ingestion/retrieval/data transfer | None | No approved cross-repository contract | NOT_AUTHORIZED; requires new ADR, authenticated versioned API, scope/rights mapping, deletion/reconciliation, tests and rollback |
