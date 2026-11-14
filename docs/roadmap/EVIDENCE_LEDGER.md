@@ -74,3 +74,45 @@ PRs without a check-run lookup in this audit are marked “not verified” in `B
 ## 5. CHUNK 00 evidence decision
 
 **Status: PASS for the read-only baseline gate.** The baseline records exact main SHAs, check-run evidence, source blob SHAs, repository structure, relevant PRs and explicit unknowns. No source code or production state was changed.
+
+## 6. CHUNK 01 current branch verification — 2026-11-14
+
+The following statuses were queried against the exact current PR head SHA. A running check is not counted as PASS.
+
+| Repository / PR | Exact head SHA | Current check result | Workflow evidence |
+|---|---|---|---|
+| RusaAi #117 | `251a7d1f345e82c8b6400185ce5160dac5f4cdbd` | Test/lint/security PASS; RAG/MCP PASS; image build/scan IN_PROGRESS | [Run 43552929727](https://github.com/StrategyG/RusaAi/actions/runs/43552929727) |
+| RusaAi #119 | `fded768e80f1b0bc0257249f60a5b2b56a4cfe6c` | Test/lint/security PASS; RAG/MCP PASS; image build/scan IN_PROGRESS | [Run 43552911148](https://github.com/StrategyG/RusaAi/actions/runs/43552911148) |
+| RusaAi #120 | `ba04a0539f88dcdb91b3b63246353f72fac99d97` | 3/3 PASS on workflow attempt 2 | [Run 43504174547](https://github.com/StrategyG/RusaAi/actions/runs/43504174547) |
+| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | Windows script validation PASS; test IN_PROGRESS | [Run 43553234278](https://github.com/StrategyG/RusaModels/actions/runs/43553234278) |
+| RAG_Cerdas #28 | `65752d94c93f8c098792bf4ec46a36f269d3de93` | 1/1 PASS | [Run 43551700624](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43551700624) |
+| RusaAi #116 | `faf686ac85875a930221ed92a357a9520a5947e5` | 3/3 PASS; raw HIGH Trivy findings remain | [Run 43403193633](https://github.com/StrategyG/RusaAi/actions/runs/43403193633) |
+
+### Intermittent FIFO test evidence
+
+- RusaAi PR #120 exact head `ba04a0539f88dcdb91b3b63246353f72fac99d97`: workflow 43504174547 attempt 1 failed `test_fifo_admission_is_shared_across_separate_os_processes`; attempt 2 passed 337 tests with 6 skipped.
+- RusaAi PR #117 superseded head `e377c268e7356ece82ccd1dbc9c5ad1735e61070`: workflow 43552467511 had the same test failure (the image job was cancelled after the test failure).
+- RusaAi PR #117 current head `251a7d1f345e82c8b6400185ce5160dac5f4cdbd`: workflow 43552929727 passed 337 tests with 6 skipped. This is evidence of a passing run, not proof that the concurrency race is eliminated.
+
+Skipped tests in the passing Python run: optional document parser dependencies unavailable; `RUSA_TEST_DATABASE_URL` not configured for the separate knowledge PostgreSQL test; optional MCP runtime unavailable; PyTorch unavailable for tokenization; optional local-model dependencies unavailable. These are not silently counted as executed tests.
+
+### Current source inspection for the cross-repository contract inventory
+
+| Repository | Source at ref | Blob SHA | Verified detail |
+|---|---|---|---|
+| RusaAi | `llm-project/serve/app.py` on main | `9058de7699c0a1312f4c0e8beb9a2b8e408b3bcc` | Tenant-authenticated `GET /v1/models` and `POST /v1/chat/completions` gateway routes |
+| RusaAi | `.env.example` on main | `50408bde27cb6a620bdf9fa1859f9dd939881a6a` | Generic default `RUSA_WORKER_INFERENCE_GATEWAY=false`; direct Model Server base URL is configurable |
+| RusaAi | `docker-compose.cpu.yml` on main | `a190706606b961b39632d1cf76568a440a2c99c6` | CPU profile enables gateway mode and clears direct worker Model Server URL/key |
+| RusaModels | `rusamodels/api.py` on main | `bd5e660c35c66b96e7e0733d89c4439f75bf2c9e` | Authenticated `/openai/v1/models`, `/openai/v1/chat/completions`, `/openai/v1/completions`, `/openai/v1/embeddings`; inference role accepted |
+| RusaModels | `rusamodels/api.py` on PR #24 head | `69f55d6769d4844c8b78294caa49fe436a160294` | FastAPI description corrected to identify RusaModels as Model Plane and RusaAi as ecosystem Control Plane |
+| RusaAi | `docs/architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md` on PR #117 head | `909f11556754d44bef668ffa33d5a8fddf2f4515` | Service ownership, data-flow contracts, cross-repository interface inventory, data classifications, ADR reconciliation and release boundaries |
+| RAG_Cerdas | `docs/ADR_0002_RUSAAI_CANONICAL_KNOWLEDGE_STORE_ALIGNMENT.md` on PR #28 head | `a3679667aeb29bb5c3e7b98c9a292ac01f1a34ba` | IM19 remains isolated; no cross-read/write, dual-write, mirroring or bulk synchronization authorized |
+
+### Relative-link validation
+
+A repository-tree-based check of changed Markdown files found no broken relative links on the inspected PR heads:
+- RusaAi PR #117: 6 Markdown files, 8 relative links, 0 broken.
+- RusaModels PR #24: 3 Markdown files, 12 relative links, 0 broken.
+- RAG_Cerdas PR #28: 6 Markdown files, 34 relative links, 0 broken.
+
+This check validates relative file targets only; it does not prove external HTTP links are reachable or semantically correct.
