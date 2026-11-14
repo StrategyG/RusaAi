@@ -47,6 +47,9 @@ The Online Installer downloads the same signed manifest and pinned image/model a
 
 ## Required manifest fields
 
+Validate the release manifest against [`local-bundle-manifest.schema.json`](local-bundle-manifest.schema.json). A manifest with `release_status: READY` must declare both model and embedding artifacts as `APPROVED`; the release pipeline must additionally verify the detached signature and every artifact digest.
+
+
 The release manifest must bind:
 
 - Bundle version, release channel, target OS and architecture.
