@@ -73,6 +73,18 @@ The installer must reject missing, unsigned, expired, mismatched, or unapproved 
 - Offline mode does not fall back to external inference.
 - Uninstall preserves user data unless the user explicitly selects secure data removal.
 
+## Current contributor preview launcher
+
+For repository contributors only, `Start-LocalPreview.ps1` creates a local-only `.env` with cryptographically random secrets, restricts its Windows ACL, validates the Compose configuration, starts the RusaAi API/web/PostgreSQL control plane, and opens `http://127.0.0.1:3000/setup`.
+
+Run from a checked-out repository on Windows 11 x64 with Docker Desktop and its WSL2 backend already installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\Start-LocalPreview.ps1
+```
+
+This is deliberately a **control-plane preview**, not the consumer installer. Its local Compose overlay disables model inference and uses the API liveness endpoint so first-run API-key onboarding is available before a model is provisioned. It does not install Docker Desktop, include RusaModels images, download model weights, or certify chat inference. Do not distribute it as the plug-and-play product.
+
 ## Release blockers
 
 The bundle cannot be certified until all of these have evidence:
