@@ -57,6 +57,13 @@ export default function LocalSetupPage() {
       if (!response.ok) throw new Error(data.detail || data.error || "Local setup failed.");
       setIssued(data as IssuedKey);
       setStatus("complete");
+      // Establish an encrypted HttpOnly dashboard session without persisting
+      // the raw key in browser storage.
+      await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: data.api_key })
+      }).catch(() => undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Local setup failed.");
     } finally {
