@@ -238,6 +238,8 @@ The opt-in local installation profile now has a first-run API-key bootstrap foun
 - The local Compose profile reserves a persistent, service-owned volume for the key store.
 - A generic OpenAI-compatible endpoint is exposed at `http://127.0.0.1:8000/v1` in the current Compose development topology.
 
+A Windows 11 x64 contributor preview launcher is available at `packaging/windows/Start-LocalPreview.ps1`; it starts the local control plane and opens `/setup`, but deliberately disables inference until the Model Plane bundle is ready. See `packaging/windows/README.md`.
+
 This is a local onboarding/API foundation, not yet a signed consumer installer. The approved RusaAi-Edge model checkpoint and artifact are still unavailable, and the desktop bundle, automatic dependency installation, dynamic hardware-driven model provisioning, editor-specific extension certification, and end-to-end Hybrid Agent orchestration remain release blockers. Do not advertise local inference as ready until the exact model artifact and target-device acceptance evidence pass.
 
 See:
