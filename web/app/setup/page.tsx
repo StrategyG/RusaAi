@@ -138,7 +138,10 @@ export default function LocalSetupPage() {
               <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-5 text-sm text-slate-300">
                 <strong className="text-white">Important:</strong> API authentication is ready, but chat inference becomes ready only after a verified RusaModels model runtime and approved model artifact are provisioned. Editor-specific integrations may require an extension or adapter.
               </div>
-              <a href="/" className="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-5 py-3 font-semibold text-slate-950 hover:bg-sky-400">Continue to RUSA AI <ArrowRight size={16} /></a>
+              <div className="flex flex-wrap gap-3">
+                <a href="/" className="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-5 py-3 font-semibold text-slate-950 hover:bg-sky-400">Continue to RUSA AI <ArrowRight size={16} /></a>
+                <a href="/keys" className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-5 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800">Manage editor keys</a>
+              </div>
             </div>
           )}
 
