@@ -1,7 +1,7 @@
 # RUSA AI Ecosystem — Repository Dependency Map
 
 **Snapshot:** 2026-11-14  
-**Architecture authority:** Roadmap v3.1 plus verified current-main ADRs, subject to CHUNK 01 reconciliation.
+**Architecture authority:** Roadmap v3.0 plus verified current-main ADRs, subject to CHUNK 01 reconciliation.
 
 ## 1. Ownership boundaries
 
@@ -110,6 +110,8 @@ The diagram describes the target boundary and currently implemented code surface
 
 ## 5. Roadmap dependency graph
 
+The graph below follows the supplied ChatGPT-first roadmap v3.0. CHUNK 03 and CHUNK 04 branch after CHUNK 02 and rejoin at CHUNK 05. CHUNK 08 and CHUNK 09 branch after CHUNK 07 and rejoin at CHUNK 10.
+
 ```text
 CHUNK 00 — Repository baseline
         |
@@ -138,33 +140,30 @@ knowledge lifecycle       registry/artifacts
               +----+----+
               |         |
               v         v
-       CHUNK 08*   CHUNK 09 — Evaluation
+       CHUNK 08 — IM19  CHUNK 09 — Evaluation
+       pilot hardening
               |         |
               +----+----+
                    v
-          CHUNK 16 — Agent/Worker
-          Knowledge-to-Action
+          CHUNK 10 — Agent registry/DAG/tool governance
                    |
                    v
-          CHUNK 10 — Agent runtime
+          CHUNK 11 — Reliability/DR/observability
                    |
                    v
-          CHUNK 11 — Reliability/DR
+          CHUNK 12 — Security supply chain/deployment hardening
                    |
                    v
-          CHUNK 12 — Supply-chain/deployment hardening
+          CHUNK 13 — Integrated staging E2E
                    |
                    v
-          CHUNK 13 — Staging E2E
+          CHUNK 14 — Production certification/controlled rollout
                    |
                    v
-          CHUNK 14 — Production certification
-                   |
-                   v
-          CHUNK 15 — Capacity and scale
+          CHUNK 15 — Capacity/scale/corpus expansion
 ```
 
-`* CHUNK 08 is conditional: it is a prerequisite to CHUNK 16 only if IM19 is selected as an active source or processing path. CHUNK 16 always requires CHUNK 03, CHUNK 05, CHUNK 07 and CHUNK 09 to be PASS. CHUNK 10 cannot be PASS until CHUNK 16 is PASS.`
+CHUNK 08 is a roadmap dependency, not an optional extra chunk. Its scope preserves IM19 as an isolated pilot and controlled knowledge boundary; it does not authorize cross-read/write or production data movement.
 
 ## 6. Current dependency blockers
 
@@ -172,7 +171,7 @@ knowledge lifecycle       registry/artifacts
 - CHUNK 03: canonical knowledge lifecycle is incomplete on main; RusaAi PR #115 remains open.
 - CHUNK 04/07: RusaAi-Edge checkpoint/tokenizer/artifact/target-device evidence is absent.
 - CHUNK 05/06: cross-repository API contract and exact end-to-end compatibility evidence require reconciliation.
-- CHUNK 09: human-reviewed qrels and held-out task/system-building benchmark are not evidenced.
-- CHUNK 16: blocked by the above prerequisites; current code has useful foundations but does not pass the knowledge-to-action acceptance criteria.
-- CHUNK 10: cannot be certified until CHUNK 16 passes.
+- CHUNK 08: IM19 rights, reviewer identity, purge/retention, tenant-scope and pilot-operational evidence remain incomplete.
+- CHUNK 09: human-reviewed qrels and held-out retrieval/model/agent benchmark evidence are not available.
+- CHUNK 10: PR #116 is a candidate-only staged registry/DAG implementation; do not build a duplicate runtime or activate candidate roles before CHUNK 08/09 and its own gates pass.
 
