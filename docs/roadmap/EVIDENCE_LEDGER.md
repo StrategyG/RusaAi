@@ -179,3 +179,29 @@ Static source inspection found that the intended chat-completion gateway does no
 - RusaModels PR #24 candidate head `128343fee6973fe19158182a4c8b40c5be5a72c2`: 2/2 PASS in workflow 43554181866; the only source-code edit is the FastAPI OpenAPI description string.
 - RusaAi PR #119 is self-updating. Its exact head and CI must be read from live PR metadata; the state update before this evidence append was head `78be5fe96fa6aeff2da1c1bb9e0355ad963a0a22` and its CI status was pending/in progress.
 
+
+## 10. Final CHUNK 01 documentation candidate refresh — 2026-11-14
+
+### Exact candidate heads and CI state at inspection
+
+| Repository / PR | Exact head SHA | Check state | Evidence |
+|---|---|---|---|
+| RusaAi #117 | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | Workflow queued after final architecture + MCP credential-boundary documentation update | [Run 43558557983](https://github.com/StrategyG/RusaAi/actions/runs/43558557983) |
+| RAG_Cerdas #28 | `7780922e617702f9934899acffabc8a3bd1cf673` | Workflow queued after matching architecture qualification | [Run 43558570258](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43558570258) |
+| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS | [Run 43554181866](https://github.com/StrategyG/RusaModels/actions/runs/43554181866) |
+
+RusaAi PR #117 now changes six documentation files: `docs/PRODUCTION_READINESS.md`, `docs/RAG_MCP_OPERATIONS.md`, two ADR files, the ADR index, and the ecosystem architecture reconciliation. The overlapping Agent/Worker engineering specification was removed from this CHUNK 01 PR; PR #120 remains deferred to CHUNK 10 (RSK-018).
+
+RAG_Cerdas PR #28 changes six documentation/instruction files and preserves IM19 isolation. Repository-tree relative-link validation on the exact candidate heads found:
+- RusaAi #117: 6 Markdown files, 8 relative links, 0 broken.
+- RAG_Cerdas #28: 6 Markdown files, 24 relative links, 0 broken.
+
+### Direct embedding and MCP credential-path evidence
+
+The optional Worker path and MCP service both construct `KnowledgeService.from_env()`, which uses the same OpenAI-compatible embedding client. When worker RAG is enabled, it can call RusaModels `/openai/v1/embeddings` directly using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback. The MCP server caches the same service factory and therefore also needs an explicit service-credential and egress boundary if deployed. This is not a live-deployment claim.
+
+The RusaAi CPU Compose profile does not enable `RUSA_RAG_ENABLED` and the worker runtime defaults it to false. The new candidate docs explicitly prohibit production worker RAG activation until a tenant-aware RusaAi embedding gateway or equivalent brokered contract is implemented and verified. RSK-020 is High priority; the ecosystem readiness score was revised from 48 to 45 after this source-level finding.
+
+### Self-updating tracker note
+
+PR #119 is the tracker PR itself. Immediately before this evidence append, its head was `ba8b52170b245ee2c1056a6a03cf5bb15b94a4e8`; this evidence update creates another head and restarts CI. Use live PR metadata for the latest SHA/check status rather than treating the tracker as self-certifying.
