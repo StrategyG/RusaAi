@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from rusa_agents.config import ApiPrincipal, KNOWN_API_ROLES
+from rusa_agents.config import KNOWN_API_ROLES, ApiPrincipal
 
 _KEY_PREFIX = "rusa_sk_"
 _ALLOWED_EDITOR_ROLES = {"developer", "read_only"}
