@@ -21,6 +21,10 @@ Until a separately reviewed numbering correction is approved:
 - Do not silently renumber or alter the accepted decision status.
 - Resolve the identifier collision through a dedicated documentation-only change with a repository-wide reference check.
 
-## Cross-repository architecture\n\n- [RUSA AI Ecosystem Architecture Reconciliation v1.0](../architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md) — service ownership, system context, data flows, trust boundaries and cross-repository contract inventory.\n\n## Related decision records
+## Cross-repository architecture
+
+- [RUSA AI Ecosystem Architecture Reconciliation v1.0](../architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md) — service ownership, system context, data flows, trust boundaries and cross-repository contract inventory.
+
+## Related decision records
 
 - [ADR-TRAIN-001 — Foundation checkpoint](../../documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md) — training/model foundation scope.
