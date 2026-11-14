@@ -54,17 +54,17 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `ae67072e9476551533746d6c25e3f8b7e821f986` | CI IN_PROGRESS after final architecture/embedding-path documentation update (run 43558264080) | Ready/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | CI QUEUED after MCP credential-boundary documentation update (run 43558557983) | Ready/open |
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `3957ecad8e6ebba89048b2d0bb6e970c960d2bce` | 1/1 PASS after embedding-path qualification (run 43558123215) | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7780922e617702f9934899acffabc8a3bd1cf673` | CI QUEUED after MCP credential-boundary documentation update (run 43558570258) | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
 - Updated canonical knowledge ADR migration-state description.
 - Updated production-readiness migration-state description.
 - ADR index and explicit duplicate ADR-0002 `OPEN_DECISION`.
-- Current-main inference and embedding data-flow qualification, including the optional direct Worker → RusaModels embedding exception.
-- RAG/MCP operations warning that production Worker RAG remains disabled until embedding calls are brokered through an approved gateway.
+- Current-main inference and embedding data-flow qualification, including direct Worker → RusaModels embeddings when `RUSA_RAG_ENABLED=true` and the separate MCP service's cached `KnowledgeService` client.
+- RAG/MCP operations warning that production Worker RAG remains disabled until embedding calls are brokered through an approved gateway; any MCP deployment needs a separately reviewed credential/egress boundary.
 
 PR #24 clarifies that the RusaModels shared PostgreSQL registry is internal to Model Server and Quant Server, not the RusaAi ecosystem Control Plane. It also updates the FastAPI OpenAPI description so the API no longer labels RusaModels as the ecosystem Control Plane.
 
@@ -113,9 +113,9 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - RusaAi main `llm-project/serve/app.py` exposes the tenant-authenticated `/v1/models` and `/v1/chat/completions` gateway routes with admission control.
 - The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults chat gateway mode off and supports a direct chat-call fallback; production-wide fail-closed enforcement is not verified.
 - When `RUSA_RAG_ENABLED=true`, `rusa_agents/runtime.py` constructs `KnowledgeService.from_env()` inside the worker. `rusa_knowledge/service.py` resolves the Model Server base URL and `RUSA_EMBEDDING_API_KEY` / `RUSA_MODEL_API_KEY`, then posts to `/embeddings`; RusaModels `/openai/v1/embeddings` accepts `inference`, `manager`, or `administrator` roles. This optional path bypasses the RusaAi chat gateway. The audited CPU Compose profile leaves RAG disabled by default; production Worker RAG must remain disabled until a tenant-aware embedding gateway/broker is implemented.
-- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; intermediate head `251a7d1f` passed 3/3 checks in run 43552929727, including 337 tests with 6 skipped, with raw Trivy HIGH findings 103/118/117/103 across four images and 0 CRITICAL. The latest head `ae67072e` adds the embedding-path qualification and is under CI in run 43558264080; do not transfer the earlier PASS to the new SHA.
+- PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; intermediate head `251a7d1f` passed 3/3 checks in run 43552929727, including 337 tests with 6 skipped, with raw Trivy HIGH findings 103/118/117/103 across four images and 0 CRITICAL. The latest head `25dd631d` adds the embedding and MCP credential-boundary qualifications; its CI is queued in run 43558557983, so earlier PASS evidence does not apply to this SHA.
 - PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
-- PR #119's earlier head `5772c23c` completed workflow 43554368639 with 3/3 checks passing and raw Trivy HIGH counts 103/118/117/103 across API, agent-sandbox, worker and RAG/MCP images, 0 CRITICAL; the gate uses `--ignore-unfixed`. The current tracker head `69529cf6` is under CI in run 43558186649. PR #24's latest head `128343fe` passes 2/2 checks in run 43554181866; raw Trivy findings remain recorded in RSK-019.
+- PR #119's earlier head `5772c23c` completed workflow 43554368639 with 3/3 checks passing and raw Trivy HIGH counts 103/118/117/103 across API, agent-sandbox, worker and RAG/MCP images, 0 CRITICAL; the gate uses `--ignore-unfixed`. Its latest tracker head before this refresh was `a790d203`; live metadata is authoritative because this update starts another CI run. PR #24's latest head `128343fe` passes 2/2 checks in run 43554181866; raw Trivy findings remain recorded in RSK-019.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
@@ -128,11 +128,11 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - PR #119 is a self-updating tracker. The last observed head before this refresh, `e41ea1d9fb2304296edbd7fa2be650ae08b458be`, had 2/3 checks complete and its production-image scan in progress in run 43557157903. This tracker update triggers a new run, so live PR metadata is authoritative for the latest SHA and CI. Its six changed paths remain documentation only.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
-- RusaAi KnowledgeService is optional and the runtime activation flag defaults false; its worker-side embedding provider currently bypasses the RusaAi chat gateway when enabled (RSK-020).
+- RusaAi KnowledgeService is optional and the runtime activation flag defaults false; its worker-side embedding provider bypasses the RusaAi chat gateway when enabled, and the MCP service uses the same provider factory (RSK-020).
 - Production RusaAi-Edge model checkpoint, tokenizer, artifact and target-device evidence are absent.
 - Human-reviewed evaluation corpus, staging end-to-end evidence, backup/restore and release certification are absent.
 
-PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 removed the overlapping Agent/Worker specification from its CHUNK 01 branch; PR #120 remains deferred for CHUNK 10 under RSK-018. RSK-020 records the optional direct Worker → RusaModels embedding path. See `OPEN_RISKS.md` for risk ownership and required resolution.
+PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 removed the overlapping Agent/Worker specification from its CHUNK 01 branch; PR #120 remains deferred for CHUNK 10 under RSK-018. RSK-020 records direct Worker and optional MCP → RusaModels embedding paths. See `OPEN_RISKS.md` for risk ownership and required resolution.
 
 ## 7. CHUNK 01 next actions
 
