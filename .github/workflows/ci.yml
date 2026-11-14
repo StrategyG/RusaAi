@@ -307,6 +307,24 @@ jobs:
           touch .env
           docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
 
+      - name: Validate local-first JSON schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          paths = [
+              "packaging/windows/local-bundle-manifest.schema.json",
+              "schemas/integrations/mcp-connection.v1.schema.json",
+              "schemas/integrations/external-rag-connection.v1.schema.json",
+          ]
+          for path in paths:
+              schema = json.loads(Path(path).read_text(encoding="utf-8"))
+              assert schema.get("$schema", "").endswith("/schema"), path
+              assert schema.get("type") == "object", path
+              assert schema.get("required"), path
+          PY
+
       - name: Install RAG and MCP test dependencies
         run: |
           python -m pip install --upgrade pip
