@@ -1,7 +1,4 @@
 [CmdletBinding()]
-param(
-    [switch]$ResetEnvironment
-)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
@@ -52,12 +49,6 @@ try {
     }
 }
 
-if ($ResetEnvironment -and (Test-Path $envPath)) {
-    $backup = "$envPath.backup.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    Move-Item -Path $envPath -Destination $backup
-    Write-Host "Previous .env saved to $backup"
-}
-
 if (-not (Test-Path $envPath)) {
     $dbPassword = New-Secret
     $setupToken = New-Secret
@@ -90,10 +81,10 @@ RUSA_RAG_ENABLED=false
 
 $envContent = Get-Content -Path $envPath -Raw
 if ($envContent -notmatch "(?m)^RUSA_LOCAL_SETUP_TOKEN=.{32,}$") {
-    throw "The existing .env has no valid RUSA_LOCAL_SETUP_TOKEN. Use -ResetEnvironment to rotate local bootstrap secrets."
+    throw "The existing .env has no valid RUSA_LOCAL_SETUP_TOKEN. Create a valid local .env first; the preview launcher will not overwrite existing secrets or data."
 }
 if ($envContent -notmatch "(?m)^RUSA_LOCAL_INSTALL_MODE=true$") {
-    throw "The existing .env is not configured for local install mode. Use -ResetEnvironment to create a local preview environment."
+    throw "The existing .env is not configured for local install mode. Create a local .env with RUSA_LOCAL_INSTALL_MODE=true before rerunning this launcher."
 }
 
 Push-Location $repoRoot
