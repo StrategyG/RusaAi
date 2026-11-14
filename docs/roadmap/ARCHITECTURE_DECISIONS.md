@@ -22,7 +22,7 @@
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Draft/open | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Review terminology and links |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Draft/open | Adds a superseding alignment ADR and marks the old canonical-store proposal superseded for ecosystem selection | Review; preserve IM19 as an isolated pilot |
 
-RusaModels PR #24 (head `ea4461d5`) has 2/2 checks passing and RAG_Cerdas PR #28 (head `65752d94`) has 1/1 check passing. RusaAi PR #117 has a new documentation update under CI at head `e377c268`; its checks were still running at the latest inspection. All three PRs remain open/draft and must not be treated as accepted or merged. Re-check exact heads before any merge.
+RusaAi PR #117 (head `251a7d1f`) has test/lint/security and RAG/MCP checks passing; its image build/scan remains in progress. RusaModels PR #24 (head `128343fe`) has Windows script validation passing and its test job in progress. RAG_Cerdas PR #28 (head `65752d94`) has 1/1 check passing. All three PRs remain open/draft and must not be treated as merged. Re-check exact heads before any merge.
 
 ## 3. Open architecture decisions
 
