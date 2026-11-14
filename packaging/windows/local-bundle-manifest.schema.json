@@ -17,7 +17,8 @@
     "embedding",
     "files",
     "required_memory_bytes",
-    "required_disk_bytes"
+    "required_disk_bytes",
+    "signature"
   ],
   "properties": {
     "schema_version": { "const": "1.0" },
@@ -93,6 +94,17 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "release_status": { "const": "READY" } }, "required": ["release_status"] },
+      "then": {
+        "properties": {
+          "model": { "properties": { "status": { "const": "APPROVED" } } },
+          "embedding": { "properties": { "status": { "const": "APPROVED" } } }
+        }
+      }
+    }
+  ],
   "$defs": {
     "image": {
       "type": "object",
