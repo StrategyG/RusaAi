@@ -11,7 +11,7 @@ import os
 import re
 import secrets
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
@@ -88,7 +88,7 @@ class LocalApiKeyStore:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(UTC).isoformat()
+        return datetime.now(timezone.utc).isoformat()
 
     def is_initialized(self) -> bool:
         with self._connect() as connection:
