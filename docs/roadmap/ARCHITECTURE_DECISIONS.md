@@ -1,7 +1,7 @@
 # Rusa AI Ecosystem — Architecture Decisions Index
 
 **Snapshot:** 2026-11-14  
-**Purpose:** cross-repository decision index for the V3.1 execution roadmap. This index records current repository decisions and open alignment work; it does not silently supersede repository ADRs.
+**Purpose:** cross-repository decision index for the roadmap v3.0. This index records current repository decisions and open alignment work; it does not silently supersede repository ADRs.
 
 ## 1. Decisions observed on current main
 
@@ -30,7 +30,8 @@ The inspected PR heads have successful CI checks, but all three PRs remain open/
 3. **RusaModels terminology:** consistently distinguish the RusaAi ecosystem Control Plane from the internal RusaModels registry/control database.
 4. **Embedding profile:** select and pin production model identity, immutable artifact digest, preprocessing/input types, dimensions and index-generation migration. 384d and 1536d spaces are not interchangeable merely because both are vectors.
 5. **Knowledge governance:** review and complete source identity/version, rights, review, human approval, publication, withdrawal, purge, retention, index/cache/backup reconciliation and tenant erasure.
-6. **Production activation:** no ADR in this index authorizes production migration, ingestion, model release or deployment without the separate release evidence and owner approval.
+6. **Inference gateway enforcement:** the CPU Compose profile routes workers through the RusaAi API gateway and clears direct Model Plane credentials, but the generic environment defaults gateway mode off and supports direct worker-to-RusaModels fallback. Production must fail closed on the gateway-only path; this remains a CHUNK 02/06 verification item.
+7. **Production activation:** no ADR in this index authorizes production migration, ingestion, model release or deployment without the separate release evidence and owner approval.
 
 ## 4. Binding ownership rule for subsequent chunks
 
