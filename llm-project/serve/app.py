@@ -24,7 +24,7 @@ from starlette.background import BackgroundTask
 from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
 from rusa_agents.config import RuntimeConfig
 from rusa_agents.http_limits import BodyLimitMiddleware
-from rusa_agents.local_api_keys import LocalApiKeyStore, LocalSetupAlreadyInitialized
+from rusa_agents.local_api_keys import LocalApiKeyStore, LocalSetupAlreadyInitialized, get_local_api_key_store
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
     InferenceDeadlineTimeout,
@@ -477,7 +477,7 @@ def _local_key_store() -> LocalApiKeyStore:
     if not database_path:
         raise HTTPException(status_code=503, detail="Local API key store is not configured")
     try:
-        return LocalApiKeyStore(database_path)
+        return get_local_api_key_store(database_path)
     except (OSError, ValueError):
         raise HTTPException(status_code=503, detail="Local API key store is unavailable") from None
 
@@ -586,7 +586,7 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
             raise HTTPException(status_code=503, detail="Local API key store is not configured")
         if not api_key:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
-        principal = LocalApiKeyStore(database_path).authenticate(api_key)
+        principal = get_local_api_key_store(database_path).authenticate(api_key)
         if principal is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
     else:
