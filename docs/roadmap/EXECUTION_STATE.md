@@ -113,7 +113,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - The RusaAi CPU Compose profile enables worker gateway mode, supplies tenant-scoped RusaAi worker keys and clears direct RusaModels worker credentials. The generic environment defaults gateway mode off and supports a direct-call fallback; production-wide fail-closed enforcement is not verified.
 - PR #117's superseded head `e377c268` failed the FIFO admission test in run 43552467511; its current head `251a7d1f` passes 337 tests with 6 skipped in run 43552929727. RAG/MCP also passes; image build/scan is still running.
 - PR #120's exact head `ba04a053` initially failed the same cross-process FIFO admission test; workflow 43504174547 attempt 2 passed all three jobs, including 337 tests with 6 skipped. Treat the repeated first-attempt failures as a timing-sensitive test/race signal, not proof of a fix.
-- PR #119's current head `fded768e` has test/lint/security and RAG/MCP checks passing; image build/scan is still running. PR #24's updated head `128343fe` has Windows script validation passing and its test job in progress.
+- PR #119's tracker branch is self-updating; its latest commit triggers a fresh CI run, so query PR metadata before merge. PR #24's updated head `128343fe` passes 2/2 checks. Its Trivy scan still reports raw HIGH findings (47 OS + 1 Python per image, 0 CRITICAL) despite the scoped setuptools VEX and `--ignore-unfixed` gate; see RSK-019.
 - PR #116's exact-head CI passed, but its Trivy workflow output contains raw HIGH findings across the four images and uses `--ignore-unfixed`; the findings are not an all-clear security result.
 
 ## 6. Current blockers
