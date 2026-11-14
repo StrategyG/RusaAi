@@ -60,7 +60,13 @@ async function answerWithRusaAI(
   extensionContext: vscode.ExtensionContext
 ): Promise<vscode.ChatResult> {
   const configuration = vscode.workspace.getConfiguration("rusaai");
-  const baseUrl = configuredEndpoint(configuration.get<string>("apiBaseUrl", "http://127.0.0.1:8000/v1"));
+  let baseUrl: string;
+  try {
+    baseUrl = configuredEndpoint(configuration.get<string>("apiBaseUrl", "http://127.0.0.1:8000/v1"));
+  } catch {
+    stream.markdown("The configured RUSA AI endpoint is invalid. Run **RUSA AI: Configure Local API** to correct it.");
+    return {};
+  }
   const model = configuration.get<string>("model", "default");
   const apiKey = await extensionContext.secrets.get(API_KEY_SECRET);
   if (!apiKey) {
