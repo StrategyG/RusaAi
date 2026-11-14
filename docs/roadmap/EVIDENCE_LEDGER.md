@@ -107,6 +107,10 @@ Skipped tests in the passing Python run: optional document parser dependencies u
 | RusaModels | `rusamodels/api.py` on PR #24 head | `69f55d6769d4844c8b78294caa49fe436a160294` | FastAPI description corrected to identify RusaModels as Model Plane and RusaAi as ecosystem Control Plane |
 | RusaAi | `docs/architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md` on PR #117 head | `909f11556754d44bef668ffa33d5a8fddf2f4515` | Service ownership, data-flow contracts, cross-repository interface inventory, data classifications, ADR reconciliation and release boundaries |
 | RAG_Cerdas | `docs/ADR_0002_RUSAAI_CANONICAL_KNOWLEDGE_STORE_ALIGNMENT.md` on PR #28 head | `a3679667aeb29bb5c3e7b98c9a292ac01f1a34ba` | IM19 remains isolated; no cross-read/write, dual-write, mirroring or bulk synchronization authorized |
+| RusaModels | `.trivy/setuptools-vex.openvex.json` on main | `f39d7163fd1fe9d4156b90b6a0235db0e88c912e` | Narrow VEX statement for `setuptools@70.3.0` / CVE-2025-47273; runtime package is asserted as 84.2.1 |
+
+
+RusaModels PR #24 workflow 43553234278 completed 2/2 checks. Its raw Trivy scan reports 47 HIGH OS-package findings plus 1 HIGH Python-package finding in each of the Model Server and worker images, with 0 CRITICAL. The VEX statement is scoped only to the stale `setuptools@70.3.0` SBOM component; CI verifies runtime `setuptools` 84.2.1 before applying it. The gate also uses `--ignore-unfixed`, so the green result does not establish zero HIGH findings. See RSK-019 in `OPEN_RISKS.md`.
 
 ### Relative-link validation
 
