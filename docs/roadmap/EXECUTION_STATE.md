@@ -15,7 +15,7 @@
 - Never modify `main` directly, merge a PR, deploy production, perform destructive DDL, bulk-ingest data or delete external data without explicit approval.
 - A PR branch is not mainline implementation. CI success is evidence only for the exact SHA and checks shown.
 - Use PASS only when every chunk acceptance criterion is satisfied; PARTIAL, BLOCKED, FAIL and NOT_VERIFIED do not satisfy dependencies.
-- No source-code, schema, model-artifact, production-data or deployment change was made in CHUNK 00 or CHUNK 01 to date.
+- CHUNK 00 made no source-code changes. CHUNK 01 includes a one-line FastAPI OpenAPI description metadata change in RusaModels PR #24; no runtime behavior, schema, model artifact, production data, or deployment behavior changed.
 
 ## 2. Repository baseline
 
