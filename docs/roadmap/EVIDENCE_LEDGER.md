@@ -186,8 +186,8 @@ Static source inspection found that the intended chat-completion gateway does no
 
 | Repository / PR | Exact head SHA | Check state | Evidence |
 |---|---|---|---|
-| RusaAi #117 | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | Workflow queued after final architecture + MCP credential-boundary documentation update | [Run 43558557983](https://github.com/StrategyG/RusaAi/actions/runs/43558557983) |
-| RAG_Cerdas #28 | `7780922e617702f9934899acffabc8a3bd1cf673` | Workflow queued after matching architecture qualification | [Run 43558570258](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43558570258) |
+| RusaAi #117 | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | Test/lint/security FAIL (FIFO waiter assertion); RAG/MCP PASS; image build/scan IN_PROGRESS | [Run 43558557983](https://github.com/StrategyG/RusaAi/actions/runs/43558557983) |
+| RAG_Cerdas #28 | `7780922e617702f9934899acffabc8a3bd1cf673` | 1/1 PASS after matching architecture qualification | [Run 43558570258](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43558570258) |
 | RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS | [Run 43554181866](https://github.com/StrategyG/RusaModels/actions/runs/43554181866) |
 
 RusaAi PR #117 now changes six documentation files: `docs/PRODUCTION_READINESS.md`, `docs/RAG_MCP_OPERATIONS.md`, two ADR files, the ADR index, and the ecosystem architecture reconciliation. The overlapping Agent/Worker engineering specification was removed from this CHUNK 01 PR; PR #120 remains deferred to CHUNK 10 (RSK-018).
@@ -195,6 +195,10 @@ RusaAi PR #117 now changes six documentation files: `docs/PRODUCTION_READINESS.m
 RAG_Cerdas PR #28 changes six documentation/instruction files and preserves IM19 isolation. Repository-tree relative-link validation on the exact candidate heads found:
 - RusaAi #117: 6 Markdown files, 8 relative links, 0 broken.
 - RAG_Cerdas #28: 6 Markdown files, 24 relative links, 0 broken.
+
+### Repeated FIFO admission test failure on current PR #117 head
+
+The exact-head workflow 43558557983 failed `test_fifo_admission_is_shared_across_separate_os_processes` with `AssertionError: Expected 2 PostgreSQL scheduler waiters` after the test's 8-second waiter poll. Result: 336 passed, 1 failed, 6 skipped. The failing job is repository-wide and not caused by the documentation paths changed in PR #117. This is a repeated failure across several exact heads and remains an unresolved CHUNK 06/11 concurrency concern (RSK-016). The workflow's image build/scan job was still running at this snapshot; no rerun was possible until the full run completed.
 
 ### Direct embedding and MCP credential-path evidence
 
@@ -204,4 +208,4 @@ The RusaAi CPU Compose profile does not enable `RUSA_RAG_ENABLED` and the worker
 
 ### Self-updating tracker note
 
-PR #119 is the tracker PR itself. Immediately before this evidence append, its head was `ba8b52170b245ee2c1056a6a03cf5bb15b94a4e8`; this evidence update creates another head and restarts CI. Use live PR metadata for the latest SHA/check status rather than treating the tracker as self-certifying.
+PR #119 is the tracker PR itself. Immediately before this evidence append, its head was `0b42dc7e137c3d2e24d091565d078ab8deab166b`; this evidence update creates another head and restarts CI. Use live PR metadata for the latest SHA/check status rather than treating the tracker as self-certifying.
