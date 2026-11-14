@@ -16,10 +16,12 @@
 | RSK-008 | High | RAG_Cerdas | IM19 is an isolated pilot. Current docs state that live Dropbox/Supabase/Qwen/E5 access and deployed autonomous worker operation are blocked; no multi-tenant production service boundary is approved. | Keep isolated. If IM19 is later selected as a source path, approve an ADR and versioned interface, prove rights and tenant/project isolation, and pass CHUNK 08 before it becomes an active dependency. |
 | RSK-009 | Critical | RusaAi + RAG_Cerdas + RusaModels | Retrieval quality and knowledge-to-action quality are not supported by a current human-reviewed held-out corpus/benchmark with exact versions and reproducible outcomes. RAG_Cerdas README says evaluation cases are unlabelled; no end-to-end system-building benchmark is evidenced. | Establish CHUNK 09 frozen datasets, human-reviewed qrels, provenance, predeclared thresholds and separate retrieval, diagnosis, system-building, worker reliability and safety metrics. |
 | RSK-010 | Critical | All three | No staging/production deployment, target-hardware soak, independent tenant-isolation review, backup/restore drill, rollback rehearsal, incident alerting or owner release sign-off was evidenced in this audit. | Produce exact-release evidence from the intended target environment; keep production NO-GO until all applicable gates pass. |
-| RSK-011 | High | RusaAi + RusaModels + RAG_Cerdas | 92 open PRs were returned (RusaAi 83, RusaModels 7, RAG_Cerdas 2). Several material PRs are stacked on feature branches or old main SHAs; successful head CI does not prove current-base compatibility. | Triage duplicate/obsolete PRs, compare each head with current main, rebase/retarget deliberately, rerun exact-head CI and close superseded work. Do not merge by title or historical CI alone. |
+| RSK-011 | High | RusaAi + RusaModels + RAG_Cerdas | 94 open PRs are currently returned (RusaAi 85, RusaModels 7, RAG_Cerdas 2). The original baseline query returned 92 before follow-up PRs #119 and #120 were added; PR #120 adds an Agent/Worker framework and PR #119 is the baseline documentation package. Several material PRs are stacked on feature branches or old main SHAs; successful head CI does not prove current-base compatibility. | Triage duplicate/obsolete PRs, compare each head with current main, rebase/retarget deliberately, rerun exact-head CI and close superseded work. Do not merge by title or historical CI alone. |
 | RSK-012 | Medium | RusaAi | `docs/PRODUCTION_READINESS.md` describes migrations 010/011/012 as open-PR work although the current main tree contains those migrations. | Reconcile readiness documentation against current main, exact migration history and actual deployment evidence. Do not equate file presence with migration application. |
 | RSK-013 | High | RusaAi + RusaModels | RusaAi supports separate 384- and 1536-dimensional vector spaces. The production embedding model, immutable artifact/version, preprocessing and index-generation migration are not selected/evidenced as one coherent release profile. | Pin exact model identity/digest, dimensions, query/passage behavior and index generation; run compatibility, retrieval quality, rollback and capacity tests. |
 | RSK-014 | Medium | Project execution | A local clone and working tree were not available through this audit. Remote GitHub main/PR state is verified; local uncommitted changes cannot be ruled out. | Before local implementation or patch generation, acquire the intended checkout and record clean/dirty state and exact base SHA. |
+| RSK-015 | High | RusaAi | PR #116 candidate image scan in workflow 43396724783 reported raw Trivy HIGH findings: API image 103, agent-sandbox image 118, worker image 117, RAG/MCP image 103; CRITICAL 0. The blocking scan command uses `--ignore-unfixed`, so a green job does not mean zero HIGH findings. These counts are scanner findings, not confirmed exploitable vulnerabilities. | Generate and retain an SBOM; triage each finding by package, fixed version and reachability; patch where possible or publish reviewed VEX dispositions for non-exploitable/unfixed findings; rerun scans under an explicitly approved release policy. Keep PR #116 activation/merge on HOLD until disposition is reviewed. |
+| RSK-016 | Medium | RusaAi | PR #120 exact-head workflow 43504174547 initially failed `test_fifo_admission_is_shared_across_separate_os_processes` (process-two acquired before process-one); rerunning the failed job passed 337 tests with 6 skipped, including the FIFO test. This is evidence of a timing-sensitive/flaky test or race, not proof of a fixed defect. | Reproduce under repeated/concurrent runs, inspect synchronization/queue ordering assumptions, make the test deterministic without weakening assertions, and retain failure/rerun evidence. Assign to CHUNK 06 inference admission/worker reliability or CHUNK 11 reliability as appropriate. |
 
 ## Immediate release posture
 
@@ -31,9 +33,12 @@
 
 ## Priority order
 
-1. Resolve CHUNK 01 architecture and ADR inconsistencies.
+1. Complete CHUNK 01 architecture and ADR reconciliation.
 2. Establish CHUNK 02 identity/security and branch governance.
-3. Complete canonical knowledge lifecycle in CHUNK 03 and model lifecycle in CHUNK 04.
-4. Complete versioned API contracts and inference/runtime prerequisites (CHUNK 05–07).
-5. Complete evaluation (CHUNK 09), then Agent/Worker Knowledge-to-Action (CHUNK 16).
-6. Only then complete broad agent runtime (CHUNK 10), reliability, supply chain, staging and production gates (CHUNK 11–14).
+3. Complete CHUNK 03 canonical knowledge lifecycle and CHUNK 04 model lifecycle.
+4. Complete CHUNK 05 versioned API contracts, then CHUNK 06 inference gateway and CHUNK 07 model runtime/hardware validation.
+5. Complete CHUNK 08 IM19 pilot hardening and CHUNK 09 evaluation.
+6. Complete CHUNK 10 agent registry/DAG/tool governance.
+7. Complete CHUNK 11 reliability/DR/observability and CHUNK 12 security supply-chain/deployment hardening.
+8. Complete CHUNK 13 staging E2E, CHUNK 14 production certification, and CHUNK 15 capacity/scale.
+
