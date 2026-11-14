@@ -44,7 +44,7 @@ export default function LocalSetupPage() {
       provider: "openai-compatible",
       base_url: LOCAL_API_BASE,
       api_key: issued.api_key,
-      model: "default"
+      model: issued.model_name || "rusaai-cpu-smoke-test"
     }, null, 2);
   }, [issued]);
 
