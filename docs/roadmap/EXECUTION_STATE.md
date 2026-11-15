@@ -2,7 +2,8 @@
 
 **Execution specification:** `RUSA_AI_ECOSYSTEM_CHATGPT_ROADMAP_EN.md` v3.0  
 **Project priority instructions:** `note.md`  
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Coordinator:** ChatGPT Project NOTE  
 **Overall status:** IN_PROGRESS  
 **Active chunk:** CHUNK 01 — Architecture Reconciliation and ADR Governance  
@@ -145,3 +146,45 @@ PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (R
 ## 8. Resume rule
 
 At each new session, re-check current default branch SHAs, repository instructions, PR base/head SHAs, CI check-runs and relevant source files. Continue from the first unpassed chunk. Never infer mainline status from a PR branch or prior conversation summary.
+
+
+## 9. Live execution refresh — 2026-11-15
+
+This section supersedes the snapshot-sensitive baseline counts and PR statuses above. The full refreshed inventory is in [BASELINE_REFRESH_2026-11-15.md](BASELINE_REFRESH_2026-11-15.md).
+
+### Current verified repository baseline
+
+| Repository | Main SHA | Exact-main checks | Open PRs | Notes |
+|---|---|---:|---:|---|
+| RusaAi | 1adac8d340e5870570910168b6626fe285dd2cf2 | 4/4 success | 87 | 337 passed / 6 skipped; raw image HIGH findings remain |
+| RusaModels | 12c49b1372b230f3656be6e1badeabad870bcfa1 | 2/2 success | 8 | 155 passed / 1 skipped / 3 warnings; raw image HIGH findings remain |
+| RAG_Cerdas | 1ead461e76d563445d179e7d5e80c25a9ca9f059 | 1 test check success plus 10 scheduled audit runs | 4 | 240 passed on the push test run |
+
+All three main SHAs are unchanged. Branch metadata returned protected=false; detailed branch-protection rules remain NOT_VERIFIED because the branch-protection API returned 403. Local working-tree state remains NOT_VERIFIED.
+
+### Chunk tracker — current state
+
+| Chunk | Status | Evidence / blocker |
+|---|---|---|
+| 00 — Repository Discovery, Baseline, Evidence Inventory | IN_PROGRESS | Live refresh artifact and evidence references have been added to PR #119; close only after the final updated PR #119 head completes its exact-head CI successfully |
+| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | PR #117, RusaModels #24 and RAG_Cerdas #28 are open and have green exact-head CI, but none is reviewed or merged; mainline documentation remains inconsistent |
+| 02–15 | NOT_STARTED | Roadmap dependency graph; CHUNK 01 must pass first |
+
+### Current alignment PR state
+
+- RusaAi #117: head 5f6b7c15, 3/3 CI success; 337 passed / 6 skipped, including the cross-process FIFO test.
+- RusaModels #24: head 128343fe, latest 2/2 CI success.
+- RAG_Cerdas #28: head 84e9a134, 1/1 CI success.
+- RusaAi #119: the pre-refresh head f1e4b938 had 3/3 CI success. The current refresh commit triggers a new exact-head run; do not reuse the previous head's result.
+- No reviews or inline review threads were present for #119, #117, #24, or #28 at the inspected snapshot. No merge was performed or authorized.
+
+### Updated risks and score
+
+- The repeated FIFO waiter failure is historical on earlier PR #117 heads; latest PR #117 head passes the test. Keep it monitored pending repeated/concurrent and staging evidence.
+- RusaAi #122 currently has a Ruff E731 lint failure; RusaAi #121 has a mixed/cancelled workflow state.
+- Direct Worker/MCP embedding credential paths, duplicate RusaAi ADR-0002 identifiers, mainline documentation drift, raw Trivy HIGH findings, missing staging/restore evidence, and absent approved model artifact remain open.
+- The ecosystem production-readiness score remains 45/100; this refresh adds no production or staging evidence and no score increase is justified.
+
+### Next action
+
+Verify the final updated head SHA of RusaAi PR #119 and its exact-head CI. If all required checks pass, close CHUNK 00 as PASS and continue CHUNK 01 review. Do not merge PR #117, #24, or #28 without explicit project-owner approval.
