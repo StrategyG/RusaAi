@@ -47,6 +47,7 @@ All worker replicas must use the same `RUSA_MAX_PARALLEL_WORKERS` value. Increas
 - Cancel via the tenant-authorized task cancellation endpoint.
 - The worker heartbeat propagates lease loss/cancellation to the DAG executor.
 - The executor cancels in-flight async work and does not write checkpoints after lease loss.
+- Default worker `write_file` operations hold the queue row lock via `with_lease_owned()`; stale workers cannot mutate the workspace after lease handoff. Other read-only tool calls verify current lease ownership before execution.
 - A reclaimed job receives a new lease token. The old worker must not publish, complete or write a checkpoint.
 - If a task remains running after a worker crash, inspect lease expiry and attempts. Do not manually edit lease tokens or queue rows to force progress.
 
@@ -84,7 +85,7 @@ No live migration is authorized by this runbook.
 
 ## 9. Security and incident rules
 
-- Never log API keys, bearer tokens, model prompts, raw model outputs or tool arguments.
+- Never log API keys, bearer tokens, model prompts, raw model outputs or tool arguments. The audited Tool Gateway records tool name, role, tenant/project scope, decision and result only.
 - Use tenant/project-scoped retrieval and the approved worker repository allowlist.
 - Keep Tool Gateway allowlists and sandbox network/filesystem boundaries authoritative.
 - Missing policy/verifier adapters, invalid registry, failed audit write, expired lease or unknown worker identity must fail closed.
