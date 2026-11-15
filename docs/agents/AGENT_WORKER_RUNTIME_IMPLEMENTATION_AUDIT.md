@@ -17,7 +17,8 @@ The Agent Runtime v1 candidate adds a versioned registry, deterministic capabili
 This implementation branch adds three hardening changes after reviewing the candidate:
 1. **Approval bypass closed:** generic retry now accepts `failed` tasks only. `awaiting_approval` tasks must pass the explicit, fingerprint-bound approval path.
 2. **Backlog and concurrency bounded:** tenant pending work is capped, and worker claims are serialized around a global active-worker ceiling.
-3. **Node audit evidence:** durable audit events record actor, root task, node, role, tool allowlist, permission scope, risk, decision, result status and counts. Raw model output, tool arguments and secrets are excluded.
+3. **Audit evidence:** durable node events and per-tool Gateway events record actor, task, tool, tenant/project scope, decision and result. Tool intent is written before execution; raw model output, tool arguments and secrets are excluded.
+4. **Stale workspace writes fenced:** default worker `write_file` operations run while the active queue lease row is locked; read-only tools check current lease ownership.
 
 The exact-head CI result cited above belongs to the reviewed PR #116 candidate, not this implementation branch. The implementation branch still requires its own exact-head CI evidence.
 
@@ -58,7 +59,7 @@ Statuses refer to source and tests on this implementation branch. A passing cand
 | Durable task queue | IMPLEMENTED | Existing PostgreSQL `aicode_jobs`; `queue.py` | Production migration rollout evidence |
 | Bounded pending queue | IMPLEMENTED | `RUSA_MAX_PENDING_TASKS_PER_TENANT` (default 1000); tenant advisory transaction lock and active-state count | Capacity must be tuned from measured workload |
 | Bounded active worker claims | IMPLEMENTED | Global advisory transaction lock plus `RUSA_MAX_PARALLEL_WORKERS` (default 1) | All worker replicas must use the same setting; load/soak evidence remains |
-| Lease heartbeat and stale-worker fencing | IMPLEMENTED | Lease UUID, expiry checks, `with_lease_owned`, `LeaseBoundCheckpointStore` | Adversarial multi-process soak still required |
+| Lease heartbeat and stale-worker fencing | IMPLEMENTED | Lease UUID, expiry checks, `with_lease_owned`, `LeaseBoundCheckpointStore`; workspace `write_file` holds the active lease row lock | Adversarial multi-process soak still required |
 | Checkpoint CAS and resume | IMPLEMENTED | Migration 014, `PostgresMemory.compare_and_set`, plan fingerprint | Apply migration 014 after migration 013 dependency |
 | Tenant idempotency | IMPLEMENTED | Migration 006, tenant/key uniqueness and payload comparison | External side-effect idempotency remains PARTIAL |
 | Bounded retries | IMPLEMENTED | Queue max attempts restricted to 1–10; node retry limit validated | Handler-specific external side-effect idempotency still required |
@@ -66,7 +67,7 @@ Statuses refer to source and tests on this implementation branch. A passing cand
 | Deadline and cancellation propagation | IMPLEMENTED | Per-node deadlines, cancellation event, heartbeat lease-loss propagation | Cancellation cannot prove termination of every external side effect; resource cleanup soak remains |
 | Tenant/project isolation | IMPLEMENTED | API-derived tenant, repository allowlist, worker handler tenant checks, RLS, project-scoped retrieval | Production adversarial isolation review remains |
 | Tool allowlists and sandbox | PARTIAL | Existing role tool allowlists, scoped adapter, sandbox and protected paths | Production policy adapter and adversarial sandbox assessment remain |
-| Audit actor/task/tool/scope/time/decision/result | PARTIAL | HMAC-chained audit store; node result event records actor/task/node/tool allowlist/scope/time/decision/status without raw output | Per-tool invocation audit is not yet emitted at every Tool Gateway call |
+| Audit actor/task/tool/scope/time/decision/result | PARTIAL | HMAC-chained node events and actual `tool.execution.started` / `tool.execution` events record actor/task/tool/scope/time/decision/result without arguments or output | Custom injected handler overrides and non-Gateway external side effects must provide equivalent audit evidence |
 | Independent verification | PARTIAL | Injected verifier contract, mandatory tester/security DAG checks and CI verification path | Production verifier adapter and independent QA ownership remain |
 | Inference gateway / Model Plane boundary | IMPLEMENTED | Worker gateway provider, tenant credentials, durable inference admission; RusaModels remains Model Plane | Production TLS endpoint and deployed identity evidence remain |
 | Tenant/project-scoped RAG | PARTIAL | Existing knowledge service and scoped retrieval path | Canonical source/role crosswalk review; source rights and publication lifecycle dependency PR #115 |
