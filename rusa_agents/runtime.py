@@ -36,6 +36,14 @@ class AICodeRuntime:
         if self.config.environment == "production" and not os.getenv("DOCKER_HOST"):
             raise RuntimeError("Production worker requires DOCKER_HOST connected to a dedicated rootless sandbox daemon")
         self.worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
+        try:
+            self.lease_heartbeat_interval_seconds = int(
+                os.getenv("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS", "10")
+            )
+        except ValueError:
+            raise ValueError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be an integer") from None
+        if not 1 <= self.lease_heartbeat_interval_seconds <= 60:
+            raise ValueError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be between 1 and 60")
         self.queue = PostgresTaskQueue(self.config.worker_database_url)
         self.memory = PostgresMemory(self.config.worker_database_url)
         if not self.config.audit_hmac_key:
@@ -232,14 +240,20 @@ class AICodeRuntime:
                 pass
 
     async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
-        try:
-            interval = int(os.getenv("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS", "10"))
-        except ValueError:
+        interval = getattr(self, "lease_heartbeat_interval_seconds", None)
+        if interval is None:
+            try:
+                interval = int(os.getenv("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS", "10"))
+            except ValueError:
+                lost_lease.set()
+                raise RuntimeError(
+                    "RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be an integer"
+                ) from None
+        if type(interval) is not int or not 1 <= interval <= 60:
             lost_lease.set()
-            raise RuntimeError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be an integer") from None
-        if not 1 <= interval <= 60:
-            lost_lease.set()
-            raise RuntimeError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be between 1 and 60")
+            raise RuntimeError(
+                "RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be between 1 and 60"
+            )
         while True:
             await asyncio.sleep(interval)
             try:
@@ -498,6 +512,9 @@ class AICodeRuntime:
                 await heartbeat
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.exception("Worker heartbeat task failed")
+                lost_lease.set()
             AICODE_TASKS.labels(outcome).inc()
             AICODE_TASK_DURATION.labels(outcome).observe(time.perf_counter() - started)
         return True
