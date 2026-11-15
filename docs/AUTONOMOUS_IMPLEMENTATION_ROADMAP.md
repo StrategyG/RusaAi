@@ -49,3 +49,26 @@ The separate Plan, Code, Build, Test, Release, Deploy, Operate, and Monitor agen
 6. **Production qualification:** add adversarial, tenant-isolation, reliability, load/soak, recovery, and operator sign-off evidence.
 
 The fine-tuned model is an implementation detail inside the agent execution layer. It must never become the policy engine, workflow state store, or source of authorization truth.
+
+## Agent/Worker runtime status snapshot — 2026-11-15
+
+The main branch remains the six-role AICode implementation, not the complete
+ten-agent/eight-stage runtime. PR #116 is the primary staged Agent Runtime
+candidate: it adds a versioned registry, capability router, DAG decomposer,
+worker execution engine, queue/API integration, lease-bound checkpoint CAS,
+approval persistence, and related tests. It remains draft/disabled and must
+not be replaced by a parallel queue, registry, DAG executor, or orchestrator.
+
+The separate hardening branch
+`feat/agent-worker-global-admission-20261115` extends the existing
+PostgreSQL queue with a per-tenant pending-task bound, a global active-worker
+bound, bounded attempts and retry delay, and a CPU-safe worker-parallelism
+default. It does not activate PR #116 or alter tool permissions. See the
+Agent/Worker operations runbook and traceability matrix for exact limits,
+rollout/rollback, CI evidence, and remaining gates.
+
+External side-effect idempotency, production policy/verifier adapters,
+authenticated human approval with separation of duties, role-to-source-chunk
+governance, residual image vulnerabilities, and production load/recovery/
+backup/restore/rollback/operator evidence remain open. A green CI run does not
+certify production readiness.
