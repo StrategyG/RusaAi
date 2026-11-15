@@ -61,13 +61,6 @@ jobs:
       - name: Tests
         run: python -m pytest -vv -o faulthandler_timeout=60
 
-      - name: Local-first feature regression tests
-        run: |
-          python -m pytest -q \
-            tests/test_local_api_keys.py \
-            tests/test_local_setup_api.py \
-            tests/test_external_rag.py
-
   docker-build:
     name: Build, test, and scan production images
     runs-on: ubuntu-latest
