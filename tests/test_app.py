@@ -10,6 +10,7 @@ import pytest
 from app import _await_with_deadline, app, set_inference_provider
 from fastapi.testclient import TestClient
 
+from rusa_agents.queue import QueueCapacityExceededError
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
     InferenceDeadlineTimeout,
@@ -621,6 +622,32 @@ def test_aicode_task_list_is_tenant_scoped_and_filterable(monkeypatch):
     assert response.status_code == 200
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["tenant_id"] == "tenant-alpha"
+
+
+def test_aicode_task_intake_returns_429_when_tenant_queue_is_full(monkeypatch):
+    class FullQueue:
+        def enqueue(self, *args, **kwargs):
+            raise QueueCapacityExceededError("Tenant task queue is full")
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(app.state, "queue", FullQueue(), raising=False)
+
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Add bounded queue behavior",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["Queue overload returns HTTP 429"],
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "5"
+    assert response.json()["detail"] == "Task queue is full for this tenant; retry later"
 
 
 def test_aicode_task_list_rejects_unknown_status(monkeypatch):
