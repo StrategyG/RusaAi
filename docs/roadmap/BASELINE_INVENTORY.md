@@ -1,6 +1,7 @@
 # RUSA AI Ecosystem — Baseline Inventory
 
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Roadmap:** RUSA AI Ecosystem ChatGPT-First Engineering Roadmap v3.0  
 **Audit type:** read-only repository discovery and evidence inventory  
 **Coordinator repository:** `StrategyG/RusaAi`  
@@ -191,3 +192,10 @@ The remaining open RusaAi PR backlog is not represented as merge-ready by this i
 | No source code changed during audit | PASS | Documentation-only audit artifacts; no source changes |
 
 **CHUNK 00 result: PASS for the read-only baseline gate.** This closes repository discovery only. It does not certify production readiness or authorize implementation, merge, migration, or deployment.
+
+
+## 7. Live baseline refresh — 2026-11-15
+
+The original 2026-11-14 snapshot above is retained as historical evidence. The live refresh is recorded in [BASELINE_REFRESH_2026-11-15.md](BASELINE_REFRESH_2026-11-15.md) and supersedes its time-sensitive open-PR counts, PR head SHAs, exact-head CI states, and review states.
+
+Current repository-wide open PR counts: RusaAi 87, RusaModels 8, RAG_Cerdas 4 (99 total). Main SHAs remain unchanged. The refresh distinguishes the single RAG_Cerdas push test run from its scheduled audit/agent-dispatch runs, and records the current exact PR heads and security scan qualifications.
