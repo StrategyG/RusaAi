@@ -9,8 +9,10 @@ from rusa_agents.tool_gateway import ToolResult
 class StubProvider:
     def __init__(self, response):
         self.response = response
+        self.prompts = []
 
     async def complete(self, *, system_prompt, user_prompt):
+        self.prompts.append((system_prompt, user_prompt))
         return self.response
 
 
@@ -109,4 +111,4 @@ def test_local_only_worker_does_not_advertise_external_rag():
     worker = AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway)
     result = asyncio.run(worker.run(make_task(), []))
     assert result.success
-    assert "search_external_rag" not in provider.response
+    assert "search_external_rag" not in provider.prompts[0][0]
