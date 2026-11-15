@@ -15,6 +15,7 @@ from rusa_agents.inference_admission import (
     InferenceDeadlineTimeout,
 )
 from rusa_agents.providers import InferenceStreamEvent
+from rusa_agents.queue import QueueCapacityExceededError
 
 client = TestClient(app)
 
@@ -179,6 +180,34 @@ def test_aicode_task_intake_is_tenant_scoped(monkeypatch):
     assert queue.get(data["task_id"], "tenant-alpha") is not None
     assert queue.get(data["task_id"], "tenant-beta") is None
 
+
+
+def test_aicode_task_intake_returns_429_when_tenant_queue_is_saturated(monkeypatch):
+    class SaturatedQueue:
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            raise QueueCapacityExceededError(limit=1, pending=1, retry_after_seconds=7)
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setenv(
+        "RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["StrategyG/RusaAi"]}'
+    )
+    monkeypatch.setattr(app.state, "queue", SaturatedQueue(), raising=False)
+
+    response = client.post(
+        "/v1/aicode/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Add a bounded queue test",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "acceptance_criteria": ["Queue saturation is explicit"],
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "7"
+    assert "capacity" in response.json()["detail"].lower()
 
 
 def test_aicode_task_idempotency_header_replays_original_task(monkeypatch):
