@@ -16,6 +16,7 @@ from rusa_agents.inference_admission import (
 )
 from rusa_agents.providers import InferenceStreamEvent
 from rusa_agents.runtime_v1 import AgentRuntimeV1
+from rusa_agents.queue import QueueCapacityError
 
 client = TestClient(app)
 
@@ -204,6 +205,47 @@ def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
     assert queue.created[2]["repository"] == {"full_name": "StrategyG/RusaAi", "base_branch": "main"}
     assert "tenant_id" not in queue.created[2]["agent_runtime_plan"]
     assert queue.created[2]["agent_runtime_plan"]["nodes"][0]["task_id"] == "task-analyst"
+
+
+
+def test_agent_runtime_task_intake_returns_429_when_tenant_queue_is_full(monkeypatch):
+    class ActiveRuntime:
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            return SimpleNamespace(topological_order=("task-analyst",))
+
+    class FullQueue:
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            raise QueueCapacityError("Tenant pending-task capacity reached")
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(app.state, "queue", FullQueue(), raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Submit one bounded task",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return a scoped analysis"],
+            }],
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "30"
+    assert response.json()["detail"] == (
+        "Tenant task backlog is full; retry after active work completes"
+    )
 
 
 def test_agent_runtime_task_intake_rejects_unscoped_worker_tools(monkeypatch):
