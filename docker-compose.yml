@@ -44,8 +44,21 @@ services:
       RUSA_LOCAL_INSTALL_MODE: ${RUSA_LOCAL_INSTALL_MODE:-false}
       RUSA_LOCAL_API_KEYS_DB: /var/lib/rusa/local-api-keys.sqlite3
       RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:-}
-      # External RAG credentials belong only to the Agent Worker.
+      # The API does not need Worker-only repository, model, or connector credentials.
       RUSA_EXTERNAL_RAG_API_KEY: ""
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_WORKER_MODEL_API_KEY: ""
+      RUSA_WORKER_INFERENCE_API_KEYS: "{}"
+      RUSA_WORKER_INFERENCE_BASE_URL: ""
+      RUSA_WORKER_INFERENCE_GATEWAY: "false"
+      RUSA_WORKER_INFERENCE_DEADLINE_MS: ""
+      RUSA_INTERNAL_CA_BUNDLE: ""
+      RUSA_WORKSPACE_ROOT: ""
+      RUSA_GIT_MIRROR_ROOT: ""
+      RUSA_SANDBOX_IMAGE: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
+      RUSA_WEB_SESSION_SECRET: ""
       RUSA_WORKER_DATABASE_URL: ""
     ports:
       - "127.0.0.1:8000:8000"
