@@ -52,35 +52,65 @@ class AICodeRuntime:
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
-        external_rag_flag = os.getenv("RUSA_EXTERNAL_RAG_ENABLED", "false").strip().lower()
-        if external_rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
-            raise RuntimeError("RUSA_EXTERNAL_RAG_ENABLED must be a boolean value")
-        self.external_rag_client = None
-        if external_rag_flag in {"1", "true", "yes", "on"}:
-            import json
+        import json
 
-            endpoint = os.getenv("RUSA_EXTERNAL_RAG_ENDPOINT", "").strip()
-            token = os.getenv("RUSA_EXTERNAL_RAG_API_KEY", "")
-            try:
-                allowed_hosts = json.loads(os.getenv("RUSA_EXTERNAL_RAG_ALLOWED_HOSTS", "[]"))
-                timeout_seconds = float(os.getenv("RUSA_EXTERNAL_RAG_TIMEOUT_SECONDS", "15"))
-                max_response_bytes = int(os.getenv("RUSA_EXTERNAL_RAG_MAX_RESPONSE_BYTES", "1000000"))
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise RuntimeError("External RAG settings are invalid") from exc
-            if not isinstance(allowed_hosts, list) or any(
-                not isinstance(host, str) or not host.strip() for host in allowed_hosts
+        try:
+            raw_external_rag_connections = json.loads(
+                os.getenv("RUSA_EXTERNAL_RAG_CONNECTIONS_JSON", "{}")
+            )
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RUSA_EXTERNAL_RAG_CONNECTIONS_JSON must be a JSON object") from exc
+        if not isinstance(raw_external_rag_connections, dict):
+            raise RuntimeError(
+                "RUSA_EXTERNAL_RAG_CONNECTIONS_JSON must map tenant IDs to connection objects"
+            )
+        self.external_rag_clients = {}
+        external_credential_envs: set[str] = set()
+        external_tokens: set[str] = set()
+        for tenant_id, connection in raw_external_rag_connections.items():
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id.strip()
+                or len(tenant_id) > 128
+                or not isinstance(connection, dict)
             ):
-                raise RuntimeError("RUSA_EXTERNAL_RAG_ALLOWED_HOSTS must be a JSON array of hostnames")
+                raise RuntimeError("External RAG tenant or connection configuration is invalid")
+            allowed_fields = {
+                "endpoint", "allowed_hosts", "credential_env", "timeout_seconds",
+                "max_response_bytes",
+            }
+            if set(connection) - allowed_fields:
+                raise RuntimeError(f"External RAG connection for tenant {tenant_id} has unsupported settings")
+            endpoint = connection.get("endpoint")
+            allowed_hosts = connection.get("allowed_hosts")
+            credential_env = connection.get("credential_env")
+            if (
+                not isinstance(endpoint, str)
+                or not isinstance(allowed_hosts, list)
+                or any(not isinstance(host, str) or not host.strip() for host in allowed_hosts)
+                or not isinstance(credential_env, str)
+                or not re.fullmatch(r"RUSA_EXTERNAL_RAG_[A-Z0-9_]{1,64}", credential_env)
+            ):
+                raise RuntimeError(f"External RAG connection for tenant {tenant_id} is incomplete or invalid")
+            if credential_env in external_credential_envs:
+                raise RuntimeError("Each tenant external RAG connection must use a distinct credential variable")
+            external_credential_envs.add(credential_env)
+            token = os.getenv(credential_env, "")
+            if not token or token in external_tokens:
+                raise RuntimeError("Each tenant external RAG connection must use a distinct non-empty token")
+            external_tokens.add(token)
             try:
-                self.external_rag_client = ExternalRAGClient(
+                self.external_rag_clients[tenant_id] = ExternalRAGClient(
                     endpoint=endpoint,
                     bearer_token=token,
                     allowed_hosts=set(allowed_hosts),
-                    timeout_seconds=timeout_seconds,
-                    max_response_bytes=max_response_bytes,
+                    timeout_seconds=float(connection.get("timeout_seconds", 15)),
+                    max_response_bytes=int(connection.get("max_response_bytes", 1_000_000)),
                 )
             except (TypeError, ValueError) as exc:
-                raise RuntimeError("External RAG configuration failed validation") from exc
+                raise RuntimeError(
+                    f"External RAG connection for tenant {tenant_id} failed validation"
+                ) from exc
 
         import json
 
@@ -233,12 +263,14 @@ class AICodeRuntime:
             knowledge_project_id=(
                 self._knowledge_project_scope(task.repository.full_name)
                 if self.knowledge_service is not None
-                or getattr(self, "external_rag_client", None) is not None
+                or getattr(self, "external_rag_clients", {}).get(tenant_id) is not None
                 else None
             ),
-            external_rag_client=getattr(self, "external_rag_client", None),
+            external_rag_client=getattr(self, "external_rag_clients", {}).get(tenant_id),
             external_rag_tenant_id=(
-                tenant_id if getattr(self, "external_rag_client", None) is not None else None
+                tenant_id
+                if getattr(self, "external_rag_clients", {}).get(tenant_id) is not None
+                else None
             ),
             mcp_client=getattr(self, "mcp_clients", {}).get(tenant_id),
             mcp_tenant_id=(
