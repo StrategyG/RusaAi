@@ -9,7 +9,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from rusa_agents.queue import LeaseLostError, PostgresTaskQueue
+from rusa_agents.queue import LeaseLostError, PostgresTaskQueue, QueueCapacityExceededError
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -95,6 +95,80 @@ def test_concurrent_duplicate_enqueue_is_idempotent():
         assert queue.get(task_id, tenant)["status"] == "queued"
     finally:
         remove_task(task_id, tenant)
+
+
+def test_concurrent_tenant_enqueue_respects_pending_capacity():
+    tenant = f"queue-capacity-{uuid4().hex}"
+    queue = PostgresTaskQueue(
+        DSN, max_pending_tasks_per_tenant=3, max_active_jobs=1
+    )
+    queue.initialize()
+    task_ids = [str(uuid4()) for _ in range(12)]
+
+    def enqueue(task_id: str) -> bool:
+        try:
+            return queue.enqueue(
+                task_id, tenant, {"objective": "bounded admission"}, priority=100
+            )
+        except QueueCapacityExceededError:
+            return False
+
+    try:
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            accepted = list(pool.map(enqueue, task_ids))
+        assert sum(accepted) == 3
+        assert sum(queue.get(task_id, tenant) is not None for task_id in task_ids) == 3
+    finally:
+        for task_id in task_ids:
+            remove_task(task_id, tenant)
+
+
+def test_idempotent_retry_succeeds_when_tenant_queue_is_full():
+    tenant = f"queue-capacity-idempotent-{uuid4().hex}"
+    queue = PostgresTaskQueue(
+        DSN, max_pending_tasks_per_tenant=1, max_active_jobs=1
+    )
+    queue.initialize()
+    task_id = str(uuid4())
+    retry_id = str(uuid4())
+    payload = {"objective": "same logical request"}
+    key = "idempotency-" + uuid4().hex
+    try:
+        first = queue.enqueue_idempotent(task_id, tenant, payload, key)
+        second = queue.enqueue_idempotent(retry_id, tenant, payload, key)
+        assert first == (task_id, True, "queued")
+        assert second == (task_id, False, "queued")
+    finally:
+        remove_task(task_id, tenant)
+        remove_task(retry_id, tenant)
+
+
+def test_concurrent_worker_claims_respect_global_active_capacity():
+    tenant = f"queue-worker-capacity-{uuid4().hex}"
+    queue = PostgresTaskQueue(
+        DSN, max_pending_tasks_per_tenant=10, max_active_jobs=2
+    )
+    queue.initialize()
+    task_ids = [str(uuid4()) for _ in range(8)]
+    try:
+        for task_id in task_ids:
+            assert queue.enqueue(
+                task_id, tenant, {"objective": "global worker admission"}, priority=100
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            claims = list(pool.map(
+                lambda index: queue.claim(f"capacity-worker-{index}", lease_seconds=30),
+                range(8),
+            ))
+
+        claimed = [job for job in claims if job is not None]
+        assert len(claimed) == 2
+        assert len({job.task_id for job in claimed}) == 2
+        assert all(job.tenant_id == tenant for job in claimed)
+    finally:
+        for task_id in task_ids:
+            remove_task(task_id, tenant)
 
 
 def test_two_workers_cannot_claim_the_same_job_concurrently():
