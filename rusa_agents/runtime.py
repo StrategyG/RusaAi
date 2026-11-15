@@ -14,13 +14,13 @@ from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
+from .external_rag import ExternalRAGClient
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
-from .external_rag import ExternalRAGClient
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
