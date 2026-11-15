@@ -176,7 +176,7 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 - RusaModels #24: head 128343fe, latest 2/2 CI success.
 - RAG_Cerdas #28: head 84e9a134, 1/1 CI success.
 - RusaAi #119: the pre-refresh head f1e4b938 had 3/3 CI success. Subsequent documentation-only refresh commits advance the tracker head and trigger a new exact-head run; live PR metadata is authoritative. Do not reuse the previous head's result.
-- RusaAi #121: head f12642d7; RUSA-AI CI test/lint/security FAIL on the FIFO PostgreSQL deadlock (348 passed, 1 failed, 6 skipped), RAG/MCP PASS, image build/scan IN_PROGRESS; Web, VS Code extension and Windows launcher syntax CI PASS.
+- RusaAi #121: head f12642d7; RUSA-AI CI test/lint/security FAIL on the FIFO PostgreSQL deadlock (348 passed, 1 failed, 6 skipped), RAG/MCP PASS, image build/scan PASS; Web, VS Code extension and Windows launcher syntax CI PASS.
 - RusaModels #25: head 9cf2816d, CI PASS; RAG_Cerdas #30: head b7e314de, CI PASS. Both remain draft and out of sequence; they do not satisfy CHUNK 07 or CHUNK 08.
 - No reviews or inline review threads were present for #119, #117, #24, or #28 at the inspected snapshot. No merge was performed or authorized.
 
