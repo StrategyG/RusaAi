@@ -121,7 +121,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 
 ## 6. Current blockers
 
-- Three architecture-alignment PRs are open and ready for review, with no review submissions or inline review threads. RusaModels #24 is green 2/2 and RAG_Cerdas #28 is green 1/1. RusaAi #117 current exact head has a failing FIFO waiter test (336 passed, 1 failed, 6 skipped), RAG/MCP integration PASS, and image build/scan still running. GitHub reports all three mergeable, but no owner approval has been given; mainline documentation remains inconsistent until coordinated merge.
+- Three architecture-alignment PRs are open and ready for review, with no review submissions or inline review threads. RusaAi #117 (head 5f6b7c15), RusaModels #24 (128343fe), and RAG_Cerdas #28 (84e9a134) have green exact-head CI and are reported mergeable, but none is reviewed or merged; mainline documentation remains inconsistent. A separate newer run on out-of-sequence RusaAi PR #121 (head f12642d7) reproduced the FIFO test failure with a PostgreSQL advisory-lock/RowExclusiveLock deadlock (348 passed, 1 failed, 6 skipped), so the concurrency risk is not resolved by the passing #117 head.
 - RusaAi contains two ADR files with numeric identifier ADR-0002; the collision is explicitly an OPEN_DECISION and must be corrected in a dedicated reviewed change with repository-wide reference validation.
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
@@ -175,13 +175,16 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 - RusaAi #117: head 5f6b7c15, 3/3 CI success; 337 passed / 6 skipped, including the cross-process FIFO test.
 - RusaModels #24: head 128343fe, latest 2/2 CI success.
 - RAG_Cerdas #28: head 84e9a134, 1/1 CI success.
-- RusaAi #119: the pre-refresh head f1e4b938 had 3/3 CI success. The current refresh commit triggers a new exact-head run; do not reuse the previous head's result.
+- RusaAi #119: the pre-refresh head f1e4b938 had 3/3 CI success. Subsequent documentation-only refresh commits advance the tracker head and trigger a new exact-head run; live PR metadata is authoritative. Do not reuse the previous head's result.
+- RusaAi #121: head f12642d7; RUSA-AI CI test/lint/security FAIL on the FIFO PostgreSQL deadlock (348 passed, 1 failed, 6 skipped), RAG/MCP PASS, image build/scan IN_PROGRESS; Web, VS Code extension and Windows launcher syntax CI PASS.
+- RusaModels #25: head 9cf2816d, CI PASS; RAG_Cerdas #30: head b7e314de, CI PASS. Both remain draft and out of sequence; they do not satisfy CHUNK 07 or CHUNK 08.
 - No reviews or inline review threads were present for #119, #117, #24, or #28 at the inspected snapshot. No merge was performed or authorized.
 
 ### Updated risks and score
 
-- The repeated FIFO waiter failure is historical on earlier PR #117 heads; latest PR #117 head passes the test. Keep it monitored pending repeated/concurrent and staging evidence.
-- RusaAi #122 currently has a Ruff E731 lint failure; RusaAi #121 has a mixed/cancelled workflow state.
+- RusaAi PR #117 head 5f6b7c15 passes the FIFO test, but a newer independent PR #121 run reproduces a PostgreSQL DeadlockDetected in the same cross-process scheduler test (348 passed, 1 failed, 6 skipped). RSK-016 remains High and unresolved; CHUNK 06/11 cannot pass until lock-ordering is fixed and repeated tests pass.
+- RusaAi #122 head 947052c2 has a Ruff E731 lint failure. RusaAi #121 head f12642d7 has Web, VS Code and Windows launcher CI passing, RAG/MCP integration passing, but RUSA-AI test/lint/security failing on the FIFO deadlock while image build/scan remains in progress.
+- RusaModels #25 and RAG_Cerdas #30 are draft companion PRs for the same local-first workstream; all three (#121/#25/#30) are out of roadmap sequence and remain parked.
 - Direct Worker/MCP embedding credential paths, duplicate RusaAi ADR-0002 identifiers, mainline documentation drift, raw Trivy HIGH findings, missing staging/restore evidence, and absent approved model artifact remain open.
 - The ecosystem production-readiness score remains 45/100; this refresh adds no production or staging evidence and no score increase is justified.
 
