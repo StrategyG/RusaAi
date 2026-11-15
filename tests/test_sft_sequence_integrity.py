@@ -129,8 +129,10 @@ def test_split_validation_rejects_scenario_group_crossing_splits():
 
 
 def test_split_validation_requires_complete_scenario_id_coverage():
-    train = [_record("train-1", scenario_id="incident-family-1")]
-    evaluation = [_record("eval-1")]
+    train = [_record("train-1", scenario_id="incident-family-1", user_prompt="training scenario")]
+    # Keep this prompt distinct so the test reaches the scenario_id coverage
+    # guard instead of correctly failing earlier on prompt leakage.
+    evaluation = [_record("eval-1", user_prompt="held-out evaluation scenario")]
 
     with pytest.raises(DatasetValidationError, match="every record"):
         validate_dataset_splits(train, evaluation)
