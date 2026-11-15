@@ -234,3 +234,38 @@ PR #119 is the tracker PR itself. Immediately before this evidence append, its h
 ### Security and limitations
 
 RusaAi main image scan raw HIGH counts: 103, 118, 117, 103; CRITICAL 0. RusaModels main image scans: 47 HIGH OS and 1 HIGH Python finding per Model Server/worker image; CRITICAL 0. These are scanner findings and must be triaged; CI's --ignore-unfixed policy does not mean zero vulnerabilities. Branch-protection endpoint reads returned 403; local working-tree state and production/staging evidence remain NOT_VERIFIED.
+
+
+## 11. Live baseline refresh — 2026-11-15
+
+### Exact mainline evidence
+
+The three default branches remain at the recorded main SHAs:
+
+- RusaAi `1adac8d340e5870570910168b6626fe285dd2cf2`: 4/4 exact-SHA GitHub checks PASS. Main Python CI, production image build/scan, RAG/MCP integration, and Web CI are recorded in workflow 43354051026 and Web workflow 43354050892.
+- RusaModels `12c49b1372b230f3656be6e1badeabad870bcfa1`: 2/2 exact-SHA checks PASS in workflow 43358929126.
+- RAG_Cerdas `1ead461e76d563445d179e7d5e80c25a9ca9f059`: 11 exact-SHA check runs returned; one push-triggered test run 43312458157 reports 240 passed, and ten successful scheduled audit/agent-dispatch runs are not additional unit-test runs. The latest scheduled run inspected was 43676646067.
+
+GitHub branch metadata returned `protected=false` for `main` in all three repositories. Detailed branch-protection rules remain NOT_VERIFIED because the branch-protection endpoint returned HTTP 403. The direct GitHub pulls API returned 87 open PRs for RusaAi, 8 for RusaModels and 4 for RAG_Cerdas (99 total).
+
+### Current exact-head PR evidence
+
+| Repository / PR | Exact head SHA | CI evidence at this refresh | Review state |
+|---|---|---|---|
+| RusaAi #119 | Self-updating CHUNK 00 tracker branch | Previous head `f1e4b938` passed 3/3 in run 43558923727; subsequent documentation refresh commits restart CI. Use live PR metadata for the current head and do not transfer prior-head status. | No submitted review or inline thread |
+| RusaAi #117 | `5f6b7c150aa234a852e413749412a0f7929ef2c6` | 3/3 PASS in run 43679880047; 337 passed, 6 skipped, including the cross-process FIFO test. Raw Trivy HIGH findings remain. | No submitted review or inline thread |
+| RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS in run 43680033627. Raw Trivy HIGH findings remain. | No submitted review or inline thread |
+| RAG_Cerdas #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | 1/1 PASS in run 43680080103. Documentation-only alignment preserves IM19 isolation. | No submitted review or inline thread |
+| RusaAi #121 | `f12642d77442256b26da0b0f075d9510a6812435` | RUSA-AI CI run 43684334340: test/lint/security FAIL (348 passed, 1 failed, 6 skipped); RAG/MCP PASS; image build/scan still IN_PROGRESS at inspection. Web run 43684334336, VS Code run 43684334307 and Windows launcher syntax run 43684334333 PASS. | Draft; no review requested for merge |
+| RusaAi #122 | `947052c2cfaa79543224c138b3659cd1e3fb98f2` | RUSA-AI CI run 43677756943 failed Ruff E731 in tool_gateway.py; RAG/MCP and image build jobs PASS. Web run 43677757019 PASS. | Draft |
+| RusaModels #25 | `9cf2816d1a3ea19531ae16ef766f27a7ab8d2681` | CI run 43639127316 PASS. | Draft |
+| RAG_Cerdas #30 | `b7e314dec8596a89e7306391dfe3cd80c7552bc8` | CI run 43640363668 PASS. | Draft |
+| RAG_Cerdas #29 | `b8f4ae5d469b6d2850d50f86df99b2d263cba302` | CI run 43614568801 PASS. | Draft |
+
+The RusaAi #121 failure is not caused by the new local-first source paths alone: the repository-wide cross-process PostgreSQL FIFO admission test reproduced a deadlock. Captured child-process stderr reports `psycopg.errors.DeadlockDetected`: one process waited for an advisory lock while another waited for a RowExclusiveLock during `PostgresInferenceAdmissionController.initialize()` / `_lock_scheduler()`. The test ended with 348 passed, 1 failed, 6 skipped. This updates RSK-016 from a timing-sensitive waiter failure to a confirmed CI deadlock trace. Do not weaken the assertion or mask the deadlock by extending the polling timeout.
+
+### Roadmap sequencing and disposition
+
+RusaAi #121, RusaModels #25 and RAG_Cerdas #30 are draft local-first desktop / hardware / external-RAG candidates opened ahead of the dependency-approved roadmap chunks. They do not advance CHUNK 02, 05, 06, 07 or 08 and are not end-to-end integrated. Keep them parked and do not merge or count them as roadmap progress until their corresponding chunks become active and their exact-head checks, cross-repository contracts and owner approvals pass.
+
+PR #122 is a separate Agent/Worker queue hardening candidate with an outstanding Ruff E731 failure. It is not a substitute for the roadmap's CHUNK 06/11 concurrency root-cause work.
