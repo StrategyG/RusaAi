@@ -99,10 +99,18 @@ class MCPToolClient:
         )
         if not api_key or len(api_key) < 32 or len(api_key) > 512:
             raise ValueError("MCP bearer key must contain 32 to 512 characters")
-        if not allowed_tools or any(not isinstance(name, str) or not name for name in allowed_tools):
-            raise ValueError("an explicit non-empty MCP tool allowlist is required")
-        if timeout_seconds <= 0 or max_argument_bytes < 1024 or max_response_bytes < 1024:
-            raise ValueError("MCP client limits are invalid")
+        if (
+            not allowed_tools
+            or len(allowed_tools) > 64
+            or any(not isinstance(name, str) or not name.strip() or len(name) > 128 for name in allowed_tools)
+        ):
+            raise ValueError("MCP tool allowlist must contain 1–64 bounded tool names")
+        if (
+            not 1 <= timeout_seconds <= 60
+            or not 1024 <= max_argument_bytes <= 1_000_000
+            or not 1024 <= max_response_bytes <= 5_000_000
+        ):
+            raise ValueError("MCP client limits are outside the allowed bounds")
         self.api_key = api_key
         self.allowed_tools = frozenset(allowed_tools)
         self.timeout_seconds = timeout_seconds
@@ -116,7 +124,7 @@ class MCPToolClient:
 
         async with httpx2.AsyncClient(
             headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=httpx2.Timeout(30.0, read=self.timeout_seconds),
+            timeout=httpx2.Timeout(self.timeout_seconds),
             follow_redirects=False,
             trust_env=False,
         ) as http_client:
