@@ -94,6 +94,11 @@ class PostgresInferenceAdmissionController:
         """Create development tables or fail closed when production migration 010 is absent."""
         production = os.getenv("ENVIRONMENT", "development").lower() == "production"
         with self._connect() as conn:
+            # Serialize schema checks/creation with every scheduler mutation.
+            # Acquiring this only after CREATE INDEX can deadlock: initialization
+            # holds a relation lock while a live scheduler transaction holds the
+            # advisory lock and waits to update that same relation.
+            self._lock_scheduler(conn)
             if production:
                 tables = conn.execute(
                     """
@@ -188,7 +193,6 @@ class PostgresInferenceAdmissionController:
                 self.lease_seconds,
             )
             with conn.transaction():
-                self._lock_scheduler(conn)
                 if not production:
                     conn.execute(
                         """
