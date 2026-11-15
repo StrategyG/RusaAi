@@ -159,8 +159,10 @@ class AICodeRuntime:
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
             knowledge_project_id=self._knowledge_project_scope(task.repository.full_name),
-            external_rag_client=self.external_rag_client,
-            external_rag_tenant_id=tenant_id if self.external_rag_client is not None else None,
+            external_rag_client=getattr(self, "external_rag_client", None),
+            external_rag_tenant_id=(
+                tenant_id if getattr(self, "external_rag_client", None) is not None else None
+            ),
         )
         workers = [
             AutonomousCodeWorker(role, tenant_provider, gateway)
