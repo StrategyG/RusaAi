@@ -14,7 +14,8 @@ class DatasetValidationError(ValueError):
     """Raised when a training example violates the agent contract or policy."""
 
 
-_RECORD_KEYS = {"id", "agent_role", "messages", "response"}
+_RECORD_REQUIRED_KEYS = {"id", "agent_role", "messages", "response"}
+_RECORD_OPTIONAL_KEYS = {"scenario_id"}
 _RESPONSE_KEYS = {"message", "actions", "done", "blocked", "blockers"}
 _ACTION_ARGUMENTS = {
     "list_files": {"path"},
@@ -154,10 +155,22 @@ def validate_agent_response(agent_role: str | WorkerRole, response: Any) -> None
 
 
 def validate_record(record: Any) -> dict[str, Any]:
-    if not isinstance(record, dict) or set(record) != _RECORD_KEYS:
-        raise DatasetValidationError("record must contain exactly id, agent_role, messages, and response")
+    if (
+        not isinstance(record, dict)
+        or not _RECORD_REQUIRED_KEYS.issubset(record)
+        or set(record) - _RECORD_REQUIRED_KEYS - _RECORD_OPTIONAL_KEYS
+    ):
+        raise DatasetValidationError(
+            "record must contain id, agent_role, messages, response, and optional scenario_id only"
+        )
     if not isinstance(record["id"], str) or not record["id"].strip():
         raise DatasetValidationError("record.id must be a non-empty string")
+    if "scenario_id" in record and (
+        not isinstance(record["scenario_id"], str)
+        or not record["scenario_id"].strip()
+        or len(record["scenario_id"]) > 256
+    ):
+        raise DatasetValidationError("scenario_id must be a non-empty string up to 256 characters")
     role = _role(record["agent_role"])
     messages = record["messages"]
     if not isinstance(messages, list) or len(messages) < 2:
@@ -214,15 +227,46 @@ def record_fingerprint(record: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def prompt_fingerprint(record: dict[str, Any]) -> str:
+    """Fingerprint the role and complete prompt independently of its target response."""
+    payload = json.dumps(
+        {"agent_role": record["agent_role"], "messages": record["messages"]},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def validate_dataset_splits(train_records: list[dict[str, Any]], eval_records: list[dict[str, Any]]) -> None:
     train_ids = {item["id"] for item in train_records}
     eval_ids = {item["id"] for item in eval_records}
     if train_ids & eval_ids:
         raise DatasetValidationError("training and evaluation splits reuse record IDs")
+
     train_fingerprints = {record_fingerprint(item) for item in train_records}
     overlap = train_fingerprints & {record_fingerprint(item) for item in eval_records}
     if overlap:
         raise DatasetValidationError("training and evaluation splits contain duplicate examples")
+
+    train_prompts = {prompt_fingerprint(item) for item in train_records}
+    eval_prompts = {prompt_fingerprint(item) for item in eval_records}
+    if train_prompts & eval_prompts:
+        raise DatasetValidationError(
+            "training and evaluation splits reuse the same role/prompt content with different or identical targets"
+        )
+
+    all_records = [*train_records, *eval_records]
+    scenario_count = sum("scenario_id" in item for item in all_records)
+    if scenario_count and scenario_count != len(all_records):
+        raise DatasetValidationError(
+            "scenario_id must be present on every record in both splits when scenario grouping is used"
+        )
+    if scenario_count:
+        train_scenarios = {item["scenario_id"] for item in train_records}
+        eval_scenarios = {item["scenario_id"] for item in eval_records}
+        if train_scenarios & eval_scenarios:
+            raise DatasetValidationError("training and evaluation splits reuse scenario_id values")
 
 
 def validate_eval_distribution(
