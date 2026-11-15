@@ -16,12 +16,12 @@ The broad Agent/Worker role catalog is a proposal. Registry membership alone is 
 1. Reuse `aicode_jobs` as the only durable task queue.
 2. Validate a versioned TaskPlan/DAG before queue intake; derive tenant identity from the authenticated principal, never model output.
 3. Execute nodes sequentially on the CPU-first profile, with bounded node count, deadline, retry limit and dependency checks.
-4. Fence every queue transition and checkpoint write with the current job/task/tenant/worker/lease identity. Use monotonic checkpoint CAS to reject stale writers.
+4. Fence every queue transition and checkpoint write with the current job/task/tenant/worker/lease identity. Use monotonic checkpoint CAS to reject stale writers. Default worker workspace writes must hold the active queue row lock; read-only Tool Gateway operations must verify the current lease.
 5. Keep human approval distinct from retry. Generic retry is valid only for `failed`; approval-pending nodes require explicit approval bound to the exact plan fingerprint and eligible node IDs.
 6. Bound pending work per tenant with `RUSA_MAX_PENDING_TASKS_PER_TENANT` (default 1000), counting queued, running and approval-paused work. Bound active worker claims globally with `RUSA_MAX_PARALLEL_WORKERS` (default 1) using a transaction-scoped advisory lock.
 7. Keep tool execution behind the existing role allowlists, Policy Engine, Tool Gateway and sandbox. Do not grant tools because a role appears in the registry.
 8. Route all worker inference through the RusaAi Control Plane gateway/admission controller. RusaModels remains the Model Plane.
-9. Record durable HMAC-chained node outcome audit events without raw model output, tool arguments or secrets.
+9. Record durable HMAC-chained node outcome and actual Tool Gateway invocation events without raw model output, tool arguments or secrets. Persist a tool-intent event before execution and an outcome event after allow/deny/result.
 10. Keep the registry draft/disabled until role owners, source/rights reviewers, security, QA and the project owner approve activation.
 
 ## Consequences
@@ -30,7 +30,7 @@ The broad Agent/Worker role catalog is a proposal. Registry membership alone is 
 - The Agent Runtime DAG path is staged and fail-closed. The 24 registry roles are not activated.
 - Queue saturation returns HTTP 429 with a retry hint; idempotent replays are resolved before capacity checks.
 - All worker replicas must share the same global concurrency setting.
-- Actual per-tool invocation audit and external side-effect idempotency remain open implementation gaps.
+- Custom injected handlers and non-Gateway external side effects still require equivalent lease fencing, audit and idempotency contracts.
 - Production deployment is not certified by unit tests or CI alone.
 
 ## Migration and rollback
