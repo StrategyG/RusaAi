@@ -70,7 +70,7 @@ The connector does not automatically send local files, chat history, prompts bey
 
 The autonomous coding workers can call the read-only `search_external_rag` tool when the administrator enables the connector with `RUSA_EXTERNAL_RAG_ENABLED=true`. Configure the exact endpoint, matching hostname allowlist, and bearer credential using the `RUSA_EXTERNAL_RAG_*` worker environment variables. The runtime injects the authenticated task tenant and server-derived repository project scope as retrieval filters; the model cannot override them. Returned evidence includes source URI, immutable revision, SHA-256, locator and ranking score, and is explicitly labeled untrusted in the worker transcript.
 
-The connector is disabled by default and fails closed when incomplete or invalid. It is not yet exposed through a browser connection-management UI; credentials and endpoint policy are administrator-managed deployment secrets. Remote MCP is still a transport client foundation and is not yet exposed as an autonomous Agent tool.
+The connector is disabled by default and fails closed when incomplete or invalid. When no connector is configured, the remote tool is omitted from the Agent prompt. If a configured provider becomes unavailable, the tool returns a bounded non-fatal unavailable result so the local planner can continue with local inference and local knowledge. It is not yet exposed through a browser connection-management UI; credentials and endpoint policy are administrator-managed deployment secrets. Remote MCP is still a transport client foundation and is not yet exposed as an autonomous Agent tool.
 
 ## Agent routing boundary
 
