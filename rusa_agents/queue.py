@@ -842,7 +842,7 @@ class PostgresTaskQueue:
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
-        """Explicitly requeue a failed or approval-paused task for a tenant."""
+        """Explicitly requeue a terminal failed task for a tenant."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
