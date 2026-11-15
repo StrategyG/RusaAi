@@ -9,7 +9,8 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from rusa_agents.queue import LeaseLostError, PostgresTaskQueue
+from rusa_agents.memory import LeaseBoundMemory, PostgresMemory
+from rusa_agents.queue import LeaseLostError, PostgresTaskQueue, QueueCapacityExceededError
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
@@ -38,6 +39,14 @@ def remove_task(task_id: str, tenant_id: str) -> None:
             (task_id, tenant_id),
         )
 
+
+
+def remove_memory(task_id: str, tenant_id: str) -> None:
+    with psycopg.connect(DSN) as connection:
+        connection.execute(
+            "DELETE FROM aicode_memory WHERE task_id=%s AND tenant_id=%s",
+            (task_id, tenant_id),
+        )
 
 def claim_specific_task(task_id: str, tenant_id: str, worker_id: str) -> tuple[int, str]:
     token = str(uuid4())
@@ -256,3 +265,180 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
     finally:
         release_publish.set()
         remove_task(task_id, tenant)
+
+
+def test_tenant_pending_capacity_is_enforced_and_tenant_scoped(monkeypatch):
+    monkeypatch.setenv("RUSA_MAX_PENDING_TASKS_PER_TENANT", "1")
+    queue = make_queue()
+    tenant_a = f"queue-capacity-a-{uuid4().hex}"
+    tenant_b = f"queue-capacity-b-{uuid4().hex}"
+    first, blocked, other = str(uuid4()), str(uuid4()), str(uuid4())
+    try:
+        assert queue.enqueue(first, tenant_a, {"objective": "first"})
+        with pytest.raises(QueueCapacityExceededError) as error:
+            queue.enqueue(blocked, tenant_a, {"objective": "blocked"})
+        assert error.value.limit == 1
+        assert error.value.pending == 1
+        assert queue.enqueue(other, tenant_b, {"objective": "other tenant"})
+    finally:
+        remove_task(first, tenant_a)
+        remove_task(blocked, tenant_a)
+        remove_task(other, tenant_b)
+
+
+def test_idempotent_replay_is_resolved_before_capacity_check(monkeypatch):
+    monkeypatch.setenv("RUSA_MAX_PENDING_TASKS_PER_TENANT", "1")
+    queue = make_queue()
+    tenant = f"queue-capacity-replay-{uuid4().hex}"
+    original_task = str(uuid4())
+    replay_task = str(uuid4())
+    payload = {"objective": "same idempotent task"}
+    try:
+        created = queue.enqueue_idempotent(
+            original_task, tenant, payload, "capacity-replay-key"
+        )
+        replayed = queue.enqueue_idempotent(
+            replay_task, tenant, payload, "capacity-replay-key"
+        )
+        assert created == (original_task, True, "queued")
+        assert replayed == (original_task, False, "queued")
+    finally:
+        remove_task(original_task, tenant)
+        remove_task(replay_task, tenant)
+
+
+def test_concurrent_enqueues_cannot_exceed_tenant_capacity(monkeypatch):
+    monkeypatch.setenv("RUSA_MAX_PENDING_TASKS_PER_TENANT", "3")
+    queue = make_queue()
+    tenant = f"queue-capacity-race-{uuid4().hex}"
+    task_ids = [str(uuid4()) for _ in range(16)]
+
+    def enqueue_one(index: int) -> bool:
+        try:
+            return queue.enqueue(
+                task_ids[index], tenant, {"objective": f"task-{index}"}
+            )
+        except QueueCapacityExceededError:
+            return False
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            outcomes = list(pool.map(enqueue_one, range(len(task_ids))))
+        assert sum(outcomes) == 3
+        assert queue.list(tenant)["total"] == 3
+    finally:
+        for task_id in task_ids:
+            remove_task(task_id, tenant)
+
+
+def test_global_active_task_limit_is_shared_across_tenants(monkeypatch):
+    monkeypatch.setenv("RUSA_MAX_ACTIVE_TASKS", "1")
+    queue = make_queue()
+    tenant_a = f"queue-active-a-{uuid4().hex}"
+    tenant_b = f"queue-active-b-{uuid4().hex}"
+    task_a, task_b = str(uuid4()), str(uuid4())
+    try:
+        assert queue.enqueue(task_a, tenant_a, {"objective": "tenant a"}, priority=2**31 - 1)
+        assert queue.enqueue(task_b, tenant_b, {"objective": "tenant b"}, priority=2**31 - 1)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claims = list(pool.map(
+                lambda worker: queue.claim(worker, lease_seconds=30),
+                ("active-worker-a", "active-worker-b"),
+            ))
+        claimed = [job for job in claims if job is not None]
+        assert len(claimed) == 1
+        assert claimed[0].task_id in {task_a, task_b}
+    finally:
+        remove_task(task_a, tenant_a)
+        remove_task(task_b, tenant_b)
+
+
+def test_generic_retry_does_not_resume_approval_paused_task():
+    queue = make_queue()
+    tenant = f"queue-approval-retry-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "approval pause"})
+        job = queue.claim("approval-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.await_approval(
+            job.id, tenant, "approval-worker", job.lease_token, "operator review required"
+        )
+        assert not queue.retry(task_id, tenant)
+        assert queue.get(task_id, tenant)["status"] == "awaiting_approval"
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_nonretryable_failure_is_terminal_until_explicit_retry():
+    queue = make_queue()
+    tenant = f"queue-nonretryable-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "permanent failure"})
+        job = queue.claim("nonretryable-worker", lease_seconds=30)
+        assert job and job.task_id == task_id
+        assert queue.fail(
+            job.id, tenant, "nonretryable-worker", job.lease_token,
+            "policy or deterministic validation failure", retryable=False,
+        )
+        assert queue.get(task_id, tenant)["status"] == "failed"
+        assert queue.retry(task_id, tenant)
+        assert queue.get(task_id, tenant)["status"] == "queued"
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_lease_bound_callback_rejects_a_stale_worker_without_side_effect():
+    queue = make_queue()
+    tenant = f"queue-stale-write-{uuid4().hex}"
+    task_id = str(uuid4())
+    side_effects = []
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "stale writer"})
+        stale = queue.claim("stale-writer", lease_seconds=30)
+        assert stale and stale.task_id == task_id
+        expire_lease(stale.id, tenant)
+        replacement = queue.claim("replacement-writer", lease_seconds=30)
+        assert replacement and replacement.task_id == task_id
+
+        with pytest.raises(LeaseLostError, match="active task lease"):
+            queue.with_lease_owned(
+                stale.id, tenant, "stale-writer", stale.lease_token,
+                lambda: side_effects.append("stale write"),
+            )
+        assert side_effects == []
+        assert queue.owns_lease(
+            replacement.id, tenant, "replacement-writer", replacement.lease_token
+        )
+    finally:
+        remove_task(task_id, tenant)
+
+
+def test_lease_bound_memory_rejects_stale_checkpoint_write():
+    queue = make_queue()
+    memory = PostgresMemory(DSN)
+    memory.initialize()
+    tenant = f"queue-memory-fence-{uuid4().hex}"
+    task_id = str(uuid4())
+    try:
+        assert queue.enqueue(task_id, tenant, {"objective": "memory fencing"})
+        stale = queue.claim("memory-stale-writer", lease_seconds=30)
+        assert stale and stale.task_id == task_id
+        expire_lease(stale.id, tenant)
+        replacement = queue.claim("memory-replacement", lease_seconds=30)
+        assert replacement and replacement.task_id == task_id
+
+        fenced_memory = LeaseBoundMemory(
+            memory, queue, stale.id, task_id, tenant,
+            "memory-stale-writer", stale.lease_token,
+        )
+        with pytest.raises(LeaseLostError):
+            fenced_memory.save(
+                task_id, "StrategyG/RusaAi", "working",
+                {"must_not_persist": True}, tenant_id=tenant,
+            )
+        assert memory.get(task_id, tenant_id=tenant) is None
+    finally:
+        remove_task(task_id, tenant)
+        remove_memory(task_id, tenant)
