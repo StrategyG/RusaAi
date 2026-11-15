@@ -37,7 +37,12 @@ class Job:
 class PostgresTaskQueue:
     """Multi-worker queue. PostgreSQL is the source of truth; SKIP LOCKED avoids double claims."""
 
-    def __init__(self, dsn: str, max_pending_per_tenant: int | None = None):
+    def __init__(
+        self,
+        dsn: str,
+        max_pending_per_tenant: int | None = None,
+        max_active_workers: int | None = None,
+    ):
         if not dsn:
             raise ValueError("PostgreSQL DSN is required")
         if max_pending_per_tenant is None:
@@ -47,8 +52,16 @@ class PostgresTaskQueue:
                 raise ValueError("RUSA_MAX_PENDING_TASKS_PER_TENANT must be an integer") from exc
         if type(max_pending_per_tenant) is not int or not 1 <= max_pending_per_tenant <= 10000:
             raise ValueError("max_pending_per_tenant must be between 1 and 10000")
+        if max_active_workers is None:
+            try:
+                max_active_workers = int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "1"))
+            except ValueError as exc:
+                raise ValueError("RUSA_MAX_PARALLEL_WORKERS must be an integer") from exc
+        if type(max_active_workers) is not int or not 1 <= max_active_workers <= 32:
+            raise ValueError("max_active_workers must be between 1 and 32")
         self.dsn = dsn
         self.max_pending_per_tenant = max_pending_per_tenant
+        self.max_active_workers = max_active_workers
 
     def _connect(self):
         try:
@@ -450,6 +463,15 @@ class PostgresTaskQueue:
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
                 WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
             """)
+            # Serialize claims around a global active-worker count. The row-level
+            # SKIP LOCKED claim below still provides per-task exclusivity.
+            conn.execute("SELECT pg_advisory_xact_lock(741203092)")
+            active = conn.execute(
+                "SELECT COUNT(*) FROM public.aicode_jobs "
+                "WHERE status='running' AND lease_until > NOW()"
+            ).fetchone()
+            if active and int(active[0]) >= self.max_active_workers:
+                return None
             row = conn.execute("""
                 WITH candidate AS (
                     SELECT id FROM aicode_jobs
