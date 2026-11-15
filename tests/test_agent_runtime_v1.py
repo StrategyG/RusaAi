@@ -789,6 +789,27 @@ async def test_run_once_dispatches_explicit_agent_runtime_queue_job(tmp_path, mo
     assert checkpoint["state"] == "agent_runtime_checkpoint"
     assert checkpoint["checkpoint_version"] >= 2
 
+    audit_rows = [
+        json.loads(line)
+        for line in (tmp_path / "queue-agent-runtime-audit.jsonl").read_text().splitlines()
+    ]
+    node_events = [
+        row for row in audit_rows if row["event"] == "agent_runtime.node.result"
+    ]
+    assert len(node_events) == 1
+    event = node_events[0]
+    assert event["actor"] == "worker-queue"
+    assert event["task_id"] == job.task_id
+    assert event["tenant_id"] == job.tenant_id
+    assert event["timestamp"]
+    assert event["details"]["node_id"] == "node_queue_dispatch"
+    assert event["details"]["scope"] == "worker"
+    assert event["details"]["tool_allowlist"] == []
+    assert event["details"]["decision"] == "allow"
+    assert event["details"]["result_status"] == "completed"
+    assert "summary" not in event["details"]
+    assert "content" not in event["details"]
+
 
 @pytest.mark.asyncio
 async def test_run_once_publishes_agent_runtime_changes_only_after_ci(tmp_path, monkeypatch):
