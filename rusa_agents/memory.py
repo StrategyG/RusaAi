@@ -147,3 +147,64 @@ class PostgresMemory:
             "tenant_id": row[0], "task_id": row[1], "repository": row[2],
             "state": row[3], "payload": payload, "updated_at": row[5].isoformat(),
         }
+
+
+class LeaseBoundMemory:
+    """Fence legacy AICode memory reads and writes with the current queue lease."""
+
+    def __init__(
+        self,
+        memory: Any,
+        queue: Any,
+        job_id: int,
+        task_id: str,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        lease_seconds: int = 180,
+    ) -> None:
+        self.memory = memory
+        self.queue = queue
+        self.job_id = job_id
+        self.task_id = task_id
+        self.tenant_id = tenant_id
+        self.worker_id = worker_id
+        self.lease_token = lease_token
+        self.lease_seconds = lease_seconds
+
+    def _with_lease(self, task_id: str, tenant_id: str, operation):
+        if task_id != self.task_id:
+            raise PermissionError("Memory task does not match the active queue job")
+        if tenant_id != self.tenant_id:
+            raise PermissionError("Memory tenant does not match the active queue lease")
+        return self.queue.with_lease_owned(
+            self.job_id,
+            self.tenant_id,
+            self.worker_id,
+            self.lease_token,
+            operation,
+            lease_seconds=self.lease_seconds,
+        )
+
+    def save(
+        self,
+        task_id: str,
+        repository: str,
+        state: str,
+        payload: dict[str, Any],
+        tenant_id: str = "default",
+    ) -> None:
+        return self._with_lease(
+            task_id,
+            tenant_id,
+            lambda: self.memory.save(
+                task_id, repository, state, payload, tenant_id=tenant_id
+            ),
+        )
+
+    def get(self, task_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
+        return self._with_lease(
+            task_id,
+            tenant_id,
+            lambda: self.memory.get(task_id, tenant_id=tenant_id),
+        )
