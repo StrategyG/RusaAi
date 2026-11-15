@@ -6,12 +6,15 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 from __future__ import annotations  # noqa: I001
 
 import json
+import logging
 import os
 import re
 import shutil
 import stat
 import subprocess  # nosec B404 - only fixed argv operations with shell=False are exposed
 import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -20,6 +23,9 @@ from uuid import uuid4
 from .agent_tools import ROLE_CHECK_PROFILES, ROLE_TOOL_ALLOWLIST
 from .contracts import WorkerRole
 from .metrics import TOOL_EXECUTIONS
+from .queue import LeaseLostError
+
+logger = logging.getLogger(__name__)
 
 DOCKER_BIN = shutil.which("docker")
 GIT_BIN = shutil.which("git")
@@ -87,11 +93,19 @@ class DockerSandbox:
                     "Pinned sandbox image is not present in the worker's rootless Docker daemon"
                 )
 
-    def run(self, workspace: Path, profile: str) -> ToolResult:
+    def run(
+        self, workspace: Path, profile: str, cancel_event: Any | None = None
+    ) -> ToolResult:
         if not DOCKER_BIN:
             return ToolResult(False, "Docker CLI is not installed in the worker image.")
         if profile not in self.PROFILES:
             raise ToolDenied(f"Unknown validation profile: {profile}")
+        if cancel_event is not None and cancel_event.is_set():
+            return ToolResult(
+                False,
+                "Sandbox execution cancelled before container start.",
+                {"profile": profile, "cancelled": True},
+            )
         workspace = workspace.resolve(strict=True)
         if not workspace.is_dir():
             raise ToolDenied("Sandbox workspace must be a directory")
@@ -187,29 +201,92 @@ class DockerSandbox:
                 self.image,
                 *self.PROFILES[profile],
             ]
-            try:
-                completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
-                    command,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.timeout_seconds,
-                    env={key: value for key, value in os.environ.items()
-                         if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
-                )
-            except FileNotFoundError as exc:
-                return ToolResult(False, "Docker executable is unavailable; sandbox checks cannot run.", {"error": str(exc)})
-            except subprocess.TimeoutExpired:
+            run_env = {
+                key: value for key, value in os.environ.items()
+                if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}
+            }
+
+            def remove_container() -> None:
                 try:
                     subprocess.run(  # nosec B603 - fixed cleanup argv, shell=False
                         [DOCKER_BIN, "rm", "-f", container_name],
                         check=False, capture_output=True, text=True, timeout=30,
-                        env={key: value for key, value in os.environ.items()
-                             if key in {"PATH", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT", "HOME"}},
+                        env=run_env,
                     )
                 except (OSError, subprocess.TimeoutExpired):
-                    pass
-                return ToolResult(False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.")
+                    logger.warning("Could not remove sandbox container %s", container_name)
+
+            if cancel_event is None:
+                try:
+                    completed = subprocess.run(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout_seconds,
+                        env=run_env,
+                    )
+                except FileNotFoundError as exc:
+                    return ToolResult(
+                        False, "Docker executable is unavailable; sandbox checks cannot run.",
+                        {"error": str(exc)},
+                    )
+                except subprocess.TimeoutExpired:
+                    remove_container()
+                    return ToolResult(
+                        False, f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout."
+                    )
+            else:
+                try:
+                    process = subprocess.Popen(  # nosec B603 - fixed profile argv, shell=False
+                        command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=run_env,
+                    )
+                except FileNotFoundError as exc:
+                    return ToolResult(
+                        False, "Docker executable is unavailable; sandbox checks cannot run.",
+                        {"error": str(exc)},
+                    )
+
+                deadline = time.monotonic() + self.timeout_seconds
+                while True:
+                    if cancel_event.is_set():
+                        remove_container()
+                        try:
+                            process.communicate(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.communicate()
+                        return ToolResult(
+                            False,
+                            "Sandbox execution cancelled because the owning task lease was revoked.",
+                            {"profile": profile, "cancelled": True, "snapshot_bytes": totals[0]},
+                        )
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        remove_container()
+                        try:
+                            process.communicate(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.communicate()
+                        return ToolResult(
+                            False,
+                            f"Sandbox profile '{profile}' exceeded {self.timeout_seconds}s timeout.",
+                            {"profile": profile, "timeout": True, "snapshot_bytes": totals[0]},
+                        )
+                    try:
+                        stdout, stderr = process.communicate(timeout=min(1.0, remaining))
+                        completed = subprocess.CompletedProcess(
+                            command, process.returncode, stdout, stderr
+                        )
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+
             output = (completed.stdout + "\n" + completed.stderr)[-20000:]
             return ToolResult(
                 completed.returncode == 0,
@@ -259,6 +336,16 @@ class WorkspaceToolGateway:
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
         knowledge_project_id: str | None = None,
+        *,
+        audit_log: Any | None = None,
+        task_id: str | None = None,
+        tenant_id: str | None = None,
+        worker_id: str | None = None,
+        repository_scope: str | None = None,
+        audit_required: bool = False,
+        lease_guard: Callable[[], bool] | None = None,
+        lease_bound_write: Callable[[Callable[[], Any]], Any] | None = None,
+        cancel_event: Any | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -279,6 +366,19 @@ class WorkspaceToolGateway:
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
         self.knowledge_project_id = knowledge_project_id
+        self.audit_log = audit_log
+        self.task_id = task_id
+        self.tenant_id = tenant_id or knowledge_tenant_id or "default"
+        self.worker_id = worker_id
+        self.repository_scope = repository_scope
+        self.audit_required = audit_required
+        self.lease_guard = lease_guard
+        self.lease_bound_write = lease_bound_write
+        self.cancel_event = cancel_event
+        if self.audit_required and (
+            self.audit_log is None or not self.task_id or not self.worker_id or not self.tenant_id
+        ):
+            raise ValueError("Required tool audit needs an audit store and complete task identity")
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -387,7 +487,11 @@ class WorkspaceToolGateway:
         allowed_profiles = ROLE_CHECK_PROFILES
         if profile not in allowed_profiles.get(role, set()):
             raise ToolDenied(f"{role.value} worker cannot run the {profile} validation profile")
-        return self.sandbox.run(self.workspace, profile)
+        if self.cancel_event is None:
+            return self.sandbox.run(self.workspace, profile)
+        return self.sandbox.run(
+            self.workspace, profile, cancel_event=self.cancel_event
+        )
 
     def git_diff(self) -> ToolResult:
         if not GIT_BIN:
@@ -476,7 +580,7 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge", "agent_id": agent_id},
         )
 
-    def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+    def _execute_action(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
         if not isinstance(action, dict):
             raise ToolDenied("Tool action must be an object")
         name = action.get("name")
@@ -510,7 +614,14 @@ class WorkspaceToolGateway:
             elif name == "read_file":
                 result = self.read_file(args.get("path", ""))
             elif name == "write_file":
-                result = self.write_file(args.get("path", ""), args.get("content", ""), role)
+                operation = lambda: self.write_file(
+                    args.get("path", ""), args.get("content", ""), role
+                )
+                result = (
+                    self.lease_bound_write(operation)
+                    if self.lease_bound_write is not None
+                    else operation()
+                )
             elif name == "run_check":
                 result = self.run_check(args.get("profile", ""), role)
             elif name == "search_knowledge":
@@ -529,3 +640,89 @@ class WorkspaceToolGateway:
             TOOL_EXECUTIONS.labels(name, "denied").inc()
             raise
         raise ToolDenied(f"Tool '{name}' is not registered")
+
+
+    def _record_tool_event(
+        self,
+        event: str,
+        tool_name: str,
+        role: WorkerRole,
+        decision: str,
+        outcome: str,
+        argument_keys: list[str],
+        *,
+        result_ok: bool | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        if self.audit_log is None:
+            if self.audit_required:
+                raise RuntimeError("Required tool audit store is unavailable")
+            return
+        if not self.task_id or not self.worker_id or not self.tenant_id:
+            if self.audit_required:
+                raise RuntimeError("Required tool audit identity is incomplete")
+            return
+        details = {
+            "tool": tool_name[:64],
+            "role": getattr(role, "value", str(role))[:64],
+            "scope": {
+                "repository": self.repository_scope,
+                "project_id": self.knowledge_project_id,
+            },
+            "decision": decision,
+            "outcome": outcome,
+            "argument_keys": sorted(argument_keys)[:16],
+            "result_ok": result_ok,
+            "error_type": error_type,
+        }
+        # The audit store receives metadata only: never raw arguments, file
+        # contents, model output, tool output, credentials, or lease tokens.
+        self.audit_log.record(
+            event,
+            self.task_id,
+            self.worker_id,
+            details,
+            tenant_id=self.tenant_id,
+        )
+
+    def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+        tool_name = (
+            action.get("name")
+            if isinstance(action, dict) and isinstance(action.get("name"), str)
+            else "invalid"
+        )
+        arguments = action.get("arguments", {}) if isinstance(action, dict) else {}
+        argument_keys = (
+            [str(key)[:64] for key in arguments]
+            if isinstance(arguments, dict)
+            else []
+        )
+        self._record_tool_event(
+            "tool.intent", tool_name, role, "requested", "pending", argument_keys
+        )
+        try:
+            if self.lease_guard is not None and not self.lease_guard():
+                raise LeaseLostError("Tool invocation rejected because the task lease is no longer owned")
+            result = self._execute_action(action, role)
+        except Exception as exc:
+            denied = isinstance(exc, (ToolDenied, LeaseLostError, PermissionError))
+            self._record_tool_event(
+                "tool.outcome",
+                tool_name,
+                role,
+                "deny" if denied else "allow",
+                "error",
+                argument_keys,
+                error_type=type(exc).__name__,
+            )
+            raise
+        self._record_tool_event(
+            "tool.outcome",
+            tool_name,
+            role,
+            "allow",
+            "success" if result.ok else "failure",
+            argument_keys,
+            result_ok=result.ok,
+        )
+        return result
