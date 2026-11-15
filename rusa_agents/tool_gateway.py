@@ -5,6 +5,7 @@ The workspace is a staging checkout. The Docker sandbox is the execution boundar
 """
 from __future__ import annotations  # noqa: I001
 
+import asyncio
 import json
 import os
 import re
@@ -259,6 +260,8 @@ class WorkspaceToolGateway:
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
         knowledge_project_id: str | None = None,
+        external_rag_client: Any | None = None,
+        external_rag_tenant_id: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -279,6 +282,12 @@ class WorkspaceToolGateway:
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
         self.knowledge_project_id = knowledge_project_id
+        if external_rag_client is not None and (
+            not isinstance(external_rag_tenant_id, str) or not external_rag_tenant_id.strip()
+        ):
+            raise ValueError("external RAG tenant identity must come from the authenticated task")
+        self.external_rag_client = external_rag_client
+        self.external_rag_tenant_id = external_rag_tenant_id
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -433,6 +442,61 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge", "collection": collection, "agent_id": agent_id},
         )
 
+    def _search_external_rag(self, args: dict[str, Any], role: WorkerRole) -> ToolResult:
+        if self.external_rag_client is None or not self.external_rag_tenant_id:
+            raise ToolDenied("Administrator-approved external RAG is not enabled for this worker")
+        query = args.get("query")
+        top_k = args.get("top_k", 5)
+        if not isinstance(query, str) or not query.strip() or len(query) > 2000:
+            raise ToolDenied("External RAG query must contain 1–2000 characters")
+        if type(top_k) is not int or not 1 <= top_k <= 10:
+            raise ToolDenied("External RAG top_k must be between 1 and 10")
+        filters = {"tenant_id": self.external_rag_tenant_id}
+        if self.knowledge_project_id:
+            filters["project_id"] = self.knowledge_project_id
+        try:
+            results = asyncio.run(
+                self.external_rag_client.search(query, top_k=top_k, filters=filters)
+            )
+        except Exception as exc:
+            # Do not expose provider response bodies, credentials, or raw transport details.
+            from .external_rag import ExternalRAGError
+            if isinstance(exc, (ExternalRAGError, ValueError)):
+                raise ToolDenied(f"External RAG retrieval failed: {exc}") from None
+            raise ToolDenied("External RAG provider is unavailable") from None
+        evidence = [
+            {
+                "id": item.evidence_id,
+                "text": item.text,
+                "source": {
+                    "uri": item.source_uri,
+                    "title": item.title,
+                    "revision": item.revision,
+                    "content_sha256": item.content_sha256,
+                    "locator": item.locator,
+                },
+                "score": item.score,
+                "metadata": item.metadata or {},
+                "trust": "untrusted_external_evidence",
+            }
+            for item in results
+        ]
+        output = json.dumps(
+            {"query": query, "results": evidence},
+            ensure_ascii=False,
+            allow_nan=False,
+        )[:12_000]
+        return ToolResult(
+            True,
+            output,
+            {
+                "source": "external_rag",
+                "tenant_id": self.external_rag_tenant_id,
+                "project_id": self.knowledge_project_id,
+                "result_count": len(evidence),
+            },
+        )
+
     def _get_knowledge_document(self, args: dict[str, Any], role: WorkerRole) -> ToolResult:
         service, tenant_id = self._knowledge_context()
         document_id = args.get("document_id")
@@ -495,6 +559,7 @@ class WorkspaceToolGateway:
             # Accept the legacy collection argument for compatibility, but the
             # handler always uses the server-configured collection and ignores it.
             "search_knowledge": {"query", "collection", "limit"},
+            "search_external_rag": {"query", "top_k"},
             "get_document": {"document_id", "collection"},
             "list_collections": set(),
         }
@@ -515,6 +580,8 @@ class WorkspaceToolGateway:
                 result = self.run_check(args.get("profile", ""), role)
             elif name == "search_knowledge":
                 result = self._search_knowledge(args, role)
+            elif name == "search_external_rag":
+                result = self._search_external_rag(args, role)
             elif name == "get_document":
                 result = self._get_knowledge_document(args, role)
             elif name == "list_collections":
