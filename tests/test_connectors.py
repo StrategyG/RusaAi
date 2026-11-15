@@ -1,3 +1,4 @@
+import sys
 from types import ModuleType
 
 import pytest
@@ -55,8 +56,8 @@ def test_external_rag_rejects_endpoint_outside_hostname_allowlist():
 
 
 def test_mcp_connections_are_isolated_per_tenant(monkeypatch):
-    monkeypatch.setitem(__import__("sys").modules, "httpx2", ModuleType("httpx2"))
-    monkeypatch.setitem(__import__("sys").modules, "mcp", ModuleType("mcp"))
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
+    monkeypatch.setitem(sys.modules, "mcp", ModuleType("mcp"))
     environ = {
         "RUSA_MCP_CONNECTIONS_JSON": (
             '{"tenant-a":{"server_url":"https://mcp-a.example.org/mcp",'
@@ -78,8 +79,8 @@ def test_mcp_connections_are_isolated_per_tenant(monkeypatch):
 
 
 def test_mcp_rejects_shared_tenant_credentials(monkeypatch):
-    monkeypatch.setitem(__import__("sys").modules, "httpx2", ModuleType("httpx2"))
-    monkeypatch.setitem(__import__("sys").modules, "mcp", ModuleType("mcp"))
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
+    monkeypatch.setitem(sys.modules, "mcp", ModuleType("mcp"))
     environ = {
         "RUSA_MCP_CONNECTIONS_JSON": (
             '{"tenant-a":{"server_url":"https://mcp-a.example.org/mcp",'
@@ -97,8 +98,8 @@ def test_mcp_rejects_shared_tenant_credentials(monkeypatch):
 
 
 def test_mcp_rejects_host_not_in_administrator_allowlist(monkeypatch):
-    monkeypatch.setitem(__import__("sys").modules, "httpx2", ModuleType("httpx2"))
-    monkeypatch.setitem(__import__("sys").modules, "mcp", ModuleType("mcp"))
+    monkeypatch.setitem(sys.modules, "httpx2", ModuleType("httpx2"))
+    monkeypatch.setitem(sys.modules, "mcp", ModuleType("mcp"))
     environ = {
         "RUSA_MCP_CONNECTIONS_JSON": (
             '{"tenant-a":{"server_url":"https://unexpected.example.org/mcp",'
