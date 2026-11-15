@@ -269,3 +269,41 @@ No PR was merged. CHUNK 01 remains PARTIAL. The required merge order remains Rus
 ### NEXUS intake boundary
 
 RusaModels main contains a strict Model Manifest v1, immutable artifact/version records and a draft-to-approved release lifecycle. No NEXUS/Argon model artifact or NEXUS-specific registration exists on RusaModels main. The RusaAi #123 assessment branch is a draft intake-boundary/remediation proposal, not a registered or approved model. Actual NEXUS source revision, tokenizer files, model weights, license evidence and checksummed artifacts remain prerequisites for a later CHUNK 04 candidate intake.
+
+
+## 16. NEXUS dual-model architecture decision and training gate — 2026-11-15
+
+### Decision recorded
+
+- Project-owner decision: **NEXUS Foundation LLM is trained from scratch; NEXUS Agent LLM is a separate model with its own checkpoint and training lineage.**
+- Qwen is prohibited as a NEXUS base, target, teacher, tokenizer, or lineage dependency.
+- The Agent initialization method remains `OPEN_DECISION`; it must be decided before training. Foundation parameter budget, exact dimensions, tokenizer vocabulary/context, general corpus token target, and compute envelope also remain open.
+- NEXUS Argon v5.8.2 remains a DevOps/SRE specialist candidate. It is not the Foundation or Agent model.
+- The supplied 50K DevOps chunks are not the sole Foundation pretraining corpus. Package-reported counts and optimizer-consumption claims require independent reconciliation before reuse.
+
+### Current architecture PRs
+
+| Repository | PR | Head SHA | Scope | Status at refresh |
+|---|---:|---|---|---|
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `30630895c870e70aa3b77080accbcf515124a39c` | Ecosystem architecture reconciliation + ADR-0003 + mission clarification | Open; exact-head CI run 43733130737 was IN_PROGRESS at refresh; reviewer confirmation pending |
+| RusaModels | [#26](https://github.com/StrategyG/RusaModels/pull/26) | `589d4e30d414e401fc924d702ce16d8914219a00` | ADR-TRAIN-002, legacy Qwen workflow warning, ADR-TRAIN-001 supersession | Draft/open; exact-head CI run 43733279709 was IN_PROGRESS at refresh |
+
+RusaModels PR #26 is a documentation companion and is intended to align with RusaAi ADR-0003. Neither PR is merged. RusaAi PR #117 also includes the explicit distinction that the RUSA-AI product includes NEXUS models while the current RusaAi repository owns the Control Plane.
+
+### Training dependencies and block
+
+- RusaModels PR #14 (Carbon-Tiny from-scratch CPU trainer), #17 (dataset engine), #18 (benchmark engine), and #20 (architecture/tokenizer engine) remain open PR candidates. #14/#17/#18 were based on an older main SHA; #20 is draft and stacked on #14. They are not merged production capabilities and do not prove production-scale NEXUS training.
+- Existing Qwen QLoRA commands/configs remain a legacy isolated six-role SFT experiment, not a NEXUS dependency.
+- No tokenizer training, Foundation pretraining, Agent training, fine-tuning, or NEXUS bulk ingestion has been started or authorized.
+- Training status: **BLOCKED** until the NEXUS Training Authorization Gate (TAG) passes: dependency baseline, distinct model identities, frozen architecture/tokenizer, approved dataset releases and rights, trainer integrity, compute feasibility, security/supply-chain controls, frozen evaluation suites, and named owner approvals.
+
+### Roadmap artifact
+
+The project roadmap v3.1 has been prepared as `RUSA_AI_ECOSYSTEM_CHATGPT_ROADMAP_EN_v3.1_NEXUS_DUAL_MODEL.md`. It records the dual-model decision, lifecycle, training strategy, dataset governance, TAG, and N0–N8 acceptance gates. This is a project artifact; it is not a merged repository change.
+
+### Current disposition
+
+- CHUNK 00 baseline: prior exact-head baseline checks are recorded above; PR #119's current head `10b71c23ae6369d49181df2892263e4c47bbb351` has workflow 43727344615 completed successfully.
+- CHUNK 01 architecture reconciliation: **PARTIAL**; companion PRs and reviewer/merge gates remain open.
+- CHUNK 04 model lifecycle and all NEXUS training: **BLOCKED** by CHUNK 01/02/03 dependencies and unresolved model identity/compute/data decisions.
+- No PR merged; no main branch, model artifact, training environment, production deployment, or production data was changed.
