@@ -12,26 +12,32 @@ ROLE_TOOL_ALLOWLIST = {
     WorkerRole.ANALYST: frozenset({
         "list_files", "read_file", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
     WorkerRole.ARCHITECT: frozenset({
         "list_files", "read_file", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
     WorkerRole.DEVELOPER: frozenset({
         "list_files", "read_file", "write_file", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
     WorkerRole.DEBUGGER: frozenset({
         "list_files", "read_file", "run_check", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
     WorkerRole.TESTER: frozenset({
         "list_files", "read_file", "run_check", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
     WorkerRole.SECURITY: frozenset({
         "list_files", "read_file", "run_check", "git_diff",
         "search_knowledge", "get_document", "list_collections",
+        "search_external_rag",
     }),
 }
 
