@@ -1,9 +1,11 @@
 import subprocess
 from pathlib import Path
+from threading import Event
 
 import pytest
 
 from rusa_agents.contracts import WorkerRole
+from rusa_agents.queue import LeaseLostError
 from rusa_agents.tool_gateway import DockerSandbox, ToolDenied, WorkspaceToolGateway
 
 
@@ -155,3 +157,157 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+class RecordingAudit:
+    def __init__(self):
+        self.events = []
+
+    def record(self, event, task_id, actor, details, tenant_id):
+        self.events.append({
+            "event": event,
+            "task_id": task_id,
+            "actor": actor,
+            "details": details,
+            "tenant_id": tenant_id,
+        })
+
+
+def test_tool_gateway_audits_intent_and_outcome_without_raw_arguments(tmp_path):
+    (tmp_path / "source.py").write_text("SAFE_CONTENT")
+    audit = RecordingAudit()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        audit_log=audit,
+        task_id="task-audit-1",
+        tenant_id="tenant-audit",
+        worker_id="worker-audit",
+        repository_scope="StrategyG/RusaAi",
+        audit_required=True,
+    )
+
+    result = gateway.execute(
+        {"name": "read_file", "arguments": {"path": "source.py"}},
+        WorkerRole.ANALYST,
+    )
+
+    assert result.ok
+    assert [item["event"] for item in audit.events] == [
+        "tool.intent", "tool.outcome"
+    ]
+    assert all(item["task_id"] == "task-audit-1" for item in audit.events)
+    assert all(item["actor"] == "worker-audit" for item in audit.events)
+    assert all(item["tenant_id"] == "tenant-audit" for item in audit.events)
+    assert audit.events[0]["details"]["decision"] == "requested"
+    assert audit.events[1]["details"]["decision"] == "allow"
+    assert audit.events[1]["details"]["result_ok"] is True
+    assert audit.events[0]["details"]["scope"]["repository"] == "StrategyG/RusaAi"
+    assert audit.events[0]["details"]["argument_keys"] == ["path"]
+    assert "source.py" not in repr(audit.events)
+    assert "SAFE_CONTENT" not in repr(audit.events)
+
+
+def test_tool_gateway_audits_denial_and_never_writes_after_lease_loss(tmp_path):
+    audit = RecordingAudit()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        audit_log=audit,
+        task_id="task-stale-1",
+        tenant_id="tenant-stale",
+        worker_id="worker-stale",
+        repository_scope="StrategyG/RusaAi",
+        audit_required=True,
+        lease_guard=lambda: False,
+        lease_bound_write=lambda operation: operation(),
+    )
+
+    with pytest.raises(LeaseLostError):
+        gateway.execute(
+            {
+                "name": "write_file",
+                "arguments": {"path": "src/never.py", "content": "DO_NOT_WRITE"},
+            },
+            WorkerRole.DEVELOPER,
+        )
+
+    assert not (tmp_path / "src" / "never.py").exists()
+    assert [item["event"] for item in audit.events] == [
+        "tool.intent", "tool.outcome"
+    ]
+    assert audit.events[1]["details"]["decision"] == "deny"
+    assert audit.events[1]["details"]["error_type"] == "LeaseLostError"
+    assert "DO_NOT_WRITE" not in repr(audit.events)
+    assert "never.py" not in repr(audit.events)
+
+
+def test_required_tool_audit_failure_blocks_execution(tmp_path):
+    class BrokenAudit:
+        def record(self, *args, **kwargs):
+            raise RuntimeError("audit store unavailable")
+
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        audit_log=BrokenAudit(),
+        task_id="task-audit-fail",
+        tenant_id="tenant-audit-fail",
+        worker_id="worker-audit-fail",
+        audit_required=True,
+    )
+
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        gateway.execute(
+            {
+                "name": "write_file",
+                "arguments": {"path": "src/blocked.py", "content": "not written"},
+            },
+            WorkerRole.DEVELOPER,
+        )
+
+    assert not (tmp_path / "src" / "blocked.py").exists()
+
+
+def test_sandbox_cancellation_removes_active_container(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "source.py").write_text("print('safe')")
+    cancelled = Event()
+    captured = {"cleanup": None}
+
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.calls = 0
+
+        def communicate(self, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                cancelled.set()
+                raise subprocess.TimeoutExpired("docker", timeout)
+            self.returncode = 0
+            return "", ""
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    def fake_popen(command, **kwargs):
+        assert command[0] == "/usr/bin/docker"
+        return FakeProcess()
+
+    def fake_run(command, **kwargs):
+        captured["cleanup"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("rusa_agents.tool_gateway.DOCKER_BIN", "/usr/bin/docker")
+    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("rusa_agents.tool_gateway.subprocess.run", fake_run)
+
+    result = DockerSandbox(image="sandbox:test", timeout_seconds=10).run(
+        workspace, "pytest", cancel_event=cancelled
+    )
+
+    assert not result.ok
+    assert result.evidence["cancelled"] is True
+    assert captured["cleanup"][:3] == ["/usr/bin/docker", "rm", "-f"]
