@@ -132,6 +132,7 @@ class AICodeRuntime:
         from rusa_mcp.client import MCPToolClient
 
         credential_envs: set[str] = set()
+        mcp_tokens: set[str] = set()
         for tenant_id, connection in raw_mcp_connections.items():
             if (
                 not isinstance(tenant_id, str)
@@ -168,8 +169,9 @@ class AICodeRuntime:
                 raise RuntimeError("Each tenant MCP connection must use a distinct credential environment variable")
             credential_envs.add(credential_env)
             token = os.getenv(credential_env, "")
-            if not token:
-                raise RuntimeError(f"MCP credential environment variable {credential_env} is empty")
+            if not token or token in mcp_tokens:
+                raise RuntimeError("Each tenant MCP connection must use a distinct non-empty bearer token")
+            mcp_tokens.add(token)
             try:
                 self.mcp_clients[tenant_id] = MCPToolClient(
                     server_url=endpoint,
