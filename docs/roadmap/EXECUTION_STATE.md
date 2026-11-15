@@ -245,3 +245,27 @@ RusaAi PR #121 current head `70d4f082e49105d62db678179cd6ec84109eeb66` has 4/4 a
 - RAG_Cerdas PR #28 review 5910264729 records this merge prerequisite. No ruleset change is authorized.
 - RusaAi PR #117 run 43703955776 remains IN_PROGRESS in the production image build/test/scan job; its RAG/MCP and Test/lint/security jobs have passed. The tracker PR #119 head `e24056726bddd3829953cb097d3a2cfa6d3812cd` is running workflow 43704538764 after the execution-state/evidence-ledger refresh.
 - No PR has been merged. CHUNK 01 remains PARTIAL.
+
+
+## 15. Live baseline and CHUNK 01 review refresh — 2026-11-15 14:58 UTC
+
+### CHUNK 00 exact-head recheck
+
+- Coordinator PR [#119](https://github.com/StrategyG/RusaAi/pull/119) was rechecked at head `8424918df9abe54de66543c66deec779eb4e40df`.
+- Workflow [43704970382](https://github.com/StrategyG/RusaAi/actions/runs/43704970382) initially failed its Test/lint/security job because the cross-process PostgreSQL FIFO admission test encountered `DeadlockDetected` and did not observe the expected two waiting requests (336 passed, 1 failed, 6 skipped).
+- The failed job was rerun without changing source code. Attempt 2 completed all three workflow jobs successfully; the test job reports 337 passed and 6 skipped. CHUNK 00 remains PASS as a read-only baseline audit on this exact head.
+- This retry does not close RSK-016: the same scheduler test has failed on other exact PR heads and one retry pass is not repeated-race or staging crash/restart evidence.
+
+### Current CHUNK 01 PR state
+
+| Repository | PR | Exact head SHA | Current exact-head CI | Review / governance state | Merge |
+|---|---:|---|---|---|---|
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | 3/3 PASS in run 43703955776 | Reviews 5910229219, 5910245817 and 5910269063 are COMMENTED; the Copilot mission wording clarification remains unresolved | Open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `7ca01d6373c1b90aadc0182461982754ca54afce` | 2/2 PASS in run 43704012560; 156 passed, 1 skipped | Review comments were addressed with service-specific OpenAPI descriptions and a regression test | Open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `84e9a13450c4b107d470eed775c1bb0998981acb` | 1/1 PASS in run 43680080103 | Review 5910264729 records active ruleset `Rag` (ID 25698740), requiring 10 approving reviews, latest-push approval, resolved threads, linear history, signed commits and CodeQL; no bypass actors | Open |
+
+No PR was merged. CHUNK 01 remains PARTIAL. The required merge order remains RusaModels #24, RAG_Cerdas #28, then refresh and merge RusaAi #117 last, subject to explicit owner approval and all repository rules. CHUNK 02–04 remain blocked by the CHUNK 01 dependency; NEXUS model intake must not bypass this gate.
+
+### NEXUS intake boundary
+
+RusaModels main contains a strict Model Manifest v1, immutable artifact/version records and a draft-to-approved release lifecycle. No NEXUS/Argon model artifact or NEXUS-specific registration exists on RusaModels main. The RusaAi #123 assessment branch is a draft intake-boundary/remediation proposal, not a registered or approved model. Actual NEXUS source revision, tokenizer files, model weights, license evidence and checksummed artifacts remain prerequisites for a later CHUNK 04 candidate intake.

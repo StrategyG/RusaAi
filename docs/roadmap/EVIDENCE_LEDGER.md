@@ -319,3 +319,14 @@ This exact-head verification closes CHUNK 00 as a **read-only baseline audit**. 
 | CH01-RV-011 | RAG_Cerdas PR #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | Review ID 5910264729 | Records the active ruleset as a merge prerequisite; no ruleset mutation performed |
 
 RusaAi and RusaModels have no active repository rulesets at this refresh. GitHub branch metadata reports `protected=false` for all three main branches, but that metadata alone does not reveal the active RAG_Cerdas repository ruleset. No branch protection, ruleset, permission, or bypass setting was changed.
+
+
+## 14. CHUNK 00 retry and CHUNK 01 current-head evidence — 2026-11-15
+
+| Evidence ID | Chunk | Repository | Commit SHA / identifier | Evidence type | Result | URL / notes |
+|---|---|---|---|---|---|---|
+| CH00-RF-001 | 00 | RusaAi | PR #119 head `8424918df9abe54de66543c66deec779eb4e40df`; workflow `43704970382`, attempt 1 | Exact-head CI | FAIL | Test/lint/security failed in `test_fifo_admission_is_shared_across_separate_os_processes`: PostgreSQL `DeadlockDetected`; expected two waiting scheduler requests. This is recorded as reliability risk RSK-016, not a model-training failure. |
+| CH00-RF-002 | 00 | RusaAi | Same exact PR head; workflow `43704970382`, attempt 2, test job `132851282466` | Exact-head CI rerun | PASS | All 3 workflow jobs completed successfully. Test/lint/security: 337 passed, 6 skipped. [Workflow run](https://github.com/StrategyG/RusaAi/actions/runs/43704970382). Retry did not modify source code and does not close RSK-016. |
+| CH01-RF-001 | 01 | RusaAi | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | PR-head CI | PASS | [Run 43703955776](https://github.com/StrategyG/RusaAi/actions/runs/43703955776): 3/3 checks successful. Review 5910245817's Copilot mission wording clarification remains open. |
+| CH01-RF-002 | 01 | RusaModels | `7ca01d6373c1b90aadc0182461982754ca54afce` | PR-head CI | PASS | [Run 43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560): 2/2 checks successful; 156 passed, 1 skipped. |
+| CH01-RF-003 | 01 | RAG_Cerdas | `84e9a13450c4b107d470eed775c1bb0998981acb` | PR-head CI | PASS | [Run 43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103): 1/1 check successful. Active ruleset 25698740 requires 10 approving reviews; review 5910264729 records this merge gate. |
