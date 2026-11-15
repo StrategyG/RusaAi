@@ -72,9 +72,6 @@ RUSA_MODEL_API_KEY=
 RUSA_RAG_ENABLED=false
 "@
     Set-Content -Path $envPath -Value $content -Encoding ASCII
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    & icacls.exe $envPath /inheritance:r /grant:r "${identity}:(F)" "SYSTEM:(F)" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not restrict access to the local .env file." }
 }
 
 $envContent = Get-Content -Path $envPath -Raw
@@ -84,6 +81,11 @@ if ($envContent -notmatch "(?m)^RUSA_LOCAL_SETUP_TOKEN=.{32,}$") {
 if ($envContent -notmatch "(?m)^RUSA_LOCAL_INSTALL_MODE=true$") {
     throw "The existing .env is not configured for local install mode. Create a local .env with RUSA_LOCAL_INSTALL_MODE=true before rerunning this launcher."
 }
+
+# Apply restrictive ACLs to both newly created and pre-existing local secrets.
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls.exe $envPath /inheritance:r /grant:r "${identity}:(F)" "SYSTEM:(F)" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Could not restrict access to the local .env file." }
 
 Push-Location $repoRoot
 try {
