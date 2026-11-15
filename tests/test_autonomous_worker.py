@@ -97,3 +97,16 @@ def test_autonomous_worker_cannot_supply_forged_test_evidence():
     result = asyncio.run(worker.run(make_task(), []))
     assert not result.success
     assert not result.evidence
+
+
+def test_local_only_worker_does_not_advertise_external_rag():
+    gateway = StubGateway()
+    provider = StubProvider(json.dumps({
+        "message": "Local-only analysis complete",
+        "actions": [],
+        "done": True,
+    }))
+    worker = AutonomousCodeWorker(WorkerRole.ANALYST, provider, gateway)
+    result = asyncio.run(worker.run(make_task(), []))
+    assert result.success
+    assert "search_external_rag" not in provider.response
