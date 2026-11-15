@@ -619,8 +619,8 @@ class AICodeRuntime:
                     "decision": decision_by_status.get(result_status, "unknown"),
                     "result_status": result_status,
                     "attempts": node_result.get("attempts", 0),
-                    "evidence_count": len(evidence_refs) if isinstance(evidence_refs, list) else 0,
-                    "artifact_count": len(artifacts) if isinstance(artifacts, list) else 0,
+                    "evidence_count": len(evidence_refs) if isinstance(evidence_refs, (list, tuple)) else 0,
+                    "artifact_count": len(artifacts) if isinstance(artifacts, (list, tuple)) else 0,
                 },
                 tenant_id=job.tenant_id,
             )
