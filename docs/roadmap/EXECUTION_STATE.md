@@ -55,9 +55,9 @@ No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `25dd631d4e26c64cd5b94edf438ee0fe39d2ea5a` | Test/lint/security FAIL (FIFO waiter assertion); RAG/MCP PASS; image build/scan IN_PROGRESS (run 43558557983) | Ready/open |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (latest run 43554181866) | Ready/open |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `7780922e617702f9934899acffabc8a3bd1cf673` | 1/1 PASS after MCP credential-boundary documentation update (run 43558570258) | Ready/open |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `5f6b7c150aa234a852e413749412a0f7929ef2c6` | 3/3 PASS in run 43679880047; 337 passed / 6 skipped | Ready/open |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS (run 43680033627) | Ready/open |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `84e9a13450c4b107d470eed775c1bb0998981acb` | 1/1 PASS (run 43680080103) | Ready/open |
 
 PR #117 now includes:
 - Cross-repository architecture reconciliation v1.0.
