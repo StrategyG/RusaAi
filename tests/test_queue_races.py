@@ -15,8 +15,15 @@ DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
 
 
-def make_queue(max_pending_per_tenant: int = 1000) -> PostgresTaskQueue:
-    queue = PostgresTaskQueue(DSN, max_pending_per_tenant=max_pending_per_tenant)
+def make_queue(
+    max_pending_per_tenant: int = 1000,
+    max_active_workers: int = 1,
+) -> PostgresTaskQueue:
+    queue = PostgresTaskQueue(
+        DSN,
+        max_pending_per_tenant=max_pending_per_tenant,
+        max_active_workers=max_active_workers,
+    )
     queue.initialize()
     return queue
 
@@ -61,6 +68,29 @@ def claim_specific_task(task_id: str, tenant_id: str, worker_id: str) -> tuple[i
 def remove_tenant_tasks(tenant_id: str) -> None:
     with psycopg.connect(DSN) as connection:
         connection.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
+
+
+
+def test_global_active_worker_limit_is_enforced_across_tasks():
+    queue = make_queue(max_active_workers=1)
+    tenant = f"queue-worker-cap-{uuid4().hex}"
+    first_id, second_id = str(uuid4()), str(uuid4())
+    try:
+        assert queue.enqueue(first_id, tenant, {"objective": "first"}, priority=100)
+        assert queue.enqueue(second_id, tenant, {"objective": "second"}, priority=99)
+        first = queue.claim("bounded-worker-a", lease_seconds=30)
+        assert first is not None and first.task_id == first_id
+        assert queue.claim("bounded-worker-b", lease_seconds=30) is None
+        assert queue.complete(
+            first.id, tenant, "bounded-worker-a", first.lease_token, {"result": "done"}
+        )
+        second = queue.claim("bounded-worker-b", lease_seconds=30)
+        assert second is not None and second.task_id == second_id
+        assert queue.complete(
+            second.id, tenant, "bounded-worker-b", second.lease_token, {"result": "done"}
+        )
+    finally:
+        remove_tenant_tasks(tenant)
 
 
 def test_tenant_pending_queue_capacity_is_enforced_without_cross_tenant_blocking():
