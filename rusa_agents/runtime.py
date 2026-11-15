@@ -374,7 +374,10 @@ class AICodeRuntime:
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
-                    retryable=record.state == TaskState.FAILED,
+                    # Orchestrator summaries do not carry a typed transient-error
+                    # contract. Fail closed; only classified transport exceptions
+                    # in the outer worker path are eligible for automatic retry.
+                    retryable=False,
                 )
                 outcome = "failed"
                 return True
