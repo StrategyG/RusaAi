@@ -186,7 +186,7 @@ class AICodeRuntime:
             tenant_id=tenant_id,
             worker_id=getattr(self, "worker_id", None),
             repository_scope=task.repository.full_name,
-            audit_required=getattr(self.config, "environment", "development") == "production",
+            audit_required=getattr(getattr(self, "config", None), "environment", "development") == "production",
             lease_guard=lease_guard,
             lease_bound_write=lease_bound_write,
             cancel_event=lost_lease,
