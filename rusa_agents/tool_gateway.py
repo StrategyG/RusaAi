@@ -262,6 +262,8 @@ class WorkspaceToolGateway:
         knowledge_project_id: str | None = None,
         external_rag_client: Any | None = None,
         external_rag_tenant_id: str | None = None,
+        mcp_client: Any | None = None,
+        mcp_tenant_id: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -288,6 +290,12 @@ class WorkspaceToolGateway:
             raise ValueError("external RAG tenant identity must come from the authenticated task")
         self.external_rag_client = external_rag_client
         self.external_rag_tenant_id = external_rag_tenant_id
+        if mcp_client is not None and (
+            not isinstance(mcp_tenant_id, str) or not mcp_tenant_id.strip()
+        ):
+            raise ValueError("MCP tenant identity must come from the authenticated task")
+        self.mcp_client = mcp_client
+        self.mcp_tenant_id = mcp_tenant_id
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -442,6 +450,81 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge", "collection": collection, "agent_id": agent_id},
         )
 
+    def _list_mcp_tools(self) -> ToolResult:
+        if self.mcp_client is None or not self.mcp_tenant_id:
+            raise ToolDenied("Administrator-approved MCP is not enabled for this tenant")
+        try:
+            tools = asyncio.run(self.mcp_client.list_tools())
+        except Exception:
+            return ToolResult(
+                False,
+                "Remote MCP is unavailable; continue with local tools and knowledge.",
+                {"source": "remote_mcp", "tenant_id": self.mcp_tenant_id, "available": False},
+            )
+        output = json.dumps(
+            {"tools": tools, "trust": "untrusted_remote_mcp_metadata"},
+            ensure_ascii=False,
+            allow_nan=False,
+        )[:12_000]
+        return ToolResult(
+            True,
+            output,
+            {
+                "source": "remote_mcp",
+                "tenant_id": self.mcp_tenant_id,
+                "available": True,
+                "tool_count": len(tools),
+            },
+        )
+
+    def _call_mcp_tool(self, args: dict[str, Any]) -> ToolResult:
+        if self.mcp_client is None or not self.mcp_tenant_id:
+            raise ToolDenied("Administrator-approved MCP is not enabled for this tenant")
+        tool_name = args.get("tool_name")
+        arguments = args.get("arguments", {})
+        if not isinstance(tool_name, str) or not tool_name.strip() or len(tool_name) > 128:
+            raise ToolDenied("MCP tool_name must contain 1–128 characters")
+        if not isinstance(arguments, dict):
+            raise ToolDenied("MCP tool arguments must be an object")
+        try:
+            result = asyncio.run(self.mcp_client.call_tool(tool_name, arguments))
+        except Exception as exc:
+            from rusa_mcp.client import MCPToolError
+            message = (
+                f"Remote MCP call unavailable: {exc}"
+                if isinstance(exc, MCPToolError)
+                else "Remote MCP server is unavailable; continue with local tools."
+            )
+            return ToolResult(
+                False,
+                message[:1000],
+                {
+                    "source": "remote_mcp",
+                    "tenant_id": self.mcp_tenant_id,
+                    "tool_name": tool_name,
+                    "available": False,
+                },
+            )
+        output = json.dumps(
+            {
+                "tool_name": tool_name,
+                "result": result,
+                "trust": "untrusted_remote_mcp_result",
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+        )[:12_000]
+        return ToolResult(
+            True,
+            output,
+            {
+                "source": "remote_mcp",
+                "tenant_id": self.mcp_tenant_id,
+                "tool_name": tool_name,
+                "available": True,
+            },
+        )
+
     def _search_external_rag(self, args: dict[str, Any], role: WorkerRole) -> ToolResult:
         if self.external_rag_client is None or not self.external_rag_tenant_id:
             raise ToolDenied("Administrator-approved external RAG is not enabled for this worker")
@@ -573,6 +656,8 @@ class WorkspaceToolGateway:
             # handler always uses the server-configured collection and ignores it.
             "search_knowledge": {"query", "collection", "limit"},
             "search_external_rag": {"query", "top_k"},
+            "list_mcp_tools": set(),
+            "call_mcp_tool": {"tool_name", "arguments"},
             "get_document": {"document_id", "collection"},
             "list_collections": set(),
         }
@@ -595,6 +680,10 @@ class WorkspaceToolGateway:
                 result = self._search_knowledge(args, role)
             elif name == "search_external_rag":
                 result = self._search_external_rag(args, role)
+            elif name == "list_mcp_tools":
+                result = self._list_mcp_tools()
+            elif name == "call_mcp_tool":
+                result = self._call_mcp_tool(args)
             elif name == "get_document":
                 result = self._get_knowledge_document(args, role)
             elif name == "list_collections":
