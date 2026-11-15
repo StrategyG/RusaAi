@@ -112,3 +112,5 @@ def test_local_only_worker_does_not_advertise_external_rag():
     result = asyncio.run(worker.run(make_task(), []))
     assert result.success
     assert "search_external_rag" not in provider.prompts[0][0]
+    assert "list_mcp_tools" not in provider.prompts[0][0]
+    assert "call_mcp_tool" not in provider.prompts[0][0]
