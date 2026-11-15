@@ -459,11 +459,24 @@ class WorkspaceToolGateway:
                 self.external_rag_client.search(query, top_k=top_k, filters=filters)
             )
         except Exception as exc:
-            # Do not expose provider response bodies, credentials, or raw transport details.
+            # A remote outage must not disable local inference or local knowledge.
+            # Expose only bounded, credential-free client errors to the local planner.
             from .external_rag import ExternalRAGError
-            if isinstance(exc, (ExternalRAGError, ValueError)):
-                raise ToolDenied(f"External RAG retrieval failed: {exc}") from None
-            raise ToolDenied("External RAG provider is unavailable") from None
+            message = (
+                f"External RAG is unavailable: {exc}"
+                if isinstance(exc, (ExternalRAGError, ValueError))
+                else "External RAG provider is unavailable; continue with local sources."
+            )
+            return ToolResult(
+                False,
+                message[:1000],
+                {
+                    "source": "external_rag",
+                    "tenant_id": self.external_rag_tenant_id,
+                    "project_id": self.knowledge_project_id,
+                    "available": False,
+                },
+            )
         evidence = [
             {
                 "id": item.evidence_id,
