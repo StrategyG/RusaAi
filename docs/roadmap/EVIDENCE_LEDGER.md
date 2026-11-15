@@ -256,7 +256,7 @@ GitHub branch metadata returned `protected=false` for `main` in all three reposi
 | RusaAi #117 | `5f6b7c150aa234a852e413749412a0f7929ef2c6` | 3/3 PASS in run 43679880047; 337 passed, 6 skipped, including the cross-process FIFO test. Raw Trivy HIGH findings remain. | No submitted review or inline thread |
 | RusaModels #24 | `128343fee6973fe19158182a4c8b40c5be5a72c2` | 2/2 PASS in run 43680033627. Raw Trivy HIGH findings remain. | No submitted review or inline thread |
 | RAG_Cerdas #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | 1/1 PASS in run 43680080103. Documentation-only alignment preserves IM19 isolation. | No submitted review or inline thread |
-| RusaAi #121 | `f12642d77442256b26da0b0f075d9510a6812435` | RUSA-AI CI run 43684334340: test/lint/security FAIL (348 passed, 1 failed, 6 skipped); RAG/MCP PASS; image build/scan still IN_PROGRESS at inspection. Web run 43684334336, VS Code run 43684334307 and Windows launcher syntax run 43684334333 PASS. | Draft; no review requested for merge |
+| RusaAi #121 | `f12642d77442256b26da0b0f075d9510a6812435` | RUSA-AI CI run 43684334340: test/lint/security FAIL (348 passed, 1 failed, 6 skipped); RAG/MCP and image build/scan PASS. Web run 43684334336, VS Code run 43684334307 and Windows launcher syntax run 43684334333 PASS. | Draft; no review requested for merge |
 | RusaAi #122 | `947052c2cfaa79543224c138b3659cd1e3fb98f2` | RUSA-AI CI run 43677756943 failed Ruff E731 in tool_gateway.py; RAG/MCP and image build jobs PASS. Web run 43677757019 PASS. | Draft |
 | RusaModels #25 | `9cf2816d1a3ea19531ae16ef766f27a7ab8d2681` | CI run 43639127316 PASS. | Draft |
 | RAG_Cerdas #30 | `b7e314dec8596a89e7306391dfe3cd80c7552bc8` | CI run 43640363668 PASS. | Draft |
