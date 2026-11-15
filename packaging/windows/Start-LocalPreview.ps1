@@ -23,9 +23,13 @@ if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "Docker Desktop is not installed. Install Docker Desktop, enable its WSL2 backend, restart Windows, then rerun this preview launcher."
 }
-docker compose version | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$composeVersionText = docker compose version --short
+if ($LASTEXITCODE -ne 0 -or $composeVersionText -notmatch "v?(\d+)\.(\d+)\.(\d+)") {
     throw "Docker Compose v2 is required."
+}
+$composeVersion = [version]("$($matches[1]).$($matches[2]).$($matches[3])")
+if ($composeVersion -lt [version]"2.24.0") {
+    throw "Docker Compose 2.24.0 or newer is required for optional worker-only connector secrets."
 }
 
 try {
