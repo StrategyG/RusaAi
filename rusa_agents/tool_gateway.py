@@ -259,6 +259,11 @@ class WorkspaceToolGateway:
         knowledge_tenant_id: str | None = None,
         knowledge_collection: str = "agent",
         knowledge_project_id: str | None = None,
+        audit_log: Any | None = None,
+        audit_task_id: str | None = None,
+        audit_tenant_id: str | None = None,
+        audit_actor: str = "worker",
+        project_scope: str | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve(strict=True)
         if not self.workspace.is_dir():
@@ -279,6 +284,11 @@ class WorkspaceToolGateway:
         self.knowledge_tenant_id = knowledge_tenant_id
         self.knowledge_collection = knowledge_collection
         self.knowledge_project_id = knowledge_project_id
+        self.audit_log = audit_log
+        self.audit_task_id = audit_task_id
+        self.audit_tenant_id = audit_tenant_id
+        self.audit_actor = audit_actor
+        self.project_scope = project_scope
 
     def _resolve(self, raw_path: str) -> Path:
         if not isinstance(raw_path, str) or not raw_path.strip():
@@ -476,7 +486,52 @@ class WorkspaceToolGateway:
             {"source": "tenant_knowledge", "agent_id": agent_id},
         )
 
+    def _record_tool_audit(
+        self, tool_name: Any, role: WorkerRole, decision: str, result: str
+    ) -> None:
+        if self.audit_log is None:
+            return
+        if not self.audit_task_id or not self.audit_tenant_id:
+            raise RuntimeError("Tool audit requires task and authenticated tenant identity")
+        safe_name = (
+            tool_name
+            if isinstance(tool_name, str)
+            and re.fullmatch(r"[a-z][a-z0-9_.:-]{0,63}", tool_name)
+            else "invalid"
+        )
+        self.audit_log.record(
+            "tool.execution",
+            self.audit_task_id,
+            self.audit_actor,
+            {
+                "tool": safe_name,
+                "role": getattr(role, "value", str(role))[:64],
+                "scope": {
+                    "tenant_id": self.audit_tenant_id,
+                    "project_id": self.project_scope,
+                },
+                "decision": decision,
+                "result": result,
+            },
+            tenant_id=self.audit_tenant_id,
+        )
+
     def execute(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
+        tool_name = action.get("name") if isinstance(action, dict) else None
+        try:
+            result = self._execute_action(action, role)
+        except ToolDenied:
+            self._record_tool_audit(tool_name, role, "deny", "denied")
+            raise
+        except Exception:
+            self._record_tool_audit(tool_name, role, "allow", "error")
+            raise
+        self._record_tool_audit(
+            tool_name, role, "allow", "success" if result.ok else "failure"
+        )
+        return result
+
+    def _execute_action(self, action: dict[str, Any], role: WorkerRole) -> ToolResult:
         if not isinstance(action, dict):
             raise ToolDenied("Tool action must be an object")
         name = action.get("name")
