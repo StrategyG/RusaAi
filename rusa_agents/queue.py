@@ -128,6 +128,9 @@ class PostgresTaskQueue:
         )
 
     def initialize(self) -> None:
+        # Validate code-level queue bounds before the API or worker accepts work.
+        self._max_pending_per_tenant()
+        self._max_active_tasks()
         with self._connect() as conn:
             if os.getenv("ENVIRONMENT", "development").lower() == "production":
                 exists = conn.execute("SELECT to_regclass('public.aicode_jobs')").fetchone()
