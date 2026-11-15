@@ -19,9 +19,10 @@ from rusa_agents.capability_router import CapabilityRouter, RouteRequest
 from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.memory import SQLiteMemory
 from rusa_agents.queue import Job
-from rusa_agents.runtime import AICodeRuntime
+from rusa_agents.runtime import AICodeRuntime, _AuditedWorkspaceToolGateway
 from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
+from rusa_agents.tool_gateway import WorkspaceToolGateway
 from rusa_agents.worker_execution import (
     CheckpointConflictError,
     InMemoryCheckpointStore,
@@ -695,7 +696,56 @@ def test_agent_runtime_queue_payload_rejects_unknown_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_once_dispatches_explicit_agent_runtime_queue_job(tmp_path, monkeypatch) -> None:
+async 
+def test_audited_tool_gateway_records_scope_decision_and_result_without_arguments(tmp_path):
+    audit_path = tmp_path / "tool-audit.jsonl"
+    audit = AuditLog(str(audit_path), hmac_key="audit-key-" + "x" * 32)
+    gateway = WorkspaceToolGateway(tmp_path)
+    audited = _AuditedWorkspaceToolGateway(
+        gateway,
+        audit,
+        "task-tool-audit",
+        "tenant-tool-audit",
+        "worker-tool-audit",
+        "strategy--rusaai",
+    )
+
+    result = audited.execute(
+        {"name": "list_files", "arguments": {"path": "."}},
+        WorkerRole.ANALYST,
+    )
+    assert result.ok
+    with pytest.raises(PermissionError):
+        audited.execute(
+            {"name": "write_file", "arguments": {"path": "secret.txt", "content": "never-log"}},
+            WorkerRole.ANALYST,
+        )
+
+    rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
+    assert len(rows) == 2
+    allowed, denied = rows
+    assert allowed["event"] == denied["event"] == "tool.execution"
+    assert allowed["task_id"] == denied["task_id"] == "task-tool-audit"
+    assert allowed["tenant_id"] == denied["tenant_id"] == "tenant-tool-audit"
+    assert allowed["actor"] == denied["actor"] == "worker-tool-audit"
+    assert allowed["timestamp"] and denied["timestamp"]
+    assert allowed["details"]["tool"] == "list_files"
+    assert allowed["details"]["scope"] == {
+        "tenant_id": "tenant-tool-audit",
+        "project_id": "strategy--rusaai",
+    }
+    assert allowed["details"]["decision"] == "allow"
+    assert allowed["details"]["result"] == "success"
+    assert denied["details"]["tool"] == "write_file"
+    assert denied["details"]["decision"] == "deny"
+    assert denied["details"]["result"] == "denied"
+    serialized = audit_path.read_text()
+    assert "never-log" not in serialized
+    assert '"arguments"' not in serialized
+    assert audit.verify()
+
+
+def test_run_once_dispatches_explicit_agent_runtime_queue_job(tmp_path, monkeypatch) -> None:
     job = _agent_runtime_queue_job({
         "execution_mode": "agent_runtime_v1",
         "agent_runtime_plan": {
