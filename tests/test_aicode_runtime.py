@@ -10,7 +10,7 @@ from rusa_agents.contracts import (
     WorkerResult,
     WorkerRole,
 )
-from rusa_agents.memory import SQLiteMemory
+from rusa_agents.memory import LeaseBoundMemory, SQLiteMemory
 from rusa_agents.orchestrator import AICodeOrchestrator
 from rusa_agents.policy import AutonomyPolicy, RiskLevel
 from rusa_agents.runtime import AICodeRuntime
@@ -395,3 +395,39 @@ def test_runtime_heartbeat_fails_closed_on_unbounded_poll_interval(monkeypatch):
         asyncio.run(runtime._heartbeat(None, lost_lease))
 
     assert lost_lease.is_set()
+
+
+def test_lease_bound_memory_rejects_cross_task_and_cross_tenant_access():
+    calls = []
+
+    class StubQueue:
+        def with_lease_owned(self, job_id, tenant_id, worker_id, lease_token, operation, **kwargs):
+            calls.append((job_id, tenant_id, worker_id, lease_token))
+            return operation()
+
+    class StubMemory:
+        def __init__(self):
+            self.saved = None
+
+        def save(self, task_id, repository, state, payload, tenant_id="default"):
+            self.saved = (task_id, repository, state, payload, tenant_id)
+
+        def get(self, task_id, tenant_id="default"):
+            return {"task_id": task_id, "tenant_id": tenant_id}
+
+    memory = StubMemory()
+    fenced = LeaseBoundMemory(
+        memory, StubQueue(), 7, "task-7", "tenant-7", "worker-7", "lease-token"
+    )
+
+    with pytest.raises(PermissionError, match="task"):
+        fenced.save("other-task", "StrategyG/RusaAi", "working", {}, tenant_id="tenant-7")
+    with pytest.raises(PermissionError, match="tenant"):
+        fenced.get("task-7", tenant_id="tenant-other")
+    assert calls == []
+
+    fenced.save("task-7", "StrategyG/RusaAi", "working", {"safe": True}, tenant_id="tenant-7")
+    assert calls == [(7, "tenant-7", "worker-7", "lease-token")]
+    assert memory.saved == (
+        "task-7", "StrategyG/RusaAi", "working", {"safe": True}, "tenant-7"
+    )
