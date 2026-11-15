@@ -1,6 +1,7 @@
 # RUSA AI Ecosystem — Open Risks
 
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Source of truth:** current main branches and the open PR metadata recorded in `BASELINE_INVENTORY.md`.  
 **Status vocabulary:** OPEN, PARTIAL, BLOCKED, MITIGATION_PROPOSED.
 
@@ -46,3 +47,18 @@
 7. Complete CHUNK 11 reliability/DR/observability and CHUNK 12 security supply-chain/deployment hardening.
 8. Complete CHUNK 13 staging E2E, CHUNK 14 production certification, and CHUNK 15 capacity/scale.
 
+
+
+## 2026-11-15 live-state refresh
+
+This section supersedes snapshot-sensitive PR counts and exact-head statuses above. See [BASELINE_REFRESH_2026-11-15.md](BASELINE_REFRESH_2026-11-15.md) for the full evidence and current PR inventory.
+
+- **RSK-001 — branch governance:** GitHub branch metadata returned protected=false for all three main branches. Direct branch-protection reads returned HTTP 403 from the connected integration; detailed ruleset and required-check configuration is therefore NOT_VERIFIED rather than independently inspected.
+- **RSK-002 — canonical-store documentation:** still open on main. RAG_Cerdas #28 is now at head 84e9a134 and its exact-head test check passes, but the PR is not merged.
+- **RSK-003 — duplicate ADR number:** unchanged; two RusaAi ADR files still use ADR-0002. Keep the collision explicit and do not silently renumber.
+- **RSK-011 — PR backlog:** current open PR count is 99 (RusaAi 87, RusaModels 8, RAG_Cerdas 4), replacing the previous 94-count snapshot. Old-base and stacked PRs remain a compatibility risk even when their head CI passes.
+- **RSK-015 / RSK-019 — image findings:** exact-main scans still report raw HIGH findings: RusaAi 103/118/117/103 across its four images, RusaModels 47 OS HIGH plus 1 Python HIGH per Model Server and worker image; CRITICAL 0 in the inspected scans. Green CI is not a zero-vulnerability certification; RusaAi and RusaModels use --ignore-unfixed in the blocking scan path, and the RusaModels VEX disposition is narrow.
+- **RSK-016 — FIFO admission:** earlier PR #117 heads failed the cross-process FIFO waiter assertion. Latest PR #117 head 5f6b7c15 passes 337 tests with 6 skipped, including the cross-process FIFO test. Reclassify the repeated failure as historical/monitoring evidence, not a current failure on that head; repeated deterministic and load evidence is still required before reliability closure.
+- **RSK-020 — direct embedding path:** remains open. Optional Worker RAG can call RusaModels /openai/v1/embeddings directly when RUSA_RAG_ENABLED=true; optional MCP KnowledgeService also requires its own credential/egress review. Keep production Worker RAG disabled until an approved brokered path exists.
+- **New PR-level blocker:** RusaAi #122 head 947052c2 has a Ruff E731 lint failure; later test steps in that job were skipped. RusaAi #121 has a mixed/cancelled workflow state and is not fully green at the inspected snapshot.
+- **CHUNK 00 refresh:** current baseline documentation is updated on the existing PR #119 branch. Its final exact-head CI must pass before the refreshed CHUNK 00 gate is closed.
