@@ -585,6 +585,46 @@ class AICodeRuntime:
                 },
             )
 
+        node_results_payload = [item.to_dict() for item in result.node_results]
+        node_results_by_id = {
+            item.get("task_id"): item
+            for item in node_results_payload
+            if isinstance(item, dict) and isinstance(item.get("task_id"), str)
+        }
+        decision_by_status = {
+            "completed": "allow",
+            "needs_approval": "require_approval",
+            "blocked": "deny",
+            "failed": "error",
+            "cancelled": "cancel",
+        }
+        for node in plan.nodes:
+            node_result = node_results_by_id.get(node.task_id, {})
+            result_status = str(node_result.get("status", "unknown"))
+            evidence_refs = node_result.get("evidence_refs", [])
+            artifacts = node_result.get("artifacts", [])
+            await asyncio.to_thread(
+                self.audit.record,
+                "agent_runtime.node.result",
+                job.task_id,
+                self.worker_id,
+                {
+                    "node_id": node.task_id,
+                    "selected_role_id": node.selected_role_id,
+                    "delegated_by_role_id": node.delegated_by_role_id,
+                    "scope": node.scope,
+                    "tool_allowlist": list(node.tool_allowlist),
+                    "requested_permissions": list(node.requested_permissions),
+                    "risk_class": node.risk_class,
+                    "decision": decision_by_status.get(result_status, "unknown"),
+                    "result_status": result_status,
+                    "attempts": node_result.get("attempts", 0),
+                    "evidence_count": len(evidence_refs) if isinstance(evidence_refs, list) else 0,
+                    "artifact_count": len(artifacts) if isinstance(artifacts, list) else 0,
+                },
+                tenant_id=job.tenant_id,
+            )
+
         coding_task = dispatch.get("coding_task")
         workspace = dispatch.get("workspace")
         publish_changes = dispatch.get("publish_changes", workspace is not None)
@@ -593,7 +633,7 @@ class AICodeRuntime:
             "plan_status": result.status.value,
             "plan_fingerprint": result.plan_fingerprint,
             "topological_order": list(result.topological_order),
-            "node_results": [item.to_dict() for item in result.node_results],
+            "node_results": node_results_payload,
         }
         if coding_task is not None:
             result_payload["branch"] = coding_task.repository.work_branch
