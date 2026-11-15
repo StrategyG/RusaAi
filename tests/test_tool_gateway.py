@@ -227,3 +227,24 @@ def test_external_rag_tool_rejects_unbounded_or_invalid_arguments(tmp_path):
             {"name": "search_external_rag", "arguments": {"query": "x", "top_k": 100}},
             WorkerRole.ANALYST,
         )
+
+
+def test_external_rag_outage_returns_local_fallback_instead_of_blocking(tmp_path):
+    from rusa_agents.external_rag import ExternalRAGError
+
+    class OfflineExternalRAG:
+        async def search(self, query, *, top_k, filters):
+            raise ExternalRAGError("External RAG provider is unavailable or returned invalid JSON")
+
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        external_rag_client=OfflineExternalRAG(),
+        external_rag_tenant_id="tenant-a",
+    )
+    result = gateway.execute(
+        {"name": "search_external_rag", "arguments": {"query": "find evidence"}},
+        WorkerRole.ANALYST,
+    )
+    assert not result.ok
+    assert "External RAG is unavailable" in result.output
+    assert result.evidence["available"] is False
