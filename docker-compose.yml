@@ -44,6 +44,8 @@ services:
       RUSA_LOCAL_INSTALL_MODE: ${RUSA_LOCAL_INSTALL_MODE:-false}
       RUSA_LOCAL_API_KEYS_DB: /var/lib/rusa/local-api-keys.sqlite3
       RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:-}
+      # External RAG credentials belong only to the Agent Worker.
+      RUSA_EXTERNAL_RAG_API_KEY: ""
       RUSA_WORKER_DATABASE_URL: ""
     ports:
       - "127.0.0.1:8000:8000"
@@ -86,6 +88,15 @@ services:
       RUSA_WORKER_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      # The Agent Worker must not inherit local first-run, API-key registry,
+      # web-session, or API metrics secrets from the shared .env file.
+      RUSA_LOCAL_INSTALL_MODE: "false"
+      RUSA_LOCAL_API_KEYS_DB: ""
+      RUSA_LOCAL_SETUP_TOKEN: ""
+      RUSA_API_KEYS: "{}"
+      RUSA_API_KEYS_JSON: "{}"
+      RUSA_WEB_SESSION_SECRET: ""
+      RUSA_METRICS_API_KEY: ""
       # Do not inherit the API-to-model secret into the worker container.
       # Direct non-production worker providers may use this separate secret.
       RUSA_MODEL_API_KEY: ${RUSA_WORKER_MODEL_API_KEY:-}
