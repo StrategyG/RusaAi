@@ -15,6 +15,7 @@ The baseline already contains:
 - Tenant-scoped API routes, task-policy events, RLS migrations 004–005, separate API/worker runtime role groups, and an HMAC-chained audit ledger.
 - Role-based Tool Gateway allowlists, protected path checks, bounded file sizes, Docker sandbox profiles, read-only sandbox snapshots, and no arbitrary shell tool.
 - Tenant/project-scoped knowledge retrieval through the RAG service.
+- Production worker configuration requires gateway mode, a credential-free HTTPS API-gateway URL, and tenant-specific worker inference credentials; direct worker model URL/key configuration is rejected. The API gateway uses shared PostgreSQL inference admission. The target deployment still needs runtime verification.
 - Task timeout, worker heartbeat, and cancellation of the orchestrator when the lease is lost.
 
 The baseline did not bound pending tasks per tenant or active queue claims across replicas. Legacy task-memory writes and Tool Gateway workspace writes did not hold the current queue lease row lock. Actual tool invocations were not written to the HMAC audit ledger. Sandbox subprocesses did not receive the lease-revocation event. Generic retry also accepted `awaiting_approval`.
