@@ -21,6 +21,7 @@ from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
 from .tool_gateway import DockerSandbox, WorkspaceToolGateway
+from .external_rag import ExternalRAGClient
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
@@ -51,6 +52,36 @@ class AICodeRuntime:
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
+        external_rag_flag = os.getenv("RUSA_EXTERNAL_RAG_ENABLED", "false").strip().lower()
+        if external_rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise RuntimeError("RUSA_EXTERNAL_RAG_ENABLED must be a boolean value")
+        self.external_rag_client = None
+        if external_rag_flag in {"1", "true", "yes", "on"}:
+            import json
+
+            endpoint = os.getenv("RUSA_EXTERNAL_RAG_ENDPOINT", "").strip()
+            token = os.getenv("RUSA_EXTERNAL_RAG_API_KEY", "")
+            try:
+                allowed_hosts = json.loads(os.getenv("RUSA_EXTERNAL_RAG_ALLOWED_HOSTS", "[]"))
+                timeout_seconds = float(os.getenv("RUSA_EXTERNAL_RAG_TIMEOUT_SECONDS", "15"))
+                max_response_bytes = int(os.getenv("RUSA_EXTERNAL_RAG_MAX_RESPONSE_BYTES", "1000000"))
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise RuntimeError("External RAG settings are invalid") from exc
+            if not isinstance(allowed_hosts, list) or any(
+                not isinstance(host, str) or not host.strip() for host in allowed_hosts
+            ):
+                raise RuntimeError("RUSA_EXTERNAL_RAG_ALLOWED_HOSTS must be a JSON array of hostnames")
+            try:
+                self.external_rag_client = ExternalRAGClient(
+                    endpoint=endpoint,
+                    bearer_token=token,
+                    allowed_hosts=set(allowed_hosts),
+                    timeout_seconds=timeout_seconds,
+                    max_response_bytes=max_response_bytes,
+                )
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("External RAG configuration failed validation") from exc
+
         self.knowledge_service = None
         if rag_flag in {"1", "true", "yes", "on"}:
             from rusa_knowledge.service import KnowledgeService
@@ -127,10 +158,9 @@ class AICodeRuntime:
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
-            knowledge_project_id=(
-                self._knowledge_project_scope(task.repository.full_name)
-                if self.knowledge_service is not None else None
-            ),
+            knowledge_project_id=self._knowledge_project_scope(task.repository.full_name),
+            external_rag_client=self.external_rag_client,
+            external_rag_tenant_id=tenant_id if self.external_rag_client is not None else None,
         )
         workers = [
             AutonomousCodeWorker(role, tenant_provider, gateway)
