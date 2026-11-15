@@ -8,8 +8,9 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from .external_rag import ExternalRAGClient
 from rusa_mcp.client import MCPToolClient
+
+from .external_rag import ExternalRAGClient
 
 
 def _tenant_connection_map(environ: Mapping[str, str], variable: str) -> dict[str, Any]:
