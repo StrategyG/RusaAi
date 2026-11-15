@@ -60,7 +60,7 @@ The following PRs touch active or near-term roadmap dependencies. Base SHAs are 
 | PR | Status | Base branch / base SHA | Head SHA | Exact-head CI | Mergeability / relevance |
 |---|---|---|---|---|---|
 | [#122](https://github.com/StrategyG/RusaAi/pull/122) | Draft | main / 1adac8d3 | 947052c2 | 3 success, 1 failure; lint stopped on Ruff E731, so later tests in that job were skipped | Mergeable=true; Agent/Worker queue and lease hardening; fix lint before further review |
-| [#121](https://github.com/StrategyG/RusaAi/pull/121) | Draft | main / 1adac8d3 | 6bcb762d | Mixed/cancelled workflow state at inspection; extension and Windows preview launcher workflows succeeded, while Web CI and RUSA-AI CI runs were cancelled; other check-run state was not uniformly complete | Mergeable=true; local-first desktop and hybrid connectors; do not call fully green |
+| [#121](https://github.com/StrategyG/RusaAi/pull/121) | Draft | main / 1adac8d3 | f12642d7 | RUSA-AI CI: test/lint/security FAIL (348 passed, 1 failed, 6 skipped; PostgreSQL FIFO admission deadlock); RAG/MCP PASS; image build/scan IN_PROGRESS. Web CI, VS Code extension CI and Windows launcher syntax CI PASS. | Mergeable=true; local-first desktop and hybrid connectors; out-of-sequence draft, not fully green |
 | [#120](https://github.com/StrategyG/RusaAi/pull/120) | Draft | main / 1adac8d3 | ba04a053 | 3/3 success | Agent/Worker chunk framework; defer to its roadmap dependency |
 | [#119](https://github.com/StrategyG/RusaAi/pull/119) | Ready | main / 1adac8d3 | f1e4b938 | 3/3 success before this refresh commit | CHUNK 00 documentation package; six baseline artifacts; this refresh is being added on this branch |
 | [#118](https://github.com/StrategyG/RusaAi/pull/118) | Draft | main / 1adac8d3 | 202a1c16 | 3/3 success | Separate ALE baseline inventory; not merged |
@@ -97,6 +97,8 @@ The following PRs touch active or near-term roadmap dependencies. Base SHAs are 
 
 Additional older RusaAi PRs and RusaModels dependency-update PRs remain open in the repository-wide backlog. The table above covers PRs with direct relevance to the active or near-term roadmap dependencies; it is not a merge recommendation. Several PRs have stale base SHAs or stacked bases even when their exact-head checks pass.
 
+**Roadmap sequencing note:** RusaAi PR #121, RusaModels PR #25 and RAG_Cerdas PR #30 are a separate local-first desktop / hardware / external-RAG workstream created ahead of the roadmap dependencies that govern those areas. They remain draft and do not advance CHUNK 02, 05, 06, 07 or 08. Keep them parked; do not merge or treat their CI as end-to-end ecosystem evidence until the corresponding dependency-approved chunks are active. PR #121's local preview explicitly disables model inference; it is not a consumer installer or a verified local model runtime.
+
 ### Review state for the CHUNK 00/01 PR set
 
 At inspection, RusaAi #119, RusaAi #117, RusaModels #24, and RAG_Cerdas #28 had no submitted reviews and no inline review threads. GitHub reported these PRs as mergeable at the time of inspection. Mergeability and green CI are not owner approval. None of these PRs was merged by this audit.
@@ -118,7 +120,9 @@ At inspection, RusaAi #119, RusaAi #117, RusaModels #24, and RAG_Cerdas #28 had 
 
 Earlier exact PR #117 heads had repeated failures in the cross-process PostgreSQL FIFO waiter test. The latest inspected PR #117 head, 5f6b7c150aa234a852e413749412a0f7929ef2c6, completed 3/3 CI checks; its test log reports 337 passed, 6 skipped, and the cross-process FIFO test passed.
 
-Disposition: retain the historical failure as a monitored concurrency risk, but do not describe the latest PR #117 head as currently failing. A single successful rerun does not prove production fairness, load capacity, or recovery behavior. Further deterministic/repeated tests belong to CHUNK 06/11.
+A newer independent reproduction appeared on RusaAi PR #121 head f12642d77442256b26da0b0f075d9510a6812435 in workflow 43684334340: 348 passed, 1 failed, 6 skipped. The same cross-process FIFO test timed out waiting for two PostgreSQL waiters. Captured child-process stderr identifies a PostgreSQL DeadlockDetected: one process waits for an advisory lock while the other waits for a RowExclusiveLock during PostgresInferenceAdmissionController.initialize() / _lock_scheduler(). This is stronger evidence of an unresolved lock-ordering/concurrency defect than a mere waiter-poll timeout.
+
+Disposition: the latest PR #117 head is green, but the separate PR #121 run reproduces the same failure class with a deadlock trace. Keep RSK-016 High and CHUNK 06/11 blocked from PASS until the lock-ordering root cause is fixed and repeatable multi-process tests pass. Do not weaken the assertion or increase its timeout to mask the deadlock.
 
 ## 6. Score and evidence policy
 
