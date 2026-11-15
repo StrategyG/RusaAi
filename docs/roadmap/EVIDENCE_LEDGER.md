@@ -284,3 +284,26 @@ RusaAi PR #119 closeout branch was inspected at exact head `d1f00563d0beab2123bc
 The image scan reported raw Trivy HIGH findings of 103 (API), 118 (agent sandbox), 117 (worker), and 103 (RAG/MCP), with CRITICAL 0. The blocking command uses `--ignore-unfixed`; these results do not mean zero vulnerabilities. Keep RSK-015 open for SBOM, package-level triage and reviewed VEX dispositions.
 
 This exact-head verification closes CHUNK 00 as a **read-only baseline audit**. The seven deliverable files remain on the open PR #119 branch and are not mainline until merged. The PR was not merged; no source code, main branch, database, model artifact, deployment or production data was changed.
+
+
+## 12. Live CHUNK 01 review and exact-SHA evidence — 2026-11-15
+
+| Evidence ID | Chunk | Repository | Commit SHA | Evidence type | Result | URL / notes |
+|---|---|---|---|---|---|---|
+| CH01-RV-001 | 01 | RusaAi | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | PR-head CI | IN_PROGRESS at refresh | [Run 43703955776](https://github.com/StrategyG/RusaAi/actions/runs/43703955776): RAG/MCP integration PASS; Test/lint/security PASS with 337 passed and 6 skipped, including the cross-process FIFO admission test; production image build/test/scan still running |
+| CH01-RV-002 | 01 | RusaModels | `7ca01d6373c1b90aadc0182461982754ca54afce` | PR-head CI | IN_PROGRESS at refresh | [Run 43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560): Windows RUSA-CPU-16 script validation PASS; test job has completed Tests, lint, compile, static security and PostgreSQL migration upgrade/rollback successfully; quantization-worker image, Trivy and Compose validation still running |
+| CH01-RV-003 | 01 | RAG_Cerdas | `84e9a13450c4b107d470eed775c1bb0998981acb` | PR-head CI | PASS | [Run 43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103): Institutional RAG checks 1/1 success |
+| CH01-RV-004 | 01 | RusaAi | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | Review evidence | COMMENTED | Review IDs 5910229219 and 5910245817. Mainline scheduler attribution and ambiguous ADR references were corrected in commits `ce77576f405c21b96738ec23a47deaada33335c8` and `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa`. Clarification of the main-branch Copilot mission wording remains open. |
+| CH01-RV-005 | 01 | RusaModels | `7ca01d6373c1b90aadc0182461982754ca54afce` | Review evidence | COMMENTED | Review ID 5910229332. Service-specific OpenAPI descriptions and regression test are in commits `1d6bde6bc2c8d22dd1880c3b436e4e339e2712b0` and `7ca01d6373c1b90aadc0182461982754ca54afce`. |
+| CH01-RV-006 | 01 | RAG_Cerdas | `84e9a13450c4b107d470eed775c1bb0998981acb` | Review evidence | COMMENTED | Review ID 5910241299. No blocking static documentation finding identified; not an approval to merge or perform data operations. |
+| CH01-RV-007 | 06 / 11 risk | RusaAi | `70d4f082e49105d62db678179cd6ec84109eeb66` | PR-head regression CI | PASS — one exact-head run | [Run 43690890924](https://github.com/StrategyG/RusaAi/actions/runs/43690890924): 4/4 associated workflows successful; repository tests 370 passed / 6 skipped; cross-process FIFO admission test passed. Earlier exact-head failures remain in history; one pass does not close RSK-016. |
+
+### Review-time mainline controls
+
+- RusaAi main: `1adac8d340e5870570910168b6626fe285dd2cf2`.
+- RusaModels main: `12c49b1372b230f3656be6e1badeabad870bcfa1`.
+- RAG_Cerdas main: `1ead461e76d563445d179e7d5e80c25a9ca9f059`.
+- GitHub branch metadata reports `protected=false` for all three main branches. No protection or permission settings were changed.
+- No merge, production deployment, production DDL, ingestion, data transfer, secret change, or model-artifact change was performed.
+
+**Disposition:** CHUNK 01 remains PARTIAL while RusaAi #117 and RusaModels #24 image/Compose jobs are running, the Copilot mission wording remains ambiguous, and all three PRs remain unmerged. Exact-head CI success is scoped to the SHA and checks shown; it is not production certification.
