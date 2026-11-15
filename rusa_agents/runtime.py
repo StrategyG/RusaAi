@@ -101,6 +101,7 @@ class AICodeRuntime:
                 ) from exc
         from rusa_mcp.client import MCPToolClient
 
+        credential_envs: set[str] = set()
         for tenant_id, connection in raw_mcp_connections.items():
             if (
                 not isinstance(tenant_id, str)
@@ -133,6 +134,9 @@ class AICodeRuntime:
                 or not re.fullmatch(r"RUSA_MCP_[A-Z0-9_]{1,64}", credential_env)
             ):
                 raise RuntimeError(f"MCP connection for tenant {tenant_id} is incomplete or invalid")
+            if credential_env in credential_envs:
+                raise RuntimeError("Each tenant MCP connection must use a distinct credential environment variable")
+            credential_envs.add(credential_env)
             token = os.getenv(credential_env, "")
             if not token:
                 raise RuntimeError(f"MCP credential environment variable {credential_env} is empty")
