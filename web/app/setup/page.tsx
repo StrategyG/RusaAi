@@ -59,11 +59,18 @@ export default function LocalSetupPage() {
       setStatus("complete");
       // Establish an encrypted HttpOnly dashboard session without persisting
       // the raw key in browser storage.
-      await fetch("/api/session", {
+      const sessionResponse = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: data.api_key })
-      }).catch(() => undefined);
+      });
+      if (!sessionResponse.ok) {
+        const sessionError = await sessionResponse.json().catch(() => ({}));
+        throw new Error(
+          sessionError.error ||
+          "The owner key was created and is shown below, but the dashboard session could not be established. Save the key and sign in manually."
+        );
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Local setup failed.");
     } finally {
