@@ -20,8 +20,8 @@ from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
 from .queue import Job, LeaseLostError, PostgresTaskQueue
-from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 from .external_rag import ExternalRAGClient
+from .tool_gateway import DockerSandbox, WorkspaceToolGateway
 
 logger = logging.getLogger("rusa-ai.aicode.runtime")
 
