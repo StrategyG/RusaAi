@@ -203,3 +203,35 @@ CHUNK 00 is closed as PASS for the read-only baseline audit. Continue CHUNK 01 r
 - **Security qualification:** raw Trivy HIGH counts 103 / 118 / 117 / 103 across API, agent-sandbox, worker and RAG/MCP images; CRITICAL 0. The blocking scan uses `--ignore-unfixed`; the scan is not a zero-finding certification. Keep RSK-015 open.
 - **Limitations:** local working-tree state NOT_VERIFIED; detailed branch-protection configuration NOT_VERIFIED (branch metadata protected=false; direct endpoint returned 403); no staging/production evidence.
 - **Boundary:** no main branch, merge, source code, database, model artifact, deployment or production data was changed. CHUNK 01 is now the active chunk.
+
+
+## 13. Live CHUNK 01 review refresh — 2026-11-15
+
+This section supersedes earlier PR-head, CI, and review snapshots above for the active CHUNK 01 PR set. It does not change the dependency order or authorize merges.
+
+### Current active PR evidence
+
+| Repository | PR | Latest head SHA | Exact-head CI evidence | Review state | Merge state |
+|---|---:|---|---|---|---|
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | Run 43703955776: RAG/MCP integration PASS; Test/lint/security PASS (337 passed, 6 skipped; cross-process FIFO test passed); production image build/test/scan IN_PROGRESS | COMMENT reviews 5910229219 and 5910245817; corrections committed; one repository-instruction clarification remains open | Open; not merged |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `7ca01d6373c1b90aadc0182461982754ca54afce` | Run 43704012560: Windows script validation PASS; test job IN_PROGRESS after Tests, lint, compile, static security, and PostgreSQL migration upgrade/rollback steps passed; image build/Trivy/Compose checks still running | COMMENT review 5910229332; service-specific OpenAPI descriptions and regression test committed | Open; not merged |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `84e9a13450c4b107d470eed775c1bb0998981acb` | Run 43680080103: 1/1 Institutional RAG check PASS | COMMENT review 5910241299; no blocking static documentation finding | Open; not merged |
+
+### Review corrections committed
+
+- RusaAi PR #117: commit `ce77576f405c21b96738ec23a47deaada33335c8` reconciles the production-readiness narrative with merged PR #111/current mainline and replaces ambiguous ADR-0002 shorthand; commit `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` updates the RAG/MCP operations ADR references.
+- RusaModels PR #24: commit `1d6bde6bc2c8d22dd1880c3b436e4e339e2712b0` makes the OpenAPI description service-specific; commit `7ca01d6373c1b90aadc0182461982754ca54afce` adds a regression test for Model Server versus Quant Server descriptions.
+- RusaAi `.github/copilot-instructions.md` on main still describes RUSA-AI as a target independent AI model/product “not an already-existing orchestrator.” A review comment records this ambiguity against the current Control Plane ownership model. It is not silently rewritten; explicit clarification remains open.
+
+### Concurrency risk refresh
+
+RusaAi PR #121 current head `70d4f082e49105d62db678179cd6ec84109eeb66` has 4/4 associated workflows successful. Its RUSA-AI CI run `43690890924` reports 370 passed and 6 skipped; `test_fifo_admission_is_shared_across_separate_os_processes` passed on this exact head. Earlier exact-head runs recorded PostgreSQL deadlock/FIFO waiter failures. One successful run on the newer head does not prove the race is eliminated; RSK-016 remains open pending repeated same-head evidence and staging crash/restart verification.
+
+### Governance and current boundaries
+
+- Current main SHAs remain RusaAi `1adac8d340e5870570910168b6626fe285dd2cf2`, RusaModels `12c49b1372b230f3656be6e1badeabad870bcfa1`, and RAG_Cerdas `1ead461e76d563445d179e7d5e80c25a9ca9f059`.
+- All three main branches currently report `protected=false`. Do not change repository rules or permissions without explicit approval.
+- No PR was merged; no main branch, production database, production data, model artifact, secret, or deployment was changed.
+- CHUNK 01 remains PARTIAL until exact-head CI completes, remaining documentation ambiguity is resolved or explicitly recorded, all three changes are adopted on main in the approved order, and cross-repository consistency is rechecked.
+- Required merge order remains RusaModels #24, RAG_Cerdas #28, then refresh RusaAi #117 to reflect those merges and merge it last. Explicit project-owner approval is required before any merge.
+- CHUNK 02 remains NOT_STARTED until CHUNK 01 passes.
