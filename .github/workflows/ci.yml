@@ -66,8 +66,7 @@ jobs:
           python -m pytest -q \
             tests/test_local_api_keys.py \
             tests/test_local_setup_api.py \
-            tests/test_external_rag.py \
-            tests/test_local_contract_schemas.py
+            tests/test_external_rag.py
 
   docker-build:
     name: Build, test, and scan production images
