@@ -146,7 +146,7 @@ At the inspected snapshot, RusaAi #117, RusaModels #24, and RAG_Cerdas #28 are a
 
 ### CHUNK 00 PR scope verification
 
-RusaAi PR #119 changes exactly six files: `docs/roadmap/ARCHITECTURE_DECISIONS.md`, `BASELINE_INVENTORY.md`, `EVIDENCE_LEDGER.md`, `EXECUTION_STATE.md`, `OPEN_RISKS.md`, and `REPOSITORY_DEPENDENCY_MAP.md`. The changed-file list contains no source-code, migration, test, model-artifact, deployment, or production-data path.
+The original CHUNK 00 package changed six roadmap documentation files. The 2026-11-15 live refresh adds `docs/roadmap/BASELINE_REFRESH_2026-11-15.md`, bringing the current PR #119 diff to seven documentation-only files; no source-code, migration, test, model-artifact, deployment, or production-data path is changed.
 
 
 ## 8. CHUNK 01 documentation-status refresh — 2026-11-14
