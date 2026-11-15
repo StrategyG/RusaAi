@@ -1,6 +1,7 @@
 # RUSA AI Ecosystem — Evidence Ledger
 
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Audit mode:** remote read-only GitHub inspection; no local test execution or production access.
 
 ## 1. Exact-main CI evidence
@@ -209,3 +210,27 @@ The RusaAi CPU Compose profile does not enable `RUSA_RAG_ENABLED` and the worker
 ### Self-updating tracker note
 
 PR #119 is the tracker PR itself. Immediately before this evidence append, its head was `0b42dc7e137c3d2e24d091565d078ab8deab166b`; this evidence update creates another head and restarts CI. Use live PR metadata for the latest SHA/check status rather than treating the tracker as self-certifying.
+
+
+## 11. Live exact-SHA refresh — 2026-11-15
+
+### Mainline evidence
+
+| Repository | Exact main SHA | Evidence | Result |
+|---|---|---|---|
+| RusaAi | 1adac8d340e5870570910168b6626fe285dd2cf2 | [CI 43354051026](https://github.com/StrategyG/RusaAi/actions/runs/43354051026), [Web CI 43354050892](https://github.com/StrategyG/RusaAi/actions/runs/43354050892) | 4/4 checks success; 337 passed / 6 skipped; sandbox 304 passed / 39 skipped |
+| RusaModels | 12c49b1372b230f3656be6e1badeabad870bcfa1 | [CI 43358929126](https://github.com/StrategyG/RusaModels/actions/runs/43358929126) | 2/2 checks success; 155 passed / 1 skipped / 3 warnings; migration upgrade/rollback validation passed |
+| RAG_Cerdas | 1ead461e76d563445d179e7d5e80c25a9ca9f059 | [tests 43312458157](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43312458157) | 240 passed; 10 successful scheduled audit/dispatch runs are separate from the test run |
+
+### Current CHUNK 01 PR heads
+
+| Repository / PR | Exact head SHA | Evidence | Result |
+|---|---|---|---|
+| RusaAi #117 | 5f6b7c150aa234a852e413749412a0f7929ef2c6 | [CI 43679880047](https://github.com/StrategyG/RusaAi/actions/runs/43679880047) | 3/3 checks success; 337 passed / 6 skipped; cross-process FIFO test passed |
+| RusaModels #24 | 128343fee6973fe19158182a4c8b40c5be5a72c2 | [CI 43680033627](https://github.com/StrategyG/RusaModels/actions/runs/43680033627) | 2/2 latest checks success |
+| RAG_Cerdas #28 | 84e9a13450c4b107d470eed775c1bb0998981acb | [CI 43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103) | 1/1 check success |
+| RusaAi #119 | f1e4b93802d8bccb4ab01d757beab0db744f3d52 | [CI 43558923727](https://github.com/StrategyG/RusaAi/actions/runs/43558923727) | 3/3 checks success before this refresh commit; the refreshed head requires its own CI result |
+
+### Security and limitations
+
+RusaAi main image scan raw HIGH counts: 103, 118, 117, 103; CRITICAL 0. RusaModels main image scans: 47 HIGH OS and 1 HIGH Python finding per Model Server/worker image; CRITICAL 0. These are scanner findings and must be triaged; CI's --ignore-unfixed policy does not mean zero vulnerabilities. Branch-protection endpoint reads returned 403; local working-tree state and production/staging evidence remain NOT_VERIFIED.
