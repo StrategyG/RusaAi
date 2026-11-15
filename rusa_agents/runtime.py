@@ -7,15 +7,17 @@ import os
 import re
 import socket
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any
+
+import httpx
 
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
-from .memory import PostgresMemory
+from .memory import LeaseBoundMemory, PostgresMemory
 from .metrics import AICODE_TASK_DURATION, AICODE_TASKS
 from .orchestrator import AICodeOrchestrator
 from .providers import OpenAICompatibleProvider
@@ -110,7 +112,12 @@ class AICodeRuntime:
         return project_id
 
     async def _build_orchestrator(
-        self, task: CodingTask, tenant_id: str
+        self,
+        task: CodingTask,
+        tenant_id: str,
+        *,
+        job: Job | None = None,
+        lost_lease: asyncio.Event | None = None,
     ) -> tuple[AICodeOrchestrator, str]:
         tenant_provider_factory = getattr(self.provider, "for_tenant", None)
         tenant_provider = (
@@ -121,6 +128,49 @@ class AICodeRuntime:
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
+        lease_guard: Callable[[], bool] | None = None
+        lease_bound_write: Callable[[Callable[[], Any]], Any] | None = None
+        memory = self.memory
+        if job is not None:
+            if (
+                job.tenant_id != tenant_id
+                or job.task_id != task.task_id
+                or job.lease_owner != self.worker_id
+            ):
+                raise PermissionError("Worker task does not match the claimed queue lease")
+
+            def owns_current_lease() -> bool:
+                return (
+                    (lost_lease is None or not lost_lease.is_set())
+                    and self.queue.owns_lease(
+                        job.id, job.tenant_id, self.worker_id, job.lease_token
+                    )
+                )
+
+            def run_lease_bound_write(operation: Callable[[], Any]) -> Any:
+                if lost_lease is not None and lost_lease.is_set():
+                    raise LeaseLostError("Task lease was revoked before workspace write")
+                return self.queue.with_lease_owned(
+                    job.id,
+                    job.tenant_id,
+                    self.worker_id,
+                    job.lease_token,
+                    operation,
+                    lease_seconds=180,
+                )
+
+            lease_guard = owns_current_lease
+            lease_bound_write = run_lease_bound_write
+            memory = LeaseBoundMemory(
+                self.memory,
+                self.queue,
+                job.id,
+                job.task_id,
+                job.tenant_id,
+                self.worker_id,
+                job.lease_token,
+            )
+
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=self.sandbox,
@@ -131,6 +181,15 @@ class AICodeRuntime:
                 self._knowledge_project_scope(task.repository.full_name)
                 if self.knowledge_service is not None else None
             ),
+            audit_log=self.audit if job is not None else None,
+            task_id=task.task_id if job is not None else None,
+            tenant_id=tenant_id,
+            worker_id=self.worker_id,
+            repository_scope=task.repository.full_name,
+            audit_required=self.config.environment == "production",
+            lease_guard=lease_guard,
+            lease_bound_write=lease_bound_write,
+            cancel_event=lost_lease,
         )
         workers = [
             AutonomousCodeWorker(role, tenant_provider, gateway)
@@ -139,7 +198,7 @@ class AICodeRuntime:
         return (
             AICodeOrchestrator(
                 workers=workers,
-                memory=self.memory,
+                memory=memory,
                 audit=self.audit,
                 max_parallel_workers=int(os.getenv("RUSA_MAX_PARALLEL_WORKERS", "4")),
                 max_repair_cycles=int(os.getenv("RUSA_MAX_REPAIR_CYCLES", "2")),
@@ -173,8 +232,16 @@ class AICodeRuntime:
                 pass
 
     async def _heartbeat(self, job: Job, lost_lease: asyncio.Event) -> None:
+        try:
+            interval = int(os.getenv("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS", "10"))
+        except ValueError:
+            lost_lease.set()
+            raise RuntimeError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be an integer") from None
+        if not 1 <= interval <= 60:
+            lost_lease.set()
+            raise RuntimeError("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS must be between 1 and 60")
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(interval)
             try:
                 renewed = await asyncio.to_thread(
                     self.queue.heartbeat, job.id, job.tenant_id, self.worker_id, job.lease_token, 180
@@ -269,7 +336,9 @@ class AICodeRuntime:
             if not authorized:
                 lost_lease.set()
                 raise RuntimeError("Worker is not authorized by the current task lease")
-            orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+            orchestrator, workspace = await self._build_orchestrator(
+                task, job.tenant_id, job=job, lost_lease=lost_lease
+            )
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
@@ -292,6 +361,7 @@ class AICodeRuntime:
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     "; ".join(record.errors) or f"Task ended in {record.state.value}",
+                    retryable=record.state == TaskState.FAILED,
                 )
                 outcome = "failed"
                 return True
@@ -418,6 +488,9 @@ class AICodeRuntime:
                 await asyncio.to_thread(
                     self.queue.fail, job.id, job.tenant_id, self.worker_id, job.lease_token,
                     f"{type(exc).__name__}: {exc}",
+                    retryable=isinstance(
+                        exc, (TimeoutError, ConnectionError, httpx.TransportError)
+                    ),
                 )
         finally:
             heartbeat.cancel()
