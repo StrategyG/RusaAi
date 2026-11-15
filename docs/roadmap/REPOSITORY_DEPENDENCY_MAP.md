@@ -1,6 +1,7 @@
 # RUSA AI Ecosystem — Repository Dependency Map
 
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Architecture authority:** Roadmap v3.0 plus verified current-main ADRs, subject to CHUNK 01 reconciliation.
 
 ## 1. Ownership boundaries
@@ -178,3 +179,12 @@ CHUNK 08 is a roadmap dependency, not an optional extra chunk. Its scope preserv
 - CHUNK 09: human-reviewed qrels and held-out retrieval/model/agent benchmark evidence are not available.
 - CHUNK 10: PR #116 is a candidate-only staged registry/DAG implementation; do not build a duplicate runtime or activate candidate roles before CHUNK 08/09 and its own gates pass.
 
+
+
+## 7. Live repository/PR refresh — 2026-11-15
+
+The ownership and data-flow model above remains unchanged. Main SHAs remain RusaAi 1adac8d340e5870570910168b6626fe285dd2cf2, RusaModels 12c49b1372b230f3656be6e1badeabad870bcfa1, and RAG_Cerdas 1ead461e76d563445d179e7d5e80c25a9ca9f059. Current open PR counts are 87, 8, and 4 respectively.
+
+The active cross-repository alignment PRs remain open: RusaAi #117 (head 5f6b7c15, 3/3 CI success), RusaModels #24 (head 128343fe, latest 2/2 CI success), and RAG_Cerdas #28 (head 84e9a134, 1/1 CI success). None has review submissions or inline review threads at the inspected snapshot, and none is merged. The RusaAi #117 PR branch now passes the previously failing FIFO test, but this is not a production reliability certification.
+
+Other relevant open work includes RusaAi #115 knowledge governance, #103 Model Plane contract, #109/#110 inference gateway, #116 staged agent/DAG runtime, #121 desktop integration, #122 Agent/Worker queue hardening, RusaModels #25 device profiles and #20 tokenizer work, and RAG_Cerdas #29/#30 architecture and external RAG contract proposals. Exact heads, base SHAs, CI state, and mergeability are recorded in [BASELINE_REFRESH_2026-11-15.md](BASELINE_REFRESH_2026-11-15.md).
