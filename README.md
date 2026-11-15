@@ -54,7 +54,19 @@ deployable. Install `requirements-rag-mcp.txt`, apply
 `migrations/007_rag_knowledge_pgvector.sql` to a PostgreSQL database with
 pgvector, and configure restricted database credentials and per-tenant MCP
 bearer-token hashes. The `rusa-knowledge` CLI supports ingestion, readiness,
-and retrieval evaluation. See `docs/RAG_MCP_OPERATIONS.md`. See [RusaModels chat/embedding integration](docs/RUSAMODELS-INTEGRATION.md) for the authenticated model gateway and non-destructive 384d vector migration, and [the Colab smoke-test notebook](notebooks/RusaModels_Codespaces_Colab_Smoke_Test.ipynb) for Codespaces connectivity checks.
+and retrieval evaluation.
+
+Autonomous Agent Workers can optionally call administrator-approved external
+RAG and per-tenant read-only MCP connections. Copy `.env.worker.example` to
+`.env.worker` to configure these connectors; Docker Compose loads this file
+only into the Worker, never into the API or browser containers. MCP endpoint
+hostnames and tool names must be explicitly allowlisted. The browser-based
+connection manager and DNS-pinned outbound egress gateway are not yet
+implemented. See `docs/HYBRID_MCP_EXTERNAL_RAG_v1.0.md` and
+`docs/RAG_MCP_OPERATIONS.md`. See [RusaModels chat/embedding integration](docs/RUSAMODELS-INTEGRATION.md)
+for the authenticated model gateway and non-destructive 384d vector migration,
+and [the Colab smoke-test notebook](notebooks/RusaModels_Codespaces_Colab_Smoke_Test.ipynb)
+for Codespaces connectivity checks.
 
 ## Repository Structure
 
