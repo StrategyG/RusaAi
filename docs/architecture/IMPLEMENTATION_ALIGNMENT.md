@@ -182,3 +182,31 @@ checkpoint approval. They do not select or build a model checkpoint, run
 training, produce an approved GGUF artifact, certify a deployment, implement
 all agents, or complete the cross-process scheduler. Those items remain
 blocked on their stated evidence and implementation work.
+
+## Agent/Worker queue admission baseline (2026-11-15)
+
+The existing PostgreSQL task queue remains the single durable queue for the
+legacy AICode pipeline and the staged Agent Runtime candidate. The
+`feat/agent-worker-global-admission-20261115` hardening branch adds a
+transaction-scoped per-tenant enqueue lock and pending-task ceiling, plus a
+global worker-claim lock and live-lease concurrency ceiling. The conservative
+defaults are 100 pending tasks per tenant and one active task across the
+worker fleet. Attempts are bounded to 1–10, retry delay to 0–3,600 seconds,
+and the runtime's default specialist parallelism is aligned to one for the
+CPU-first profile.
+
+This change does not add a queue service or database migration. All API
+replicas must use the same pending-task limit and all worker replicas must
+use the same active-job limit. Old binaries do not take the advisory locks;
+the rollout therefore requires draining old API and worker processes before
+the new limits can be relied upon. See
+`docs/AGENT_WORKER_RUNTIME_OPERATIONS.md`,
+`docs/adr/ADR-0002-agent-worker-admission.md`, and
+`docs/engineering/AGENT_WORKER_RUNTIME_TRACEABILITY.md`.
+
+The general versioned Agent/Worker registry and DAG executor remain a
+separate staged candidate in PR #116. It is not mainline merely because its
+candidate branch has CI evidence. The registry remains disabled until
+production policy/verifier adapters, durable approval provenance, source
+crosswalk review, security disposition, and operations gates are complete.
+Production readiness remains NOT CERTIFIED.
