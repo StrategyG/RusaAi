@@ -9,6 +9,7 @@ Use the full ADR title or filename in cross-repository references. Do not refer 
 | [ADR-0001 — RusaAi-Edge v2.0 CPU-first baseline](ADR-0001-rusaai-edge-v2-cpu-first-baseline.md) | Accepted for repository alignment; full architecture remains proposed | CPU-first model target, admission limits, deployment ownership |
 | [ADR-0002 — Canonical Shared Agent/Worker Knowledge Store](ADR-0002-canonical-shared-agent-worker-knowledge-store.md) | Accepted by project owner for implementation planning; production activation not authorized | Selects RusaAi `rusa_knowledge` as canonical shared Agent/Worker store, subject to gates |
 | [ADR-0002 — RusaModels owns the Model Plane](ADR-0002-rusamodels-model-plane-boundary.md) | Accepted for repository integration alignment | RusaAi Control Plane / RusaModels production Model Plane boundary |
+| [ADR-0003 — NEXUS Foundation and Separate Agent Model Architecture](ADR-0003-nexus-foundation-agent-architecture.md) | Accepted architecture direction; training and implementation gated | From-scratch Foundation, separate Agent model, training authorization and model ownership |
 
 ## Numbering governance
 
@@ -27,4 +28,4 @@ Until a separately reviewed numbering correction is approved:
 
 ## Related decision records
 
-- [ADR-TRAIN-001 — Foundation checkpoint](../../documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md) — training/model foundation scope.
+- [ADR-TRAIN-001 — Foundation checkpoint](../../documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md) — superseded historical pretrained-checkpoint candidate record; see ADR-0003.

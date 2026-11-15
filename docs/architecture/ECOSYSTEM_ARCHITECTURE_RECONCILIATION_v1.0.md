@@ -13,6 +13,7 @@ This document establishes a single, reviewable system context for the three repo
 |---|---|---|
 | Ecosystem Control Plane | RusaAi owns trusted tenant identity, agent/task orchestration, workflow state, policy, tools, audit and worker execution | RusaAi architecture and Model Plane ADRs; implementation remains incremental |
 | Model Plane | RusaModels owns model registry, immutable artifacts, inference, embeddings, conversion, quantization and model telemetry | RusaAi Model Plane ADR; RusaModels ADR-001 |
+| NEXUS model family | NEXUS Foundation is trained from scratch; NEXUS Agent is a separate model with its own checkpoint and training lineage; Qwen is prohibited | RusaAi [ADR-0003 — NEXUS Foundation and Separate Agent Model Architecture](../adr/ADR-0003-nexus-foundation-agent-architecture.md); training remains blocked by TAG |
 | Canonical shared Agent/Worker knowledge | RusaAi `rusa_knowledge` is selected for implementation planning as the single canonical shared writer and answer-facing retrieval authority after gates pass | RusaAi [Canonical Shared Agent/Worker Knowledge Store ADR](../adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md); production activation not authorized |
 | Device-local state | SQLite/FTS5 remains local state and local full-text retrieval; it is not a shared-corpus replica | RusaAi architecture baseline |
 | IM19 | RAG_Cerdas / IM19 remains an isolated Knowledge Intelligence pilot; it is not a second canonical writer or production retrieval backend | RAG_Cerdas [Alignment with the RusaAi Canonical Knowledge Store ADR](https://github.com/StrategyG/RAG_Cerdas/pull/28) is proposed, not merged |
@@ -71,7 +72,7 @@ flowchart TB
 | Canonical shared Agent/Worker knowledge | RusaAi (`rusa_knowledge`) | Authorized RusaAi agents/workers | IM19 is not a second writer or retrieval backend |
 | Device-local state and FTS | RusaAi device/runtime | Local RusaAi components | SQLite/FTS5 is not a replica or synchronization target |
 | RusaAi knowledge PostgreSQL/pgvector | RusaAi | RusaAi KnowledgeService and approved MCP readers | No direct access from RusaModels or IM19 |
-| Model catalog, versions, manifests and artifact hashes | RusaModels | RusaModels services; approved clients through API | No RusaAi database or object-store credentials |
+| Model catalog, versions, manifests and artifact hashes | RusaModels | RusaModels services; approved clients through API | Includes distinct NEXUS Foundation and Agent identities; no RusaAi database or object-store credentials |
 | Model artifacts and S3-compatible storage | RusaModels | Model Server and Quant Server/Worker under separate least-privilege identities | Never mounted into RusaAi workers or IM19 |
 | Inference and embedding runtimes | RusaModels | RusaAi through authenticated Model Server API | No private runtime ports or direct worker access |
 | Model conversion and quantization | RusaModels | RusaModels Quant Server/Worker | No agent orchestration or knowledge publication authority |
@@ -276,3 +277,18 @@ This document does not authorize:
 - Treating CI success as staging, scale, security or production certification.
 
 **Conclusion:** the three-repository ownership model is defined and the conflicting canonical-store statements are explicitly reconciled at the proposed-ADR level. Mainline consistency remains pending review/merge of RusaAi PR #117, RusaModels PR #24 and RAG_Cerdas PR #28.
+
+
+## 8. NEXUS model family and training boundary
+
+The project-owner decision is recorded in [ADR-0003 — NEXUS Foundation and Separate Agent Model Architecture](../adr/ADR-0003-nexus-foundation-agent-architecture.md).
+
+- **NEXUS Foundation LLM:** random initialization and from-scratch pretraining. No pretrained checkpoint and no Qwen lineage.
+- **NEXUS Agent LLM:** a separate model with its own model ID, checkpoint, training lineage, evaluation suite, and release manifest. Its initialization method is an explicit open decision; Qwen is prohibited.
+- **NEXUS Argon v5.8.2:** remains a DevOps/SRE specialist candidate, not the Foundation or Agent model.
+- **50K DevOps chunks:** a specialist knowledge corpus; not the sole general-purpose Foundation pretraining corpus.
+- **RusaModels:** owns model identities, tokenizer/model training, artifacts, evaluation, inference, and release lifecycle.
+- **RusaAi:** owns agent orchestration, policy, approvals, Tool Gateway, sandbox, and audit. Model output cannot authorize tools.
+- **Training Authorization Gate:** no tokenizer/model training or bulk ingestion begins until identity, data rights, trainer integrity, compute feasibility, security, frozen evaluation, and owner approvals all pass.
+
+The exact Foundation architecture/parameter budget and Agent initialization strategy remain open. The planned 96-layer/12,288-hidden blueprint and the separate RusaAi-Edge 1.54B reference are not automatically adopted as NEXUS dimensions. Existing Qwen QLoRA configuration is a legacy isolated experiment, not a NEXUS dependency.

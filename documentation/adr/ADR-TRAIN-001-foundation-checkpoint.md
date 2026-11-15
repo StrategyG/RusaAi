@@ -1,6 +1,8 @@
 # ADR-TRAIN-001 — Foundation Checkpoint Decision
 
-- **Status:** PILOT_ONLY
+> **Supersession notice (2026-11-15):** This historical candidate-selection record is superseded by ADR-0003. The project-owner decision is to train NEXUS Foundation from scratch and keep NEXUS Agent as a separate model. The Bhineka-GPT candidate and other pretrained checkpoint options below are not selected for NEXUS. This file is retained for history only; it does not authorize model loading or training.
+
+- **Status:** SUPERSEDED — historical pretrained-checkpoint candidate record only; see [ADR-0003](../../docs/adr/ADR-0003-nexus-foundation-agent-architecture.md)
 - **Date:** 2026-11-12
 - **Owner:** RusaAi model release process
 - **Product model identity:** `rusaai-edge-derived`
