@@ -76,6 +76,68 @@ class _ScopedAICodeWorkerHandler:
         return await adapter.execute(node, dependency_results)
 
 
+class _AuditedWorkspaceToolGateway:
+    """Record actual tool decisions without persisting arguments or output content."""
+
+    def __init__(
+        self,
+        gateway: WorkspaceToolGateway,
+        audit: Any,
+        task_id: str,
+        tenant_id: str,
+        actor: str,
+        project_scope: str,
+    ) -> None:
+        self.gateway = gateway
+        self.audit = audit
+        self.task_id = task_id
+        self.tenant_id = tenant_id
+        self.actor = actor
+        self.project_scope = project_scope
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.gateway, name)
+
+    def _record(self, tool_name: Any, role: WorkerRole, decision: str, result: str) -> None:
+        safe_tool = (
+            tool_name
+            if isinstance(tool_name, str)
+            and re.fullmatch(r"[a-z][a-z0-9_.:-]{0,63}", tool_name)
+            else "invalid"
+        )
+        self.audit.record(
+            "tool.execution",
+            self.task_id,
+            self.actor,
+            {
+                "tool": safe_tool,
+                "role": getattr(role, "value", str(role))[:64],
+                "scope": {
+                    "tenant_id": self.tenant_id,
+                    "project_id": self.project_scope,
+                },
+                "decision": decision,
+                "result": result,
+            },
+            tenant_id=self.tenant_id,
+        )
+
+    def execute(self, action: dict[str, Any], role: WorkerRole) -> Any:
+        tool_name = action.get("name") if isinstance(action, dict) else None
+        try:
+            result = self.gateway.execute(action, role)
+        except PermissionError:
+            self._record(tool_name, role, "deny", "denied")
+            raise
+        except Exception:
+            self._record(tool_name, role, "allow", "error")
+            raise
+        self._record(
+            tool_name, role, "allow", "success" if result.ok else "failure"
+        )
+        return result
+
+
 class AICodeRuntime:
     def __init__(self, config: RuntimeConfig | None = None, worker_id: str | None = None):
         self.config = config or RuntimeConfig.from_env()
@@ -920,16 +982,22 @@ class AICodeRuntime:
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
+        project_scope = self._knowledge_project_scope(task.repository.full_name)
         gateway = WorkspaceToolGateway(
             workspace,
             sandbox=self.sandbox,
             knowledge_service=self.knowledge_service,
             knowledge_tenant_id=tenant_id if self.knowledge_service is not None else None,
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
-            knowledge_project_id=(
-                self._knowledge_project_scope(task.repository.full_name)
-                if self.knowledge_service is not None else None
-            ),
+            knowledge_project_id=project_scope if self.knowledge_service is not None else None,
+        )
+        gateway = _AuditedWorkspaceToolGateway(
+            gateway,
+            self.audit,
+            task.task_id,
+            tenant_id,
+            self.worker_id,
+            project_scope,
         )
         workers = [
             AutonomousCodeWorker(role, tenant_provider, gateway)
