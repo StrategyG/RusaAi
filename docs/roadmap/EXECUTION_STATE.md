@@ -183,7 +183,7 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 ### Updated risks and score
 
 - RusaAi PR #117 head 5f6b7c15 passes the FIFO test, but a newer independent PR #121 run reproduces a PostgreSQL DeadlockDetected in the same cross-process scheduler test (348 passed, 1 failed, 6 skipped). RSK-016 remains High and unresolved; CHUNK 06/11 cannot pass until lock-ordering is fixed and repeated tests pass.
-- RusaAi #122 head 947052c2 has a Ruff E731 lint failure. RusaAi #121 head f12642d7 has Web, VS Code and Windows launcher CI passing, RAG/MCP integration passing, but RUSA-AI test/lint/security failing on the FIFO deadlock while image build/scan remains in progress.
+- RusaAi #122 head 947052c2 has a Ruff E731 lint failure. RusaAi #121 head f12642d7 has Web, VS Code and Windows launcher CI passing, RAG/MCP integration and image build/scan passing, but RUSA-AI test/lint/security failing on the FIFO deadlock.
 - RusaModels #25 and RAG_Cerdas #30 are draft companion PRs for the same local-first workstream; all three (#121/#25/#30) are out of roadmap sequence and remain parked.
 - Direct Worker/MCP embedding credential paths, duplicate RusaAi ADR-0002 identifiers, mainline documentation drift, raw Trivy HIGH findings, missing staging/restore evidence, and absent approved model artifact remain open.
 - The ecosystem production-readiness score remains 45/100; this refresh adds no production or staging evidence and no score increase is justified.
