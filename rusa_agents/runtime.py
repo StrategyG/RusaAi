@@ -102,7 +102,10 @@ class _AuditedWorkspaceToolGateway:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.gateway, name)
 
-    def _record(self, tool_name: Any, role: WorkerRole, decision: str, result: str) -> None:
+    def _record(
+        self, tool_name: Any, role: WorkerRole, decision: str, result: str,
+        event: str = "tool.execution",
+    ) -> None:
         safe_tool = (
             tool_name
             if isinstance(tool_name, str)
@@ -110,7 +113,7 @@ class _AuditedWorkspaceToolGateway:
             else "invalid"
         )
         self.audit.record(
-            "tool.execution",
+            event,
             self.task_id,
             self.actor,
             {
@@ -130,6 +133,9 @@ class _AuditedWorkspaceToolGateway:
         tool_name = action.get("name") if isinstance(action, dict) else None
 
         def invoke() -> Any:
+            # Persist intent before a tool can mutate the workspace. If audit
+            # storage is unavailable, fail closed without executing the tool.
+            self._record(tool_name, role, "pending", "started", event="tool.execution.started")
             try:
                 result = self.gateway.execute(action, role)
             except PermissionError:
