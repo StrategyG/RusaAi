@@ -1,6 +1,7 @@
 # Rusa AI Ecosystem — Architecture Decisions Index
 
-**Snapshot:** 2026-11-14  
+**Initial snapshot:** 2026-11-14  
+**Latest refresh:** 2026-11-15  
 **Purpose:** cross-repository decision index for the roadmap v3.0. This index records current repository decisions and open alignment work; it does not silently supersede repository ADRs.
 
 ## 1. Decisions observed on current main
@@ -22,7 +23,7 @@
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Ready/open | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Review terminology and links |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready/open | Adds a superseding alignment ADR and marks the old canonical-store proposal superseded for ecosystem selection | Review; preserve IM19 as an isolated pilot |
 
-RusaAi PR #117 (head `251a7d1f`) is open and ready for review with 3/3 checks passing; its raw Trivy image reports still contain HIGH findings. RusaModels PR #24 (head `128343fe`) is open and ready for review with 2/2 checks passing in latest run 43554181866; its earlier raw Trivy image reports also contain HIGH findings. RAG_Cerdas PR #28 (head `7480bb2f`) is open and ready for review with 1/1 check passing after a documentation-only status refresh in workflow 43557286413. GitHub reports all three mergeable; no review submissions or inline review threads were present at the inspected snapshot. None is merged. Re-check exact heads before any merge.
+RusaAi PR #117 (head `5f6b7c15`) is open and ready for review with 3/3 exact-head checks passing in workflow 43679880047; its raw Trivy image reports still contain HIGH findings. RusaModels PR #24 (head `128343fe`) is open and ready for review with 2/2 exact-head checks passing in workflow 43680033627; raw Trivy HIGH findings remain. RAG_Cerdas PR #28 (head `84e9a134`) is open and ready for review with 1/1 exact-head check passing in workflow 43680080103. GitHub reports all three mergeable; no review submissions or inline review threads were found on the latest inspection. None is merged. These PRs remain the active CHUNK 01 alignment set; explicit project-owner approval is required before merge. Re-check exact heads before any merge.
 
 ## 3. Open architecture decisions
 
