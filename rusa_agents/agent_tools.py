@@ -35,6 +35,15 @@ ROLE_TOOL_ALLOWLIST = {
     }),
 }
 
+ROLE_PERMISSION_ALLOWLIST = {
+    WorkerRole.ANALYST: frozenset({"repo_read"}),
+    WorkerRole.ARCHITECT: frozenset({"repo_read"}),
+    WorkerRole.DEVELOPER: frozenset({"repo_read", "workspace_write"}),
+    WorkerRole.DEBUGGER: frozenset({"repo_read", "test_run"}),
+    WorkerRole.TESTER: frozenset({"repo_read", "test_run"}),
+    WorkerRole.SECURITY: frozenset({"repo_read", "test_run", "audit_read"}),
+}
+
 ROLE_CHECK_PROFILES = {
     WorkerRole.TESTER: frozenset({"pytest"}),
     WorkerRole.DEBUGGER: frozenset({"pytest", "compile", "ruff"}),

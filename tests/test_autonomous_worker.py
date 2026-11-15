@@ -44,6 +44,32 @@ def test_autonomous_worker_executes_only_registered_tools():
     assert len(gateway.calls) == 1
 
 
+def test_autonomous_worker_enforces_a_narrower_task_tool_allowlist():
+    gateway = StubGateway()
+    provider = StubProvider(json.dumps({
+        "message": "Try listing files",
+        "actions": [{"name": "list_files", "arguments": {"path": "."}}],
+        "done": True,
+    }))
+    worker = AutonomousCodeWorker(
+        WorkerRole.ANALYST, provider, gateway, allowed_tools={"read_file"}
+    )
+    result = asyncio.run(worker.run(make_task(), []))
+    assert not result.success
+    assert gateway.calls == []
+    assert "outside its role permissions" in result.blockers[0]
+
+
+def test_autonomous_worker_rejects_allowlist_broader_than_role_permissions():
+    import pytest
+
+    with pytest.raises(ValueError, match="cannot exceed"):
+        AutonomousCodeWorker(
+            WorkerRole.ANALYST, StubProvider("{}"), StubGateway(),
+            allowed_tools={"read_file", "write_file"},
+        )
+
+
 def test_autonomous_worker_rejects_role_escalation():
     gateway = StubGateway()
     provider = StubProvider(json.dumps({
