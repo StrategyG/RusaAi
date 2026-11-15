@@ -307,3 +307,15 @@ This exact-head verification closes CHUNK 00 as a **read-only baseline audit**. 
 - No merge, production deployment, production DDL, ingestion, data transfer, secret change, or model-artifact change was performed.
 
 **Disposition:** CHUNK 01 remains PARTIAL while RusaAi #117 and RusaModels #24 image/Compose jobs are running, the Copilot mission wording remains ambiguous, and all three PRs remain unmerged. Exact-head CI success is scoped to the SHA and checks shown; it is not production certification.
+
+
+## 13. RusaModels PR #24 final CI and repository ruleset evidence — 2026-11-15
+
+| Evidence ID | Repository | SHA / identifier | Evidence | Result |
+|---|---|---|---|---|
+| CH01-RV-008 | RusaModels PR #24 | `7ca01d6373c1b90aadc0182461982754ca54afce` | [CI run 43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560) | 2/2 checks PASS; test step 156 passed, 1 skipped; Windows RUSA-CPU-16 script validation, lint, compile, static security, PostgreSQL migration upgrade/rollback, image builds, Trivy, container health, devcontainer and Compose checks passed |
+| CH01-RV-009 | RusaModels PR #24 | Same SHA | Raw Trivy scan | Both Model Server and quantization-enabled worker images: 47 HIGH OS-package findings and 1 HIGH Python SBOM component (`setuptools@70.3.0`) per image; 0 CRITICAL. Runtime setuptools 84.2.1 verified; scoped VEX disposition verified; gate uses `--ignore-unfixed`. RSK-019 remains open; green CI is not a zero-HIGH result. |
+| CH01-RV-010 | RAG_Cerdas | Ruleset ID `25698740` (`Rag`) | Repository ruleset API | Active; no ref include/exclude patterns; 10 approving reviews, latest-push approval, review-thread resolution, linear history, signed commits, CodeQL HIGH-or-higher security-alert threshold; no bypass actors |
+| CH01-RV-011 | RAG_Cerdas PR #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | Review ID 5910264729 | Records the active ruleset as a merge prerequisite; no ruleset mutation performed |
+
+RusaAi and RusaModels have no active repository rulesets at this refresh. GitHub branch metadata reports `protected=false` for all three main branches, but that metadata alone does not reveal the active RAG_Cerdas repository ruleset. No branch protection, ruleset, permission, or bypass setting was changed.
