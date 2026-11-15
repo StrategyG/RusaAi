@@ -22,29 +22,52 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _valid_host(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return bool(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}", host))
+
+
 def validate_server_url(
     server_url: str,
     *,
+    allowed_hosts: set[str] | frozenset[str] = frozenset(),
     allow_http_hosts: set[str] | frozenset[str] = frozenset(),
 ) -> str:
     parsed = urlsplit(server_url)
-    trusted_http_hosts = {host.strip().lower() for host in allow_http_hosts}
+    host = (parsed.hostname or "").rstrip(".").lower()
+    trusted_hosts = {item.strip().rstrip(".").lower() for item in allowed_hosts}
+    trusted_http_hosts = {item.strip().rstrip(".").lower() for item in allow_http_hosts}
+    if (
+        not host
+        or not trusted_hosts
+        or host not in trusted_hosts
+        or any(not _valid_host(item) for item in trusted_hosts)
+        or not trusted_http_hosts.issubset(trusted_hosts)
+    ):
+        raise ValueError("MCP endpoint hostname must match an explicit administrator allowlist")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("MCP endpoint port is invalid") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("MCP endpoint port is invalid")
     secure = parsed.scheme == "https"
     local = (
         parsed.scheme == "http"
-        and bool(parsed.hostname)
-        and (_is_loopback(parsed.hostname) or parsed.hostname.lower() in trusted_http_hosts)
+        and (_is_loopback(host) or host in trusted_http_hosts)
     )
     if (
         not (secure or local)
-        or not parsed.hostname
         or parsed.username
         or parsed.password
         or parsed.query
         or parsed.fragment
         or not parsed.path.endswith("/mcp")
     ):
-        raise ValueError("MCP endpoint must be an HTTPS or loopback HTTP URL ending in /mcp")
+        raise ValueError("MCP endpoint must be an allowlisted HTTPS or loopback HTTP URL ending in /mcp")
     return server_url
 
 
@@ -57,16 +80,21 @@ class MCPToolClient:
         server_url: str,
         api_key: str,
         allowed_tools: set[str] | frozenset[str],
+        allowed_hosts: set[str] | frozenset[str],
         allow_http_hosts: set[str] | frozenset[str] = frozenset(),
         timeout_seconds: float = 60.0,
         max_argument_bytes: int = 32_768,
         max_response_bytes: int = 1_000_000,
     ) -> None:
-        trusted_http_hosts = frozenset(host.strip().lower() for host in allow_http_hosts)
-        if any(not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}", host) for host in trusted_http_hosts):
-            raise ValueError("MCP internal HTTP host allowlist is invalid")
+        trusted_hosts = frozenset(host.strip().rstrip(".").lower() for host in allowed_hosts)
+        trusted_http_hosts = frozenset(host.strip().rstrip(".").lower() for host in allow_http_hosts)
+        if not trusted_hosts or any(not _valid_host(host) for host in trusted_hosts):
+            raise ValueError("MCP administrator hostname allowlist is invalid")
+        if not trusted_http_hosts.issubset(trusted_hosts):
+            raise ValueError("MCP internal HTTP hosts must also be administrator-allowlisted")
         self.server_url = validate_server_url(
             server_url,
+            allowed_hosts=trusted_hosts,
             allow_http_hosts=trusted_http_hosts,
         )
         if not api_key or len(api_key) < 32 or len(api_key) > 512:
