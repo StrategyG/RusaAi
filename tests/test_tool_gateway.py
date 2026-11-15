@@ -248,3 +248,80 @@ def test_external_rag_outage_returns_local_fallback_instead_of_blocking(tmp_path
     assert not result.ok
     assert "External RAG is unavailable" in result.output
     assert result.evidence["available"] is False
+
+
+def test_mcp_tools_are_tenant_scoped_allowlisted_and_marked_untrusted(tmp_path):
+    import json
+
+    class FakeMCPClient:
+        allowed_tools = frozenset({"search_docs"})
+
+        async def list_tools(self):
+            return [
+                {
+                    "name": "search_docs",
+                    "description": "Read-only document search",
+                    "input_schema": {"type": "object"},
+                }
+            ]
+
+        async def call_tool(self, name, arguments):
+            assert name == "search_docs"
+            assert arguments == {"query": "RusaAi"}
+            return {"matches": ["doc-1"]}
+
+    client = FakeMCPClient()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        mcp_client=client,
+        mcp_tenant_id="tenant-a",
+    )
+    listed = gateway.execute(
+        {"name": "list_mcp_tools", "arguments": {}},
+        WorkerRole.ANALYST,
+    )
+    listed_payload = json.loads(listed.output)
+    assert listed.ok
+    assert listed_payload["trust"] == "untrusted_remote_mcp_metadata"
+    assert listed_payload["tools"][0]["name"] == "search_docs"
+    assert listed.evidence["tenant_id"] == "tenant-a"
+
+    called = gateway.execute(
+        {
+            "name": "call_mcp_tool",
+            "arguments": {"tool_name": "search_docs", "arguments": {"query": "RusaAi"}},
+        },
+        WorkerRole.ANALYST,
+    )
+    called_payload = json.loads(called.output)
+    assert called.ok
+    assert called_payload["trust"] == "untrusted_remote_mcp_result"
+    assert called_payload["result"]["matches"] == ["doc-1"]
+
+
+def test_mcp_tools_fail_closed_when_no_tenant_connection_is_configured(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied, match="not enabled"):
+        gateway.execute(
+            {"name": "list_mcp_tools", "arguments": {}},
+            WorkerRole.ANALYST,
+        )
+
+
+def test_mcp_provider_outage_returns_nonfatal_local_fallback(tmp_path):
+    class OfflineMCPClient:
+        async def list_tools(self):
+            raise RuntimeError("network is offline")
+
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        mcp_client=OfflineMCPClient(),
+        mcp_tenant_id="tenant-a",
+    )
+    result = gateway.execute(
+        {"name": "list_mcp_tools", "arguments": {}},
+        WorkerRole.ANALYST,
+    )
+    assert not result.ok
+    assert "continue with local tools" in result.output
+    assert result.evidence["available"] is False
