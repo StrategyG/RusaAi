@@ -359,3 +359,39 @@ def test_knowledge_project_scope_is_derived_from_authorized_repository_target():
         AICodeRuntime._knowledge_project_scope("StrategyG")
     with pytest.raises(ValueError, match="unsupported project-scope"):
         AICodeRuntime._knowledge_project_scope("StrategyG/Repo With Spaces")
+
+
+def test_runtime_await_with_lease_cancels_child_operation_on_revocation():
+    runtime = object.__new__(AICodeRuntime)
+    lost_lease = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def operation():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async def scenario():
+        running = asyncio.create_task(
+            runtime._await_with_lease(operation(), lost_lease)
+        )
+        await asyncio.sleep(0)
+        lost_lease.set()
+        with pytest.raises(RuntimeError, match="lost its task lease"):
+            await running
+
+    asyncio.run(scenario())
+    assert cancelled.is_set()
+
+
+def test_runtime_heartbeat_fails_closed_on_unbounded_poll_interval(monkeypatch):
+    runtime = object.__new__(AICodeRuntime)
+    lost_lease = asyncio.Event()
+    monkeypatch.setenv("RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS", "0")
+
+    with pytest.raises(RuntimeError, match="between 1 and 60"):
+        asyncio.run(runtime._heartbeat(None, lost_lease))
+
+    assert lost_lease.is_set()
