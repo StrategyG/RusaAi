@@ -280,3 +280,24 @@ ruff check rusa_agents tests llm-project/serve
 The runtime registry is a development-stage contract. Production activation
 still requires human approval, adapter review, security review, hardware
 benchmarking, and an explicit release decision.
+
+
+## Runtime hardening on `feat/agent-worker-runtime-audit-20261115`
+
+The implementation branch adds the following safeguards to the staged v1 runtime:
+
+- `RUSA_MAX_PENDING_TASKS_PER_TENANT` defaults to 1000 and is bounded to 1–10000. The cap counts `queued`, `running` and `awaiting_approval` rows. A transaction-scoped tenant advisory lock serializes admission across API replicas. Idempotency replay is checked before capacity, so a legitimate retry does not create a duplicate or fail solely because the queue is full.
+- `RUSA_MAX_PARALLEL_WORKERS` defaults to 1 and is bounded to 1–32. A global transaction-scoped advisory lock serializes claims and enforces the active, unexpired worker lease ceiling across worker replicas. All replicas must use the same setting.
+- Queue `max_attempts` is restricted to 1–10. Generic `retry()` accepts only `failed`; `awaiting_approval` must use the fingerprint-bound `approve()` endpoint. This prevents retry permission from becoming an approval bypass.
+- API intake returns HTTP 429 with `Retry-After: 30` when the tenant backlog is full.
+- Each Agent Runtime node produces a HMAC-chained audit event containing actor, root task, node, selected/delegating role, tool allowlist, requested permission scope, risk class, decision, result status, attempts and evidence/artifact counts. Raw model output, prompts, tool arguments and secrets are not copied into this event. Per-tool invocation-level audit remains a known gap.
+
+### Migration dependency
+
+Apply migrations in order: 001–012, then migration 013 from the RAG governance sequence (currently tracked by open PR #115), then 014 checkpoint CAS and 015 task approval audit action. Do not apply 014/015 ahead of migration 013. No live migration was performed by this implementation branch.
+
+### Rollback
+
+Rollback application images first and keep migration 014's additive checkpoint version column. Keep migration 015's expanded audit action constraint if any `task.approve` events exist. Never remove checkpoint rows or audit events during rollback. Schema reversal requires a separate reviewed migration and DBA approval.
+
+See `docs/agents/AGENT_WORKER_RUNTIME_IMPLEMENTATION_AUDIT.md` for the traceability matrix, exact baseline, findings and open production gates; `docs/adr/ADR-0003-agent-worker-runtime.md` for the architecture decision; and `docs/runbooks/AGENT_WORKER_RUNTIME.md` for operational and rollback procedures.
