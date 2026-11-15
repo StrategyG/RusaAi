@@ -126,7 +126,7 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 - The current RAG_Cerdas main branch still has the historical no-selection ADR until PR #28 is merged.
 - The current RusaModels main terminology is clarified only on PR #24 until merged.
 - The current main branches report branch protection disabled.
-- PR #119 is a self-updating tracker. The last observed head before this refresh, `e41ea1d9fb2304296edbd7fa2be650ae08b458be`, had 2/3 checks complete and its production-image scan in progress in run 43557157903. This tracker update triggers a new run, so live PR metadata is authoritative for the latest SHA and CI. Its six changed paths remain documentation only.
+- PR #119 is a self-updating tracker. The last observed head before this refresh, `e41ea1d9fb2304296edbd7fa2be650ae08b458be`, had 2/3 checks complete and its production-image scan in progress in run 43557157903. This tracker update triggers a new run, so live PR metadata is authoritative for the latest SHA and CI. Its seven changed paths remain documentation only.
 - RusaAi PR #115 proposes additional knowledge governance migration 013; it remains open/draft and is not mainline.
 - RusaAi worker result contracts do not yet expose a complete typed immutable knowledge-reference/version trace.
 - RusaAi KnowledgeService is optional and the runtime activation flag defaults false; its worker-side embedding provider bypasses the RusaAi chat gateway when enabled, and the MCP service uses the same provider factory (RSK-020).
