@@ -1,7 +1,7 @@
 # Hybrid MCP and External RAG Connectivity v1.0
 
 - Repository: StrategyG/RusaAi
-- Status: remote MCP client exists; normalized external RAG client added; end-to-end Agent orchestration remains pending
+- Status: normalized external RAG retrieval is available as an opt-in Agent Worker tool; MCP Agent tool orchestration and end-user connection management remain pending
 - Security owner: RusaAi Policy Engine and Tool Gateway
 
 ## Runtime topology
@@ -66,6 +66,12 @@ The client validates response shape, HTTPS source URI, exact revision, SHA-256 p
 
 The connector does not automatically send local files, chat history, prompts beyond the explicit query, or private memory. Data minimization and tenant/provider authorization must be configured before enabling a connection. Provider credentials remain server-side.
 
+### Agent Worker integration
+
+The autonomous coding workers can call the read-only `search_external_rag` tool when the administrator enables the connector with `RUSA_EXTERNAL_RAG_ENABLED=true`. Configure the exact endpoint, matching hostname allowlist, and bearer credential using the `RUSA_EXTERNAL_RAG_*` worker environment variables. The runtime injects the authenticated task tenant and server-derived repository project scope as retrieval filters; the model cannot override them. Returned evidence includes source URI, immutable revision, SHA-256, locator and ranking score, and is explicitly labeled untrusted in the worker transcript.
+
+The connector is disabled by default and fails closed when incomplete or invalid. It is not yet exposed through a browser connection-management UI; credentials and endpoint policy are administrator-managed deployment secrets. Remote MCP is still a transport client foundation and is not yet exposed as an autonomous Agent tool.
+
 ## Agent routing boundary
 
 The intended hybrid sequence is:
@@ -77,4 +83,4 @@ The intended hybrid sequence is:
 5. Local Agent executes local workspace actions only through the existing sandbox/Tool Gateway.
 6. Result, source citations, request ID and policy decision are audited.
 
-The external RAG client is a reusable transport/validation component. It is not yet wired into every Agent/Worker workflow or a public connection-management UI. Do not claim end-to-end hybrid execution until those integration tests pass.
+The external RAG client is integrated into the autonomous coding worker tool gateway as an opt-in, tenant/project-scoped read-only retrieval tool. MCP transport remains a separate foundation pending Agent tool routing and a connection-management UI. Full end-to-end consumer hybrid setup is not yet complete.
