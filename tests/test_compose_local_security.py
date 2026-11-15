@@ -25,7 +25,7 @@ def test_external_rag_bearer_credential_is_not_injected_into_api_container():
     compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
     api_environment = compose["services"]["api"]["environment"]
 
-    assert api_environment["RUSA_EXTERNAL_RAG_API_KEY"] == ""
+    assert "RUSA_EXTERNAL_RAG_CONNECTIONS_JSON" not in api_environment
     for secret_name in (
         "RUSA_GITHUB_TOKEN",
         "RUSA_WORKER_MODEL_API_KEY",
