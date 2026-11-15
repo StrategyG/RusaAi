@@ -6,8 +6,8 @@
 **Latest refresh:** 2026-11-15  
 **Coordinator:** ChatGPT Project NOTE  
 **Overall status:** IN_PROGRESS  
-**Active chunk:** CHUNK 00 — Repository Baseline refresh (final exact-head CI pending)  
-**Last closed chunk:** none for the 2026-11-15 refresh; the 2026-11-14 CHUNK 00 PASS is historical
+**Active chunk:** CHUNK 01 — Architecture Reconciliation and ADR Governance  
+**Last closed chunk:** CHUNK 00 — Repository Discovery, Baseline, and Evidence Inventory (PASS; refreshed 2026-11-15)
 
 ## 1. Operating rules
 
@@ -32,8 +32,8 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 | Chunk | Status | Evidence / note |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | IN_PROGRESS | 2026-11-15 live refresh is on PR #119; close after final updated head CI passes |
-| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | PRs #117, #24 and #28 are open, ready for review, mergeable and green on their exact inspected heads; none is merged, no owner approval exists, and mainline documentation remains inconsistent |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Refreshed baseline artifacts on PR #119; final inspected head `d1f00563` passed 3/3 exact-head checks in run 43685578070; uncertainties are explicitly recorded |
+| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | Active: PRs #117, #24 and #28 are open, mergeable and green on their exact inspected heads, but unreviewed/unmerged; mainline documentation remains inconsistent |
 | 02 — Trusted Identity, Authorization, Tenant Security | NOT_STARTED | Depends on CHUNK 01 |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
@@ -166,8 +166,8 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 
 | Chunk | Status | Evidence / blocker |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | IN_PROGRESS | Live refresh artifact and evidence references have been added to PR #119; close only after the final updated PR #119 head completes its exact-head CI successfully |
-| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | PR #117, RusaModels #24 and RAG_Cerdas #28 are open and have green exact-head CI, but none is reviewed or merged; mainline documentation remains inconsistent |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | PR #119 head `d1f00563` passed all 3 exact-head checks in run 43685578070; 337 passed / 6 skipped, sandbox 304 passed / 39 skipped; raw Trivy HIGH findings are retained as an open risk |
+| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | Active chunk. PR #117, RusaModels #24 and RAG_Cerdas #28 have green exact-head CI but no submitted reviews or inline threads and remain unmerged; mainline documentation remains inconsistent |
 | 02–15 | NOT_STARTED | Roadmap dependency graph; CHUNK 01 must pass first |
 
 ### Current alignment PR state
@@ -175,7 +175,7 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 - RusaAi #117: head 5f6b7c15, 3/3 CI success; 337 passed / 6 skipped, including the cross-process FIFO test.
 - RusaModels #24: head 128343fe, latest 2/2 CI success.
 - RAG_Cerdas #28: head 84e9a134, 1/1 CI success.
-- RusaAi #119: the pre-refresh head f1e4b938 had 3/3 CI success. Subsequent documentation-only refresh commits advance the tracker head and trigger a new exact-head run; live PR metadata is authoritative. Do not reuse the previous head's result.
+- RusaAi #119: final inspected pre-closeout head `d1f00563d0beab2123bc9d5e96ae2d437c5296d5` passed 3/3 checks in workflow 43685578070 (337 passed / 6 skipped; sandbox 304 passed / 39 skipped). This closeout update advances the tracker branch; re-check the new head before any merge.
 - RusaAi #121: head f12642d7; RUSA-AI CI test/lint/security FAIL on the FIFO PostgreSQL deadlock (348 passed, 1 failed, 6 skipped), RAG/MCP PASS, image build/scan PASS; Web, VS Code extension and Windows launcher syntax CI PASS.
 - RusaModels #25: head 9cf2816d, CI PASS; RAG_Cerdas #30: head b7e314de, CI PASS. Both remain draft and out of sequence; they do not satisfy CHUNK 07 or CHUNK 08.
 - No reviews or inline review threads were present for #119, #117, #24, or #28 at the inspected snapshot. No merge was performed or authorized.
@@ -190,4 +190,16 @@ All three main SHAs are unchanged. Branch metadata returned protected=false; det
 
 ### Next action
 
-Verify the final updated head SHA of RusaAi PR #119 and its exact-head CI. If all required checks pass, close CHUNK 00 as PASS and continue CHUNK 01 review. Do not merge PR #117, #24, or #28 without explicit project-owner approval.
+CHUNK 00 is closed as PASS for the read-only baseline audit. Continue CHUNK 01 review of PRs #117, #24 and #28. Preserve the coordinated order: merge #24, then #28, refresh #117 to reflect both merges, then merge #117 last — only after explicit project-owner approval. Do not merge any of these PRs without that approval.
+
+
+## 10. CHUNK 00 closeout — 2026-11-15
+
+- **Status:** PASS for the read-only repository baseline and evidence inventory.
+- **Coordinator PR:** [RusaAi #119](https://github.com/StrategyG/RusaAi/pull/119), documentation-only branch; seven changed paths, no source-code changes.
+- **Verified head at closeout:** `d1f00563d0beab2123bc9d5e96ae2d437c5296d5`.
+- **Exact-head workflow:** [43685578070](https://github.com/StrategyG/RusaAi/actions/runs/43685578070), 3/3 jobs successful.
+- **Test evidence:** 337 passed, 6 skipped; isolated sandbox suite 304 passed, 39 skipped; cross-process FIFO test passed on this exact head.
+- **Security qualification:** raw Trivy HIGH counts 103 / 118 / 117 / 103 across API, agent-sandbox, worker and RAG/MCP images; CRITICAL 0. The blocking scan uses `--ignore-unfixed`; the scan is not a zero-finding certification. Keep RSK-015 open.
+- **Limitations:** local working-tree state NOT_VERIFIED; detailed branch-protection configuration NOT_VERIFIED (branch metadata protected=false; direct endpoint returned 403); no staging/production evidence.
+- **Boundary:** no main branch, merge, source code, database, model artifact, deployment or production data was changed. CHUNK 01 is now the active chunk.

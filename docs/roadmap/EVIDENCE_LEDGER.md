@@ -269,3 +269,18 @@ The RusaAi #121 failure is not caused by the new local-first source paths alone:
 RusaAi #121, RusaModels #25 and RAG_Cerdas #30 are draft local-first desktop / hardware / external-RAG candidates opened ahead of the dependency-approved roadmap chunks. They do not advance CHUNK 02, 05, 06, 07 or 08 and are not end-to-end integrated. Keep them parked and do not merge or count them as roadmap progress until their corresponding chunks become active and their exact-head checks, cross-repository contracts and owner approvals pass.
 
 PR #122 is a separate Agent/Worker queue hardening candidate with an outstanding Ruff E731 failure. It is not a substitute for the roadmap's CHUNK 06/11 concurrency root-cause work.
+
+
+## 12. CHUNK 00 final exact-head verification — 2026-11-15
+
+RusaAi PR #119 closeout branch was inspected at exact head `d1f00563d0beab2123bc9d5e96ae2d437c5296d5`. Workflow [43685578070](https://github.com/StrategyG/RusaAi/actions/runs/43685578070) completed all three jobs successfully:
+
+| Job | GitHub job | Result | Detail |
+|---|---:|---|---|
+| RAG and MCP integration tests | 132725305363 | PASS | Job completed successfully |
+| Test, lint, and security | 132725305541 | PASS | 337 passed, 6 skipped; cross-process PostgreSQL FIFO admission test passed |
+| Build, test, and scan production images | 132725305607 | PASS | Isolated sandbox suite 304 passed, 39 skipped; image builds and Compose validations passed |
+
+The image scan reported raw Trivy HIGH findings of 103 (API), 118 (agent sandbox), 117 (worker), and 103 (RAG/MCP), with CRITICAL 0. The blocking command uses `--ignore-unfixed`; these results do not mean zero vulnerabilities. Keep RSK-015 open for SBOM, package-level triage and reviewed VEX dispositions.
+
+This exact-head verification closes CHUNK 00 as a **read-only baseline audit**. The seven deliverable files remain on the open PR #119 branch and are not mainline until merged. The PR was not merged; no source code, main branch, database, model artifact, deployment or production data was changed.
