@@ -9,14 +9,14 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from rusa_agents.queue import LeaseLostError, PostgresTaskQueue
+from rusa_agents.queue import LeaseLostError, PostgresTaskQueue, QueueCapacityError
 
 DSN = os.getenv("RUSA_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DSN, reason="PostgreSQL integration DSN is not configured")
 
 
-def make_queue() -> PostgresTaskQueue:
-    queue = PostgresTaskQueue(DSN)
+def make_queue(max_pending_per_tenant: int = 1000) -> PostgresTaskQueue:
+    queue = PostgresTaskQueue(DSN, max_pending_per_tenant=max_pending_per_tenant)
     queue.initialize()
     return queue
 
@@ -55,6 +55,75 @@ def claim_specific_task(task_id: str, tenant_id: str, worker_id: str) -> tuple[i
     if row is None:
         raise AssertionError("test task could not be claimed")
     return row[0], token
+
+
+
+def remove_tenant_tasks(tenant_id: str) -> None:
+    with psycopg.connect(DSN) as connection:
+        connection.execute("DELETE FROM aicode_jobs WHERE tenant_id=%s", (tenant_id,))
+
+
+def test_tenant_pending_queue_capacity_is_enforced_without_cross_tenant_blocking():
+    queue = make_queue(max_pending_per_tenant=1)
+    tenant_a = f"queue-capacity-a-{uuid4().hex}"
+    tenant_b = f"queue-capacity-b-{uuid4().hex}"
+    first = str(uuid4())
+    blocked = str(uuid4())
+    other_tenant = str(uuid4())
+    try:
+        assert queue.enqueue(first, tenant_a, {"objective": "first"})
+        with pytest.raises(QueueCapacityError):
+            queue.enqueue(blocked, tenant_a, {"objective": "second"})
+        assert queue.enqueue(other_tenant, tenant_b, {"objective": "other tenant"})
+        assert queue.get(first, tenant_a)["status"] == "queued"
+        assert queue.get(blocked, tenant_a) is None
+    finally:
+        remove_tenant_tasks(tenant_a)
+        remove_tenant_tasks(tenant_b)
+
+
+def test_idempotent_replay_is_allowed_when_tenant_queue_is_at_capacity():
+    queue = make_queue(max_pending_per_tenant=1)
+    tenant = f"queue-capacity-idempotency-{uuid4().hex}"
+    task_id = str(uuid4())
+    payload = {"objective": "stable replay"}
+    key = "capacity-replay-" + uuid4().hex
+    try:
+        created_id, created, status = queue.enqueue_idempotent(
+            task_id, tenant, payload, key
+        )
+        replayed_id, replay_created, replay_status = queue.enqueue_idempotent(
+            str(uuid4()), tenant, payload, key
+        )
+        assert (created_id, created, status) == (task_id, True, "queued")
+        assert (replayed_id, replay_created, replay_status) == (task_id, False, "queued")
+    finally:
+        remove_tenant_tasks(tenant)
+
+
+def test_concurrent_enqueues_cannot_exceed_tenant_pending_capacity():
+    queue = make_queue(max_pending_per_tenant=2)
+    tenant = f"queue-capacity-race-{uuid4().hex}"
+    task_ids = [str(uuid4()) for _ in range(8)]
+    try:
+        def submit(task_id: str) -> bool:
+            try:
+                return queue.enqueue(task_id, tenant, {"objective": task_id})
+            except QueueCapacityError:
+                return False
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            accepted = list(pool.map(submit, task_ids))
+        assert sum(accepted) == 2
+        with psycopg.connect(DSN) as connection:
+            count = connection.execute(
+                "SELECT COUNT(*) FROM aicode_jobs WHERE tenant_id=%s "
+                "AND status IN ('queued', 'running', 'awaiting_approval')",
+                (tenant,),
+            ).fetchone()[0]
+        assert count == 2
+    finally:
+        remove_tenant_tasks(tenant)
 
 
 def test_crashed_worker_lease_is_reclaimed_and_old_token_is_fenced():
