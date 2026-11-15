@@ -74,6 +74,8 @@ The connector is disabled by default and fails closed when incomplete or invalid
 
 ### MCP Agent Worker integration
 
+For a deployment that enables the Worker profile, copy `.env.worker.example` to `.env.worker`. Compose loads this file only into the Agent Worker; the API and web containers do not receive its connector credentials. Keep `.env.worker` out of version control.
+
 The autonomous workers expose `list_mcp_tools` and `call_mcp_tool` only when a connection exists for the authenticated task tenant. Configure tenant-keyed `RUSA_MCP_CONNECTIONS_JSON` in the Worker-only `.env.worker` file. Each entry contains the exact HTTPS endpoint, matching `allowed_hosts`, a `credential_env` reference, and an explicit `read_only_tools` list. The raw bearer token belongs in the separately named environment variable, never in the JSON mapping. Optional internal HTTP endpoints require both `allowed_hosts` and `allow_http_hosts`; public endpoints must use HTTPS.
 
 The runtime builds one MCP client per tenant and injects only the matching client into that tenant's Agent tool gateway. MCP discovery metadata and tool results are labeled untrusted. A provider outage returns a non-fatal unavailable result; it does not redirect local inference. The Worker image includes the MCP client runtime dependencies. Administrators must ensure the configured allowlist contains only read-only tools; write-capable tools are not supported by this integration.
