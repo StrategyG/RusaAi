@@ -13,12 +13,12 @@ All three repositories are reachable through the connected GitHub integration. T
 
 | Repository | Default branch | Verified main SHA | Branch protected | Open PRs returned |
 |---|---|---|---:|---:|
-| [RusaAi](https://github.com/StrategyG/RusaAi) | `main` | `1adac8d340e5870570910168b6626fe285dd2cf2` | No | 87 |
-| [RusaModels](https://github.com/StrategyG/RusaModels) | `main` | `12c49b1372b230f3656be6e1badeabad870bcfa1` | No | 6 |
-| [RAG_Cerdas](https://github.com/StrategyG/RAG_Cerdas) | `main` | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | No | 4 |
-| **Total** | | | | **97** |
+| [RusaAi](https://github.com/StrategyG/RusaAi) | `main` | `1adac8d340e5870570910168b6626fe285dd2cf2` | No | 85 |
+| [RusaModels](https://github.com/StrategyG/RusaModels) | `main` | `12c49b1372b230f3656be6e1badeabad870bcfa1` | No | 7 |
+| [RAG_Cerdas](https://github.com/StrategyG/RAG_Cerdas) | `main` | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | No | 2 |
+| **Total** | | | | **94** |
 
-A fresh repository-scoped open-PR search on 2026-11-15 returned 87 RusaAi PRs, 6 RusaModels PRs and 4 RAG_Cerdas PRs (97 total). The previous 2026-11-14 snapshot was 85/7/2 (94 total); the counts changed as PRs were opened, merged or closed. These are time-stamped search results, not immutable repository totals.
+The initial RusaAi repository-scoped search returned 83 open PRs. A follow-up search on 2026-11-14 returned 85 after PRs #119 and #120 were opened; RusaModels remained at 7 and RAG_Cerdas at 2 (94 total). PR #118's own ALE baseline records 82. These are time-stamped snapshots, not contradictory immutable counts.
 
 ### Exact-main CI evidence
 
