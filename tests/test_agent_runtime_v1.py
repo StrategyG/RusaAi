@@ -18,7 +18,7 @@ from rusa_agents.capability_registry import (
 from rusa_agents.capability_router import CapabilityRouter, RouteRequest
 from rusa_agents.contracts import CodingTask, RepositoryTarget, WorkerRole
 from rusa_agents.memory import SQLiteMemory
-from rusa_agents.queue import Job
+from rusa_agents.queue import Job, LeaseLostError
 from rusa_agents.runtime import AICodeRuntime, _AuditedWorkspaceToolGateway
 from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskDecomposer, TaskNode, TaskPlan
@@ -722,13 +722,17 @@ def test_audited_tool_gateway_records_scope_decision_and_result_without_argument
         )
 
     rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
-    assert len(rows) == 2
-    allowed, denied = rows
+    started = [row for row in rows if row["event"] == "tool.execution.started"]
+    outcomes = [row for row in rows if row["event"] == "tool.execution"]
+    assert len(started) == len(outcomes) == 2
+    allowed, denied = outcomes
+    assert all(row["task_id"] == "task-tool-audit" for row in rows)
+    assert all(row["tenant_id"] == "tenant-tool-audit" for row in rows)
+    assert all(row["actor"] == "worker-tool-audit" for row in rows)
+    assert all(row["timestamp"] for row in rows)
+    assert all(row["details"]["decision"] == "pending" for row in started)
+    assert all(row["details"]["result"] == "started" for row in started)
     assert allowed["event"] == denied["event"] == "tool.execution"
-    assert allowed["task_id"] == denied["task_id"] == "task-tool-audit"
-    assert allowed["tenant_id"] == denied["tenant_id"] == "tenant-tool-audit"
-    assert allowed["actor"] == denied["actor"] == "worker-tool-audit"
-    assert allowed["timestamp"] and denied["timestamp"]
     assert allowed["details"]["tool"] == "list_files"
     assert allowed["details"]["scope"] == {
         "tenant_id": "tenant-tool-audit",
@@ -742,6 +746,55 @@ def test_audited_tool_gateway_records_scope_decision_and_result_without_argument
     serialized = audit_path.read_text()
     assert "never-log" not in serialized
     assert '"arguments"' not in serialized
+    assert audit.verify()
+
+
+def test_stale_worker_cannot_write_through_the_audited_tool_gateway(tmp_path):
+    class StaleQueue:
+        def with_lease_owned(self, *args, **kwargs):
+            raise LeaseLostError("lease lost")
+
+        def owns_lease(self, *args):
+            return False
+
+    audit_path = tmp_path / "stale-tool-audit.jsonl"
+    audit = AuditLog(str(audit_path), hmac_key="audit-key-" + "y" * 32)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    job = Job(
+        id=77,
+        task_id="task-stale-tool",
+        tenant_id="tenant-stale-tool",
+        payload={},
+        attempts=1,
+        max_attempts=3,
+        lease_owner="stale-worker",
+        lease_token="00000000-0000-4000-8000-000000000077",
+    )
+    gateway = _AuditedWorkspaceToolGateway(
+        WorkspaceToolGateway(workspace),
+        audit,
+        job.task_id,
+        job.tenant_id,
+        job.lease_owner,
+        "strategy--rusaai",
+        queue=StaleQueue(),
+        job=job,
+    )
+
+    with pytest.raises(LeaseLostError):
+        gateway.execute(
+            {"name": "write_file", "arguments": {"path": "src/never-written.py", "content": "VALUE = 1"}},
+            WorkerRole.DEVELOPER,
+        )
+
+    assert not (workspace / "src" / "never-written.py").exists()
+    rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["event"] == "tool.execution"
+    assert rows[0]["details"]["tool"] == "write_file"
+    assert rows[0]["details"]["decision"] == "deny"
+    assert rows[0]["details"]["result"] == "lease_lost"
     assert audit.verify()
 
 
