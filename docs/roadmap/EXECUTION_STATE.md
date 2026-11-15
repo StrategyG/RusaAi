@@ -307,3 +307,36 @@ The project roadmap v3.1 has been prepared as `RUSA_AI_ECOSYSTEM_CHATGPT_ROADMAP
 - CHUNK 01 architecture reconciliation: **PARTIAL**; companion PRs and reviewer/merge gates remain open.
 - CHUNK 04 model lifecycle and all NEXUS training: **BLOCKED** by CHUNK 01/02/03 dependencies and unresolved model identity/compute/data decisions.
 - No PR merged; no main branch, model artifact, training environment, production deployment, or production data was changed.
+
+
+## 17. Live baseline and CHUNK 01 revalidation — 2026-11-16
+
+This section supersedes prior time-sensitive PR counts, head SHAs, CI and review-state snapshots above. Full evidence is recorded in [BASELINE_REFRESH_2026-11-16.md](BASELINE_REFRESH_2026-11-16.md).
+
+### Current mainline
+
+| Repository | Main SHA | Main check runs | Open PRs | Ruleset status |
+|---|---|---:|---:|---|
+| RusaAi | 1adac8d340e5870570910168b6626fe285dd2cf2 | 4/4 success | 88 | No repository rulesets; branch metadata protected=false |
+| RusaModels | 12c49b1372b230f3656be6e1badeabad870bcfa1 | 2/2 success | 7 | No repository rulesets; branch metadata protected=false |
+| RAG_Cerdas | 1ead461e76d563445d179e7d5e80c25a9ca9f059 | 13/13 success (one test run; 12 scheduled audit runs) | 4 | Active ruleset Rag ID 25698740; 10 approving reviews, latest-push approval, resolved threads, linear history, signed commits, CodeQL HIGH-or-higher; no bypass actors |
+
+### Active PR heads and exact-head checks
+
+| Repository | PR | Head SHA | CI | Review / merge state |
+|---|---:|---|---|---|
+| RusaAi | #119 | 226c8da9855106ece8caec76301e86da4b3cdc9d | 3/3 PASS (workflow 43733483582) | Open; no review submission |
+| RusaAi | #117 | 30630895c870e70aa3b77080accbcf515124a39c | 3/3 PASS (workflow 43733130737) | Open; 3 COMMENTED reviews, no APPROVED review |
+| RusaModels | #24 | 7ca01d6373c1b90aadc0182461982754ca54afce | 2/2 PASS (workflow 43704012560) | Open; 2 COMMENTED reviews, no APPROVED review |
+| RAG_Cerdas | #28 | 84e9a13450c4b107d470eed775c1bb0998981acb | 1/1 PASS (workflow 43680080103) | Open; 2 COMMENTED reviews, no APPROVED review; 10-approval ruleset blocks merge |
+
+No inline review threads were returned for these PRs. PR #117's latest head now clarifies the product-versus-repository mission wording and the mainline migration/ADR references. PR #24's service-specific OpenAPI descriptions and regression test are present. PR #28 preserves the isolated IM19 boundary.
+
+### Status and next gate
+
+- CHUNK 00 remains PASS for the read-only baseline audit.
+- CHUNK 01 remains PARTIAL: changes are prepared on PR branches, not main; no PR has an approving review; RAG_Cerdas #28 is subject to the active 10-approval ruleset.
+- CHUNK 02 remains NOT_STARTED and cannot proceed until CHUNK 01 passes.
+- The supplied roadmap v3.0 defines CHUNK 00–15 only. No CHUNK 16 is part of that roadmap.
+- RusaEval/RusaGovernance local P0 ZIP artifacts are not verified as integrated into the three official repositories; GitHub lookups for those repository names returned 404 through the current connection.
+- Required merge order remains RusaModels #24, RAG_Cerdas #28 (after its ruleset gate is met or an explicitly approved ruleset change), then refreshed RusaAi #117 last. No merge or ruleset change is authorized by this refresh.
