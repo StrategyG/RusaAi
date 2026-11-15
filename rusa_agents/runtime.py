@@ -87,6 +87,8 @@ class _AuditedWorkspaceToolGateway:
         tenant_id: str,
         actor: str,
         project_scope: str,
+        queue: PostgresTaskQueue | None = None,
+        job: Job | None = None,
     ) -> None:
         self.gateway = gateway
         self.audit = audit
@@ -94,6 +96,8 @@ class _AuditedWorkspaceToolGateway:
         self.tenant_id = tenant_id
         self.actor = actor
         self.project_scope = project_scope
+        self.queue = queue
+        self.job = job
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.gateway, name)
@@ -124,18 +128,44 @@ class _AuditedWorkspaceToolGateway:
 
     def execute(self, action: dict[str, Any], role: WorkerRole) -> Any:
         tool_name = action.get("name") if isinstance(action, dict) else None
+
+        def invoke() -> Any:
+            try:
+                result = self.gateway.execute(action, role)
+            except PermissionError:
+                self._record(tool_name, role, "deny", "denied")
+                raise
+            except Exception:
+                self._record(tool_name, role, "allow", "error")
+                raise
+            self._record(
+                tool_name, role, "allow", "success" if result.ok else "failure"
+            )
+            return result
+
         try:
-            result = self.gateway.execute(action, role)
-        except PermissionError:
-            self._record(tool_name, role, "deny", "denied")
+            if self.queue is not None and self.job is not None:
+                job = self.job
+                if tool_name == "write_file":
+                    # Workspace mutation is short and local; hold the lease row
+                    # lock across the write so a stale worker cannot write after
+                    # lease handoff.
+                    return self.queue.with_lease_owned(
+                        job.id,
+                        job.tenant_id,
+                        job.lease_owner,
+                        job.lease_token,
+                        invoke,
+                        lease_seconds=180,
+                    )
+                if not self.queue.owns_lease(
+                    job.id, job.tenant_id, job.lease_owner, job.lease_token
+                ):
+                    raise LeaseLostError("Tool execution refused after task lease loss")
+            return invoke()
+        except LeaseLostError:
+            self._record(tool_name, role, "deny", "lease_lost")
             raise
-        except Exception:
-            self._record(tool_name, role, "allow", "error")
-            raise
-        self._record(
-            tool_name, role, "allow", "success" if result.ok else "failure"
-        )
-        return result
 
 
 class AICodeRuntime:
@@ -527,7 +557,7 @@ class AICodeRuntime:
             )
         await self._assert_lease(job, cancellation_event)
         task = self._agent_runtime_coding_task(job, plan)
-        orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+        orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id, job=job)
         if cancellation_event.is_set():
             try:
                 await asyncio.to_thread(self.workspace_manager.cleanup, task, job.tenant_id)
@@ -971,7 +1001,7 @@ class AICodeRuntime:
         return project_id
 
     async def _build_orchestrator(
-        self, task: CodingTask, tenant_id: str
+        self, task: CodingTask, tenant_id: str, job: Job | None = None
     ) -> tuple[AICodeOrchestrator, str]:
         tenant_provider_factory = getattr(self.provider, "for_tenant", None)
         tenant_provider = (
@@ -998,6 +1028,8 @@ class AICodeRuntime:
             tenant_id,
             self.worker_id,
             project_scope,
+            queue=self.queue if job is not None else None,
+            job=job,
         )
         workers = [
             AutonomousCodeWorker(role, tenant_provider, gateway)
@@ -1163,7 +1195,7 @@ class AICodeRuntime:
             if not authorized:
                 lost_lease.set()
                 raise RuntimeError("Worker is not authorized by the current task lease")
-            orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id)
+            orchestrator, workspace = await self._build_orchestrator(task, job.tenant_id, job=job)
             if lost_lease.is_set():
                 raise RuntimeError("Worker lost its task lease before execution")
             task_timeout = int(os.getenv("RUSA_TASK_TIMEOUT_SECONDS", "3600"))
