@@ -26,3 +26,16 @@ def test_external_rag_bearer_credential_is_not_injected_into_api_container():
     api_environment = compose["services"]["api"]["environment"]
 
     assert api_environment["RUSA_EXTERNAL_RAG_API_KEY"] == ""
+    for secret_name in (
+        "RUSA_GITHUB_TOKEN",
+        "RUSA_WORKER_MODEL_API_KEY",
+        "RUSA_WORKER_INFERENCE_API_KEYS",
+        "RUSA_WORKER_INFERENCE_BASE_URL",
+        "RUSA_INTERNAL_CA_BUNDLE",
+        "RUSA_WORKSPACE_ROOT",
+        "RUSA_GIT_MIRROR_ROOT",
+        "RUSA_SANDBOX_IMAGE",
+        "RUSA_DOCKER_SOCKET",
+        "RUSA_WEB_SESSION_SECRET",
+    ):
+        assert api_environment[secret_name] in {"", "{}"}
