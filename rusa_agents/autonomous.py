@@ -57,7 +57,10 @@ class AutonomousCodeWorker:
         return payload
 
     async def run(self, task: CodingTask, prior_results: list[WorkerResult]) -> WorkerResult:
-        allowed = sorted(self.ROLE_TOOLS[self.role])
+        allowed_tools = set(self.ROLE_TOOLS[self.role])
+        if getattr(self.gateway, "external_rag_client", None) is None:
+            allowed_tools.discard("search_external_rag")
+        allowed = sorted(allowed_tools)
         history = "\n".join(
             f"{item.role.value}: {item.summary[:1500]}" for item in prior_results
         ) or "No previous worker reports."
@@ -128,7 +131,7 @@ class AutonomousCodeWorker:
                         success=False, artifacts=artifacts, evidence=evidence,
                         blockers=["Tool action must include a name and arguments object."],
                     )
-                if action["name"] not in self.ROLE_TOOLS[self.role]:
+                if action["name"] not in allowed_tools:
                     return WorkerResult(
                         role=self.role, summary=f"Tool not allowed for role: {action['name']}",
                         success=False, artifacts=artifacts, evidence=evidence,
