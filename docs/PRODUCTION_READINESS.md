@@ -8,7 +8,7 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Canonical shared knowledge-store decision (2026-11-12)
 
-ADR-0002 selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
+The RusaAi **Canonical Shared Agent/Worker Knowledge Store** ADR selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
 shared Agent/Worker knowledge store, subject to implementation and release gates.
 
 - SQLite/FTS5 remains device-local memory/state; it is not a shared-corpus replica.
@@ -16,7 +16,7 @@ shared Agent/Worker knowledge store, subject to implementation and release gates
   cross-read are not authorized.
 - RusaModels remains the Model Plane and is accessed through an authenticated API.
 - The 1,536-dimensional and 384-dimensional vector spaces remain separate. The
-  final production embedding profile is not selected.
+  final production embedding profile is not selected by the canonical-store ADR.
 - This decision does not authorize production migrations, ingestion, embeddings,
   index writes, publication or deployment.
 
@@ -30,14 +30,14 @@ Current mainline migration inventory (RusaAi main SHA `1adac8d340e5870570910168b
 
 The repository migration files are not proof of the migration history in any deployed database. Verify the exact target's applied migration history read-only before planning any DDL. Reconcile all branch diffs into one unique ordered migration inventory and run forward/rollback/restore tests in disposable PostgreSQL/pgvector before any approved staging change.
 
-## Delivered in this integration branch
+## Capabilities present on current mainline
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
 - Local model artifact manifest and SHA-256 verification; production local loading
   requires an externally pinned manifest digest.
 - Bounded generation/streaming adapters, API admission control, and backend shutdown.
-- CPU Compose worker inference routed through the API gateway with per-tenant API credentials, request deadlines, JSON response-format forwarding, and no automatic gateway retries (PR #108).
-- PostgreSQL-backed FIFO inference admission with global slot rows, bounded waiting, heartbeat leases, crash recovery, stale-owner fencing, and API-only database privileges (PR #109; exact-head CI and staging verification pending).
+- CPU Compose worker inference is routed through the API gateway with per-tenant API credentials, request deadlines, JSON response-format forwarding, and no automatic gateway retries; this integrated path is present on current mainline.
+- PostgreSQL-backed FIFO inference admission with global slot rows, bounded waiting, heartbeat leases, crash recovery, stale-owner fencing, and API-only database privileges is present on current mainline through merged PR #111. PR #109 remains open on a stacked branch and is not a separate source of mainline migration or runtime state.
 - Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
   fencing of stale acknowledgements, cancellation/completion race protection,
   and retry limits.
@@ -52,17 +52,9 @@ The repository migration files are not proof of the migration history in any dep
 
 ## Verification boundary
 
-Architecture PR #107 passed all jobs on exact head
-`117da0ef39a38a096e28cc3d9712c95a8fef4f8a` in workflow run
-[43100849792](https://github.com/StrategyG/RusaAi/actions/runs/43100849792):
-293 passed, 6 skipped; compile, Ruff, Bandit, curated SFT validation,
-RAG/MCP integration, isolated sandbox tests, image builds, Trivy release
-gate, and Compose validation passed. The stacked worker-gateway change in
-PR #108 passed 306 tests with 6 skipped plus the RAG/MCP integration job;
-its Docker/sandbox/Trivy/Compose job is still being verified. PR #109 adds
-the PostgreSQL-backed scheduler and must pass its own exact-head CI before
-being considered verified. A successful result on an earlier PR does not
-certify a later stacked commit.
+Current mainline CI evidence is summarized in the release-gates table below: RusaAi main SHA `1adac8d340e5870570910168b6626fe285dd2cf2` had 4/4 exact-main check runs pass. This is evidence for that exact SHA and those checks only; it does not certify deployment.
+
+Historical PR-head evidence (not current-mainline evidence): Architecture PR #107 passed all jobs on exact head `117da0ef39a38a096e28cc3d9712c95a8fef4f8a` in workflow run [43100849792](https://github.com/StrategyG/RusaAi/actions/runs/43100849792): 293 passed, 6 skipped; compile, Ruff, Bandit, curated SFT validation, RAG/MCP integration, isolated sandbox tests, image builds, Trivy release gate, and Compose validation passed. The stacked worker-gateway change in PR #108 passed 306 tests with 6 skipped plus the RAG/MCP integration job; those results apply only to that historical PR head. PR #109 remains open on a stacked branch. The integrated scheduler is present on current main through merged PR #111; PR #109's branch checks do not determine mainline status. A successful result on an earlier PR does not certify a later stacked commit or a production deployment.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
