@@ -214,7 +214,7 @@ This section supersedes earlier PR-head, CI, and review snapshots above for the 
 | Repository | PR | Latest head SHA | Exact-head CI evidence | Review state | Merge state |
 |---|---:|---|---|---|---|
 | RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | `85a9d936bc0d8feb3b0c33a3336fa9fa83cdd3fa` | Run 43703955776: RAG/MCP integration PASS; Test/lint/security PASS (337 passed, 6 skipped; cross-process FIFO test passed); production image build/test/scan IN_PROGRESS | COMMENT reviews 5910229219 and 5910245817; corrections committed; one repository-instruction clarification remains open | Open; not merged |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `7ca01d6373c1b90aadc0182461982754ca54afce` | Run 43704012560: Windows script validation PASS; test job IN_PROGRESS after Tests, lint, compile, static security, and PostgreSQL migration upgrade/rollback steps passed; image build/Trivy/Compose checks still running | COMMENT review 5910229332; service-specific OpenAPI descriptions and regression test committed | Open; not merged |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | `7ca01d6373c1b90aadc0182461982754ca54afce` | Run 43704012560: 2/2 checks PASS; 156 passed, 1 skipped; Windows script, lint, compile, static security, PostgreSQL migration upgrade/rollback, image build, Trivy, health and Compose checks passed | COMMENT reviews 5910229332 and 5910262769; service-specific OpenAPI descriptions and regression test committed | Open; not merged |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | `84e9a13450c4b107d470eed775c1bb0998981acb` | Run 43680080103: 1/1 Institutional RAG check PASS | COMMENT review 5910241299; no blocking static documentation finding | Open; not merged |
 
 ### Review corrections committed
@@ -230,8 +230,18 @@ RusaAi PR #121 current head `70d4f082e49105d62db678179cd6ec84109eeb66` has 4/4 a
 ### Governance and current boundaries
 
 - Current main SHAs remain RusaAi `1adac8d340e5870570910168b6626fe285dd2cf2`, RusaModels `12c49b1372b230f3656be6e1badeabad870bcfa1`, and RAG_Cerdas `1ead461e76d563445d179e7d5e80c25a9ca9f059`.
-- All three main branches currently report `protected=false`. Do not change repository rules or permissions without explicit approval.
+- Branch metadata reports `protected=false` on all three main branches. RusaAi and RusaModels have no active repository rulesets; RAG_Cerdas has active ruleset `Rag` (ID 25698740), apparently applying to all branches, requiring 10 approving reviews, latest-push approval, review-thread resolution, linear history, signed commits, and CodeQL (HIGH-or-higher security alerts); no bypass actors are configured. Do not change repository rules or permissions without explicit approval.
 - No PR was merged; no main branch, production database, production data, model artifact, secret, or deployment was changed.
 - CHUNK 01 remains PARTIAL until exact-head CI completes, remaining documentation ambiguity is resolved or explicitly recorded, all three changes are adopted on main in the approved order, and cross-repository consistency is rechecked.
 - Required merge order remains RusaModels #24, RAG_Cerdas #28, then refresh RusaAi #117 to reflect those merges and merge it last. Explicit project-owner approval is required before any merge.
 - CHUNK 02 remains NOT_STARTED until CHUNK 01 passes.
+
+
+## 14. Governance ruleset and PR #24 final CI refresh — 2026-11-15
+
+- RusaModels PR #24 current head `7ca01d6373c1b90aadc0182461982754ca54afce` completed run `43704012560` with 2/2 checks PASS. Its test step reports 156 passed, 1 skipped. The Windows script validation, lint, compile, static security, PostgreSQL migration upgrade/rollback, container build, image scan, health smoke test, devcontainer and Compose validation completed successfully.
+- Raw Trivy results for both RusaModels CI images: 47 HIGH OS-package findings and one HIGH Python SBOM finding for `setuptools@70.3.0` per image; 0 CRITICAL. The runtime check reports `setuptools 84.2.1`, the scoped VEX disposition for the stale SBOM component is verified, and the blocking gate uses `--ignore-unfixed`. This is not a zero-HIGH image result; RSK-019 remains open.
+- RAG_Cerdas ruleset `Rag` (ID 25698740) is active. Its rules include 10 required approving reviews, approval of the latest push, review-thread resolution, required linear history, required signatures, and CodeQL security-alert threshold HIGH-or-higher. No bypass actors are configured. The ruleset has no ref include/exclude entries, so treat it as applying to all branches unless the owner verifies otherwise. This is in addition to branch metadata reporting `protected=false`.
+- RAG_Cerdas PR #28 review 5910264729 records this merge prerequisite. No ruleset change is authorized.
+- RusaAi PR #117 run 43703955776 remains IN_PROGRESS in the production image build/test/scan job; its RAG/MCP and Test/lint/security jobs have passed. The tracker PR #119 head `e24056726bddd3829953cb097d3a2cfa6d3812cd` is running workflow 43704538764 after the execution-state/evidence-ledger refresh.
+- No PR has been merged. CHUNK 01 remains PARTIAL.
