@@ -6,8 +6,8 @@
 **Latest refresh:** 2026-11-15  
 **Coordinator:** ChatGPT Project NOTE  
 **Overall status:** IN_PROGRESS  
-**Active chunk:** CHUNK 01 — Architecture Reconciliation and ADR Governance  
-**Last closed chunk:** CHUNK 00 — PASS (read-only baseline and CI verification)
+**Active chunk:** CHUNK 00 — Repository Baseline refresh (final exact-head CI pending)  
+**Last closed chunk:** none for the 2026-11-15 refresh; the 2026-11-14 CHUNK 00 PASS is historical
 
 ## 1. Operating rules
 
@@ -32,7 +32,7 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 | Chunk | Status | Evidence / note |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Six-file baseline artifact package complete; PR #119 exact head `5772c23c1cb7c6ec738925ce5b4663c79e17e029` has 3/3 checks passing in run 43554368639; six changed files are roadmap documentation only; no source code changed |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | IN_PROGRESS | 2026-11-15 live refresh is on PR #119; close after final updated head CI passes |
 | 01 — Architecture Reconciliation and ADR Governance | PARTIAL | PRs #117, #24 and #28 are open, ready for review, mergeable and green on their exact inspected heads; none is merged, no owner approval exists, and mainline documentation remains inconsistent |
 | 02 — Trusted Identity, Authorization, Tenant Security | NOT_STARTED | Depends on CHUNK 01 |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
