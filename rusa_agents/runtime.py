@@ -133,6 +133,12 @@ class AICodeRuntime:
             if callable(tenant_provider_factory)
             else self.provider
         )
+        if job is not None and (
+            job.tenant_id != tenant_id
+            or job.task_id != task.task_id
+            or job.lease_owner != self.worker_id
+        ):
+            raise PermissionError("Worker task does not match the claimed queue lease")
         workspace = await asyncio.to_thread(
             self.workspace_manager.create, task, tenant_id
         )
@@ -140,13 +146,6 @@ class AICodeRuntime:
         lease_bound_write: Callable[[Callable[[], Any]], Any] | None = None
         memory = self.memory
         if job is not None:
-            if (
-                job.tenant_id != tenant_id
-                or job.task_id != task.task_id
-                or job.lease_owner != self.worker_id
-            ):
-                raise PermissionError("Worker task does not match the claimed queue lease")
-
             def owns_current_lease() -> bool:
                 return (
                     (lost_lease is None or not lost_lease.is_set())
