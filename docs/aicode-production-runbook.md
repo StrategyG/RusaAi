@@ -144,6 +144,10 @@ RUSA_GIT_MIRROR_ROOT=/var/lib/rusa/mirrors
 RUSA_GITHUB_TOKEN=FINE_GRAINED_REPOSITORY_TOKEN
 RUSA_SANDBOX_IMAGE=ghcr.io/ORG/rusa-aicode-sandbox@sha256:REGISTRY_DIGEST
 RUSA_TASK_TIMEOUT_SECONDS=3600
+RUSA_MAX_PENDING_TASKS_PER_TENANT=1000
+RUSA_MAX_ACTIVE_TASKS=1
+RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS=10
+RUSA_MAX_PARALLEL_WORKERS=1
 RUSA_CI_TIMEOUT_SECONDS=900
 RUSA_CI_POLL_SECONDS=15
 RUSA_METRICS_PORT=9100
@@ -213,7 +217,7 @@ curl -fsS -X POST http://127.0.0.1:8000/v1/aicode/tasks \
   }'
 ```
 
-The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Tasks in `awaiting_approval` or terminal `failed` state can be explicitly requeued by the owning tenant with `POST /v1/aicode/tasks/{task_id}/retry` after reviewing the failure. The retry endpoint does not approve PR merges or deployments.
+The API returns a task UUID and generated feature branch. Poll `GET /v1/aicode/tasks/{task_id}` with the same tenant key. The response includes the durable `result` object after completion (Pull Request URL, commit SHA, and actual lease-specific branch), or after human review is required. The initial submission returns `work_branch_prefix`; the actual branch is assigned per worker lease to prevent stale workers from colliding. Only terminal `failed` tasks can be requeued through generic `POST /v1/aicode/tasks/{task_id}/retry`. An `awaiting_approval` task is not a retry state and requires a separate, explicit operator approval path. The current mainline legacy AICode path does not yet expose a plan-fingerprint-bound approval-resume endpoint; treat automated resume of these tasks as BLOCKED until that path is reviewed and implemented. The retry endpoint does not approve PR merges or deployments.
 
 A successful task creates a draft pull request and requires both GitHub Actions jobs to pass. If checks are missing, fail, or cannot be verified, the task remains `awaiting_approval`; it is never silently marked successful.
 
@@ -349,3 +353,42 @@ arbitrary SQL; deployments requiring isolation against a compromised service
 process must move to per-tenant database identities or signed database
 assertions. Export the append-only audit stream to a restricted, immutable
 off-host retention system and test restore/retention independently.
+
+
+## Runtime hardening — 2026-11-15
+
+### Queue admission and concurrency bounds
+
+The durable queue now enforces two independent PostgreSQL-backed bounds without changing the schema:
+
+- `RUSA_MAX_PENDING_TASKS_PER_TENANT`: default 1000, valid range 1–1,000,000. Counts `queued`, `running`, and `awaiting_approval` rows for one tenant. API replicas serialize the count-and-insert operation with a transaction-scoped tenant advisory lock. Saturation returns HTTP 429 with a `Retry-After` header.
+- `RUSA_MAX_ACTIVE_TASKS`: default 1, valid range 1–64. Worker replicas serialize active-lease counting and claiming with one transaction-scoped global advisory lock. Expired leases do not consume an active slot; stale workers remain fenced by the lease token.
+
+An identical `Idempotency-Key` replay is resolved before capacity enforcement and returns the original task ID/state. A replay with a different payload remains a 409 conflict. All API replicas must use the same pending-task limit; all worker replicas must use the same active-task limit. Mixed old/new replicas can bypass these code-level bounds, so stop intake and drain workers before rolling out the new version to every replica.
+
+`RUSA_MAX_PARALLEL_WORKERS` remains the in-task specialist concurrency limit. It is not the global queue-claim limit. Keep these settings separate and size both for the actual CPU/memory and inference-admission capacity.
+
+### Lease fencing, tool audit, and cancellation
+
+- Legacy AICode memory reads/writes and developer workspace writes are executed under the active queue-row lock through `with_lease_owned`. The callback is limited to short local/database operations; model inference, Git/network requests, and sandbox execution must not hold this lock.
+- Read-only Tool Gateway invocations verify the current task lease before execution. The gateway writes a HMAC-chained `tool.intent` event before execution and `tool.outcome` after allow/deny/result. Events include actor, task, tenant, tool, repository/project scope, timestamp, decision, and result status; they exclude raw arguments, file contents, model/tool output, credentials, and lease tokens. Production fails closed if the required audit store cannot persist the intent.
+- `RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS` defaults to 10 seconds and accepts 1–60 seconds. Lease revocation/cancellation is detected on the next heartbeat; sandbox execution receives the cancellation signal and force-removes its named Docker container. Other I/O remains bounded by its own timeout. This is cooperative cancellation, not a hard real-time guarantee.
+- `fail(..., retryable=False)` terminates a task immediately. The worker retries only classified timeout/connection transport failures; deterministic policy/permission and blocked verification results are terminal. Attempts remain bounded by `max_attempts` (1–10), and retry delay is bounded to 0–3600 seconds.
+- Generic retry now accepts only `failed` tasks. Approval-pending tasks must not be converted into retries. The legacy mainline path still lacks an explicit approval-resume endpoint, so such tasks require operator handling and are a known lifecycle gap.
+
+### Rollout and rollback
+
+No database migration is introduced by these changes. The existing `aicode_jobs`, lease token, idempotency, tenant RLS, and HMAC audit schema are reused.
+
+1. Keep `RUSA_AICODE_ENABLED=false`; stop/drain every worker and wait for running leases to finish or be explicitly cancelled.
+2. Take/verify a database backup and record the current API/worker image digests.
+3. Deploy the reviewed API image to every API replica with the same `RUSA_MAX_PENDING_TASKS_PER_TENANT` value.
+4. Deploy the reviewed worker image to every worker replica with the same `RUSA_MAX_ACTIVE_TASKS` and `RUSA_LEASE_HEARTBEAT_INTERVAL_SECONDS` values.
+5. Run queue admission, idempotency replay, claim-capacity, lease-loss, audit-chain, and sandbox-cancellation smoke tests. Verify the production database roles and audit append-only controls.
+6. Re-enable intake only after operator approval. Monitor 429s, pending age, active leases, heartbeat failures, sandbox cancellations/timeouts, and audit write failures.
+
+Rollback does not require a schema rollback. Disable intake, stop/drain workers, deploy the last reviewed API and worker image digests together, and verify queue/lease state before resuming. The old images do not enforce the new code-level bounds; keep intake disabled until the rollback topology is stable. Never delete or rewrite audit records. Do not run destructive migrations.
+
+### Implementation evidence and remaining gaps
+
+See [Agent–Worker Runtime traceability](engineering/AGENT_WORKER_RUNTIME_TRACEABILITY_20261115.md) and [implementation notes](agents/AGENT_WORKER_RUNTIME_IMPLEMENTATION.md). The current branch is a code-level hardening candidate, not a production certification. Production still requires actual deployment-role adversarial tests, load/soak, backup/restore and rollback drills, off-host immutable audit retention, monitoring/alert verification, and operator sign-off.
