@@ -155,3 +155,75 @@ def test_protected_deployment_paths(tmp_path, path):
     gateway = WorkspaceToolGateway(tmp_path)
     with pytest.raises(ToolDenied):
         gateway.write_file(path, "x", WorkerRole.DEVELOPER)
+
+
+def test_external_rag_tool_is_tenant_and_project_scoped(tmp_path):
+    import json
+
+    from rusa_agents.external_rag import ExternalRAGEvidence
+
+    class FakeExternalRAG:
+        def __init__(self):
+            self.calls = []
+
+        async def search(self, query, *, top_k, filters):
+            self.calls.append((query, top_k, filters))
+            return [
+                ExternalRAGEvidence(
+                    evidence_id="evidence-1",
+                    text="Untrusted retrieved evidence.",
+                    source_uri="https://docs.example.org/guide",
+                    title="Guide",
+                    revision="rev-7",
+                    content_sha256="a" * 64,
+                    locator="section:2",
+                    score=0.81,
+                    metadata={"language": "en"},
+                )
+            ]
+
+    client = FakeExternalRAG()
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        external_rag_client=client,
+        external_rag_tenant_id="tenant-a",
+        knowledge_project_id="strategy--rusaai",
+    )
+    result = gateway.execute(
+        {"name": "search_external_rag", "arguments": {"query": "find the design", "top_k": 2}},
+        WorkerRole.ANALYST,
+    )
+    payload = json.loads(result.output)
+    assert result.ok
+    assert client.calls == [
+        ("find the design", 2, {"tenant_id": "tenant-a", "project_id": "strategy--rusaai"})
+    ]
+    assert payload["results"][0]["trust"] == "untrusted_external_evidence"
+    assert payload["results"][0]["source"]["revision"] == "rev-7"
+    assert payload["results"][0]["source"]["content_sha256"] == "a" * 64
+
+
+def test_external_rag_tool_fails_closed_when_not_configured(tmp_path):
+    gateway = WorkspaceToolGateway(tmp_path)
+    with pytest.raises(ToolDenied, match="not enabled"):
+        gateway.execute(
+            {"name": "search_external_rag", "arguments": {"query": "find evidence"}},
+            WorkerRole.ANALYST,
+        )
+
+
+def test_external_rag_tool_rejects_unbounded_or_invalid_arguments(tmp_path):
+    class FakeExternalRAG:
+        async def search(self, query, *, top_k, filters):
+            raise AssertionError("invalid arguments must be rejected before provider access")
+
+    gateway = WorkspaceToolGateway(
+        tmp_path,
+        external_rag_client=FakeExternalRAG(),
+        external_rag_tenant_id="tenant-a",
+    )
+    with pytest.raises(ToolDenied, match="top_k"):
+        gateway.execute(
+            {"name": "search_external_rag", "arguments": {"query": "x", "top_k": 100}},
+            WorkerRole.ANALYST,
+        )
