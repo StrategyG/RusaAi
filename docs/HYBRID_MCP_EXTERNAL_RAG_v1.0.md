@@ -1,7 +1,7 @@
 # Hybrid MCP and External RAG Connectivity v1.0
 
 - Repository: StrategyG/RusaAi
-- Status: normalized external RAG retrieval is available as an opt-in Agent Worker tool; MCP Agent tool orchestration and end-user connection management remain pending
+- Status: tenant-scoped external RAG and read-only MCP Agent tools are available as opt-in Worker integrations; end-user connection management and DNS-pinned egress remain pending
 - Security owner: RusaAi Policy Engine and Tool Gateway
 
 ## Runtime topology
@@ -14,7 +14,7 @@
 
 ## MCP
 
-The existing `rusa_mcp.client.MCPToolClient` supports Streamable HTTP, bearer authentication, explicit tool allowlists, argument/response size limits, disabled redirects, and `trust_env=False`. Each configured connection must additionally be governed by:
+The `rusa_mcp.client.MCPToolClient` supports Streamable HTTP, bearer authentication, explicit tool allowlists, argument/response size limits, disabled redirects, `trust_env=False`, and exact administrator hostname allowlists for HTTPS endpoints. Each configured connection must additionally be governed by:
 
 - Exact administrator-approved HTTPS endpoint and hostname allowlist.
 - Dedicated credential per connection; no model-plane token reuse.
@@ -70,7 +70,14 @@ The connector does not automatically send local files, chat history, prompts bey
 
 The autonomous coding workers can call the read-only `search_external_rag` tool when the administrator enables the connector with `RUSA_EXTERNAL_RAG_ENABLED=true`. Configure the exact endpoint, matching hostname allowlist, and bearer credential using the `RUSA_EXTERNAL_RAG_*` worker environment variables. The runtime injects the authenticated task tenant and server-derived repository project scope as retrieval filters; the model cannot override them. Returned evidence includes source URI, immutable revision, SHA-256, locator and ranking score, and is explicitly labeled untrusted in the worker transcript.
 
-The connector is disabled by default and fails closed when incomplete or invalid. When no connector is configured, the remote tool is omitted from the Agent prompt. If a configured provider becomes unavailable, the tool returns a bounded non-fatal unavailable result so the local planner can continue with local inference and local knowledge. It is not yet exposed through a browser connection-management UI; credentials and endpoint policy are administrator-managed deployment secrets. Remote MCP is still a transport client foundation and is not yet exposed as an autonomous Agent tool.
+The connector is disabled by default and fails closed when incomplete or invalid. When no connector is configured, the remote tool is omitted from the Agent prompt. If a configured provider becomes unavailable, the tool returns a bounded non-fatal unavailable result so the local planner can continue with local inference and local knowledge. It is not yet exposed through a browser connection-management UI; credentials and endpoint policy are administrator-managed deployment secrets.
+
+### MCP Agent Worker integration
+
+The autonomous workers expose `list_mcp_tools` and `call_mcp_tool` only when a connection exists for the authenticated task tenant. Configure tenant-keyed `RUSA_MCP_CONNECTIONS_JSON` in the Worker-only `.env.worker` file. Each entry contains the exact HTTPS endpoint, matching `allowed_hosts`, a `credential_env` reference, and an explicit `read_only_tools` list. The raw bearer token belongs in the separately named environment variable, never in the JSON mapping. Optional internal HTTP endpoints require both `allowed_hosts` and `allow_http_hosts`; public endpoints must use HTTPS.
+
+The runtime builds one MCP client per tenant and injects only the matching client into that tenant's Agent tool gateway. MCP discovery metadata and tool results are labeled untrusted. A provider outage returns a non-fatal unavailable result; it does not redirect local inference. The Worker image includes the MCP client runtime dependencies. Administrators must ensure the configured allowlist contains only read-only tools; write-capable tools are not supported by this integration.
+
 
 ## Agent routing boundary
 
@@ -83,4 +90,4 @@ The intended hybrid sequence is:
 5. Local Agent executes local workspace actions only through the existing sandbox/Tool Gateway.
 6. Result, source citations, request ID and policy decision are audited.
 
-The external RAG client is integrated into the autonomous coding worker tool gateway as an opt-in, tenant/project-scoped read-only retrieval tool. MCP transport remains a separate foundation pending Agent tool routing and a connection-management UI. Full end-to-end consumer hybrid setup is not yet complete.
+External RAG and remote MCP are integrated into the autonomous coding worker tool gateway as opt-in read-only tools. External RAG filters are injected from the authenticated tenant and server-derived repository project; MCP clients are configured and isolated per tenant. A browser connection-management UI, DNS-pinned outbound egress gateway, and full end-to-end consumer hybrid setup remain pending.
