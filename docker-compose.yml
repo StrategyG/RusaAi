@@ -45,7 +45,6 @@ services:
       RUSA_LOCAL_API_KEYS_DB: /var/lib/rusa/local-api-keys.sqlite3
       RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:-}
       # The API does not need Worker-only repository, model, or connector credentials.
-      RUSA_EXTERNAL_RAG_API_KEY: ""
       RUSA_GITHUB_TOKEN: ""
       RUSA_WORKER_MODEL_API_KEY: ""
       RUSA_WORKER_INFERENCE_API_KEYS: "{}"
