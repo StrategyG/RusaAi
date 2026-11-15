@@ -65,3 +65,26 @@ def test_mcp_client_requires_allowlisted_https_host():
             allowed_tools={"search_knowledge"},
             allowed_hosts={"knowledge.example.com"},
         )
+
+
+@pytest.mark.parametrize(
+    ("timeout_seconds", "max_argument_bytes", "max_response_bytes"),
+    [
+        (61, 32768, 1000000),
+        (15, 1000001, 1000000),
+        (15, 32768, 5000001),
+    ],
+)
+def test_mcp_client_rejects_unbounded_limits(
+    timeout_seconds, max_argument_bytes, max_response_bytes
+):
+    with pytest.raises(ValueError, match="bounds"):
+        MCPToolClient(
+            server_url="https://knowledge.example.com/mcp",
+            api_key="x" * 40,
+            allowed_tools={"search_knowledge"},
+            allowed_hosts={"knowledge.example.com"},
+            timeout_seconds=timeout_seconds,
+            max_argument_bytes=max_argument_bytes,
+            max_response_bytes=max_response_bytes,
+        )
