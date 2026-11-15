@@ -82,6 +82,74 @@ class AICodeRuntime:
             except (TypeError, ValueError) as exc:
                 raise RuntimeError("External RAG configuration failed validation") from exc
 
+        import json
+
+        try:
+            raw_mcp_connections = json.loads(os.getenv("RUSA_MCP_CONNECTIONS_JSON", "{}"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("RUSA_MCP_CONNECTIONS_JSON must be a JSON object") from exc
+        if not isinstance(raw_mcp_connections, dict):
+            raise RuntimeError("RUSA_MCP_CONNECTIONS_JSON must map tenant IDs to connection objects")
+        self.mcp_clients = {}
+        if raw_mcp_connections:
+            try:
+                import httpx2  # noqa: F401
+                import mcp  # noqa: F401
+            except ImportError as exc:
+                raise RuntimeError(
+                    "MCP connections are configured but MCP worker dependencies are missing"
+                ) from exc
+        from rusa_mcp.client import MCPToolClient
+
+        for tenant_id, connection in raw_mcp_connections.items():
+            if (
+                not isinstance(tenant_id, str)
+                or not tenant_id.strip()
+                or len(tenant_id) > 128
+                or not isinstance(connection, dict)
+            ):
+                raise RuntimeError("MCP connection tenant or configuration is invalid")
+            allowed_fields = {
+                "server_url", "allowed_hosts", "credential_env", "read_only_tools",
+                "allow_http_hosts", "timeout_seconds", "max_argument_bytes",
+                "max_response_bytes",
+            }
+            if set(connection) - allowed_fields:
+                raise RuntimeError(f"MCP connection for tenant {tenant_id} has unsupported settings")
+            endpoint = connection.get("server_url")
+            allowed_hosts = connection.get("allowed_hosts")
+            credential_env = connection.get("credential_env")
+            read_only_tools = connection.get("read_only_tools")
+            allow_http_hosts = connection.get("allow_http_hosts", [])
+            if (
+                not isinstance(endpoint, str)
+                or not isinstance(allowed_hosts, list)
+                or any(not isinstance(host, str) or not host.strip() for host in allowed_hosts)
+                or not isinstance(read_only_tools, list)
+                or any(not isinstance(name, str) or not name.strip() for name in read_only_tools)
+                or not isinstance(allow_http_hosts, list)
+                or any(not isinstance(host, str) or not host.strip() for host in allow_http_hosts)
+                or not isinstance(credential_env, str)
+                or not re.fullmatch(r"RUSA_MCP_[A-Z0-9_]{1,64}", credential_env)
+            ):
+                raise RuntimeError(f"MCP connection for tenant {tenant_id} is incomplete or invalid")
+            token = os.getenv(credential_env, "")
+            if not token:
+                raise RuntimeError(f"MCP credential environment variable {credential_env} is empty")
+            try:
+                self.mcp_clients[tenant_id] = MCPToolClient(
+                    server_url=endpoint,
+                    api_key=token,
+                    allowed_tools=set(read_only_tools),
+                    allowed_hosts=set(allowed_hosts),
+                    allow_http_hosts=set(allow_http_hosts),
+                    timeout_seconds=float(connection.get("timeout_seconds", 15)),
+                    max_argument_bytes=int(connection.get("max_argument_bytes", 32768)),
+                    max_response_bytes=int(connection.get("max_response_bytes", 1000000)),
+                )
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"MCP connection for tenant {tenant_id} failed validation") from exc
+
         self.knowledge_service = None
         if rag_flag in {"1", "true", "yes", "on"}:
             from rusa_knowledge.service import KnowledgeService
@@ -162,6 +230,10 @@ class AICodeRuntime:
             external_rag_client=getattr(self, "external_rag_client", None),
             external_rag_tenant_id=(
                 tenant_id if getattr(self, "external_rag_client", None) is not None else None
+            ),
+            mcp_client=getattr(self, "mcp_clients", {}).get(tenant_id),
+            mcp_tenant_id=(
+                tenant_id if getattr(self, "mcp_clients", {}).get(tenant_id) is not None else None
             ),
         )
         workers = [
