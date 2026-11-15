@@ -44,7 +44,7 @@ from rusa_agents.metrics import (
 )
 from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionController
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import PostgresTaskQueue, QueueCapacityError
 from rusa_agents.rate_limit import PostgresRateLimiter
 from rusa_agents.runtime_v1 import AgentRuntimeV1
 from rusa_agents.task_decomposer import TaskNode, TaskPlan
@@ -1401,6 +1401,13 @@ def create_agent_runtime_task(
                 payload,
                 audit_actor=_api_task_actor(http_request),
             )
+    except QueueCapacityError:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant task backlog is full; retry after active work completes",
+            headers={"Retry-After": "30"},
+        ) from None
     except ValueError as exc:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=409, detail=str(exc)) from None
@@ -1614,7 +1621,7 @@ def retry_aicode_task(
     http_request: Request,
     tenant_id: str = Depends(require_task_permission("task:retry")),
 ):
-    """Require a tenant-authorized retry after failure or human review."""
+    """Retry failed tasks only; awaiting-approval tasks require the explicit approval endpoint."""
     if not RuntimeConfig.from_env().aicode_enabled:
         audit_api_task(http_request, tenant_id, str(task_id), "task.retry", False)
         raise HTTPException(status_code=503, detail="AICode task intake is disabled")
