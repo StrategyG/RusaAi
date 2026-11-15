@@ -9,7 +9,8 @@ def test_worker_does_not_inherit_local_setup_or_api_session_secrets():
     worker = compose["services"]["worker"]
     environment = worker["environment"]
 
-    assert worker["env_file"] == ".env"
+    assert worker["env_file"][0] == ".env"
+    assert worker["env_file"][1] == {"path": ".env.worker", "required": False}
     assert environment["RUSA_LOCAL_INSTALL_MODE"] == "false"
     assert environment["RUSA_LOCAL_API_KEYS_DB"] == ""
     assert environment["RUSA_LOCAL_SETUP_TOKEN"] == ""
