@@ -13,9 +13,9 @@ This document establishes a single, reviewable system context for the three repo
 |---|---|---|
 | Ecosystem Control Plane | RusaAi owns trusted tenant identity, agent/task orchestration, workflow state, policy, tools, audit and worker execution | RusaAi architecture and Model Plane ADRs; implementation remains incremental |
 | Model Plane | RusaModels owns model registry, immutable artifacts, inference, embeddings, conversion, quantization and model telemetry | RusaAi Model Plane ADR; RusaModels ADR-001 |
-| Canonical shared Agent/Worker knowledge | RusaAi `rusa_knowledge` is selected for implementation planning as the single canonical shared writer and answer-facing retrieval authority after gates pass | RusaAi canonical knowledge ADR-0002; production activation not authorized |
+| Canonical shared Agent/Worker knowledge | RusaAi `rusa_knowledge` is selected for implementation planning as the single canonical shared writer and answer-facing retrieval authority after gates pass | RusaAi [Canonical Shared Agent/Worker Knowledge Store ADR](../adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md); production activation not authorized |
 | Device-local state | SQLite/FTS5 remains local state and local full-text retrieval; it is not a shared-corpus replica | RusaAi architecture baseline |
-| IM19 | RAG_Cerdas / IM19 remains an isolated Knowledge Intelligence pilot; it is not a second canonical writer or production retrieval backend | RAG_Cerdas alignment ADR-0002 proposed in PR #28 |
+| IM19 | RAG_Cerdas / IM19 remains an isolated Knowledge Intelligence pilot; it is not a second canonical writer or production retrieval backend | RAG_Cerdas [Alignment with the RusaAi Canonical Knowledge Store ADR](https://github.com/StrategyG/RAG_Cerdas/pull/28) is proposed, not merged |
 | Cross-repository data movement | No cross-read, cross-write, dual-write, mirroring, bulk copy or synchronization between IM19 and `rusa_knowledge` is authorized | Binding boundary; any future path requires a new approved ADR and contract |
 | Production activation | NO-GO until all applicable security, rights, quality, operational and human approval gates pass | All three repositories' production-readiness gates |
 
@@ -240,11 +240,11 @@ flowchart TB
 
 ## 8. ADR reconciliation and open decisions
 
-- RusaAi ADR-0002 canonical knowledge decision is accepted for implementation planning only.
+- RusaAi's [Canonical Shared Agent/Worker Knowledge Store ADR](../adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md) is accepted for implementation planning only.
 - RusaAi has two files numbered ADR-0002. The ADR index PR #117 records the collision; the numeric identifier remains an OPEN_DECISION until a dedicated reviewed correction preserves history and references.
 - RusaModels ADR-001's phrase “shared control plane” refers to its internal PostgreSQL registry store shared by Model Server and Quant Server, not the RusaAi ecosystem Control Plane. RusaModels PR #24 proposes clarifying this wording.
 - RusaAi and RusaModels both carry `documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md`. RusaAi labels the candidate `PILOT_ONLY`; RusaModels keeps the overall selection ADR `DRAFT` and the candidate `PENDING_AUDIT / PILOT_CANDIDATE_ONLY`. These are compatible when the distinction is explicit: `rusaai-edge-1.54b` is an architecture reference, `rusaai-edge-derived` is the pre-audit product identity, Bhineka-GPT is a research/pilot candidate only, and the approved runtime model ID remains pending. RusaAi owns product-level selection/approval; RusaModels owns registry, artifact integrity and runtime release. No checkpoint is production-approved.
-- RAG_Cerdas ADR-0001 is historical no-selection analysis. RAG_Cerdas PR #28 proposes ADR-0002 to align the repository with the accepted RusaAi decision while retaining IM19 as an isolated pilot.
+- RAG_Cerdas's [Canonical Knowledge Store Alignment ADR](https://github.com/StrategyG/RAG_Cerdas/pull/28) proposes to supersede the historical no-selection position in ADR-0001 for ecosystem-level selection while retaining IM19 as an isolated pilot.
 - The exact production embedding model, immutable artifact digest, dimensions and index-generation migration remain OPEN_DECISION.
 - The future IM19 model-inference path remains OPEN_DECISION.
 - Production activation, production DDL, ingestion, embedding, source mutation, cross-repository data transfer and deployment are not authorized by this document.

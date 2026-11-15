@@ -4,7 +4,7 @@
 - Status: Accepted by the project owner for implementation planning; production activation is not authorized
 - Decision owner: RUSA AI Project Owner
 - Scope: Shared Agent/Worker knowledge storage and retrieval in RusaAi
-- Related: ADR-0001 (RusaAi-Edge v2.0 CPU-first baseline, currently proposed in PR #107); RAG retrieval contract; RusaModels Model Plane API contract; [Ecosystem architecture reconciliation](../architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md)
+- Related: [ADR-0001 — RusaAi-Edge v2.0 CPU-first baseline](ADR-0001-rusaai-edge-v2-cpu-first-baseline.md) (accepted for repository alignment; full architecture remains proposed; PR #107 is a separate open alignment candidate); RAG retrieval contract; RusaModels Model Plane API contract; [Ecosystem architecture reconciliation](../architecture/ECOSYSTEM_ARCHITECTURE_RECONCILIATION_v1.0.md)
 
 ## Context
 
@@ -26,7 +26,7 @@ The inspected RusaAi main branch already contains:
 
 The current RusaAi store is therefore the most direct implementation base for the shared Agent/Worker corpus. It is not yet a fully governed, production-activated knowledge platform. Its current mainline schema does not provide the complete source-rights, source-version, review, approval, publication, deletion and agent/project authorization lifecycle.
 
-RAG_Cerdas IM19 remains a separate isolated Knowledge Intelligence pilot. It is not selected as the canonical writer or answer-facing retrieval backend. The earlier RAG_Cerdas ADR-0001 was a proposed no-selection hold; RAG_Cerdas is preparing an alignment ADR-0002 to record this parent decision. Regardless of that documentation change, IM19 tenant/project isolation and its public service boundary are not approved for multi-tenant production use, and no cross-read, cross-write, dual-write, mirroring, or bulk synchronization is authorized.
+RAG_Cerdas IM19 remains a separate isolated Knowledge Intelligence pilot. It is not selected as the canonical writer or answer-facing retrieval backend. The earlier RAG_Cerdas ADR-0001 remains historical no-selection analysis; RAG_Cerdas PR #28 proposes the companion “Alignment with the RusaAi Canonical Knowledge Store” ADR, which is not yet merged. Regardless of that documentation change, IM19 tenant/project isolation and its public service boundary are not approved for multi-tenant production use, and no cross-read, cross-write, dual-write, mirroring, or bulk synchronization is authorized.
 
 ## Decision
 
