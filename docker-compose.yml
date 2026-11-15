@@ -83,7 +83,10 @@ services:
       - /tmp:rw,nosuid,size=128m
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file: .env
+    env_file:
+      - .env
+      - path: .env.worker
+        required: false
     environment:
       RUSA_WORKER_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_API_DATABASE_URL: ""
