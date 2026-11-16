@@ -8,7 +8,7 @@ for the exact commit and checks that ran; it is not a production approval.
 
 ## Canonical shared knowledge-store decision (2026-11-12)
 
-ADR-0002 selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
+The RusaAi **Canonical Shared Agent/Worker Knowledge Store** ADR selects RusaAi `rusa_knowledge` PostgreSQL/pgvector as the canonical
 shared Agent/Worker knowledge store, subject to implementation and release gates.
 
 - SQLite/FTS5 remains device-local memory/state; it is not a shared-corpus replica.
@@ -16,25 +16,28 @@ shared Agent/Worker knowledge store, subject to implementation and release gates
   cross-read are not authorized.
 - RusaModels remains the Model Plane and is accessed through an authenticated API.
 - The 1,536-dimensional and 384-dimensional vector spaces remain separate. The
-  final production embedding profile is not selected.
+  final production embedding profile is not selected by the canonical-store ADR.
 - This decision does not authorize production migrations, ingestion, embeddings,
   index writes, publication or deployment.
 
-Open RusaAi integration work requires reconciliation before merge:
-- PR #82 proposes RAG agent/project scope and version history but is draft and
-  introduces migration numbers that collide with current main and PR #109.
-- PR #109 introduces inference admission migration 010.
-- PR #111 is a combined CPU/inference integration candidate and must pass exact-head CI.
-- All migrations must be re-sequenced into one reviewed, unique ordered inventory.
+Current mainline migration inventory (RusaAi main SHA `1adac8d340e5870570910168b6626fe285dd2cf2`):
 
-## Delivered in this integration branch
+- Migrations 001–012 are present on main, including 010 inference admission, 011 agent/project scope, and 012 append-only knowledge version history.
+- PR #111 is merged and must not be described as an open integration candidate.
+- PR #82 remains a draft based on an older main SHA and proposes migration filenames that overlap the current mainline sequence; do not merge it wholesale.
+- PR #109 remains open on a stacked architecture branch. Its migration 010 proposal must be compared with the current mainline migration 010; it is not evidence of an additional migration to apply.
+- PR #115 proposes migration 013 for knowledge governance and remains draft/open. It is not part of mainline until reviewed and merged.
+
+The repository migration files are not proof of the migration history in any deployed database. Verify the exact target's applied migration history read-only before planning any DDL. Reconcile all branch diffs into one unique ordered migration inventory and run forward/rollback/restore tests in disposable PostgreSQL/pgvector before any approved staging change.
+
+## Capabilities present on current mainline
 
 - OpenAI-compatible inference API with an optional local Transformers/vLLM backend.
 - Local model artifact manifest and SHA-256 verification; production local loading
   requires an externally pinned manifest digest.
 - Bounded generation/streaming adapters, API admission control, and backend shutdown.
-- CPU Compose worker inference routed through the API gateway with per-tenant API credentials, request deadlines, JSON response-format forwarding, and no automatic gateway retries (PR #108).
-- PostgreSQL-backed FIFO inference admission with global slot rows, bounded waiting, heartbeat leases, crash recovery, stale-owner fencing, and API-only database privileges (PR #109; exact-head CI and staging verification pending).
+- CPU Compose worker inference is routed through the API gateway with per-tenant API credentials, request deadlines, JSON response-format forwarding, and no automatic gateway retries; this integrated path is present on current mainline.
+- PostgreSQL-backed FIFO inference admission with global slot rows, bounded waiting, heartbeat leases, crash recovery, stale-owner fencing, and API-only database privileges is present on current mainline through merged PR #111. PR #109 remains open on a stacked branch and is not a separate source of mainline migration or runtime state.
 - Tenant-scoped PostgreSQL coding-task queue with lease tokens, expiry recovery,
   fencing of stale acknowledgements, cancellation/completion race protection,
   and retry limits.
@@ -49,17 +52,9 @@ Open RusaAi integration work requires reconciliation before merge:
 
 ## Verification boundary
 
-Architecture PR #107 passed all jobs on exact head
-`117da0ef39a38a096e28cc3d9712c95a8fef4f8a` in workflow run
-[43100849792](https://github.com/StrategyG/RusaAi/actions/runs/43100849792):
-293 passed, 6 skipped; compile, Ruff, Bandit, curated SFT validation,
-RAG/MCP integration, isolated sandbox tests, image builds, Trivy release
-gate, and Compose validation passed. The stacked worker-gateway change in
-PR #108 passed 306 tests with 6 skipped plus the RAG/MCP integration job;
-its Docker/sandbox/Trivy/Compose job is still being verified. PR #109 adds
-the PostgreSQL-backed scheduler and must pass its own exact-head CI before
-being considered verified. A successful result on an earlier PR does not
-certify a later stacked commit.
+Current mainline CI evidence is summarized in the release-gates table below: RusaAi main SHA `1adac8d340e5870570910168b6626fe285dd2cf2` had 4/4 exact-main check runs pass. This is evidence for that exact SHA and those checks only; it does not certify deployment.
+
+Historical PR-head evidence (not current-mainline evidence): Architecture PR #107 passed all jobs on exact head `117da0ef39a38a096e28cc3d9712c95a8fef4f8a` in workflow run [43100849792](https://github.com/StrategyG/RusaAi/actions/runs/43100849792): 293 passed, 6 skipped; compile, Ruff, Bandit, curated SFT validation, RAG/MCP integration, isolated sandbox tests, image builds, Trivy release gate, and Compose validation passed. The stacked worker-gateway change in PR #108 passed 306 tests with 6 skipped plus the RAG/MCP integration job; those results apply only to that historical PR head. PR #109 remains open on a stacked branch. The integrated scheduler is present on current main through merged PR #111; PR #109's branch checks do not determine mainline status. A successful result on an earlier PR does not certify a later stacked commit or a production deployment.
 
 A local model backend is not a trained RUSA-AI model. No model weights are bundled.
 The optional runtime can load a compatible, externally supplied, locally mounted
@@ -91,17 +86,17 @@ release manifest.
 
 | Gate | Evidence required | Status |
 |---|---|---|
-| Integration CI | All jobs green on exact PR head, including Docker/Trivy and RAG/MCP | PR #107 passed; PR #109 exact-head CI running after 8-GB Compose environment fix |
+| Integration CI | All jobs green on the exact candidate SHA, including Docker/Trivy and RAG/MCP | Current main SHA `1adac8d` has 4/4 check runs passing. PR #107 has 3/3 passing on an older base SHA; PR #109 has 2 passing and 1 cancelled check on a stacked branch; PR #111 is merged with 4/4 observed checks passing. CI does not certify deployment. |
 | Inference contract integration | Endpoint and worker validate v1 request/response schemas, stable IDs, model identity, error semantics, and measured performance fields | Schema files exist, but README confirms the OpenAI-compatible endpoint does not yet consume them; blocked |
 | Local model artifact | Approved non-Qwen model ID/revision, license, tokenizer, pinned manifest digest | Blocked: no production checkpoint; Bhineka-GPT is PILOT_ONLY pending audit |
 | Model quality | Versioned task dataset, safety evaluation, human review | Not measured |
 | Hardware capacity | p50/p95 latency, throughput, RAM/VRAM, concurrency and soak results | Not measured |
 | vLLM production | Compatible CUDA/PyTorch/vLLM versions and target-GPU smoke/load test | Not verified |
 | Queue operations | PostgreSQL race, crash recovery, idempotency and cancellation tests | PR #107 unit/integration CI passed; staging recovery drill still required |
-| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | PostgreSQL scheduler implemented in PR #109; exact-head CI and staging crash/restart drill pending |
+| Shared inference admission | API and worker use one gateway; multi-process fairness, cancellation, restart and crash recovery | Migration 010 and PostgreSQL scheduler are present on main; PR #109 remains open on a stacked branch and its security check was cancelled. Cross-process FIFO evidence and staging crash/restart drill remain required. |
 | RAG/MCP deployment | Apply pgvector migration, restricted DB role, TLS/network controls, tenant-key provisioning | Code and tests added; deployment not performed |
 | Knowledge governance | Rights, source versions, review, human approval, publication, deletion and audit lifecycle | Initial governance is proposed in PR #115; purge, index-generation reconciliation and erasure remain open |
-| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | PR #111 adds migrations 011/012; exact-head and PostgreSQL ACL evidence required |
+| Agent/project retrieval scope | Trusted runtime identity and cross-scope negative tests for search/get/list/history | Migrations 011/012 are present on main and PR #111 is merged; deployed-database PostgreSQL ACL and cross-scope negative evidence are still required. |
 | Retrieval quality | Human-reviewed Indonesian/English gold set, citations, groundedness and security evaluation | Not measured |
 | Identity/web workspace | Integrated JWT identity, browser UI, user administration and end-to-end tests | Not included in this integration branch |
 | Security operations | Independent tenant-isolation review, penetration testing, secret rotation and TLS verification | Deployment review required |
@@ -116,13 +111,7 @@ release manifest.
 - Build the API image with `--build-arg RUSA_INSTALL_LOCAL_MODEL=1` when local
   Transformers dependencies are required. The default image intentionally omits
   heavyweight model packages.
-- Preserve the existing mainline migration inventory `001`–`009`. Treat
-  migrations `010` (inference admission), `011` (agent/project scope),
-  `012` (immutable knowledge versions), and `013` (governance) as open-PR
-  changes until one unique ordered inventory is reviewed and disposable
-  PostgreSQL/pgvector forward/rollback tests pass. Do not apply open-PR migrations
-  to staging or production. The API runtime must not have schema-owner or
-  superuser privileges.
+- Preserve the current mainline migration inventory 001–012. Migration 013 is proposed in open PR #115 and is not on main. Do not apply PR-only migrations to staging or production. Reconcile every branch and the actual applied database history, then run disposable PostgreSQL/pgvector forward/rollback/restore tests before any approved staging migration. The API runtime must not have schema-owner or superuser privileges.
 - Apply `migrations/007_rag_knowledge_pgvector.sql` only on the designated
   pgvector-enabled knowledge database and configure the restricted
   `rusa_knowledge_worker` role. Apply `migrations/009_knowledge_embedding_384.sql`

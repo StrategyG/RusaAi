@@ -1,7 +1,7 @@
 # RUSA-AI model development collaboration
 
 ## Mission
-ChatGPT and GitHub Copilot are external AI engineering partners collaborating to build RUSA-AI. RUSA-AI is the target independent AI model/product, not an already-existing orchestrator. ChatGPT leads planning and implementation support; GitHub Copilot helps with repository edits, tests, and review while remaining under explicit human approval for production decisions.
+ChatGPT and GitHub Copilot are external AI engineering partners collaborating to build RUSA-AI as an independently controlled AI product and ecosystem. The NEXUS model family consists of a Foundation LLM trained from scratch and a separate Agent LLM with its own checkpoint and training lineage; Qwen is not a NEXUS dependency. In the current repository split, the RusaAi repository owns the Control Plane (identity, agent/task orchestration, policy, tools, approvals and audit), while RusaModels owns the Model Plane (NEXUS model identities, training, artifacts, registry and inference). These statements are complementary: the RUSA-AI product includes its own models, while the RusaAi repository remains the Control Plane implementation. ChatGPT leads planning and implementation support; GitHub Copilot helps with repository edits, tests, and review while remaining under explicit human approval for production decisions.
 
 RUSA-AI must be treated as an engineering program with verifiable evidence, not as a conceptual blueprint that becomes true by declaration. A strategic specification is valid only once it is grounded in repository state, execution results, benchmark data, deployment evidence, and operational logs.
 

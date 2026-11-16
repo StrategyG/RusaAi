@@ -24,6 +24,8 @@ The chat provider uses the existing `RUSA_MODEL_BASE_URL`, `RUSA_MODEL_NAME` and
 
 The embedding provider uses `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_MODEL`, `RUSA_EMBEDDING_API_KEY`, `RUSA_EMBEDDING_DIMENSIONS` and `RUSA_EMBEDDING_INPUT_TYPE_ENABLED`. For the 384d RusaModels profile, the embedding API key falls back to `RUSA_MODEL_API_KEY` when a separate key is not supplied. Any token used for this path must also be a RusaModels `inference` principal. The legacy 1536d external embedding provider continues to use only `RUSA_EMBEDDING_API_KEY`.
 
+**Credential boundary:** these Model Server credentials may be used by the RusaAi API's chat provider and by a short-lived, operator-controlled re-embedding process. Do not place `RUSA_MODEL_API_KEY` or `RUSA_EMBEDDING_API_KEY` in a production autonomous Worker environment. The current optional Worker `KnowledgeService` path calls RusaModels `/openai/v1/embeddings` directly and bypasses the RusaAi Model Access Gateway; see the production restriction in the rollout sequence below.
+
 For multilingual-e5-small:
 - Model ID: `rusa-embedding-small`.
 - Dimensions: 384.
@@ -80,7 +82,7 @@ Migration 009 does not delete or overwrite the existing 1536-dimensional vectors
      AND embedding_384 IS NULL
    GROUP BY collection;
    ```
-8. Run retrieval evaluation and a RUSA AI end-to-end task using the 384d profile. Then enable `RUSA_RAG_ENABLED=true` for the worker.
+8. Run retrieval evaluation and a RUSA AI end-to-end task using the 384d profile through the approved service path. **Do not enable `RUSA_RAG_ENABLED=true` on production workers.** The current Worker `KnowledgeService` embeds directly against the Model Server using a Model Plane API credential, bypassing the RusaAi gateway. Production Worker RAG remains blocked until a tenant-aware RusaAi embedding gateway or reviewed brokered contract is implemented, tested, and approved. Keep the worker flag false meanwhile.
 
 For new documents after cutover, RUSA AI writes 384d vectors to `embedding_384`. The old `embedding` column remains null for those rows. Do not mix 1536d and 384d vectors in one query or index.
 
@@ -101,6 +103,7 @@ The 1536d vectors for pre-existing chunks are retained. New documents created on
 
 - Use the HTTPS forwarded Model Server URL. Do not expose llama.cpp or embedding sidecar ports directly.
 - Keep the RusaModels bearer token in a secret manager; do not put it in Colab notebook source, Git, logs or dataset metadata.
+- Never distribute a RusaModels `inference` token to a production autonomous Worker. Use it only in the RusaAi API or a separately approved, isolated operator/service process with a reviewed credential and egress boundary.
 - Use a dedicated least-privilege RusaModels principal and rotate its token.
 - Keep RUSA AI's Tool Gateway and Policy Engine as the only runtime authorization boundary. Model output never grants tool permissions.
 - Use the existing tenant-scoped database role and row-level security. The re-embedding utility requires an explicit tenant ID and never performs cross-tenant scans.

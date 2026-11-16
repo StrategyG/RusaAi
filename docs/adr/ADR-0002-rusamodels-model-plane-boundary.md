@@ -2,6 +2,7 @@
 
 - Date: 2026-11-12
 - Status: Accepted for repository integration alignment
+- Record key: `ADR-0002-rusamodels-model-plane-boundary.md` (numeric ID collision; see [ADR index](README.md))
 - Source: RusaAi_Architecture_v2.0, RUSA_AI_CPU_Deployment_Configuration_v1.0
 
 ## Context
@@ -29,7 +30,7 @@ The RusaAi CPU Compose profile previously started its own llama.cpp/GGUF service
 - RusaAi CPU Compose can be deployed independently only after the RusaModels Model Server is reachable and its dedicated inference principal is configured.
 - The RusaAi 8-GB resource overlay covers Control Plane containers only. The combined host budget must include RusaModels and retain the architecture's free-RAM reserve.
 - The current RusaModels CPU profile is a 4-vCPU/16-GB Codespaces smoke profile. It does not certify the combined `rusa-edge-8` device profile.
-- The canonical knowledge store, embedding dimension, vector backend and corpus topology remain separate unresolved ADR decisions; this ADR does not select them.
+- The canonical shared Agent/Worker knowledge store is selected by the separate [canonical knowledge-store ADR](ADR-0002-canonical-shared-agent-worker-knowledge-store.md): RusaAi `rusa_knowledge`, subject to its implementation and release gates. This Model Plane ADR does not override that decision. Embedding model/dimension, vector index generation and corpus topology remain separate technical decisions subject to benchmark and approval.
 
 ## Validation
 

@@ -147,6 +147,8 @@ memory-capacity test for that target hardware.
 
 For the CPU Compose profile, the RusaAi API is the only RusaAi component that connects to the RusaModels Model Server. The Worker connects to the RusaAi OpenAI-compatible gateway and supplies the API key mapped to the current task tenant. RusaAi uses its separate RusaModels `inference` role token upstream. The Worker must never reuse another tenant's key or fall back to a global credential when a tenant mapping is missing.
 
+**Scope qualification:** this paragraph describes the CPU Compose chat-completion path only. That profile leaves `RUSA_RAG_ENABLED` false. If optional Worker RAG is enabled elsewhere, the current `KnowledgeService` constructs an embedding client in the Worker and can call RusaModels `/openai/v1/embeddings` directly using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback. That direct embedding path bypasses this gateway and is not approved for production. Keep Worker RAG disabled and do not distribute Model Server credentials to workers until a tenant-aware RusaAi embedding gateway or reviewed brokered contract is implemented and verified.
+
 - Set `RUSA_WORKER_INFERENCE_GATEWAY=true`.
 - Set `RUSA_WORKER_INFERENCE_BASE_URL` to the API gateway URL. Production requires credential-free HTTPS with certificate validation.
 - Mount the internal CA bundle read-only into the worker and set `SSL_CERT_FILE` to the in-container bundle path. The production Compose overlay requires `RUSA_INTERNAL_CA_BUNDLE` as the host-side source path.

@@ -5,7 +5,7 @@ not enabled by the core API merely because its package is installed.
 
 ## Canonical shared knowledge-store decision
 
-ADR-0002 selects the existing RusaAi `rusa_knowledge` PostgreSQL/pgvector service
+The RusaAi **Canonical Shared Agent/Worker Knowledge Store** ADR selects the existing `rusa_knowledge` PostgreSQL/pgvector service
 as the canonical shared Agent/Worker knowledge store, subject to the release gates
 below. This is an architecture decision, not evidence that a production database
 has been migrated, populated, deployed or activated.
@@ -17,7 +17,7 @@ has been migrated, populated, deployed or activated.
 - RusaModels is accessed through an authenticated Model Plane API for inference
   and embedding; RusaAi must not access its database or model-storage credentials.
 - The 1,536-dimensional and 384-dimensional embeddings remain separate vector
-  spaces. The final production embedding profile is not selected by ADR-0002.
+  spaces. The final production embedding profile is not selected by the canonical-store ADR.
 - The service remains optional and disabled by default until source rights,
   schema/migration, ACL, retrieval evaluation, deployment and owner approval pass.
 
@@ -212,6 +212,8 @@ the pgvector migration and role grants have been applied. Configure:
 - `RUSA_KNOWLEDGE_COLLECTION=agent`
 - `RUSA_EMBEDDING_BASE_URL`, `RUSA_EMBEDDING_API_KEY`, and
   `RUSA_EMBEDDING_MODEL`
+
+**Production boundary:** this optional worker integration currently instantiates `KnowledgeService` inside the worker and sends embedding requests directly to the configured OpenAI-compatible Model Server endpoint. It therefore requires a Model Server API credential in the worker environment and bypasses the RusaAi chat-completion gateway. Keep `RUSA_RAG_ENABLED=false` on production workers; do not distribute `RUSA_EMBEDDING_API_KEY` or `RUSA_MODEL_API_KEY` to them. Production activation is blocked until a tenant-aware RusaAi embedding gateway or an equivalently reviewed brokered contract is implemented and tested. This optional direct path is suitable only for an explicitly isolated, approved non-production profile.
 
 The task tenant is taken from the authenticated queue lease and injected into
 the read-only agent tools. The model cannot provide or override `tenant_id`.
