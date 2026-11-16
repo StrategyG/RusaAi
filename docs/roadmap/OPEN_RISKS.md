@@ -36,6 +36,8 @@
 
 | RSK-027 | High | RusaAi | CHUNK 02 adds P0 regression coverage for Worker payload tenant spoofing and cross-tenant knowledge version-history access on branch `security/chunk-02-tenant-spoofing-regressions-20261116`. Exact-head CI passed 3/3; the tests remain off mainline pending merge. | Preserve the tests in mainline and keep CHUNK 02 IN_PROGRESS until remaining identity, audit, MCP and production-grant gates are addressed. |
 
+| RSK-029 | Medium | RusaAi | CI exposed a deadlock when multiple development processes initialized the PostgreSQL inference scheduler concurrently: DDL relation locks were retained while each initializer waited for the shared advisory lock. Branch `fix/inference-scheduler-init-deadlock-20261116` commits development DDL before acquiring the scheduler lock; exact-head CI is pending. | Require the multi-process FIFO admission integration test and exact-head CI to pass before merge. Production migrations remain a separate migration-only operation. |
+
 ## Immediate release posture
 
 - **Production:** NO-GO / NOT_VERIFIED.
