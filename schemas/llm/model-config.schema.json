@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa-ai.local/schemas/llm/model-config.schema.json",
+  "title": "RUSA-AI Model Blueprint Configuration",
+  "description": "Validates the proposed model blueprint. Validation does not imply that model weights or runtime exist.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_name", "status", "model", "training", "inference", "notes"],
+  "properties": {
+    "project_name": { "const": "llm-project" },
+    "status": { "const": "planned" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "architecture", "moe", "modalities"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "const": "decoder-only-transformer" },
+        "architecture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["layers", "hidden_size", "attention_heads", "kv_heads", "context_window", "positional_encoding", "normalization", "activation"],
+          "properties": {
+            "layers": { "type": "integer", "minimum": 1 },
+            "hidden_size": { "type": "integer", "minimum": 1 },
+            "attention_heads": { "type": "integer", "minimum": 1 },
+            "kv_heads": { "type": "integer", "minimum": 1 },
+            "context_window": { "type": "integer", "minimum": 1 },
+            "positional_encoding": { "const": "rope" },
+            "normalization": { "const": "rmsnorm" },
+            "activation": { "const": "swiglu" }
+          }
+        },
+        "moe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "num_experts", "experts_per_token"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "num_experts": { "type": "integer", "minimum": 1 },
+            "experts_per_token": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "modalities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["text", "image"] }
+        }
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "precision", "pipeline"],
+      "properties": {
+        "objective": { "const": "next_token_prediction" },
+        "precision": { "enum": ["bf16", "fp16", "fp32"] },
+        "pipeline": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["pretraining", "supervised_fine_tuning", "rlhf_rlaif", "reasoning_rl", "safety_alignment"]
+          }
+        }
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quantization", "speculative_decoding", "tool_use"],
+      "properties": {
+        "quantization": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["int8", "fp8"] }
+        },
+        "speculative_decoding": { "type": "boolean" },
+        "tool_use": { "type": "boolean" }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

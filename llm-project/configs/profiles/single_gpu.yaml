@@ -1,0 +1,26 @@
+profile: single_gpu
+status: proposed
+purpose: Starting profile for adapting a compatible pretrained checkpoint on one CUDA GPU; actual memory fit must be benchmarked.
+hardware:
+  device: cuda
+  gpu_count: 1
+  distributed_backend: none
+model:
+  source: pretrained_checkpoint
+  max_context_tokens: 8192
+  context_mode: standard
+training:
+  enabled: true
+  strategy: qlora
+  precision: bf16
+  micro_batch_size: 1
+  gradient_accumulation_steps: 16
+inference:
+  enabled: true
+  backend: transformers
+  quantization: 4bit
+  max_batch_size: 1
+notes:
+  - Supply a licensed checkpoint and matching tokenizer before execution.
+  - Verify GPU architecture, VRAM, CUDA, driver, and quantization kernel compatibility first.
+  - This profile is for adaptation experiments, not pretraining the proposed 96-layer MoE target.
