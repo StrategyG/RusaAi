@@ -187,6 +187,10 @@ class PostgresInferenceAdmissionController:
                 int(round(self.queue_timeout * 1000)),
                 self.lease_seconds,
             )
+            # Commit development DDL before acquiring the scheduler advisory lock.
+            # Concurrent initializers otherwise retain relation locks while waiting
+            # for the same advisory lock, allowing a lock-order deadlock.
+            conn.commit()
             with conn.transaction():
                 self._lock_scheduler(conn)
                 if not production:
