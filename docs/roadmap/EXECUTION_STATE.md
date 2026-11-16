@@ -24,7 +24,7 @@
 |---|---|---|---:|---:|---:|
 | RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 88 |
 | RusaModels | main | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 pass | No | 7 |
-| RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 13/13 check runs (1 test + 12 scheduled audit/agent runs) | No | 4 |
+| RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 14/14 check runs (1 test + 13 scheduled audit/agent runs) | No | 4 |
 
 The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.md`. The local working-tree state is **NOT_VERIFIED** because this audit used remote GitHub inspection and no local checkout was available.
 
@@ -319,7 +319,7 @@ This section supersedes prior time-sensitive PR counts, head SHAs, CI and review
 |---|---|---:|---:|---|
 | RusaAi | 1adac8d340e5870570910168b6626fe285dd2cf2 | 4/4 success | 88 | No repository rulesets; branch metadata protected=false |
 | RusaModels | 12c49b1372b230f3656be6e1badeabad870bcfa1 | 2/2 success | 7 | No repository rulesets; branch metadata protected=false |
-| RAG_Cerdas | 1ead461e76d563445d179e7d5e80c25a9ca9f059 | 13/13 success (one test run; 12 scheduled audit runs) | 4 | Active ruleset Rag ID 25698740; 10 approving reviews, latest-push approval, resolved threads, linear history, signed commits, CodeQL HIGH-or-higher; no bypass actors |
+| RAG_Cerdas | 1ead461e76d563445d179e7d5e80c25a9ca9f059 | 14/14 success (one test run; 13 scheduled audit runs) | 4 | Active ruleset Rag ID 25698740; 10 approving reviews, latest-push approval, resolved threads, linear history, signed commits, CodeQL HIGH-or-higher; no bypass actors |
 
 ### Active PR heads and exact-head checks
 
