@@ -352,9 +352,9 @@ RusaAi and RusaModels have no active repository rulesets at this refresh. GitHub
 |---|---|---:|---:|---|
 | RusaAi | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 success | 88 | None active |
 | RusaModels | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 success | 7 | None active |
-| RAG_Cerdas | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 13/13 check runs: one push-triggered test run and 12 scheduled audit/agent-dispatch runs | 4 | One active ruleset: `Rag` / `25698740` |
+| RAG_Cerdas | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 14/14 check runs: one push-triggered test run and 13 scheduled audit/agent-dispatch runs | 4 | One active ruleset: `Rag` / `25698740` |
 
-RAG_Cerdas' push-triggered main test run reports 240 passed. The 12 scheduled runs are audit/agent-dispatch workflows, not 12 additional unit-test runs. All main SHAs remain unchanged. Branch metadata reports `protected=false` for all three repositories.
+RAG_Cerdas' push-triggered main test run reports 240 passed. The 13 scheduled runs are audit/agent-dispatch workflows, not 13 additional unit-test runs. All main SHAs remain unchanged. Branch metadata reports `protected=false` for all three repositories.
 
 ### Current CHUNK 00 / CHUNK 01 PR evidence
 
