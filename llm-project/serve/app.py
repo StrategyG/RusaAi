@@ -40,7 +40,7 @@ from rusa_agents.metrics import (
 )
 from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionController
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
-from rusa_agents.queue import PostgresTaskQueue
+from rusa_agents.queue import PostgresTaskQueue, QueueCapacityExceededError
 from rusa_agents.rate_limit import PostgresRateLimiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -1050,6 +1050,13 @@ def create_aicode_task(
                 task_id, tenant_id, payload, audit_actor=_api_task_actor(http_request)
             )
             accepted = created
+    except QueueCapacityExceededError as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from None
     except ValueError as exc:
         audit_api_task(http_request, tenant_id, task_id, "task.create", False)
         raise HTTPException(status_code=409, detail=str(exc)) from None

@@ -17,6 +17,18 @@ class LeaseLostError(RuntimeError):
     """A worker attempted a side effect without holding its current task lease."""
 
 
+class QueueCapacityExceededError(RuntimeError):
+    """The tenant's bounded pending-task allowance is exhausted."""
+
+    def __init__(self, limit: int, pending: int, retry_after_seconds: int = 5):
+        self.limit = limit
+        self.pending = pending
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            f"Tenant task capacity reached ({pending}/{limit} pending); retry later"
+        )
+
+
 @dataclass(frozen=True)
 class Job:
     id: int
@@ -56,6 +68,34 @@ class PostgresTaskQueue:
             raise RuntimeError("Production task queue operations require a policy audit actor")
 
     @staticmethod
+    def _read_bounded_limit(name: str, default: int, maximum: int) -> int:
+        raw = os.getenv(name, str(default))
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise RuntimeError(f"{name} must be an integer") from None
+        if not 1 <= value <= maximum:
+            raise RuntimeError(f"{name} must be between 1 and {maximum}")
+        return value
+
+    @classmethod
+    def _max_pending_per_tenant(cls) -> int:
+        return cls._read_bounded_limit("RUSA_MAX_PENDING_TASKS_PER_TENANT", 1000, 1_000_000)
+
+    @classmethod
+    def _max_active_tasks(cls) -> int:
+        return cls._read_bounded_limit("RUSA_MAX_ACTIVE_TASKS", 1, 64)
+
+    @staticmethod
+    def _lock_tenant_capacity(conn, tenant_id: str) -> None:
+        # Serialize all new intake for one tenant so count + insert is atomic
+        # across API replicas. Hash collisions only serialize unrelated tenants.
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s), 741203092)",
+            (tenant_id,),
+        )
+
+    @staticmethod
     def _record_policy_event(
         conn,
         tenant_id: str,
@@ -88,6 +128,9 @@ class PostgresTaskQueue:
         )
 
     def initialize(self) -> None:
+        # Validate code-level queue bounds before the API or worker accepts work.
+        self._max_pending_per_tenant()
+        self._max_active_tasks()
         with self._connect() as conn:
             if os.getenv("ENVIRONMENT", "development").lower() == "production":
                 exists = conn.execute("SELECT to_regclass('public.aicode_jobs')").fetchone()
@@ -260,22 +303,67 @@ class PostgresTaskQueue:
         *,
         audit_actor: str | None = None,
     ) -> bool:
-        if not tenant_id or not task_id or max_attempts < 1:
-            raise ValueError("tenant_id, task_id, and positive max_attempts are required")
+        if (
+            not tenant_id or not task_id
+            or type(max_attempts) is not int or not 1 <= max_attempts <= 10
+        ):
+            raise ValueError("tenant_id, task_id, and max_attempts between 1 and 10 are required")
+        if not isinstance(payload, dict):
+            raise ValueError("task payload must be an object")
         self._require_policy_audit_actor(audit_actor)
+        capacity_error: QueueCapacityExceededError | None = None
+        accepted = False
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            row = conn.execute("""
-                INSERT INTO aicode_jobs(task_id, tenant_id, payload, max_attempts, priority)
-                VALUES (%s, %s, %s::jsonb, %s, %s)
-                ON CONFLICT (tenant_id, task_id) DO NOTHING
-                RETURNING id
-            """, (task_id, tenant_id, json.dumps(payload), max_attempts, priority)).fetchone()
-            self._record_policy_event(
-                conn, tenant_id, task_id, audit_actor, "task.create",
-                "allow" if row is not None else "deny",
-            )
-        return row is not None
+            self._lock_tenant_capacity(conn, tenant_id)
+            existing = conn.execute(
+                """
+                SELECT 1 FROM public.aicode_jobs
+                WHERE tenant_id=%s AND task_id=%s
+                FOR UPDATE
+                """,
+                (tenant_id, task_id),
+            ).fetchone()
+            if existing is not None:
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+                )
+                return False
+
+            pending = conn.execute(
+                """
+                SELECT COUNT(*) FROM public.aicode_jobs
+                WHERE tenant_id=%s
+                  AND status IN ('queued', 'running', 'awaiting_approval')
+                """,
+                (tenant_id,),
+            ).fetchone()[0]
+            limit = self._max_pending_per_tenant()
+            if pending >= limit:
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+                )
+                capacity_error = QueueCapacityExceededError(limit, pending)
+            else:
+                row = conn.execute(
+                    """
+                    INSERT INTO public.aicode_jobs(
+                        task_id, tenant_id, payload, max_attempts, priority
+                    )
+                    VALUES (%s, %s, %s::jsonb, %s, %s)
+                    ON CONFLICT (tenant_id, task_id) DO NOTHING
+                    RETURNING id
+                    """,
+                    (task_id, tenant_id, json.dumps(payload), max_attempts, priority),
+                ).fetchone()
+                accepted = row is not None
+                self._record_policy_event(
+                    conn, tenant_id, task_id, audit_actor, "task.create",
+                    "allow" if accepted else "deny",
+                )
+        if capacity_error is not None:
+            raise capacity_error
+        return accepted
 
     def enqueue_idempotent(
         self,
@@ -288,7 +376,7 @@ class PostgresTaskQueue:
         *,
         audit_actor: str | None = None,
     ) -> tuple[str, bool, str]:
-        """Create once per tenant/key; identical retries return the original task ID and state."""
+        """Create once per tenant/key; identical retries bypass capacity checks."""
         import re
 
         if (
@@ -296,8 +384,11 @@ class PostgresTaskQueue:
             or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", idempotency_key)
         ):
             raise ValueError("Idempotency-Key must be 1-128 safe ASCII characters")
-        if not tenant_id or not task_id or max_attempts < 1:
-            raise ValueError("tenant_id, task_id, and positive max_attempts are required")
+        if (
+            not tenant_id or not task_id
+            or type(max_attempts) is not int or not 1 <= max_attempts <= 10
+        ):
+            raise ValueError("tenant_id, task_id, and max_attempts between 1 and 10 are required")
         if not isinstance(payload, dict):
             raise ValueError("task payload must be an object")
         self._require_policy_audit_actor(audit_actor)
@@ -309,69 +400,128 @@ class PostgresTaskQueue:
                 repository.pop("work_branch_prefix", None)
             return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
+        response: tuple[str, bool, str] | None = None
+        conflict_error: IdempotencyConflictError | None = None
+        capacity_error: QueueCapacityExceededError | None = None
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
-            inserted = conn.execute(
-                """
-                INSERT INTO aicode_jobs(
-                    task_id, tenant_id, payload, max_attempts, priority, idempotency_key
-                )
-                VALUES (%s, %s, %s::jsonb, %s, %s, %s)
-                ON CONFLICT DO NOTHING
-                RETURNING task_id::text, status
-                """,
-                (
-                    task_id, tenant_id, json.dumps(payload, ensure_ascii=False),
-                    max_attempts, priority, idempotency_key,
-                ),
-            ).fetchone()
-            if inserted is not None:
-                self._record_policy_event(
-                    conn, tenant_id, task_id, audit_actor, "task.create", "allow"
-                )
-                return str(inserted[0]), True, str(inserted[1])
+            self._lock_tenant_capacity(conn, tenant_id)
 
             existing = conn.execute(
                 """
                 SELECT task_id::text, payload, status
-                FROM aicode_jobs
+                FROM public.aicode_jobs
                 WHERE tenant_id=%s AND idempotency_key=%s
                 FOR UPDATE
                 """,
                 (tenant_id, idempotency_key),
             ).fetchone()
-            if existing is None:
-                self._record_policy_event(
-                    conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+            if existing is not None:
+                existing_payload = (
+                    existing[1] if isinstance(existing[1], dict) else json.loads(existing[1])
                 )
-                raise IdempotencyConflictError("Task identifier conflicts with an existing task")
-            existing_payload = existing[1] if isinstance(existing[1], dict) else json.loads(existing[1])
-            if comparable(existing_payload) != comparable(payload):
-                self._record_policy_event(
-                    conn, tenant_id, str(existing[0]), audit_actor, "task.create", "deny"
-                )
-                raise IdempotencyConflictError(
-                    "Idempotency-Key was already used with a different task payload"
-                )
-            self._record_policy_event(
-                conn, tenant_id, str(existing[0]), audit_actor, "task.create", "allow"
-            )
-            return str(existing[0]), False, str(existing[2])
+                if comparable(existing_payload) != comparable(payload):
+                    self._record_policy_event(
+                        conn, tenant_id, str(existing[0]), audit_actor, "task.create", "deny"
+                    )
+                    conflict_error = IdempotencyConflictError(
+                        "Idempotency-Key was already used with a different task payload"
+                    )
+                else:
+                    self._record_policy_event(
+                        conn, tenant_id, str(existing[0]), audit_actor, "task.create", "allow"
+                    )
+                    response = (str(existing[0]), False, str(existing[2]))
+            else:
+                task_conflict = conn.execute(
+                    """
+                    SELECT 1 FROM public.aicode_jobs
+                    WHERE tenant_id=%s AND task_id=%s
+                    FOR UPDATE
+                    """,
+                    (tenant_id, task_id),
+                ).fetchone()
+                if task_conflict is not None:
+                    self._record_policy_event(
+                        conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+                    )
+                    conflict_error = IdempotencyConflictError(
+                        "Task identifier conflicts with an existing task"
+                    )
+                else:
+                    pending = conn.execute(
+                        """
+                        SELECT COUNT(*) FROM public.aicode_jobs
+                        WHERE tenant_id=%s
+                          AND status IN ('queued', 'running', 'awaiting_approval')
+                        """,
+                        (tenant_id,),
+                    ).fetchone()[0]
+                    limit = self._max_pending_per_tenant()
+                    if pending >= limit:
+                        self._record_policy_event(
+                            conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+                        )
+                        capacity_error = QueueCapacityExceededError(limit, pending)
+                    else:
+                        inserted = conn.execute(
+                            """
+                            INSERT INTO public.aicode_jobs(
+                                task_id, tenant_id, payload, max_attempts, priority, idempotency_key
+                            )
+                            VALUES (%s, %s, %s::jsonb, %s, %s, %s)
+                            ON CONFLICT DO NOTHING
+                            RETURNING task_id::text, status
+                            """,
+                            (
+                                task_id, tenant_id, json.dumps(payload, ensure_ascii=False),
+                                max_attempts, priority, idempotency_key,
+                            ),
+                        ).fetchone()
+                        if inserted is not None:
+                            self._record_policy_event(
+                                conn, tenant_id, task_id, audit_actor, "task.create", "allow"
+                            )
+                            response = (str(inserted[0]), True, str(inserted[1]))
+                        else:
+                            self._record_policy_event(
+                                conn, tenant_id, task_id, audit_actor, "task.create", "deny"
+                            )
+                            conflict_error = IdempotencyConflictError(
+                                "Task identifier or idempotency key conflicts with an existing task"
+                            )
+        if capacity_error is not None:
+            raise capacity_error
+        if conflict_error is not None:
+            raise conflict_error
+        if response is None:
+            raise IdempotencyConflictError("Task could not be enqueued")
+        return response
 
     def claim(self, worker_id: str, lease_seconds: int = 180) -> Job | None:
         if not worker_id or lease_seconds < 15 or lease_seconds > 3600:
             raise ValueError("worker_id is required and lease_seconds must be between 15 and 3600")
         lease_token = str(uuid4())
+        max_active = self._max_active_tasks()
         with self._connect() as conn:
+            # One transaction-scoped lock makes the active-count check and claim
+            # atomic across every worker replica.
+            conn.execute("SELECT pg_advisory_xact_lock(741203093)")
             conn.execute("""
-                UPDATE aicode_jobs
+                UPDATE public.aicode_jobs
                 SET status='failed', lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error='Lease expired after maximum attempts', updated_at=NOW()
                 WHERE status='running' AND lease_until < NOW() AND attempts >= max_attempts
             """)
+            active = conn.execute("""
+                SELECT COUNT(*) FROM public.aicode_jobs
+                WHERE status='running' AND lease_until > NOW()
+            """).fetchone()[0]
+            if active >= max_active:
+                return None
             row = conn.execute("""
                 WITH candidate AS (
-                    SELECT id FROM aicode_jobs
+                    SELECT id FROM public.aicode_jobs
                     WHERE attempts < max_attempts
                       AND ((status='queued' AND available_at <= NOW())
                         OR (status='running' AND lease_until < NOW()))
@@ -379,7 +529,7 @@ class PostgresTaskQueue:
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
-                UPDATE aicode_jobs AS job
+                UPDATE public.aicode_jobs AS job
                 SET status='running', attempts=job.attempts+1, lease_owner=%s,
                     lease_token=%s::uuid,
                     lease_until=NOW() + (%s * INTERVAL '1 second'), updated_at=NOW()
@@ -408,6 +558,81 @@ class PostgresTaskQueue:
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (lease_seconds, job_id, tenant_id, worker_id, lease_token))
         return cur.rowcount == 1
+
+    def with_lease_owned(
+        self,
+        job_id: int,
+        tenant_id: str,
+        worker_id: str,
+        lease_token: str,
+        operation: Callable[[], Any],
+        *,
+        lease_seconds: int = 180,
+    ) -> Any:
+        """Run a short bounded side effect while holding the active lease row lock.
+
+        Use only for local workspace writes and durable checkpoint I/O. Never
+        hold the queue row lock during model inference, Git/network operations,
+        or long-running sandbox execution.
+        """
+        if (
+            type(job_id) is not int
+            or job_id <= 0
+            or not tenant_id
+            or not worker_id
+            or len(worker_id) > 128
+            or not lease_token
+            or not callable(operation)
+            or type(lease_seconds) is not int
+            or not 15 <= lease_seconds <= 3600
+        ):
+            raise ValueError("Lease-bound operation identity or duration is invalid")
+
+        with self._connect() as conn:
+            self._set_tenant(conn, tenant_id)
+            owned = conn.execute(
+                """
+                SELECT 1 FROM public.aicode_jobs
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                  AND lease_until > NOW()
+                FOR UPDATE
+                """,
+                (job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if owned is None:
+                raise LeaseLostError("Refusing side effect without the active task lease")
+
+            extended = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                RETURNING id
+                """,
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if extended is None:
+                raise LeaseLostError("Task lease could not be extended before the side effect")
+
+            result = operation()
+
+            refreshed = conn.execute(
+                """
+                UPDATE public.aicode_jobs
+                SET lease_until=NOW() + (%s * INTERVAL '1 second'),
+                    updated_at=NOW()
+                WHERE id=%s AND tenant_id=%s AND lease_owner=%s
+                  AND lease_token=%s::uuid AND status='running'
+                RETURNING id
+                """,
+                (lease_seconds, job_id, tenant_id, worker_id, lease_token),
+            ).fetchone()
+            if refreshed is None:
+                raise LeaseLostError("Task lease changed during the lease-bound side effect")
+            return result
 
     def publish_if_lease_owned(
         self,
@@ -535,19 +760,27 @@ class PostgresTaskQueue:
     def fail(
         self, job_id: int, tenant_id: str, worker_id: str,
         lease_token: str, error: str, retry_delay_seconds: int = 30,
+        *, retryable: bool = True,
     ) -> bool:
+        if type(retryable) is not bool:
+            raise ValueError("retryable must be a boolean")
+        if type(retry_delay_seconds) is not int or not 0 <= retry_delay_seconds <= 3600:
+            raise ValueError("retry_delay_seconds must be between 0 and 3600")
         with self._connect() as conn:
             self._set_tenant(conn, tenant_id)
             cur = conn.execute("""
-                UPDATE aicode_jobs
-                SET status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
+                UPDATE public.aicode_jobs
+                SET status=CASE
+                        WHEN %s AND attempts < max_attempts THEN 'queued'
+                        ELSE 'failed'
+                    END,
                     available_at=NOW() + (%s * INTERVAL '1 second'),
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL,
                     last_error=%s, updated_at=NOW()
                 WHERE id=%s AND tenant_id=%s AND lease_owner=%s
                   AND lease_token=%s::uuid AND status='running' AND lease_until > NOW()
             """, (
-                max(0, retry_delay_seconds), error[:4000],
+                retryable, retry_delay_seconds, error[:4000],
                 job_id, tenant_id, worker_id, lease_token,
             ))
         return cur.rowcount == 1
@@ -612,7 +845,7 @@ class PostgresTaskQueue:
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
-        """Explicitly requeue a failed or approval-paused task for a tenant."""
+        """Explicitly requeue a terminal failed task for a tenant."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
@@ -623,7 +856,7 @@ class PostgresTaskQueue:
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
+                  AND status='failed'
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(
