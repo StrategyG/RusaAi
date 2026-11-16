@@ -75,6 +75,6 @@ This pre-merge section is retained for audit history and is superseded by the po
 
 - **CHUNK 01:** PASS. All seven integration/closeout PRs are merged and the mainline architecture/ADR references are consistent.
 - **CHUNK 02:** IN_PROGRESS. Source/CI identity baseline is recorded in `docs/security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md`. The first production Worker direct-RAG fail-closed guard is on branch `security/chunk-02-identity-tenant-guard-20261116` and is not yet mainline.
-- **Main CI:** RusaAi post-merge run 43801535417 has two checks passed and the production image build/scan in progress; RusaModels post-merge run 43801252283 is 2/2 success; RAG_Cerdas post-merge run 43800691402 is 1/1 success.
+- **Main CI:** RusaAi post-merge run 43801535417 is 3/3 success; RusaModels post-merge run 43801252283 is 2/2 success; RAG_Cerdas post-merge run 43800691402 is 1/1 success.
 - **Open PR count at refresh:** 98 (RusaAi 87, RusaModels 8, RAG_Cerdas 3), before the current CHUNK 02 PR is opened.
 - **Production:** remains NO-GO / NOT_VERIFIED. No live production DB, IdP, secret manager, Supabase project, Dropbox account or deployment was accessed.
