@@ -40,7 +40,7 @@ vllm = ["vllm>=0.32,<0.33"]
 training = ["torch>=2.4,<3", "transformers>=5.10.0,<6", "accelerate>=1.0,<2", "safetensors>=0.4.5,<1", "peft>=0.18,<1", "bitsandbytes>=0.46,<1"]
 
 [tool.setuptools.packages.find]
-include = ["rusa_agents*", "rusa_knowledge*", "rusa_training*"]
+include = ["rusa_agents*", "rusa_knowledge*", "rusa_training*", "rusa_mcp*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -287,6 +287,44 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Validate local first-run Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-local-postgres-password
+          RUSA_WEB_SESSION_SECRET: long_random_ci_web_session_secret_12345678901234567890
+          RUSA_LOCAL_SETUP_TOKEN: ci-local-setup-capability-12345678901234567890
+          RUSA_MODEL_BASE_URL: ""
+          RUSA_MODEL_NAME: rusaai-local-unprovisioned
+          RUSA_MODEL_API_KEY: ""
+          RUSA_WORKER_INFERENCE_API_KEYS: '{"development":"local-dev-key"}'
+          RUSA_WORKER_INFERENCE_DEADLINE_MS: "270000"
+          RUSA_GENERATION_TIMEOUT_SECONDS: "300"
+          RUSA_MAX_PARALLEL_WORKERS: "1"
+          RUSA_DOCKER_SOCKET: /run/user/1000/docker.sock
+          RUSA_DOCKER_GID: "1000"
+          RUSA_WORKSPACE_ROOT: /srv/rusa/workspaces
+          RUSA_GIT_MIRROR_ROOT: /srv/rusa/mirrors
+        run: |
+          touch .env
+          docker compose -f docker-compose.yml -f docker-compose.local.yml config --quiet
+
+      - name: Validate local-first JSON schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          paths = [
+              "packaging/windows/local-bundle-manifest.schema.json",
+              "schemas/integrations/mcp-connection.v1.schema.json",
+              "schemas/integrations/external-rag-connection.v1.schema.json",
+          ]
+          for path in paths:
+              schema = json.loads(Path(path).read_text(encoding="utf-8"))
+              assert schema.get("$schema", "").endswith("/schema"), path
+              assert schema.get("type") == "object", path
+              assert schema.get("required"), path
+          PY
+
       - name: Install RAG and MCP test dependencies
         run: |
           python -m pip install --upgrade pip

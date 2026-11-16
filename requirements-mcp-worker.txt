@@ -1,0 +1,3 @@
+# Optional remote MCP client dependencies for autonomous Agent Workers.
+httpx2>=2,<3
+mcp>=2,<3

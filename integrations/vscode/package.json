@@ -1,0 +1,52 @@
+{
+  "name": "rusaai-local",
+  "displayName": "RUSA AI Local",
+  "description": "Connect Visual Studio Code chat to your local RUSA AI API.",
+  "version": "0.1.0",
+  "publisher": "strategy-g",
+  "license": "MIT",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Chat"],
+  "activationEvents": ["onChatParticipant:rusaai.chat", "onCommand:rusaai.configureConnection"],
+  "main": "./out/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "contributes": {
+    "commands": [
+      { "command": "rusaai.configureConnection", "title": "RUSA AI: Configure Local API" }
+    ],
+    "chatParticipants": [
+      {
+        "id": "rusaai.chat",
+        "name": "rusaai",
+        "fullName": "RUSA AI Local",
+        "description": "Chat with your local RUSA AI model gateway.",
+        "isSticky": true
+      }
+    ],
+    "configuration": {
+      "title": "RUSA AI Local",
+      "properties": {
+        "rusaai.apiBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000/v1",
+          "description": "Local RUSA AI OpenAI-compatible API base URL."
+        },
+        "rusaai.model": {
+          "type": "string",
+          "default": "default",
+          "description": "Model alias exposed by the local RUSA AI gateway."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.2"
+  }
+}

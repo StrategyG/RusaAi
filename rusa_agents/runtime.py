@@ -13,6 +13,7 @@ from typing import Any
 from .audit import PostgresAuditLog, PostgresTaskPolicyAudit, record_task_policy
 from .autonomous import AutonomousCodeWorker
 from .config import RuntimeConfig
+from .connectors import load_external_rag_clients, load_mcp_clients
 from .contracts import CodingTask, RepositoryTarget, TaskState
 from .git_workspace import GitHubPublisher, GitWorkspaceManager
 from .memory import PostgresMemory
@@ -51,6 +52,9 @@ class AICodeRuntime:
         rag_flag = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
         if rag_flag not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             raise RuntimeError("RUSA_RAG_ENABLED must be a boolean value")
+        self.external_rag_clients = load_external_rag_clients()
+        self.mcp_clients = load_mcp_clients()
+
         self.knowledge_service = None
         if rag_flag in {"1", "true", "yes", "on"}:
             from rusa_knowledge.service import KnowledgeService
@@ -129,7 +133,19 @@ class AICodeRuntime:
             knowledge_collection=os.getenv("RUSA_KNOWLEDGE_COLLECTION", "agent"),
             knowledge_project_id=(
                 self._knowledge_project_scope(task.repository.full_name)
-                if self.knowledge_service is not None else None
+                if self.knowledge_service is not None
+                or getattr(self, "external_rag_clients", {}).get(tenant_id) is not None
+                else None
+            ),
+            external_rag_client=getattr(self, "external_rag_clients", {}).get(tenant_id),
+            external_rag_tenant_id=(
+                tenant_id
+                if getattr(self, "external_rag_clients", {}).get(tenant_id) is not None
+                else None
+            ),
+            mcp_client=getattr(self, "mcp_clients", {}).get(tenant_id),
+            mcp_tenant_id=(
+                tenant_id if getattr(self, "mcp_clients", {}).get(tenant_id) is not None else None
             ),
         )
         workers = [

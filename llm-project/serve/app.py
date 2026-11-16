@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -29,6 +30,11 @@ from rusa_agents.inference_admission import (
     InferenceDeadlineTimeout,
     InferenceQueueFull,
     InferenceQueueTimeout,
+)
+from rusa_agents.local_api_keys import (
+    LocalApiKeyStore,
+    LocalSetupAlreadyInitialized,
+    get_local_api_key_store,
 )
 from rusa_agents.metrics import (
     API_REQUEST_DURATION,
@@ -454,6 +460,103 @@ def verify_api_key(request: Request, api_key: str | None = Depends(api_key_heade
     return authenticate_api_key(request, api_key)
 
 
+class LocalApiKeyCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    roles: list[Literal["developer", "read_only"]] = Field(
+        default_factory=lambda: ["developer"], min_length=1, max_length=2
+    )
+
+
+def _local_install_enabled() -> bool:
+    return os.getenv("RUSA_LOCAL_INSTALL_MODE", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _local_key_store() -> LocalApiKeyStore:
+    if not _local_install_enabled():
+        raise HTTPException(status_code=404, detail="Local installation endpoints are disabled")
+    database_path = os.getenv("RUSA_LOCAL_API_KEYS_DB", "").strip()
+    if not database_path:
+        raise HTTPException(status_code=503, detail="Local API key store is not configured")
+    try:
+        return get_local_api_key_store(database_path)
+    except (OSError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="Local API key store is unavailable") from None
+
+
+def require_local_admin(
+    request: Request,
+    tenant_id: str = Depends(verify_api_key),
+) -> str:
+    principal = getattr(request.state, "principal", None)
+    if principal is None or not ({"tenant_admin", "platform_admin"} & set(principal.roles)):
+        raise HTTPException(status_code=403, detail="Local API key administration requires tenant_admin")
+    if not _local_install_enabled():
+        raise HTTPException(status_code=404, detail="Local installation endpoints are disabled")
+    return tenant_id
+
+
+@app.get("/v1/local/setup/status")
+def local_setup_status():
+    store = _local_key_store()
+    return {"enabled": True, "initialized": store.is_initialized()}
+
+
+@app.post("/v1/local/setup/initialize")
+def initialize_local_setup(request: Request):
+    store = _local_key_store()
+    expected = os.getenv("RUSA_LOCAL_SETUP_TOKEN", "")
+    supplied = request.headers.get("X-RUSA-Setup-Token", "")
+    if len(expected.encode("utf-8")) < 32:
+        raise HTTPException(status_code=503, detail="Local setup capability is not configured")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Invalid local setup capability")
+    try:
+        issued = store.initialize_owner()
+    except LocalSetupAlreadyInitialized:
+        raise HTTPException(status_code=409, detail="Local setup has already been initialized") from None
+    return {
+        **issued,
+        "api_base_url": "/v1",
+        "model_name": RuntimeConfig.from_env().model_name,
+        "key_display_policy": "shown_once",
+    }
+
+
+@app.get("/v1/local/api-keys")
+def list_local_api_keys(tenant_id: str = Depends(require_local_admin)):
+    return {"items": _local_key_store().list_keys(tenant_id)}
+
+
+@app.post("/v1/local/api-keys")
+def create_local_api_key(
+    payload: LocalApiKeyCreateRequest,
+    tenant_id: str = Depends(require_local_admin),
+):
+    try:
+        return _local_key_store().create_editor_key(
+            tenant_id=tenant_id, label=payload.label, roles=payload.roles
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.delete("/v1/local/api-keys/{key_id}")
+def revoke_local_api_key(
+    key_id: str,
+    tenant_id: str = Depends(require_local_admin),
+):
+    try:
+        revoked = _local_key_store().revoke_key(key_id=key_id, tenant_id=tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    if not revoked:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"key_id": key_id, "revoked": True}
+
 
 @app.get("/v1/auth/session")
 def read_api_session(
@@ -477,36 +580,53 @@ def read_api_session(
 
 def authenticate_api_key(request: Request, api_key: str | None, *, require_key: bool = False) -> str:
     config = RuntimeConfig.from_env()
-    if not config.api_key_principals and not config.api_keys:
-        if require_key or config.environment == "production":
-            raise HTTPException(status_code=503, detail="API authentication is not configured")
-        return os.getenv("RUSA_DEFAULT_TENANT", "development")
-    if not api_key or (
-        (config.api_key_principals or config.environment == "production")
-        and len(api_key.encode("utf-8")) < 32
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
-
-    supplied_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    local_mode = os.getenv("RUSA_LOCAL_INSTALL_MODE", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
     principal = None
-    for stored_digest, candidate in config.api_key_principals.items():
-        if hmac.compare_digest(supplied_digest, stored_digest):
-            principal = candidate
-            break
 
-    # Raw-key mappings are retained only as a development compatibility path.
-    if principal is None and config.environment != "production":
-        for candidate, mapped_tenant in config.api_keys.items():
-            if hmac.compare_digest(api_key.encode("utf-8"), candidate.encode("utf-8")):
-                from rusa_agents.config import ApiPrincipal
-                principal = ApiPrincipal(
-                    subject=f"legacy:{mapped_tenant}",
-                    tenant_id=mapped_tenant,
-                    roles=("tenant_admin",),
-                )
+    if local_mode:
+        database_path = os.getenv("RUSA_LOCAL_API_KEYS_DB", "").strip()
+        if not database_path:
+            raise HTTPException(status_code=503, detail="Local API key store is not configured")
+        if not api_key:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+        try:
+            principal = get_local_api_key_store(database_path).authenticate(api_key)
+        except (OSError, sqlite3.Error, ValueError):
+            raise HTTPException(status_code=503, detail="Local API key store is unavailable") from None
+        if principal is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+    else:
+        if not config.api_key_principals and not config.api_keys:
+            if require_key or config.environment == "production":
+                raise HTTPException(status_code=503, detail="API authentication is not configured")
+            return os.getenv("RUSA_DEFAULT_TENANT", "development")
+        if not api_key or (
+            (config.api_key_principals or config.environment == "production")
+            and len(api_key.encode("utf-8")) < 32
+        ):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+        supplied_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        for stored_digest, candidate in config.api_key_principals.items():
+            if hmac.compare_digest(supplied_digest, stored_digest):
+                principal = candidate
                 break
-    if principal is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+
+        # Raw-key mappings are retained only as a development compatibility path.
+        if principal is None and config.environment != "production":
+            for candidate, mapped_tenant in config.api_keys.items():
+                if hmac.compare_digest(api_key.encode("utf-8"), candidate.encode("utf-8")):
+                    from rusa_agents.config import ApiPrincipal
+                    principal = ApiPrincipal(
+                        subject=f"legacy:{mapped_tenant}",
+                        tenant_id=mapped_tenant,
+                        roles=("tenant_admin",),
+                    )
+                    break
+        if principal is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
 
     request.state.principal = principal
     tenant_id = principal.tenant_id
@@ -535,7 +655,6 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
                 headers={"Retry-After": str(retry_after)},
             )
     return tenant_id
-
 
 TASK_ROLE_PERMISSIONS = {
     "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),

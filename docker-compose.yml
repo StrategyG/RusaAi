@@ -1,4 +1,13 @@
 services:
+  local-data-init:
+    image: busybox:1.36.1
+    user: "0:0"
+    network_mode: none
+    command: ["sh", "-c", "mkdir -p /var/lib/rusa && chown 10001:10001 /var/lib/rusa && chmod 700 /var/lib/rusa"]
+    volumes:
+      - rusa-local-data:/var/lib/rusa
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -32,6 +41,23 @@ services:
     environment:
       RUSA_API_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_DATABASE_URL: ""
+      RUSA_LOCAL_INSTALL_MODE: ${RUSA_LOCAL_INSTALL_MODE:-false}
+      RUSA_LOCAL_API_KEYS_DB: /var/lib/rusa/local-api-keys.sqlite3
+      RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:-}
+      # The API does not need Worker-only repository, model, or connector credentials.
+      RUSA_GITHUB_TOKEN: ""
+      RUSA_WORKER_MODEL_API_KEY: ""
+      RUSA_WORKER_INFERENCE_API_KEYS: "{}"
+      RUSA_WORKER_INFERENCE_BASE_URL: ""
+      RUSA_WORKER_INFERENCE_GATEWAY: "false"
+      RUSA_WORKER_INFERENCE_DEADLINE_MS: ""
+      RUSA_INTERNAL_CA_BUNDLE: ""
+      RUSA_WORKSPACE_ROOT: ""
+      RUSA_GIT_MIRROR_ROOT: ""
+      RUSA_SANDBOX_IMAGE: ""
+      RUSA_DOCKER_SOCKET: ""
+      RUSA_DOCKER_GID: ""
+      RUSA_WEB_SESSION_SECRET: ""
       RUSA_WORKER_DATABASE_URL: ""
     ports:
       - "127.0.0.1:8000:8000"
@@ -40,6 +66,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      local-data-init:
+        condition: service_completed_successfully
+    volumes:
+      - rusa-local-data:/var/lib/rusa
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
       interval: 30s
@@ -65,11 +95,23 @@ services:
       - /tmp:rw,nosuid,size=128m
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file: .env
+    env_file:
+      - .env
+      - path: .env.worker
+        required: false
     environment:
       RUSA_WORKER_DATABASE_URL: postgresql://rusa:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/rusa
       RUSA_API_DATABASE_URL: ""
       RUSA_DATABASE_URL: ""
+      # The Agent Worker must not inherit local first-run, API-key registry,
+      # web-session, or API metrics secrets from the shared .env file.
+      RUSA_LOCAL_INSTALL_MODE: "false"
+      RUSA_LOCAL_API_KEYS_DB: ""
+      RUSA_LOCAL_SETUP_TOKEN: ""
+      RUSA_API_KEYS: "{}"
+      RUSA_API_KEYS_JSON: "{}"
+      RUSA_WEB_SESSION_SECRET: ""
+      RUSA_METRICS_API_KEY: ""
       # Do not inherit the API-to-model secret into the worker container.
       # Direct non-production worker providers may use this separate secret.
       RUSA_MODEL_API_KEY: ${RUSA_WORKER_MODEL_API_KEY:-}
@@ -98,6 +140,7 @@ services:
       RUSA_API_BASE_URL: http://api:8000
       RUSA_WEB_SESSION_SECRET: ${RUSA_WEB_SESSION_SECRET:?Set RUSA_WEB_SESSION_SECRET in .env}
       RUSA_WEB_COOKIE_SECURE: "false"
+      RUSA_LOCAL_SETUP_TOKEN: ${RUSA_LOCAL_SETUP_TOKEN:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -121,6 +164,7 @@ services:
 
 volumes:
   rusa-postgres:
+  rusa-local-data:
 
 networks:
   rusa-internal:

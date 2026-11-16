@@ -332,12 +332,18 @@ def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, m
     runtime.workspace_manager = WorkspaceManager()
     runtime.sandbox = object()
     runtime.knowledge_service = None
+    runtime.mcp_clients = {"tenant-a": object()}
     runtime.memory = object()
     runtime.audit = object()
+    gateway_options = {}
+
+    def capture_gateway(*args, **kwargs):
+        gateway_options.update(kwargs)
+        return object()
 
     monkeypatch.setattr(
         "rusa_agents.runtime.WorkspaceToolGateway",
-        lambda *args, **kwargs: object(),
+        capture_gateway,
     )
     monkeypatch.setattr(
         "rusa_agents.runtime.AICodeOrchestrator",
@@ -351,6 +357,8 @@ def test_runtime_builds_all_workers_with_the_current_tenant_provider(tmp_path, m
     assert runtime.provider.requested_tenants == ["tenant-a"]
     assert captured["workers"]
     assert all(worker.provider is tenant_provider for worker in captured["workers"])
+    assert gateway_options["mcp_client"] is runtime.mcp_clients["tenant-a"]
+    assert gateway_options["mcp_tenant_id"] == "tenant-a"
 
 
 def test_knowledge_project_scope_is_derived_from_authorized_repository_target():
