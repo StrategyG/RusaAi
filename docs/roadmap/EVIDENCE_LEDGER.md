@@ -1,7 +1,7 @@
 # RUSA AI Ecosystem — Evidence Ledger
 
 **Initial snapshot:** 2026-11-14  
-**Latest refresh:** 2026-11-15  
+**Latest refresh:** 2026-11-16  
 **Audit mode:** remote read-only GitHub inspection; no local test execution or production access.
 
 ## 1. Exact-main CI evidence
@@ -342,3 +342,42 @@ RusaAi and RusaModels have no active repository rulesets at this refresh. GitHub
 | NEXUS-DEP-001 | 04 | RusaModels | PRs #14, #17, #18, #20 | Dependency inventory | OPEN / NOT_MERGED | #14 Carbon-Tiny from-scratch CPU prototype; #17 dataset engine; #18 frozen benchmark engine; #20 architecture/tokenizer engine stacked on #14. These are candidate dependencies only. Rebase/review/CI and scale suitability remain required. |
 | NEXUS-TAG-001 | 04 | RusaAi / RusaModels | ADR-0003 + ADR-TRAIN-002 | Training authorization | BLOCKED | No tokenizer/model training or bulk ingestion authorized until model identity, data rights, trainer integrity, compute feasibility, security, frozen evaluation, and owner approvals all pass. No training was run in this work. |
 | NEXUS-ROADMAP-001 | Project NOTE | Project artifact | `RUSA_AI_ECOSYSTEM_CHATGPT_ROADMAP_EN_v3.1_NEXUS_DUAL_MODEL.md` | Roadmap revision | PREPARED | Adds NEXUS dual-model architecture, lifecycle, Foundation/Agent training strategy, data governance, TAG and N0–N8 acceptance gates. Not merged into GitHub main. |
+
+
+## 16. Live GitHub revalidation — 2026-11-16
+
+### Current mainline
+
+| Repository | Main SHA | Exact-main checks | Open PRs | Rulesets |
+|---|---|---:|---:|---|
+| RusaAi | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 success | 88 | None active |
+| RusaModels | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 success | 7 | None active |
+| RAG_Cerdas | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 13/13 check runs: one push-triggered test run and 12 scheduled audit/agent-dispatch runs | 4 | One active ruleset: `Rag` / `25698740` |
+
+RAG_Cerdas' push-triggered main test run reports 240 passed. The 12 scheduled runs are audit/agent-dispatch workflows, not 12 additional unit-test runs. All main SHAs remain unchanged. Branch metadata reports `protected=false` for all three repositories.
+
+### Current CHUNK 00 / CHUNK 01 PR evidence
+
+| Repository / PR | Exact head SHA | Exact-head CI | Review state | Merge state |
+|---|---|---|---|---|
+| RusaAi #119 | `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23` | 3/3 success; [workflow 43758029041](https://github.com/StrategyG/RusaAi/actions/runs/43758029041) | No submitted reviews; no inline threads | Open, mergeable, not merged |
+| RusaAi #117 | `30630895c870e70aa3b77080accbcf515124a39c` | 3/3 success; [workflow 43733130737](https://github.com/StrategyG/RusaAi/actions/runs/43733130737) | 3 COMMENTED reviews; no APPROVED review; no inline threads | Open, mergeable, not merged |
+| RusaModels #24 | `7ca01d6373c1b90aadc0182461982754ca54afce` | 2/2 success; [workflow 43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560); test step 156 passed, 1 skipped | 2 COMMENTED reviews; no APPROVED review; no inline threads | Open, mergeable, not merged |
+| RAG_Cerdas #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | 1/1 success; [workflow 43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103) | 2 COMMENTED reviews; no APPROVED review; no inline threads | Open, mergeable, not merged; ruleset gate unmet |
+
+The RusaAi #117 branch contains the requested current-main scheduler attribution, full ADR-title references, and clarification distinguishing the RUSA-AI product/model vision from the current RusaAi repository's Control Plane role. RusaModels #24 contains service-specific Model Server/Quant Server OpenAPI descriptions and a focused regression test. RAG_Cerdas #28 preserves IM19 isolation and the prohibition on cross-read/write, dual-write, mirroring and bulk synchronization.
+
+### Repository governance
+
+- RusaAi repository-ruleset API: empty list.
+- RusaModels repository-ruleset API: empty list.
+- RAG_Cerdas ruleset `Rag` (ID `25698740`) is active with no ref include/exclude patterns. It requires 10 approving reviews, approval of the latest push, review-thread resolution, linear history, signed commits, and CodeQL with HIGH-or-higher security-alert threshold. Its bypass-actor list is empty; the connected identity reports `current_user_can_bypass=never`.
+- The active ruleset was read only. No ruleset, branch-protection, permission, or bypass setting was changed.
+
+### CHUNK disposition
+
+- CHUNK 00: PASS for the read-only baseline and evidence inventory. PR #119 remains open and unmerged.
+- CHUNK 01: PARTIAL. Candidate documentation and metadata changes are present on the three PR branches and their exact-head CI is green, but no PR has an APPROVED review, none is merged, and RAG_Cerdas #28 has an unmet 10-approval ruleset gate. Mainline cross-repository documentation remains inconsistent until the approved changes are merged.
+- CHUNK 02: NOT_STARTED; it remains dependency-blocked by CHUNK 01.
+
+This snapshot records pre-update PR #119 head `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23`. The documentation commit that appends this evidence advances PR #119; the new head and its exact-head checks must be fetched again before closeout. No main branch, repository ruleset, production data, database, model artifact or deployment was changed by this revalidation.
