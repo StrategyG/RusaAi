@@ -256,3 +256,41 @@ def test_replacement_worker_cannot_reclaim_during_repository_publication():
     finally:
         release_publish.set()
         remove_task(task_id, tenant)
+
+
+def test_worker_tenant_identity_comes_from_claimed_row_not_payload():
+    """A tenant field embedded in JSON must never override the queue row's tenant."""
+    queue = make_queue()
+    tenant_id = f"queue-tenant-authority-{uuid4().hex}"
+    forged_tenant_id = f"queue-tenant-forged-{uuid4().hex}"
+    task_id = str(uuid4())
+    worker_id = "tenant-authority-worker"
+    payload = {
+        "objective": "prove database row tenant authority",
+        "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+        "acceptance_criteria": ["worker tenant comes from the claimed queue row"],
+        "tenant_id": forged_tenant_id,
+        "metadata": {"tenant_id": forged_tenant_id},
+    }
+    try:
+        assert queue.enqueue(
+            task_id, tenant_id, payload, priority=2**31 - 1
+        )
+        job = queue.claim(worker_id, lease_seconds=30)
+        assert job is not None and job.task_id == task_id
+        assert job.tenant_id == tenant_id
+        assert job.payload["tenant_id"] == forged_tenant_id
+
+        from rusa_agents.runtime import AICodeRuntime
+
+        task = AICodeRuntime._task(job)
+        assert task.metadata["tenant_id"] == tenant_id
+        assert task.metadata["tenant_id"] != forged_tenant_id
+        assert queue.owns_lease(
+            job.id, tenant_id, worker_id, job.lease_token
+        )
+        assert not queue.owns_lease(
+            job.id, forged_tenant_id, worker_id, job.lease_token
+        )
+    finally:
+        remove_task(task_id, tenant_id)
