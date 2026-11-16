@@ -24,12 +24,12 @@ The three main SHAs are unchanged from the prior baseline.
 |---|---:|---|---|
 | RusaAi | 4 | 4/4 success | Includes main tests/security, RAG/MCP integration, production image build/scan and web build |
 | RusaModels | 2 | 2/2 success | Test and Windows RUSA-CPU-16 script validation |
-| RAG_Cerdas | 13 | 13/13 success | One push-triggered test run (240 passed); 12 scheduled audit/agent-dispatch runs, not 12 additional unit-test runs |
+| RAG_Cerdas | 14 | 14/14 success | One push-triggered test run (240 passed); 13 scheduled audit/agent-dispatch runs, not 13 additional unit-test runs |
 
 Evidence:
 - RusaAi main: [workflow 43354051026](https://github.com/StrategyG/RusaAi/actions/runs/43354051026), [web workflow 43354050892](https://github.com/StrategyG/RusaAi/actions/runs/43354050892).
 - RusaModels main: [workflow 43358929126](https://github.com/StrategyG/RusaModels/actions/runs/43358929126).
-- RAG_Cerdas main tests: [workflow 43312458157](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43312458157); latest scheduled audit observed: [workflow 43751180128](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43751180128).
+- RAG_Cerdas main tests: [workflow 43312458157](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43312458157); latest scheduled audit observed: [workflow 43776177560](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43776177560).
 
 These checks validate only the exact SHAs and workflows listed. They do not establish staging, production, model quality, target-device performance or release certification.
 
