@@ -322,7 +322,8 @@ class RuntimeConfig:
         ):
             if os.getenv(variable, "").strip():
                 missing.append(
-                    f"{variable} must not be provided to the production Worker while Worker RAG is disabled"
+                    f"{variable} must not be provided to the production Worker "
+                    "while Worker RAG is disabled"
                 )
 
         gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
