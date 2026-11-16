@@ -401,9 +401,11 @@ This snapshot records pre-update PR #119 head `0eb9a62c7cb3e5b4b1da747ec8a83df6f
 
 | Repository | Main SHA | Post-merge CI | Open PRs |
 |---|---|---|---:|
-| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 2/3 success; production image build/scan remains in progress in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 |
+| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 success in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 |
 | RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 success in [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) | 8 |
 | RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 success in [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) | 3 |
+
+All three post-merge main CI workflows are green. This is repository CI evidence only, not production certification.
 
 ### CHUNK 02 identity/security source evidence
 
