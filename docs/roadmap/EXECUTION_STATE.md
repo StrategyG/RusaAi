@@ -22,7 +22,7 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `57541882563f18cf6b57442a2059c0b68962a4f4` | 3 completed success; production image build/scan in progress (run 43826751700) | No | 86 |
+| RusaAi | main | `57541882563f18cf6b57442a2059c0b68962a4f4` | 4/4 pass (run 43826751700) | No | 87 |
 | RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass | No | 6 |
 | RAG_Cerdas | main | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 tests pass (run 43800691402) | No | 3 |
 
@@ -34,7 +34,7 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 |---|---|---|
 | 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Baseline artifacts merged in RusaAi PR #119 (merge commit `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb`); read-only baseline remains distinct from production certification |
 | 01 — Architecture Reconciliation and ADR Governance | PASS | RusaAi #117, RusaModels #24 and RAG_Cerdas #28 merged; post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 merged; cross-repository ownership, canonical-store and IM19 isolation statements verified on all three main branches |
-| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Worker direct-RAG fail-closed guard merged in #125 (exact-head CI 4/4); post-merge main image build/scan is still in progress. Payload-tenant spoofing and cross-tenant version-history regressions are on the current branch, pending exact-head CI |
+| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Worker direct-RAG fail-closed guard merged in #125 (exact-head and post-merge main CI 4/4). PR #126 adds payload-tenant spoofing and cross-tenant version-history regressions; exact-head CI 3/3 passed and merge is pending |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
 | 05 — Versioned API Contract Between RusaAi and RusaModels | NOT_STARTED | Depends on CHUNK 03 and 04 |
@@ -402,13 +402,13 @@ Key findings:
 
 | Repository | Main SHA | Exact-main checks | Open PRs | Branch/ruleset |
 |---|---|---|---:|---|
-| RusaAi | `57541882563f18cf6b57442a2059c0b68962a4f4` | 3 completed success; production image build/scan in progress, run [43826751700](https://github.com/StrategyG/RusaAi/actions/runs/43826751700) | 86 | protected=false; no active repository ruleset |
+| RusaAi | `57541882563f18cf6b57442a2059c0b68962a4f4` | 4/4 pass, run [43826751700](https://github.com/StrategyG/RusaAi/actions/runs/43826751700) | 87 | protected=false; no active repository ruleset |
 | RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 success | 6 | protected=false; no active repository ruleset |
 | RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | tests and scheduled audit successful | 3 | protected=false; active `Rag` ruleset 25698740 remains unchanged |
 
 ### Merged P0 guard
 
-RusaAi PR #125 merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Exact-head CI on `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a` passed 4/4. The merge-triggered main workflow has 3 completed successful checks and one production image build/scan in progress. The production Worker now fails closed on direct RAG and embedding credentials; this is a configuration/runtime guard, not a deployed-production verification.
+RusaAi PR #125 merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Exact-head CI on `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a` passed 4/4. The merge-triggered main workflow completed 4/4 successful checks. The production Worker now fails closed on direct RAG and embedding credentials; this is a configuration/runtime guard, not a deployed-production verification.
 
 ### Current P0 regression branch
 
@@ -418,4 +418,4 @@ Branch: `security/chunk-02-tenant-spoofing-regressions-20261116`
 - Knowledge version-history tenant isolation regression: verifies another tenant cannot list or read historical versions, current documents or search results.
 - Existing tests continue to cover stale lease-token fencing, task API cross-tenant denial, RLS role separation, and agent/project visibility.
 
-The regression branch must pass exact-head CI before these tests count as verified. CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
+PR #126 exact-head CI passed 3/3; the tests are verified in CI but remain outside mainline until merge. CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
