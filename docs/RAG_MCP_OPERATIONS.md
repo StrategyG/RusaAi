@@ -57,9 +57,14 @@ A future Worker RAG activation requires a versioned tenant-aware RusaAi
 embedding gateway/broker, authenticated scope propagation, audit correlation,
 cross-tenant negative tests, and a separately approved release profile.
 
-The standalone MCP process is a separate security principal and is not covered
-by the Worker Compose guard. Do not deploy it with a shared Model Server
-credential or unrestricted egress; its service identity, embedding broker,
+The standalone MCP process is a separate security principal. Its production
+startup is blocked by a fail-closed guard until a signed tenant-aware embedding
+gateway and service identity are implemented and approved. `Dockerfile.rag-mcp`
+sets `ENVIRONMENT=production` by default so the hardened container cannot start
+in production while that gateway is absent. Local source/container development
+must explicitly set `ENVIRONMENT=development`; never use that override in a
+production deployment. Do not deploy MCP with a shared Model Server credential
+or unrestricted egress; its service identity, embedding broker,
 tenant/agent/project claims, and secret rotation must be reviewed separately.
 
 ## Database setup
@@ -198,6 +203,7 @@ Configure the server with a JSON object mapping each token's lowercase SHA-256
 digest to its tenant ID:
 
 ```bash
+export ENVIRONMENT=development  # local development only
 export RUSA_MCP_TENANT_KEYS='{"<sha256-token-digest>":"tenant-a"}'
 export RUSA_KNOWLEDGE_DATABASE_URL='postgresql://restricted-role:...@db/knowledge'
 export RUSA_KNOWLEDGE_DB_ROLE='rusa_knowledge_worker'
@@ -205,6 +211,8 @@ export RUSA_EMBEDDING_BASE_URL='https://embedding.example/v1'
 export RUSA_EMBEDDING_API_KEY='...'
 uvicorn rusa_mcp.server:app --host 127.0.0.1 --port 8002
 ```
+
+This shell example is for local development only. The hardened container image defaults to `ENVIRONMENT=production` and intentionally fails closed until the signed tenant-aware embedding gateway is implemented and approved. Do not set `ENVIRONMENT=development` in production.
 
 The MCP server exposes only the read-only tools `search_knowledge`,
 `get_document`, and `list_collections`. Tenant identity is derived from the

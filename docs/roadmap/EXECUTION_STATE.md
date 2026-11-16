@@ -20,9 +20,9 @@
 
 ## 2. Repository baseline
 
-| Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
+| Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at refreshed snapshot |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `57541882563f18cf6b57442a2059c0b68962a4f4` | 4/4 pass (run 43826751700) | No | 87 |
+| RusaAi | main | `a646de5acfb3c6617470e70782953d1836e6f775` | 2/3 complete PASS; production image build/scan in progress (run 43833073112) | No | 88 |
 | RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass | No | 6 |
 | RAG_Cerdas | main | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 tests pass (run 43800691402) | No | 3 |
 
@@ -34,7 +34,7 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 |---|---|---|
 | 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Baseline artifacts merged in RusaAi PR #119 (merge commit `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb`); read-only baseline remains distinct from production certification |
 | 01 — Architecture Reconciliation and ADR Governance | PASS | RusaAi #117, RusaModels #24 and RAG_Cerdas #28 merged; post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 merged; cross-repository ownership, canonical-store and IM19 isolation statements verified on all three main branches |
-| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Worker direct-RAG fail-closed guard merged in #125 (exact-head and post-merge main CI 4/4). PR #126 adds payload-tenant spoofing and cross-tenant version-history regressions; exact-head CI 3/3 passed and merge is pending |
+| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Worker direct-RAG fail-closed guard merged in #125 (exact-head and post-merge main CI 4/4). PR #126 merged at `a646de5` with payload-tenant spoofing and cross-tenant version-history regressions (exact-head CI 3/3). PR #128 adds a production MCP direct-embedding guard and is pending exact-head CI; PR #127 records a proposed signed cross-service audit-context contract |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
 | 05 — Versioned API Contract Between RusaAi and RusaModels | NOT_STARTED | Depends on CHUNK 03 and 04 |
@@ -396,9 +396,9 @@ Key findings:
 - CHUNK 03–15: NOT_STARTED; dependency order remains unchanged.
 - Production readiness remains **45/100** and production remains NO-GO / NOT_VERIFIED.
 
-## 19. CHUNK 02 P0 implementation refresh — 2026-11-16
+## 19. CHUNK 02 P0 implementation refresh — 2026-11-16 (pre-PR #126 merge snapshot)
 
-### Current mainline snapshot
+### Mainline snapshot before PR #126
 
 | Repository | Main SHA | Exact-main checks | Open PRs | Branch/ruleset |
 |---|---|---|---:|---|
@@ -418,4 +418,23 @@ Branch: `security/chunk-02-tenant-spoofing-regressions-20261116`
 - Knowledge version-history tenant isolation regression: verifies another tenant cannot list or read historical versions, current documents or search results.
 - Existing tests continue to cover stale lease-token fencing, task API cross-tenant denial, RLS role separation, and agent/project visibility.
 
-PR #126 exact-head CI passed 3/3; the tests are verified in CI but remain outside mainline until merge. CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
+At this snapshot, PR #126 exact-head CI passed 3/3 and merge was pending; PR #126 was subsequently merged at `a646de5` (see section 20). CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
+
+## 20. CHUNK 02 mainline refresh after PR #126 — 2026-11-16
+
+### Current repository snapshot
+
+| Repository | Main SHA | Exact-main CI checks | Open PRs |
+|---|---|---|---:|
+| RusaAi | `a646de5acfb3c6617470e70782953d1836e6f775` | 2/3 completed successfully; production image build/scan still in progress, run [43833073112](https://github.com/StrategyG/RusaAi/actions/runs/43833073112) | 88 |
+| RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass | 6 |
+| RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | tests and scheduled audit successful | 3 |
+
+### CHUNK 02 status
+
+- PR #125: production Worker direct-RAG/embedding fail-closed guard merged; exact-head and post-merge main CI passed 4/4.
+- PR #126: Worker payload-tenant spoofing and cross-tenant knowledge version-history regressions merged at `a646de5`; exact-head CI passed 3/3.
+- PR #127: design-only signed cross-service tenant/audit context proposal; explicitly not approved for production use.
+- PR #128: standalone MCP production guard; blocks production MCP construction until a signed tenant-aware embedding gateway is implemented; exact-head CI is pending.
+
+CHUNK 02 remains IN_PROGRESS. Production remains NO-GO / NOT_VERIFIED; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed.
