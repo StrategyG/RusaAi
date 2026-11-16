@@ -26,7 +26,7 @@ The inspected RusaAi main branch already contains:
 
 The current RusaAi store is therefore the most direct implementation base for the shared Agent/Worker corpus. It is not yet a fully governed, production-activated knowledge platform. Its current mainline schema does not provide the complete source-rights, source-version, review, approval, publication, deletion and agent/project authorization lifecycle.
 
-RAG_Cerdas IM19 remains a separate isolated Knowledge Intelligence pilot. It is not selected as the canonical writer or answer-facing retrieval backend. The earlier RAG_Cerdas ADR-0001 remains historical no-selection analysis; RAG_Cerdas PR #28 proposes the companion “Alignment with the RusaAi Canonical Knowledge Store” ADR, which is not yet merged. Regardless of that documentation change, IM19 tenant/project isolation and its public service boundary are not approved for multi-tenant production use, and no cross-read, cross-write, dual-write, mirroring, or bulk synchronization is authorized.
+RAG_Cerdas IM19 remains a separate isolated Knowledge Intelligence pilot. It is not selected as the canonical writer or answer-facing retrieval backend. The earlier RAG_Cerdas ADR-0001 remains historical no-selection analysis; the companion “Alignment with the RusaAi Canonical Knowledge Store” ADR was merged in RAG_Cerdas PR #28 on 2026-11-16. IM19 tenant/project isolation and its public service boundary are still not approved for multi-tenant production use, and no cross-read, cross-write, dual-write, mirroring, or bulk synchronization is authorized.
 
 ## Decision
 
