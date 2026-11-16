@@ -45,7 +45,7 @@ The CI databases are disposable test environments. Passing tests do not prove th
 - `rusa_knowledge` uses transaction-local role and tenant context. The query layer applies agent/project filters. Project scope is not independently enforced by the inspected database RLS predicates, so every read/list/search/history/export path must continue to be covered by negative tests.
 - Before CHUNK 02 PR #125, the optional Worker `KnowledgeService` path could construct an embedding client from `RUSA_EMBEDDING_BASE_URL` / `RUSA_EMBEDDING_API_KEY` and call RusaModels `/openai/v1/embeddings` directly. PR #125 now blocks this path in production Worker configuration; the separate MCP process remains outside that guard.
 
-**CHUNK 02 P0 mitigation — merged in RusaAi PR #125:** production Worker validation rejects `RUSA_RAG_ENABLED=true`, ambiguous RAG flag values, and Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. Production Compose pins RAG off and clears those credentials. PR #125 exact-head CI passed 4/4; post-merge main image build/scan is still running on SHA `57541882563f18cf6b57442a2059c0b68962a4f4` (3/4 completed checks passed at this snapshot). This does not authorize the separate MCP process to use direct Model Server credentials.
+**CHUNK 02 P0 mitigation — merged in RusaAi PR #125:** production Worker validation rejects `RUSA_RAG_ENABLED=true`, ambiguous RAG flag values, and Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. Production Compose pins RAG off and clears those credentials. PR #125 exact-head CI and post-merge main CI both passed 4/4 on SHA `57541882563f18cf6b57442a2059c0b68962a4f4`. This does not authorize the separate MCP process to use direct Model Server credentials.
 
 ### RusaModels
 
@@ -167,7 +167,7 @@ This baseline and the Worker fail-closed change do not authorize production RAG 
 
 ### P0 production Worker boundary
 
-RusaAi PR #125 is merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Its exact-head CI completed 4/4 successfully on head `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a`. The merge-triggered main workflow `43826751700` is not yet complete: test/lint/security and RAG/MCP integration checks passed; the production image build/scan is still in progress. Do not call post-merge CI fully green until that final check completes.
+RusaAi PR #125 is merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Its exact-head CI completed 4/4 successfully on head `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a`. The merge-triggered main workflow `43826751700` completed 4/4 successfully, including the production image build/scan.
 
 The production Worker config now fails closed on a truthy or ambiguous `RUSA_RAG_ENABLED` value and on direct Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. The production Compose profile pins RAG off and clears those variables. This blocks the optional Worker-to-Model-Plane embedding path in the production profile. It does not secure the standalone MCP process or create a tenant-aware embedding gateway.
 
@@ -178,6 +178,6 @@ The production Worker config now fails closed on a truthy or ambiguous `RUSA_RAG
 - Existing PostgreSQL tests already cover cross-tenant task API read/retry/cancel denial, forced RLS, API/Worker role separation, stale lease-token fencing, agent scope, project scope, and agent/project-scoped version history.
 - No export endpoint was found in the inspected RusaAi knowledge service/store API. The acceptance criterion remains applicable if another export surface is discovered.
 
-These two regression tests are committed on `security/chunk-02-tenant-spoofing-regressions-20261116` and require exact-head CI before they count as passed evidence. They do not access production data or perform DDL outside disposable CI fixtures.
+These two regression tests are committed on `security/chunk-02-tenant-spoofing-regressions-20261116`; PR #126 exact-head CI passed 3/3. The tests are CI-verified on the branch but are not yet in mainline. They do not access production data or perform DDL outside disposable CI fixtures.
 
 CHUNK 02 remains IN_PROGRESS. Human IdP/SSO/MFA, key expiry and automated rotation, standardized cross-service audit correlation, MCP service identity/egress, live database grants and deployment evidence remain open. Production remains NO-GO / NOT_VERIFIED.
