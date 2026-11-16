@@ -56,6 +56,28 @@ def _tenant_for_token(token: str, key_hashes: dict[str, str]) -> str | None:
     return None
 
 
+def validate_production_embedding_boundary() -> None:
+    """Keep the standalone MCP process out of production until tenant-aware embedding is approved."""
+    if os.getenv("ENVIRONMENT", "development").strip().lower() != "production":
+        return
+
+    direct_variables = (
+        "RUSA_EMBEDDING_BASE_URL",
+        "RUSA_EMBEDDING_API_KEY",
+        "RUSA_MODEL_BASE_URL",
+        "RUSA_MODEL_API_KEY",
+    )
+    configured = [name for name in direct_variables if os.getenv(name)]
+    if configured:
+        raise RuntimeError(
+            "Production MCP direct Model Plane embedding credentials are forbidden; "
+            "a signed tenant-aware embedding gateway is not implemented"
+        )
+    raise RuntimeError(
+        "Production MCP is disabled until an approved signed tenant-aware embedding gateway is implemented"
+    )
+
+
 @lru_cache(maxsize=1)
 def get_knowledge_service() -> KnowledgeService:
     return KnowledgeService.from_env(check_ready=True)
@@ -159,6 +181,7 @@ class TenantAuthMiddleware:
     """Pure ASGI middleware; authentication and tenant context are per request."""
 
     def __init__(self, app: Any, key_hashes: dict[str, str] | None = None) -> None:
+        validate_production_embedding_boundary()
         self.app = app
         self.key_hashes = key_hashes if key_hashes is not None else parse_tenant_key_hashes(
             os.getenv("RUSA_MCP_TENANT_KEYS")
