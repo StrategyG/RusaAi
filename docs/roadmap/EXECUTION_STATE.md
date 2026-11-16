@@ -22,7 +22,7 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 2/3 pass; production image build/scan in progress (run 43801535417) | No | 87 |
+| RusaAi | main | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 pass (run 43801535417) | No | 87 |
 | RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass (run 43801252283) | No | 8 |
 | RAG_Cerdas | main | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 tests pass (run 43800691402) | No | 3 |
 
@@ -370,11 +370,11 @@ Cross-repository verification confirms that RusaAi is the ecosystem Control Plan
 
 | Repository | Main SHA | Main CI at refresh | Open PRs | Branch/ruleset observation |
 |---|---|---|---:|---|
-| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 2/3 passed; image build/scan still running in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 | Branch metadata protected=false; no active repository ruleset |
+| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 passed in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 | Branch metadata protected=false; no active repository ruleset |
 | RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 passed in [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) | 8 | Branch metadata protected=false; no active repository ruleset |
 | RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 passed in [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) | 3 | Active `Rag` ruleset ID `25698740`; 10 approvals, latest-push approval, resolved threads, signed commits, CodeQL HIGH-or-higher; no bypass actors reported |
 
-The exact-head PR CI for the merged alignment and closeout PRs passed. RusaAi's post-merge production image build/scan remained in progress at this refresh and must be rechecked before any release claim.
+The exact-head PR CI for the merged alignment and closeout PRs passed. All three post-merge main CI workflows are green. This is repository CI evidence only, not production certification.
 
 ### CHUNK 02 initial baseline
 
