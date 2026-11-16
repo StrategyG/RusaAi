@@ -43,9 +43,9 @@ The CI databases are disposable test environments. Passing tests do not prove th
 - `rusa_api_runtime` and `rusa_worker_runtime` are NOLOGIN / NOBYPASSRLS group roles. Dedicated login roles are used for API and Worker connections.
 - Worker queue access is intentionally cross-tenant for claiming work. A claimed row supplies its tenant ID; worker ID and lease token fence heartbeat, completion and state transitions. This global queue-read capability must not be confused with permission to read arbitrary tenant memory or knowledge.
 - `rusa_knowledge` uses transaction-local role and tenant context. The query layer applies agent/project filters. Project scope is not independently enforced by the inspected database RLS predicates, so every read/list/search/history/export path must continue to be covered by negative tests.
-- The optional Worker `KnowledgeService` path can construct an embedding client from `RUSA_EMBEDDING_BASE_URL` / `RUSA_EMBEDDING_API_KEY` and call RusaModels `/openai/v1/embeddings` directly. This bypasses the RusaAi chat gateway and is not an approved production Worker path.
+- Before CHUNK 02 PR #125, the optional Worker `KnowledgeService` path could construct an embedding client from `RUSA_EMBEDDING_BASE_URL` / `RUSA_EMBEDDING_API_KEY` and call RusaModels `/openai/v1/embeddings` directly. PR #125 now blocks this path in production Worker configuration; the separate MCP process remains outside that guard.
 
-**CHUNK 02 mitigation in this branch:** production Worker validation now rejects `RUSA_RAG_ENABLED=true`, ambiguous RAG flag values, and Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. The production Compose profile pins RAG off and clears those credentials. This mitigation is not mainline until this PR passes CI and is merged. It does not authorize the separate MCP process to use direct Model Server credentials.
+**CHUNK 02 P0 mitigation — merged in RusaAi PR #125:** production Worker validation rejects `RUSA_RAG_ENABLED=true`, ambiguous RAG flag values, and Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. Production Compose pins RAG off and clears those credentials. PR #125 exact-head CI passed 4/4; post-merge main image build/scan is still running on SHA `57541882563f18cf6b57442a2059c0b68962a4f4` (3/4 completed checks passed at this snapshot). This does not authorize the separate MCP process to use direct Model Server credentials.
 
 ### RusaModels
 
@@ -93,7 +93,7 @@ CHUNK 02 must define one cross-service audit envelope: `request_id`, `tenant_id`
 | Worker payload changes tenant | Tenant is read from the claimed DB row; lease owner/token fence state changes | Add a regression test that tampers with payload tenant metadata and proves the DB row remains authoritative |
 | Cross-tenant task/memory read | Forced RLS and dedicated API/Worker roles; PostgreSQL integration tests | Live production grants remain NOT_VERIFIED |
 | Cross-project knowledge leakage within one tenant | Agent/project filters in knowledge query layer; disposable pgvector tests passed | Project scope is not independently enforced by DB RLS; preserve exhaustive query-path negative tests or add DB-level project policy |
-| Worker bypasses tenant gateway for embeddings | This branch rejects direct Worker RAG and direct knowledge/embedding credentials in production; Compose profile clears them | MCP is a separate process and still needs its own brokered credential/egress design; change is not mainline until merged |
+| Worker bypasses tenant gateway for embeddings | Production Worker guard is merged in PR #125; Compose pins RAG off and clears direct knowledge/embedding credentials | MCP is a separate process and still needs its own brokered credential/egress design; production main image build/scan remains in progress |
 | Model Server token is over-privileged | Hashed principal registry and role-based API permissions; inference role is narrower than manager/admin | No expiry/key ID/automated rotation; one global service token remains for internal dependencies |
 | IM19 reviewer impersonation or role escalation | PostgreSQL login-to-reviewer binding, role-membership guard, revocation ledger and trigger checks | No external IdP, SSO, MFA, identity proofing or automated account lifecycle |
 | IM19 data leaks across tenants | Private schema, separate worker/approver roles, forced RLS; Edge Function disabled by default | IM19 has no tenant/project data model. It must remain isolated and single-pilot. |
@@ -133,9 +133,9 @@ All rotations require a recorded owner, change window, validation evidence, roll
 
 | Priority | Work item | Initial disposition |
 |---|---|---|
-| P0 | Deny direct Worker RAG / embedding credentials in production | Implemented in this branch; pending exact-head CI and merge |
-| P0 | Add Worker payload-tenant spoofing and lease-fencing negative tests | Required |
-| P0 | Preserve cross-tenant negative tests for task, memory, knowledge search/list/history/export | Core and knowledge suites pass in disposable CI; expand where coverage is not explicit |
+| P0 | Deny direct Worker RAG / embedding credentials in production | Merged in RusaAi #125; exact-head CI 4/4 passed; post-merge main image build/scan pending |
+| P0 | Add Worker payload-tenant spoofing and lease-fencing negative tests | Implemented on `security/chunk-02-tenant-spoofing-regressions-20261116`; exact-head CI pending |
+| P0 | Preserve cross-tenant negative tests for task, memory, knowledge search/list/history/export | Existing task/memory/search/get/list and agent/project/version-scope tests are present; this branch adds explicit cross-tenant version-history denial. No export endpoint was found in the inspected knowledge API/store surface; verify any separate export path before closeout |
 | P1 | Define human identity/IdP, MFA, tenant membership and role lifecycle for RusaAi UI/API | Not implemented; design decision required |
 | P1 | Standardize audit envelope and propagate request IDs across RusaAi → RusaModels → IM19 | Partial; schema/application changes required |
 | P1 | Add key expiry/IDs, rotation overlap, revocation tests and deployment runbooks | Partial; manual registry rotation only |
@@ -162,3 +162,22 @@ Any cross-tenant negative-test failure is a hard FAIL. Passing disposable CI is 
 ## 10. Non-authorization
 
 This baseline and the Worker fail-closed change do not authorize production RAG activation, IM19 public exposure, SSO/provider integration, production DDL, bulk ingestion, credential sharing, cross-system synchronization, model release, or deployment. The overall production-readiness score remains **45/100** until separate evidence-backed scorecard criteria are met.
+
+## 11. CHUNK 02 implementation refresh — 2026-11-16
+
+### P0 production Worker boundary
+
+RusaAi PR #125 is merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Its exact-head CI completed 4/4 successfully on head `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a`. The merge-triggered main workflow `43826751700` is not yet complete: test/lint/security and RAG/MCP integration checks passed; the production image build/scan is still in progress. Do not call post-merge CI fully green until that final check completes.
+
+The production Worker config now fails closed on a truthy or ambiguous `RUSA_RAG_ENABLED` value and on direct Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. The production Compose profile pins RAG off and clears those variables. This blocks the optional Worker-to-Model-Plane embedding path in the production profile. It does not secure the standalone MCP process or create a tenant-aware embedding gateway.
+
+### P0 negative-test additions on the current branch
+
+- `tests/test_queue_races.py`: a forged `tenant_id` embedded in the queued JSON payload is asserted not to override the tenant ID returned from the database row or the Worker task metadata. The test also verifies that the lease is owned under the row tenant and not under the forged tenant.
+- `tests/test_knowledge_postgres.py`: a document's version list, historical version read, current document read and search are asserted to be invisible to a different tenant.
+- Existing PostgreSQL tests already cover cross-tenant task API read/retry/cancel denial, forced RLS, API/Worker role separation, stale lease-token fencing, agent scope, project scope, and agent/project-scoped version history.
+- No export endpoint was found in the inspected RusaAi knowledge service/store API. The acceptance criterion remains applicable if another export surface is discovered.
+
+These two regression tests are committed on `security/chunk-02-tenant-spoofing-regressions-20261116` and require exact-head CI before they count as passed evidence. They do not access production data or perform DDL outside disposable CI fixtures.
+
+CHUNK 02 remains IN_PROGRESS. Human IdP/SSO/MFA, key expiry and automated rotation, standardized cross-service audit correlation, MCP service identity/egress, live database grants and deployment evidence remain open. Production remains NO-GO / NOT_VERIFIED.
