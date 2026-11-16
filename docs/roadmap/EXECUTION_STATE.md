@@ -22,9 +22,9 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 85 |
+| RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 88 |
 | RusaModels | main | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 pass | No | 7 |
-| RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 5/5 pass | No | 2 |
+| RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 13/13 check runs (1 test + 12 scheduled audit/agent runs) | No | 4 |
 
 The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.md`. The local working-tree state is **NOT_VERIFIED** because this audit used remote GitHub inspection and no local checkout was available.
 
@@ -325,7 +325,7 @@ This section supersedes prior time-sensitive PR counts, head SHAs, CI and review
 
 | Repository | PR | Head SHA | CI | Review / merge state |
 |---|---:|---|---|---|
-| RusaAi | #119 | 226c8da9855106ece8caec76301e86da4b3cdc9d | 3/3 PASS (workflow 43733483582) | Open; no review submission |
+| RusaAi | #119 | `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23` (pre-refresh) | 3/3 PASS (workflow 43758029041) | Open; no review submission; this documentation update requires fresh exact-head CI |
 | RusaAi | #117 | 30630895c870e70aa3b77080accbcf515124a39c | 3/3 PASS (workflow 43733130737) | Open; 3 COMMENTED reviews, no APPROVED review |
 | RusaModels | #24 | 7ca01d6373c1b90aadc0182461982754ca54afce | 2/2 PASS (workflow 43704012560) | Open; 2 COMMENTED reviews, no APPROVED review |
 | RAG_Cerdas | #28 | 84e9a13450c4b107d470eed775c1bb0998981acb | 1/1 PASS (workflow 43680080103) | Open; 2 COMMENTED reviews, no APPROVED review; 10-approval ruleset blocks merge |
