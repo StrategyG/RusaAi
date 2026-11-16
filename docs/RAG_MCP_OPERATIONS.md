@@ -41,6 +41,27 @@ the decision, alternatives and implementation/release gates.
 - Per-tenant bearer credentials. Store only SHA-256 digests in
   `RUSA_MCP_TENANT_KEYS`; never put raw tenant tokens in that JSON map.
 
+## Production Worker boundary
+
+The production Worker is gateway-only and must not construct the optional direct
+`KnowledgeService` embedding client. The production Compose profile pins
+`RUSA_RAG_ENABLED=false` and clears `RUSA_KNOWLEDGE_DATABASE_URL`,
+`RUSA_EMBEDDING_BASE_URL`, and `RUSA_EMBEDDING_API_KEY`. Production Worker
+startup fails closed if the RAG flag is true/ambiguous or any of those direct
+knowledge/embedding credentials are present.
+
+This prevents the optional Worker → RusaModels `/embeddings` path from
+bypassing the tenant-authenticated RusaAi gateway. Do not reintroduce those
+credentials through an override file, secret mount, or environment injection.
+A future Worker RAG activation requires a versioned tenant-aware RusaAi
+embedding gateway/broker, authenticated scope propagation, audit correlation,
+cross-tenant negative tests, and a separately approved release profile.
+
+The standalone MCP process is a separate security principal and is not covered
+by the Worker Compose guard. Do not deploy it with a shared Model Server
+credential or unrestricted egress; its service identity, embedding broker,
+tenant/agent/project claims, and secret rotation must be reviewed separately.
+
 ## Database setup
 
 Apply `migrations/007_rag_knowledge_pgvector.sql` as a database owner or

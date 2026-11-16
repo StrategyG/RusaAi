@@ -6,8 +6,8 @@
 **Latest refresh:** 2026-11-16  
 **Coordinator:** ChatGPT Project NOTE  
 **Overall status:** IN_PROGRESS  
-**Active chunk:** CHUNK 01 — Architecture Reconciliation and ADR Governance  
-**Last closed chunk:** CHUNK 00 — Repository Discovery, Baseline, and Evidence Inventory (PASS; refreshed 2026-11-16)
+**Active chunk:** CHUNK 02 — Trusted Identity, Authorization, Tenant Security  
+**Last closed chunk:** CHUNK 01 — Architecture Reconciliation and ADR Governance (PASS; all seven integration/closeout PRs merged and cross-repository documentation rechecked 2026-11-16)
 
 ## 1. Operating rules
 
@@ -22,9 +22,9 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `1adac8d340e5870570910168b6626fe285dd2cf2` | 4/4 pass | No | 88 |
-| RusaModels | main | `12c49b1372b230f3656be6e1badeabad870bcfa1` | 2/2 pass | No | 7 |
-| RAG_Cerdas | main | `1ead461e76d563445d179e7d5e80c25a9ca9f059` | 14/14 check runs (1 test + 13 scheduled audit/agent runs) | No | 4 |
+| RusaAi | main | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 pass (run 43801535417) | No | 87 |
+| RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass (run 43801252283) | No | 8 |
+| RAG_Cerdas | main | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 tests pass (run 43800691402) | No | 3 |
 
 The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.md`. The local working-tree state is **NOT_VERIFIED** because this audit used remote GitHub inspection and no local checkout was available.
 
@@ -32,9 +32,9 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 | Chunk | Status | Evidence / note |
 |---|---|---|
-| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Refreshed baseline artifacts on PR #119; final inspected head `d1f00563` passed 3/3 exact-head checks in run 43685578070; uncertainties are explicitly recorded |
-| 01 — Architecture Reconciliation and ADR Governance | PARTIAL | Active: PRs #117, #24 and #28 are open, mergeable and green on their exact inspected heads, but unreviewed/unmerged; mainline documentation remains inconsistent |
-| 02 — Trusted Identity, Authorization, Tenant Security | NOT_STARTED | Depends on CHUNK 01 |
+| 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Baseline artifacts merged in RusaAi PR #119 (merge commit `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb`); read-only baseline remains distinct from production certification |
+| 01 — Architecture Reconciliation and ADR Governance | PASS | RusaAi #117, RusaModels #24 and RAG_Cerdas #28 merged; post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 merged; cross-repository ownership, canonical-store and IM19 isolation statements verified on all three main branches |
+| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Discovery/baseline is recorded in `docs/security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md`; first production Worker fail-closed guard is implemented on the current CHUNK 02 branch and awaits exact-head CI |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
 | 05 — Versioned API Contract Between RusaAi and RusaModels | NOT_STARTED | Depends on CHUNK 03 and 04 |
@@ -51,7 +51,9 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 
 No CHUNK 16 exists in the supplied v3.0 roadmap. Any additional engineering work must be placed within the existing chunks or proposed as an explicit roadmap revision; it must not be silently added to this tracker.
 
-## 4. Active CHUNK 01 PR set
+## 4. Historical CHUNK 01 candidate PR set (pre-merge snapshot)
+
+This section records the candidate PR state before the 2026-11-16 merges. It is superseded by Section 18; do not use its open/unmerged statuses as current state.
 
 | Repository | PR | Head SHA | CI result | State |
 |---|---:|---|---|---|
@@ -135,7 +137,9 @@ The roadmap's previous-audit engineering maturity estimates (RusaAi 71, RusaMode
 
 PR #117 and RusaModels #24 image scans completed with raw Trivy HIGH findings (RSK-015 and RSK-019); green CI is not a zero-vulnerability certification. CHUNK 12 owns remediation. PR #117 removed the overlapping Agent/Worker specification from its CHUNK 01 branch; PR #120 remains deferred for CHUNK 10 under RSK-018. RSK-016 records the repeated FIFO admission failure; RSK-020 records direct Worker and optional MCP → RusaModels embedding paths. See `OPEN_RISKS.md` for risk ownership and required resolution.
 
-## 7. CHUNK 01 next actions
+## 7. Historical CHUNK 01 next actions (pre-merge snapshot)
+
+The actions below were completed by the coordinated merges and post-merge documentation closeout recorded in Section 18.
 
 1. The three PRs are already marked ready for review. Complete owner/maintainer review; obtain explicit project-owner approval before any merge. No reviews or inline review threads are currently recorded.
 2. Proposed merge order: RusaModels #24, then RAG_Cerdas #28 (both align with already-accepted RusaAi main ADRs), then refresh RusaAi #117 wording to reflect the merged states, rerun its exact-head CI, and merge RusaAi #117 last.
@@ -309,7 +313,9 @@ The project roadmap v3.1 has been prepared as `RUSA_AI_ECOSYSTEM_CHATGPT_ROADMAP
 - No PR merged; no main branch, model artifact, training environment, production deployment, or production data was changed.
 
 
-## 17. Live baseline and CHUNK 01 revalidation — 2026-11-16
+## 17. Historical pre-merge baseline and CHUNK 01 revalidation — 2026-11-16
+
+This pre-merge snapshot is retained for audit history and is superseded by Section 18.
 
 This section supersedes prior time-sensitive PR counts, head SHAs, CI and review-state snapshots above. Full evidence is recorded in [BASELINE_REFRESH_2026-11-16.md](BASELINE_REFRESH_2026-11-16.md).
 
@@ -340,3 +346,52 @@ No inline review threads were returned for these PRs. PR #117's latest head now 
 - The supplied roadmap v3.0 defines CHUNK 00–15 only. No CHUNK 16 is part of that roadmap.
 - RusaEval/RusaGovernance local P0 ZIP artifacts are not verified as integrated into the three official repositories; GitHub lookups for those repository names returned 404 through the current connection.
 - Required merge order remains RusaModels #24, RAG_Cerdas #28 (after its ruleset gate is met or an explicitly approved ruleset change), then refreshed RusaAi #117 last. No merge or ruleset change is authorized by this refresh.
+
+
+## 18. CHUNK 01 closeout and CHUNK 02 start — 2026-11-16
+
+This section is the current execution state and supersedes snapshot-sensitive PR, CI and dependency statements in Sections 4–17.
+
+### Verified CHUNK 01 merges
+
+| Repository | PR | Merge commit | Result |
+|---|---:|---|---|
+| RusaAi | #119 | `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb` | CHUNK 00 baseline artifacts merged |
+| RusaModels | #24 | `926f557cd955dd905e2b13da773e6c44152c506d` | Model Plane terminology and OpenAPI description aligned |
+| RAG_Cerdas | #28 | `2966572bbcb2eac41749454cc8ba3660a0a67148` | Canonical-store alignment ADR merged; IM19 remains isolated |
+| RusaAi | #117 | `6485a38c2daf6744c0e8074ad91ea4bc1bfd5049` | Ecosystem architecture/ADR reconciliation merged |
+| RusaModels | #27 | `b9671c1581edc6c3ee265fa97dff949a070e1999` | README link updated to merged RusaAi architecture document |
+| RAG_Cerdas | #31 | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | ADR and reviewer-identity status documentation corrected |
+| RusaAi | #124 | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | Post-merge architecture/ADR status corrected |
+
+Cross-repository verification confirms that RusaAi is the ecosystem Control Plane and owner of canonical `rusa_knowledge`; RusaModels is the Model Plane; RAG_Cerdas / IM19 remains an isolated single-pilot Knowledge Intelligence boundary. The RusaAi ADR-0002 numeric collision remains explicitly recorded as an open decision. No production activation, cross-system data movement, database migration or deployment was authorized.
+
+### Current mainline and post-merge CI
+
+| Repository | Main SHA | Main CI at refresh | Open PRs | Branch/ruleset observation |
+|---|---|---|---:|---|
+| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 passed in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 | Branch metadata protected=false; no active repository ruleset |
+| RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 passed in [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) | 8 | Branch metadata protected=false; no active repository ruleset |
+| RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 passed in [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) | 3 | Active `Rag` ruleset ID `25698740`; 10 approvals, latest-push approval, resolved threads, signed commits, CodeQL HIGH-or-higher; no bypass actors reported |
+
+The exact-head PR CI for the merged alignment and closeout PRs passed. All three post-merge main CI workflows are green. This is repository CI evidence only, not production certification.
+
+### CHUNK 02 initial baseline
+
+The source and CI evidence is recorded in [CHUNK 02 Identity, Authorization and Tenant Security Baseline](../security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md).
+
+Key findings:
+- RusaAi API tenant identity is derived from a hashed API-key principal; request-body tenant substitution is rejected. Browser sessions wrap this API-key principal and do not provide human SSO/MFA.
+- RusaAi Worker queue claim is intentionally cross-tenant; tenant identity is taken from the database row and state changes are lease-fenced. Tenant-scoped memory and knowledge tests pass in disposable PostgreSQL/pgvector CI.
+- RusaModels uses a hashed service-principal registry and role-based API authorization; the Model Plane is platform-wide and is not the tenant data boundary.
+- IM19 reviewer identity is bound to PostgreSQL login role OID and tested; external IdP/SSO/MFA and tenant/project authorization are absent. IM19 remains single-pilot.
+- Audit correlation is inconsistent: RusaModels persists request IDs, while RusaAi and IM19 do not consistently persist actor/request/resource/outcome in a common envelope.
+- Optional Worker RAG can directly call RusaModels embeddings when enabled. The current CHUNK 02 branch now fails closed on `RUSA_RAG_ENABLED=true` and direct Worker knowledge/embedding credentials; this is not mainline until its PR passes CI and is merged.
+
+### Current disposition
+
+- CHUNK 00: PASS.
+- CHUNK 01: PASS — documentation/ADR integration is merged and verified across all three main branches.
+- CHUNK 02: IN_PROGRESS — DISCOVER/BASELINE complete; DESIGN and implementation are underway. The first fail-closed Worker RAG guard is on branch `security/chunk-02-identity-tenant-guard-20261116`, pending exact-head CI.
+- CHUNK 03–15: NOT_STARTED; dependency order remains unchanged.
+- Production readiness remains **45/100** and production remains NO-GO / NOT_VERIFIED.

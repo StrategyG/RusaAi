@@ -37,7 +37,7 @@ Required service boundary:
 
 RusaAi integration uses a dedicated RusaModels `inference` principal and the versioned API boundary. The worker must not receive the RusaModels token or direct runtime URL.
 
-The CPU Compose profile configures the chat-completion boundary explicitly: worker gateway mode is enabled, the worker calls the RusaAi API using tenant-scoped RusaAi keys, and direct chat Model Plane credentials are cleared from the worker. The generic `.env.example` defaults gateway mode to false and the provider has a direct-call fallback. Separately, when `RUSA_RAG_ENABLED=true`, the optional worker `KnowledgeService` creates an embedding client that posts directly to RusaModels `/openai/v1/embeddings` using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback. There is no RusaAi embedding gateway in current main. Keep worker RAG disabled in production until this path is brokered and tenant-aware. Therefore production fail-closed enforcement of both chat and embedding gateway boundaries remains a CHUNK 02/05/06 requirement, not a universal property proven by source inspection.
+The CPU Compose profile configures the chat-completion boundary explicitly: worker gateway mode is enabled, the worker calls the RusaAi API using tenant-scoped RusaAi keys, and direct chat Model Plane credentials are cleared from the worker. The generic `.env.example` defaults gateway mode to false and the provider has a direct-call fallback. Separately, current main still permits the optional worker `KnowledgeService` embedding client to post directly to RusaModels `/openai/v1/embeddings` when `RUSA_RAG_ENABLED=true`. The current CHUNK 02 branch adds production fail-closed validation and clears direct knowledge/embedding credentials from the production Worker Compose profile; that mitigation is not mainline until exact-head CI passes and the PR merges. The separate MCP process remains a distinct direct-embedding risk requiring its own brokered contract and restricted egress.
 
 ### RAG_Cerdas / IM19 — Isolated Knowledge Intelligence pilot
 
@@ -171,7 +171,7 @@ CHUNK 08 is a roadmap dependency, not an optional extra chunk. Its scope preserv
 
 ## 6. Current dependency blockers
 
-- CHUNK 01: RusaAi PR #117 proposes cross-repository ownership, data-flow, trust-boundary and ADR reconciliation; RusaModels PR #24 proposes clarifying its internal registry/control store and now updates the FastAPI OpenAPI description; RAG_Cerdas PR #28 proposes aligning IM19 with the accepted RusaAi canonical-store decision. All remain draft/open, so mainline docs are still inconsistent. The RusaAi ADR-0002 numeric collision remains an explicit OPEN_DECISION. Related drafts: RusaAi #117, RusaModels #24, RAG_Cerdas #28.
+- CHUNK 01: PASS. RusaAi #117, RusaModels #24 and RAG_Cerdas #28 plus post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 are merged; cross-repository ownership, canonical-store and IM19 isolation references are consistent on main. The RusaAi ADR-0002 numeric collision remains an explicit OPEN_DECISION.
 - CHUNK 03: canonical knowledge lifecycle is incomplete on main; RusaAi PR #115 remains open.
 - CHUNK 04/07: RusaAi-Edge checkpoint/tokenizer/artifact/target-device evidence is absent.
 - CHUNK 05/06: cross-repository API contract and exact end-to-end compatibility evidence require reconciliation.
@@ -181,10 +181,20 @@ CHUNK 08 is a roadmap dependency, not an optional extra chunk. Its scope preserv
 
 
 
-## 7. Live repository/PR refresh — 2026-11-15
+## 7. Historical repository/PR refresh — 2026-11-15
 
-The ownership and data-flow model above remains unchanged. Main SHAs remain RusaAi 1adac8d340e5870570910168b6626fe285dd2cf2, RusaModels 12c49b1372b230f3656be6e1badeabad870bcfa1, and RAG_Cerdas 1ead461e76d563445d179e7d5e80c25a9ca9f059. Current open PR counts are 87, 8, and 4 respectively.
+The ownership and data-flow model above remains unchanged. This 2026-11-15 SHA/count snapshot is historical and is superseded by the post-merge state below.
 
 The active cross-repository alignment PRs remain open: RusaAi #117 (head 5f6b7c15, 3/3 CI success), RusaModels #24 (head 128343fe, latest 2/2 CI success), and RAG_Cerdas #28 (head 84e9a134, 1/1 CI success). None has review submissions or inline review threads at the inspected snapshot, and none is merged. The RusaAi #117 PR branch now passes the previously failing FIFO test, but this is not a production reliability certification.
 
 Other relevant open work includes RusaAi #115 knowledge governance, #103 Model Plane contract, #109/#110 inference gateway, #116 staged agent/DAG runtime, #121 desktop integration, #122 Agent/Worker queue hardening, RusaModels #25 device profiles and #20 tokenizer work, and RAG_Cerdas #29/#30 architecture and external RAG contract proposals. Exact heads, base SHAs, CI state, and mergeability are recorded in [BASELINE_REFRESH_2026-11-15.md](BASELINE_REFRESH_2026-11-15.md).
+
+
+## 8. Post-merge dependency state — 2026-11-16
+
+- RusaAi main: `cb7e12a44406cba1ff3e55aa699b389bd2fcc773`; RusaModels main: `b9671c1581edc6c3ee265fa97dff949a070e1999`; RAG_Cerdas main: `7b62582824d5fda33f5c47d1ac9e67378d3c019d`.
+- Open PR counts at refresh: RusaAi 87, RusaModels 8, RAG_Cerdas 3 (98 total).
+- CHUNK 01 is PASS; CHUNK 02 is the active dependency-approved chunk.
+- The identity/tenant-security source baseline and current gaps are recorded in [CHUNK 02 Identity, Authorization and Tenant Security Baseline](../security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md).
+- RusaAi #115 (migration 013 / knowledge governance) and #116 (migration 014 / staged runtime) remain open candidates; do not merge them ahead of CHUNK 02 or assume their branch migration state is mainline. CHUNK 02 audit-schema changes must coordinate with these reserved migration numbers.
+- RusaAi #121, #122, RusaModels #25/#26 and RAG_Cerdas #29/#30 remain out-of-sequence or draft candidates; rebase and reconcile only when their dependency-approved chunks are active.

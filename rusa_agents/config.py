@@ -306,6 +306,26 @@ class RuntimeConfig:
                 "RUSA_MODEL_API_KEY must not be provided to the Worker; only the API gateway holds the RusaModels token"
             )
 
+        rag_enabled = os.getenv("RUSA_RAG_ENABLED", "false").strip().lower()
+        if rag_enabled not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            missing.append("RUSA_RAG_ENABLED must be a boolean value")
+        elif rag_enabled in {"1", "true", "yes", "on"}:
+            missing.append(
+                "RUSA_RAG_ENABLED=true is not approved for the production Worker; "
+                "use a tenant-aware RusaAi embedding gateway before enabling Worker RAG"
+            )
+
+        for variable in (
+            "RUSA_KNOWLEDGE_DATABASE_URL",
+            "RUSA_EMBEDDING_BASE_URL",
+            "RUSA_EMBEDDING_API_KEY",
+        ):
+            if os.getenv(variable, "").strip():
+                missing.append(
+                    f"{variable} must not be provided to the production Worker "
+                    "while Worker RAG is disabled"
+                )
+
         gateway_value = os.getenv("RUSA_WORKER_INFERENCE_GATEWAY", "false").strip().lower()
         if gateway_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
             missing.append("RUSA_WORKER_INFERENCE_GATEWAY must be a boolean value")

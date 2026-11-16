@@ -86,11 +86,34 @@ Important implementation qualification remains explicit: generic RusaAi configur
 - The supplied v3.0 roadmap defines CHUNK 00–15 only. It does not define CHUNK 16.
 - The previously generated RusaEval/RusaGovernance P0 ZIP artifacts are separate local deliverables. GitHub repository lookups for StrategyG/RusaEval and StrategyG/RusaGovernance returned 404 through the current connection; no remote branch/commit integration could be verified. The v4.0 integration branch named in the prior local report was not found in the three official repositories.
 
-## 6. Next action and approval boundary
+## 6. Historical pre-merge next action and approval boundary (superseded by Section 7)
 
-The candidate merge order remains:
+This section is retained for audit history. Its no-merge / CHUNK 01 blocked statements are superseded by Section 7.
+
+The candidate merge order at that earlier snapshot was:
 1. RusaModels #24.
 2. RAG_Cerdas #28, only after its ruleset requirements are satisfied or an explicitly approved owner-level ruleset change is made.
 3. Refresh RusaAi #117 to reflect the merged states, rerun exact-head CI, then merge it last.
 
-No PR was merged. No main branch, ruleset, repository permission, database, model artifact, deployment, secret or production data was changed during this revalidation. Do not start CHUNK 02 until CHUNK 01 passes on main and cross-repository consistency is rechecked.
+At that earlier pre-merge snapshot no PR had yet merged. The current post-merge state is recorded in Section 7: CHUNK 01 is PASS and CHUNK 02 is active. No production database, model artifact, deployment, secret or production data was changed.
+
+
+## 7. Post-merge CHUNK 01 closeout — 2026-11-16
+
+The pre-merge snapshots in Sections 1–4 are retained for audit history. Current status is:
+
+| Repository | Main SHA | Main CI after merge | Open PRs | Ruleset |
+|---|---|---|---:|---|
+| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 passed, run 43801535417 | 87 | No active repository ruleset; branch metadata protected=false |
+| RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 passed, run 43801252283 | 8 | No active repository ruleset; branch metadata protected=false |
+| RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 passed, run 43800691402 | 3 | Active `Rag` ruleset ID 25698740; 10 approvals, no bypass actors |
+
+Merged PRs: RusaAi #119, #117 and #124; RusaModels #24 and #27; RAG_Cerdas #28 and #31. Their merge commits and exact-head CI runs are recorded in [EVIDENCE_LEDGER.md](EVIDENCE_LEDGER.md).
+
+Cross-repository source verification confirms the architecture and ADR status are aligned on all three main branches. CHUNK 01 is PASS. The duplicate RusaAi ADR-0002 identifier remains an explicit open decision; no silent renumbering was performed.
+
+RAG_Cerdas PR #28 and #31 were accepted by GitHub without APPROVED reviews although the active ruleset reports 10 approvals and no bypass actors. The ruleset was not changed; the enforcement path requires owner investigation.
+
+CHUNK 02 is now IN_PROGRESS. The source/CI identity baseline is documented in [CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md](../security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md). A first production Worker fail-closed guard is implemented on the current CHUNK 02 branch but is not mainline until exact-head CI passes and the PR is merged.
+
+No production database, IdP, secret manager, Supabase project, Dropbox account, model artifact or deployment was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
