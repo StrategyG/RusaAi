@@ -27,7 +27,7 @@ function encryptionKey(): Uint8Array {
 }
 
 export async function issueSessionToken(apiKey: string, identity: SessionIdentity): Promise<string> {
-  return new EncryptJWT({
+  const token = await new EncryptJWT({
     apiKey,
     subject: identity.subject,
     tenantId: identity.tenant_id,
@@ -37,6 +37,7 @@ export async function issueSessionToken(apiKey: string, identity: SessionIdentit
     .setIssuedAt()
     .setExpirationTime("8h")
     .encrypt(encryptionKey());
+  return token;
 }
 
 export async function readServerSession(): Promise<ServerSession | null> {
@@ -47,10 +48,11 @@ export async function readServerSession(): Promise<ServerSession | null> {
     const { payload } = await jwtDecrypt(token, encryptionKey());
     if (
       typeof payload.apiKey !== "string" ||
-      typeof payload.subject !== "string" ||
-      typeof payload.tenantId !== "string" ||
-      !Array.isArray(payload.roles) ||
-      !payload.roles.every((role) => typeof role === "string")
+      payload.apiKey.length === 0 || payload.apiKey.length > 2048 ||
+      typeof payload.subject !== "string" || payload.subject.length === 0 || payload.subject.length > 128 ||
+      typeof payload.tenantId !== "string" || payload.tenantId.length === 0 || payload.tenantId.length > 128 ||
+      !Array.isArray(payload.roles) || payload.roles.length === 0 ||
+      !payload.roles.every((role) => ["platform_admin", "tenant_admin", "developer", "read_only"].includes(String(role)))
     ) return null;
     return {
       apiKey: payload.apiKey,

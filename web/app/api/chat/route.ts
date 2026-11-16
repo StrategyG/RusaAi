@@ -16,9 +16,24 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+  const serializedBody = JSON.stringify(body);
+  if (new TextEncoder().encode(serializedBody).byteLength > 900 * 1024) {
+    return NextResponse.json({ error: "Chat request exceeds the 900 KiB web limit." }, { status: 413 });
+  }
   const response = await backendFetch("/v1/chat/completions", session, {
     method: "POST",
-    body: JSON.stringify(body)
+    body: serializedBody,
+    signal: request.signal
   });
+  if (response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        "Content-Type": response.headers.get("content-type") || "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no"
+      }
+    });
+  }
   return forwardJson(response);
 }

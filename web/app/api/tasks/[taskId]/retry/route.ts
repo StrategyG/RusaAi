@@ -16,7 +16,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const response = await backendFetch(
     "/v1/aicode/tasks/" + encodeURIComponent(taskId) + "/retry",
     session,
-    { method: "POST" }
+    { method: "POST", signal: request.signal }
   );
   return forwardJson(response);
 }

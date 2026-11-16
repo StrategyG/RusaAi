@@ -612,7 +612,7 @@ class PostgresTaskQueue:
     def retry(
         self, task_id: str, tenant_id: str, *, audit_actor: str | None = None,
     ) -> bool:
-        """Explicitly requeue a failed or approval-paused task for a tenant."""
+        """Requeue a failed task only; approval-paused tasks require a decision API."""
         if not task_id or not tenant_id:
             raise ValueError("task_id and tenant_id are required")
         self._require_policy_audit_actor(audit_actor)
@@ -623,7 +623,7 @@ class PostgresTaskQueue:
                 SET status='queued', attempts=0, available_at=NOW(), result=NULL,
                     lease_owner=NULL, lease_until=NULL, lease_token=NULL, last_error=NULL, updated_at=NOW()
                 WHERE task_id=%s AND tenant_id=%s
-                  AND status IN ('awaiting_approval', 'failed')
+                  AND status='failed'
                 RETURNING id
             """, (task_id, tenant_id)).fetchone()
             self._record_policy_event(

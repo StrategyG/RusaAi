@@ -22,7 +22,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!session) return unauthorizedResponse();
   const { taskId } = await context.params;
   const response = await backendFetch("/v1/aicode/tasks/" + encodeURIComponent(taskId), session, {
-    method: "DELETE"
+    method: "DELETE",
+    signal: request.signal
   });
   return forwardJson(response);
 }

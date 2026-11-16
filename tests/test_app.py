@@ -296,6 +296,24 @@ def test_aicode_task_retry_is_tenant_scoped(monkeypatch):
 
 
 
+def test_aicode_task_retry_rejects_approval_paused_task(monkeypatch):
+    class ApprovalQueue:
+        def retry(self, task_id, tenant_id, *, audit_actor=None):
+            return False
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.setattr(app.state, "queue", ApprovalQueue(), raising=False)
+
+    response = client.post(
+        "/v1/aicode/tasks/00000000-0000-4000-8000-000000000002/retry",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Task is unavailable or not in a retryable state"
+
+
 def test_readiness_checks_inference_and_database(monkeypatch):
     class ReadyProvider:
         async def check_ready(self):
