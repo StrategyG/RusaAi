@@ -36,6 +36,8 @@
 
 | RSK-027 | High | RusaAi | CHUNK 02 adds P0 regression coverage for Worker payload tenant spoofing and cross-tenant knowledge version-history access on branch `security/chunk-02-tenant-spoofing-regressions-20261116`. Exact-head CI passed 3/3; the tests remain off mainline pending merge. | Preserve the tests in mainline and keep CHUNK 02 IN_PROGRESS until remaining identity, audit, MCP and production-grant gates are addressed. |
 
+| RSK-028 | High | RusaAi | The standalone MCP server authenticates a tenant bearer token but its `KnowledgeService.from_env()` constructs an embedding provider from direct `RUSA_EMBEDDING_*` / `RUSA_MODEL_*` settings without a signed tenant context. The production Compose file does not include an MCP service, but separately deployed instances had no production fail-closed guard. Branch `security/chunk-02-mcp-production-embedding-guard-20261116` now blocks production MCP construction until a signed tenant-aware embedding gateway is approved; exact-head CI is pending. | Keep production MCP disabled. Merge the guard only after exact-head CI; implement and approve the signed tenant-aware gateway before enabling a production MCP deployment. |
+
 ## Immediate release posture
 
 - **Production:** NO-GO / NOT_VERIFIED.
