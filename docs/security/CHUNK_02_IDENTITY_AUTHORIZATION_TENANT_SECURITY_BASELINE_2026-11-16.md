@@ -17,7 +17,7 @@ Relevant CI evidence:
 - RusaAi PR #117 exact-head workflow [43733130737](https://github.com/StrategyG/RusaAi/actions/runs/43733130737): 3/3 checks passed; core suite 337 passed / 6 skipped. Its RAG/MCP integration job also ran the disposable PostgreSQL/pgvector knowledge-store tests: 65 passed.
 - RusaModels PR #24 exact-head workflow [43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560): 2/2 checks passed; 156 passed / 1 skipped.
 - RAG_Cerdas PR #28 exact-head workflow [43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103): 1/1 check passed; disposable PostgreSQL/pgvector-backed suite reported 240 passed, including reviewer-principal and role-membership tests.
-- Post-merge main workflows were still running for RusaAi [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) and RusaModels [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) at the time of this snapshot. RAG_Cerdas main workflow [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) passed.
+- Post-merge main workflows all passed: RusaAi [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) 3/3, RusaModels [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) 2/2, and RAG_Cerdas [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) 1/1.
 
 The CI databases are disposable test environments. Passing tests do not prove that production grants, secrets, RLS policies, external identity, or deployment configuration match the repository.
 
