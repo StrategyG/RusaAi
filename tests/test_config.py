@@ -214,12 +214,17 @@ def test_production_worker_rejects_ambiguous_rag_flag(monkeypatch):
 @pytest.mark.parametrize(
     "variable,value",
     [
-        ("RUSA_KNOWLEDGE_DATABASE_URL", "postgresql://knowledge_worker:secret@db/rusa?sslmode=verify-full"),
+        (
+            "RUSA_KNOWLEDGE_DATABASE_URL",
+            "postgresql://knowledge_worker:secret@db/rusa?sslmode=verify-full",
+        ),
         ("RUSA_EMBEDDING_BASE_URL", "https://model.internal/openai/v1"),
         ("RUSA_EMBEDDING_API_KEY", "e" * 48),
     ],
 )
-def test_production_worker_rejects_direct_knowledge_or_embedding_credentials(monkeypatch, variable, value):
+def test_production_worker_rejects_direct_knowledge_or_embedding_credentials(
+    monkeypatch, variable, value
+):
     set_worker_environment(monkeypatch)
     monkeypatch.setenv(variable, value)
 
