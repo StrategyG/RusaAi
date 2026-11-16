@@ -1,7 +1,7 @@
 # Rusa AI Ecosystem — Architecture Decisions Index
 
 **Initial snapshot:** 2026-11-14  
-**Latest refresh:** 2026-11-15  
+**Latest refresh:** 2026-11-16  
 **Purpose:** cross-repository decision index for the roadmap v3.0. This index records current repository decisions and open alignment work; it does not silently supersede repository ADRs.
 
 ## 1. Decisions observed on current main
@@ -12,28 +12,27 @@
 | RusaAi | `docs/adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md` | Accepted by project owner for implementation planning | Selects RusaAi `rusa_knowledge` as canonical shared Agent/Worker knowledge store | Production activation is not authorized; governance lifecycle remains incomplete |
 | RusaAi | `docs/adr/ADR-0002-rusamodels-model-plane-boundary.md` | Accepted for repository integration alignment | RusaAi owns Control Plane; RusaModels owns Model Plane | Numeric identifier collides with the canonical-store ADR |
 | RusaModels | `docs/ADR-001-shared-control-plane.md` | Accepted | Model Server and Quant Server share RusaModels' registry/control database and S3-compatible artifact store | “Shared control plane” wording can be confused with the RusaAi ecosystem Control Plane |
-| RAG_Cerdas | `docs/ADR_0001_CANONICAL_KNOWLEDGE_STORE.md` | Proposed — no canonical-store decision approved | Keeps local SQLite/FTS5 and the RusaAi/RAG_Cerdas stores isolated pending selection | Conflicts with the later accepted RusaAi canonical-store decision; PR #28 proposes an alignment ADR |
-| RusaAi + RusaModels | `documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md` | RusaAi: PILOT_ONLY; RusaModels: DRAFT — no foundation checkpoint approved | Bhineka-GPT is a research/pilot candidate only; architecture reference and product identity remain distinct; approved runtime model ID is pending | Semantics are compatible; no production checkpoint, immutable revision, artifact digest or target-device evidence is approved |
+| RAG_Cerdas | `docs/ADR_0001_CANONICAL_KNOWLEDGE_STORE.md` | Historical comparison; superseded by accepted ADR-0002 | Retains the original local SQLite/FTS5 and isolated-store analysis as historical context | The accepted ADR-0002 alignment merged in PR #28 on 2026-11-16; IM19 remains isolated |
+| RAG_Cerdas | `docs/ADR_0002_RUSAAI_CANONICAL_KNOWLEDGE_STORE_ALIGNMENT.md` | Accepted repository alignment; merged in PR #28 on 2026-11-16 | Aligns IM19 as an isolated pilot and prohibits implicit data movement/public multi-tenant exposure | Production activation remains NOT APPROVED |\n| RusaAi + RusaModels | `documentation/adr/ADR-TRAIN-001-foundation-checkpoint.md` | RusaAi: PILOT_ONLY; RusaModels: DRAFT — no foundation checkpoint approved | Bhineka-GPT is a research/pilot candidate only; architecture reference and product identity remain distinct; approved runtime model ID is pending | Semantics are compatible; no production checkpoint, immutable revision, artifact digest or target-device evidence is approved |
 
-## 2. Relevant open alignment PRs
+## 2. Historical CHUNK 01 alignment PRs (all merged 2026-11-16)
 
 | Repository | PR | Status | Purpose | Current disposition |
 |---|---|---|---|---|
-| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | Ready/open | Adds ADR index, records duplicate ADR-0002 collision and updates Model Plane/canonical-store references | Review; it deliberately does not renumber the records |
-| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Ready/open | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Review terminology and links |
-| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Ready/open | Adds a superseding alignment ADR and marks the old canonical-store proposal superseded for ecosystem selection | Review; preserve IM19 as an isolated pilot |
+| RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | Merged | Adds ADR index, records duplicate ADR-0002 collision and updates Model Plane/canonical-store references | Merged at `6485a38c`; numeric ADR collision remains an explicit open decision |
+| RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | Merged | Clarifies that the shared PostgreSQL registry store is internal to RusaModels Model Server and Quant Server | Merged at `926f557c`; README now links to the mainline reconciliation document |
+| RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | Merged | Adds the accepted alignment ADR and marks the old canonical-store proposal historical for ecosystem selection | Merged at `2966572b`; preserve IM19 as an isolated pilot |
 
-RusaAi PR #117 (head `5f6b7c15`) is open and ready for review with 3/3 exact-head checks passing in workflow 43679880047; its raw Trivy image reports still contain HIGH findings. RusaModels PR #24 (head `128343fe`) is open and ready for review with 2/2 exact-head checks passing in workflow 43680033627; raw Trivy HIGH findings remain. RAG_Cerdas PR #28 (head `84e9a134`) is open and ready for review with 1/1 exact-head check passing in workflow 43680080103. GitHub reports all three mergeable; no review submissions or inline review threads were found on the latest inspection. None is merged. These PRs remain the active CHUNK 01 alignment set; explicit project-owner approval is required before merge. Re-check exact heads before any merge.
+All three alignment PRs are merged. Their post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 are also merged. Exact-head CI and merge commits are recorded in `EVIDENCE_LEDGER.md`. No ADR identifier was silently renumbered.
 
 ## 3. Open architecture decisions
 
 1. **ADR numbering collision:** decide a reviewed, stable identifier strategy for the two RusaAi ADR-0002 files. Preserve historical references and update links atomically in a dedicated documentation PR.
-2. **Cross-repository canonical-store alignment:** align RAG_Cerdas docs with the RusaAi decision while explicitly preserving IM19's isolated pilot boundary and prohibiting cross-read/write, dual-write, mirroring or bulk synchronization.
-3. **RusaModels terminology:** consistently distinguish the RusaAi ecosystem Control Plane from the internal RusaModels registry/control database.
-4. **Embedding profile:** select and pin production model identity, immutable artifact digest, preprocessing/input types, dimensions and index-generation migration. 384d and 1536d spaces are not interchangeable merely because both are vectors.
-5. **Knowledge governance:** review and complete source identity/version, rights, review, human approval, publication, withdrawal, purge, retention, index/cache/backup reconciliation and tenant erasure.
-6. **Inference and embedding gateway enforcement:** the CPU Compose profile routes chat completion through the RusaAi API gateway and clears direct chat Model Plane credentials, but the generic environment defaults gateway mode off and supports direct worker-to-RusaModels chat fallback. Separately, when `RUSA_RAG_ENABLED=true`, optional worker `KnowledgeService` embeddings call RusaModels `/openai/v1/embeddings` directly using `RUSA_EMBEDDING_API_KEY` or the `RUSA_MODEL_API_KEY` fallback; no RusaAi embedding gateway is present. Keep worker RAG disabled in production until a tenant-aware brokered embedding path is implemented. Production must fail closed on both chat and embedding gateway boundaries; this remains a CHUNK 02/05/06 verification item.
-7. **Foundation checkpoint:** RusaAi and RusaModels ADR-TRAIN-001 records are compatible only when read as product/research status versus runtime approval: Bhineka-GPT remains PILOT_ONLY/PENDING_AUDIT, the architecture reference is not an available checkpoint, and the approved runtime model ID remains pending. RusaAi owns product selection/approval; RusaModels owns registry, artifact integrity and runtime release.
+2. **Embedding profile:** select and pin production model identity, immutable artifact digest, preprocessing/input types, dimensions and index-generation migration. 384d and 1536d spaces are not interchangeable merely because both are vectors.
+3. **Knowledge governance:** review and complete source identity/version, rights, review, human approval, publication, withdrawal, purge, retention, index/cache/backup reconciliation and tenant erasure.
+4. **Inference and embedding gateway enforcement:** the CPU Compose profile routes chat completion through the RusaAi API gateway and clears direct chat Model Plane credentials, but generic environment defaults and optional Worker RAG previously allowed direct Model Plane paths. CHUNK 02 now adds a production Worker fail-closed guard on a branch; MCP remains separately gated.
+5. **Foundation checkpoint:** RusaAi and RusaModels ADR-TRAIN-001 records are compatible only when read as product/research status versus runtime approval: Bhineka-GPT remains PILOT_ONLY/PENDING_AUDIT, the architecture reference is not an available checkpoint, and the approved runtime model ID remains pending. RusaAi owns product selection/approval; RusaModels owns registry, artifact integrity and runtime release.
+6. **Governance enforcement:** RAG_Cerdas ruleset metadata reports 10 approvals and no bypass actors, while GitHub accepted PR #28 and #31 without APPROVED reviews and no ruleset change. The enforcement path requires owner investigation.
 8. **Production activation:** no ADR in this index authorizes production migration, ingestion, model release or deployment without the separate release evidence and owner approval.
 
 ## 4. Binding ownership rule for subsequent chunks
