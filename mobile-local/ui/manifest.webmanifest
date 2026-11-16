@@ -1,0 +1,14 @@
+{
+  "name": "HYBRIDA AI",
+  "short_name": "HYBRIDA",
+  "description": "Asisten AI lokal di perangkat Android",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10131b",
+  "theme_color": "#10131b",
+  "orientation": "portrait",
+  "icons": [
+    {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
