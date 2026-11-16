@@ -15,6 +15,7 @@ from rusa_agents.inference_admission import (
     InferenceDeadlineTimeout,
 )
 from rusa_agents.providers import InferenceStreamEvent
+from rusa_agents.runtime_v1 import AgentRuntimeV1
 
 client = TestClient(app)
 
@@ -23,6 +24,468 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+
+def _configure_agent_runtime_api(monkeypatch, agent_runtime=None):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "agent_runtime",
+        agent_runtime or AgentRuntimeV1(),
+        raising=False,
+    )
+
+
+def test_agent_runtime_status_is_authenticated_and_reports_staged_registry(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.get(
+        "/v1/agent-runtime/status",
+        headers={"X-API-Key": "tenant-key"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "draft_proposed_not_activated"
+    assert data["role_count"] == 24
+    assert data["dispatchable_roles"] == 0
+    assert data["execution_enabled"] is False
+
+
+def test_agent_runtime_route_preview_never_grants_tools_or_dispatches(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/route-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "scope": "worker",
+            "required_capability_ids": ["RUSA-AW-WORKER-001"],
+            "identity_type": "aicode_worker",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "PREVIEW_ONLY"
+    assert data["selected_role_id"] is None
+    assert data["suggested_role_id"] == "analyst"
+    assert data["tool_grants"] == []
+    assert data["candidates"][0]["dispatchable"] is False
+
+
+def test_agent_runtime_route_preview_rejects_unknown_capability(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/route-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={"scope": "worker", "required_capability_ids": ["UNKNOWN-CAPABILITY"]},
+    )
+    assert response.status_code == 422
+
+
+def test_agent_runtime_plan_preview_validates_dag_and_uses_authenticated_tenant(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/plan-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "root_task_id": "plan-root-001",
+            "objective": "Preview a small coding DAG",
+            "nodes": [
+                {
+                    "task_id": "task-analyst",
+                    "selected_role_id": "analyst",
+                    "scope": "worker",
+                    "objective": "Analyze the requested change",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return a scoped analysis"],
+                },
+                {
+                    "task_id": "task-developer",
+                    "selected_role_id": "developer",
+                    "scope": "worker",
+                    "objective": "Implement the approved change",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return a code change"],
+                    "dependencies": ["task-analyst"],
+                },
+                {
+                    "task_id": "task-tester",
+                    "selected_role_id": "tester",
+                    "scope": "worker",
+                    "objective": "Verify the implementation",
+                    "delegated_by_role_id": "supreme_orchestrator",
+                    "acceptance_criteria": ["Return test evidence"],
+                    "dependencies": ["task-developer"],
+                    "risk_class": "high",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tenant_id"] == "tenant-alpha"
+    assert data["topological_order"] == [
+        "task-analyst", "task-developer", "task-tester"
+    ]
+    assert data["approval_required_node_ids"] == ["task-tester"]
+    assert data["registry_status"] == "draft_proposed_not_activated"
+    assert data["execution_enabled"] is False
+    assert data["execution_dispatched"] is False
+
+
+def test_agent_runtime_plan_preview_rejects_caller_supplied_tenant(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    response = client.post(
+        "/v1/agent-runtime/plan-preview",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "root_task_id": "plan-root-tenant",
+            "tenant_id": "tenant-attacker",
+            "objective": "Attempt to override tenant context",
+            "nodes": [],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_agent_runtime_task_intake_enqueues_tenant_bound_plan(monkeypatch):
+    class ActiveRuntime:
+        def __init__(self):
+            self.validated_plan = None
+
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            self.validated_plan = plan
+            return SimpleNamespace(topological_order=("task-analyst",))
+
+    class Queue:
+        def __init__(self):
+            self.created = None
+
+        def enqueue(self, task_id, tenant_id, payload, *, audit_actor=None):
+            self.created = (task_id, tenant_id, payload, audit_actor)
+            return True
+
+    runtime = ActiveRuntime()
+    _configure_agent_runtime_api(monkeypatch, runtime)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Execute a validated Agent Runtime DAG",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["tenant_id"] == "tenant-alpha"
+    assert data["execution_mode"] == "agent_runtime_v1"
+    assert data["execution_enabled"] is True
+    assert runtime.validated_plan.root_task_id == data["task_id"]
+    assert runtime.validated_plan.tenant_id == "tenant-alpha"
+    assert queue.created[0] == data["task_id"]
+    assert queue.created[1] == "tenant-alpha"
+    assert queue.created[2]["execution_mode"] == "agent_runtime_v1"
+    assert queue.created[2]["repository"] == {"full_name": "StrategyG/RusaAi", "base_branch": "main"}
+    assert "tenant_id" not in queue.created[2]["agent_runtime_plan"]
+    assert queue.created[2]["agent_runtime_plan"]["nodes"][0]["task_id"] == "task-analyst"
+
+
+def test_agent_runtime_task_intake_rejects_unscoped_worker_tools(monkeypatch):
+    class ActiveRuntime:
+        def __init__(self):
+            self.validator = AgentRuntimeV1()
+
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            return self.validator.validate_plan(plan)
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(
+        app.state,
+        "queue",
+        SimpleNamespace(enqueue=lambda *args, **kwargs: True),
+        raising=False,
+    )
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Reject a worker tool escalation",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Attempt to write through the analyst role",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+                "tool_allowlist": ["write_file"],
+            }],
+        },
+    )
+    assert response.status_code == 422
+    assert "tool_allowlist" in response.json()["detail"]
+
+
+def test_agent_runtime_task_intake_requires_dependent_quality_gates_for_code_changes(monkeypatch):
+    class ActiveRuntime:
+        def __init__(self):
+            self.validator = AgentRuntimeV1()
+
+        def status(self):
+            return {"execution_enabled": True}
+
+        def validate_plan(self, plan):
+            return self.validator.validate_plan(plan)
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setattr(
+        app.state,
+        "queue",
+        SimpleNamespace(enqueue=lambda *args, **kwargs: True),
+        raising=False,
+    )
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Require independent quality checks",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-developer",
+                "selected_role_id": "developer",
+                "scope": "worker",
+                "objective": "Implement the requested change",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return a code change"],
+            }],
+        },
+    )
+    assert response.status_code == 422
+    assert "tester and security" in response.json()["detail"]
+
+
+def test_agent_runtime_task_intake_rejects_repository_outside_tenant_allowlist(monkeypatch):
+    class ActiveRuntime:
+        def status(self):
+            return {"execution_enabled": True}
+
+    class Queue:
+        called = False
+
+        def enqueue(self, *args, **kwargs):
+            self.called = True
+            return True
+
+    _configure_agent_runtime_api(monkeypatch, ActiveRuntime())
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    monkeypatch.setenv("RUSA_TENANT_REPOSITORIES", '{"tenant-alpha":["Other/Repo"]}')
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Reject a repository outside the tenant scope",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+
+    assert response.status_code == 403
+    assert queue.called is False
+
+
+def test_agent_runtime_task_intake_fails_closed_while_registry_is_draft(monkeypatch):
+    class Queue:
+        called = False
+
+        def enqueue(self, *args, **kwargs):
+            self.called = True
+            return True
+
+    _configure_agent_runtime_api(monkeypatch)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Do not enqueue before registry activation",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+
+    assert response.status_code == 409
+    assert queue.called is False
+
+
+def test_agent_runtime_task_intake_rejects_caller_tenant_override(monkeypatch):
+    _configure_agent_runtime_api(monkeypatch)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "tenant_id": "tenant-attacker",
+            "objective": "Attempt to override authenticated tenant",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_agent_runtime_task_intake_respects_kill_switch(monkeypatch):
+    class ActiveRuntime:
+        def status(self):
+            return {"execution_enabled": True}
+
+    class Queue:
+        called = False
+
+        def enqueue(self, *args, **kwargs):
+            self.called = True
+            return True
+
+    _configure_agent_runtime_api(monkeypatch)
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "false")
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+
+    response = client.post(
+        "/v1/agent-runtime/tasks",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "objective": "Respect the task intake kill switch",
+            "repository": {"full_name": "StrategyG/RusaAi", "base_branch": "main"},
+            "nodes": [{
+                "task_id": "task-analyst",
+                "selected_role_id": "analyst",
+                "scope": "worker",
+                "objective": "Analyze the requested task",
+                "delegated_by_role_id": "supreme_orchestrator",
+                "acceptance_criteria": ["Return verified analysis"],
+            }],
+        },
+    )
+    assert response.status_code == 503
+    assert queue.called is False
+
+
+def test_agent_runtime_task_approval_is_tenant_admin_scoped(monkeypatch):
+    _configure_agent_runtime_api(
+        monkeypatch, SimpleNamespace(status=lambda: {"execution_enabled": True})
+    )
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+
+    class Queue:
+        def __init__(self):
+            self.args = None
+            self.kwargs = None
+
+        def approve(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            return True
+
+    queue = Queue()
+    monkeypatch.setattr(app.state, "queue", queue, raising=False)
+    task_id = str(uuid.uuid4())
+    response = client.post(
+        f"/v1/agent-runtime/tasks/{task_id}/approve",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "plan_fingerprint": "a" * 64,
+            "approved_node_ids": ["node-high-risk"],
+            "rationale": "Reviewed the risk and approved this exact plan",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["task_id"] == task_id
+    assert response.json()["status"] == "queued"
+    assert queue.args[:4] == (
+        task_id, "tenant-alpha", "a" * 64, ["node-high-risk"]
+    )
+    assert queue.args[4] == "Reviewed the risk and approved this exact plan"
+    assert queue.kwargs["audit_actor"].startswith("api:")
+
+
+def test_agent_runtime_task_approval_rejects_stale_or_ineligible_nodes(monkeypatch):
+    _configure_agent_runtime_api(
+        monkeypatch, SimpleNamespace(status=lambda: {"execution_enabled": True})
+    )
+    monkeypatch.setenv("RUSA_AICODE_ENABLED", "true")
+
+    class Queue:
+        def approve(self, *args, **kwargs):
+            return False
+
+    monkeypatch.setattr(app.state, "queue", Queue(), raising=False)
+    response = client.post(
+        f"/v1/agent-runtime/tasks/{uuid.uuid4()}/approve",
+        headers={"X-API-Key": "tenant-key"},
+        json={
+            "plan_fingerprint": "b" * 64,
+            "approved_node_ids": ["node-completed"],
+            "rationale": "Attempt to approve a node that is not awaiting approval",
+        },
+    )
+    assert response.status_code == 409
+
+
+def test_agent_runtime_status_requires_task_read_permission(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("RUSA_API_KEYS", '{"tenant-key":"tenant-alpha"}')
+    monkeypatch.delenv("RUSA_API_KEYS_JSON", raising=False)
+    response = client.get("/v1/agent-runtime/status")
+    assert response.status_code == 401
 
 
 def test_chat_completions_fails_closed_without_backend():

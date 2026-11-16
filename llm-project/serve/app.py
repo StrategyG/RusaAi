@@ -21,8 +21,12 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.background import BackgroundTask
 
+from rusa_agents.agent_tools import ROLE_PERMISSION_ALLOWLIST, ROLE_TOOL_ALLOWLIST
 from rusa_agents.audit import PostgresTaskPolicyAudit, record_task_policy
+from rusa_agents.capability_registry import RegistryValidationError
+from rusa_agents.capability_router import RouteRequest
 from rusa_agents.config import RuntimeConfig
+from rusa_agents.contracts import WorkerRole
 from rusa_agents.http_limits import BodyLimitMiddleware
 from rusa_agents.inference_admission import (
     InferenceAdmissionController,
@@ -42,6 +46,8 @@ from rusa_agents.postgres_inference_admission import PostgresInferenceAdmissionC
 from rusa_agents.providers import InferenceStreamEvent, OpenAIChatInferenceProvider
 from rusa_agents.queue import PostgresTaskQueue
 from rusa_agents.rate_limit import PostgresRateLimiter
+from rusa_agents.runtime_v1 import AgentRuntimeV1
+from rusa_agents.task_decomposer import TaskNode, TaskPlan
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("rusa-ai-serve")
@@ -450,6 +456,126 @@ class AICodeTaskResponse(BaseModel):
     work_branch_prefix: str
 
 
+class AgentRuntimeTaskResponse(BaseModel):
+    task_id: str
+    status: str
+    tenant_id: str
+    execution_mode: Literal["agent_runtime_v1"] = "agent_runtime_v1"
+    execution_enabled: bool = True
+
+
+class AgentRoutePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: Literal["agent", "worker"]
+    required_capability_ids: list[str] = Field(default_factory=list, max_length=16)
+    explicit_role_id: str | None = Field(
+        default=None, min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    identity_type: Literal[
+        "core_agent", "aicode_worker", "devops_lifecycle_profile"
+    ] | None = None
+    parent_role_id: str | None = Field(
+        default=None, min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    max_candidates: int = Field(default=5, ge=1, le=10)
+    require_all_capabilities: bool = True
+
+    @field_validator("required_capability_ids")
+    @classmethod
+    def validate_capability_ids(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("Capability IDs cannot be blank")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("Capability IDs must be unique")
+        return normalized
+
+
+class AgentTaskNodePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(min_length=1, max_length=128)
+    selected_role_id: str = Field(
+        min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    scope: Literal["agent", "worker"]
+    objective: str = Field(min_length=1, max_length=8000)
+    delegated_by_role_id: str = Field(
+        min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]{1,63}$"
+    )
+    acceptance_criteria: list[str] = Field(min_length=1, max_length=20)
+    dependencies: list[str] = Field(default_factory=list, max_length=64)
+    parent_task_id: str | None = Field(default=None, max_length=128)
+    workspace_ref: str | None = Field(default=None, max_length=512)
+    deadline_at: str | None = Field(default=None, max_length=64)
+    retry_limit: int = Field(default=1, ge=0, le=5)
+    tool_allowlist: list[str] = Field(default_factory=list, max_length=32)
+    requested_permissions: list[str] = Field(default_factory=list, max_length=32)
+    risk_class: Literal["low", "medium", "high", "critical"] = "low"
+    context_refs: list[str] = Field(default_factory=list, max_length=64)
+    change_id: str | None = Field(default=None, max_length=128)
+    target_environment: Literal["development", "staging", "production"] | None = None
+    release_or_change_version: str | None = Field(default=None, max_length=128)
+    lifecycle_gate: str | None = Field(default=None, max_length=128)
+    rollback_stop_condition: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("acceptance_criteria")
+    @classmethod
+    def validate_acceptance_criteria(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() for item in value):
+            raise ValueError("Acceptance criteria cannot contain blank items")
+        return value
+
+
+class AgentTaskPlanPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_task_id: str = Field(min_length=1, max_length=128)
+    objective: str = Field(min_length=1, max_length=8000)
+    nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
+
+
+class AgentTaskPlanCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(min_length=1, max_length=8000)
+    repository: RepositoryInput
+    context: str = Field(default="", max_length=20000)
+    nodes: list[AgentTaskNodePreviewRequest] = Field(min_length=1, max_length=64)
+
+    @field_validator("objective")
+    @classmethod
+    def validate_objective(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Objective cannot be blank")
+        return value
+
+
+class AgentRuntimeApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    approved_node_ids: list[str] = Field(min_length=1, max_length=64)
+    rationale: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("approved_node_ids")
+    @classmethod
+    def validate_approved_node_ids(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() or len(item) > 128 for item in value):
+            raise ValueError("Approved node IDs must be non-empty strings of at most 128 characters")
+        if len(set(value)) != len(value):
+            raise ValueError("Approved node IDs cannot contain duplicates")
+        return value
+
+    @field_validator("rationale")
+    @classmethod
+    def validate_approval_rationale(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Approval rationale cannot be blank")
+        return value
+
+
 def verify_api_key(request: Request, api_key: str | None = Depends(api_key_header)) -> str:
     return authenticate_api_key(request, api_key)
 
@@ -515,8 +641,16 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
     if limiter is not None:
         if request.url.path == "/v1/chat/completions":
             limit = int(os.getenv("RUSA_RATE_LIMIT_CHAT_PER_MINUTE", "60"))
-        elif request.method == "POST" and request.url.path == "/v1/aicode/tasks":
+        elif request.method == "POST" and request.url.path in {
+            "/v1/aicode/tasks", "/v1/agent-runtime/tasks"
+        }:
             limit = int(os.getenv("RUSA_RATE_LIMIT_TASKS_PER_MINUTE", "10"))
+        elif (
+            request.method == "POST"
+            and request.url.path.startswith("/v1/agent-runtime/tasks/")
+            and request.url.path.endswith("/approve")
+        ):
+            limit = int(os.getenv("RUSA_RATE_LIMIT_TASK_APPROVALS_PER_MINUTE", "20"))
         else:
             limit = int(os.getenv("RUSA_RATE_LIMIT_DEFAULT_PER_MINUTE", "120"))
         try:
@@ -538,8 +672,8 @@ def authenticate_api_key(request: Request, api_key: str | None, *, require_key: 
 
 
 TASK_ROLE_PERMISSIONS = {
-    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
-    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel"}),
+    "platform_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel", "task:approve"}),
+    "tenant_admin": frozenset({"task:create", "task:read", "task:retry", "task:cancel", "task:approve"}),
     "developer": frozenset({"task:create", "task:read"}),
     "read_only": frozenset({"task:read"}),
 }
@@ -581,6 +715,97 @@ def _api_task_actor(request: Request) -> str:
     if principal is None:
         raise RuntimeError("Task API principal is missing after authentication")
     return f"api:{principal.subject}"
+
+
+def _get_agent_runtime(request: Request) -> AgentRuntimeV1:
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is not None:
+        return runtime
+    try:
+        runtime = AgentRuntimeV1()
+    except (OSError, ValueError, RegistryValidationError):
+        logger.exception("Agent Runtime registry could not be loaded")
+        raise HTTPException(
+            status_code=503, detail="Agent Runtime registry is unavailable"
+        ) from None
+    request.app.state.agent_runtime = runtime
+    return runtime
+
+
+def _agent_task_nodes(
+    nodes: list[AgentTaskNodePreviewRequest],
+) -> tuple[TaskNode, ...]:
+    """Convert the strict API model into immutable executor contracts."""
+    tuple_fields = (
+        "acceptance_criteria",
+        "dependencies",
+        "tool_allowlist",
+        "requested_permissions",
+        "context_refs",
+    )
+    converted = []
+    for node in nodes:
+        values = node.model_dump()
+        for field_name in tuple_fields:
+            values[field_name] = tuple(values[field_name])
+        converted.append(TaskNode(**values))
+    return tuple(converted)
+
+
+def _validate_agent_runtime_execution_plan(plan: TaskPlan, validation: Any) -> None:
+    """Reject DAGs that cannot be executed by the reviewed AICode worker adapters."""
+    roles = {node.selected_role_id for node in plan.nodes}
+    supported = {role.value for role in ROLE_TOOL_ALLOWLIST}
+    unsupported = roles - supported
+    if unsupported:
+        raise ValueError(
+            "No reviewed execution adapter is available for roles: "
+            + ", ".join(sorted(unsupported))
+        )
+    for node in plan.nodes:
+        role = WorkerRole(node.selected_role_id)
+        if node.tool_allowlist and not set(node.tool_allowlist).issubset(ROLE_TOOL_ALLOWLIST[role]):
+            raise ValueError(
+                f"{node.task_id} tool_allowlist exceeds the registered {role.value} role permissions"
+            )
+        if node.requested_permissions and not set(node.requested_permissions).issubset(
+            ROLE_PERMISSION_ALLOWLIST[role]
+        ):
+            raise ValueError(
+                f"{node.task_id} requested_permissions exceed the registered {role.value} role policy"
+            )
+
+    developer_ids = {
+        node.task_id for node in plan.nodes if node.selected_role_id == "developer"
+    }
+    if not developer_ids:
+        return
+    missing_roles = {"tester", "security"} - roles
+    if missing_roles:
+        raise ValueError(
+            "Repository implementation plans require tester and security nodes; missing: "
+            + ", ".join(sorted(missing_roles))
+        )
+    dependencies = validation.effective_dependencies
+
+    def ancestors(task_id: str) -> set[str]:
+        found: set[str] = set()
+        pending = list(dependencies[task_id])
+        while pending:
+            parent_id = pending.pop()
+            if parent_id in found:
+                continue
+            found.add(parent_id)
+            pending.extend(dependencies[parent_id])
+        return found
+
+    for node in plan.nodes:
+        if node.selected_role_id in {"tester", "security"}:
+            if not developer_ids.issubset(ancestors(node.task_id)):
+                raise ValueError(
+                    f"{node.selected_role_id} node {node.task_id!r} must depend on every "
+                    "developer node before quality verification"
+                )
 
 
 def require_task_permission(permission: str):
@@ -1000,6 +1225,203 @@ def validate_task_envelope(request: TaskValidationRequest):
         raise HTTPException(status_code=500, detail="Task schema validation failed") from None
 
 
+@app.get("/v1/agent-runtime/status")
+def get_agent_runtime_status(
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Return the staged Agent/Worker registry state without enabling execution."""
+    runtime = _get_agent_runtime(request)
+    audit_api_task(request, tenant_id, "*", "agent_runtime.status", True)
+    return runtime.status()
+
+
+@app.post("/v1/agent-runtime/route-preview")
+def preview_agent_route(
+    body: AgentRoutePreviewRequest,
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Preview deterministic role routing; this endpoint never dispatches work."""
+    runtime = _get_agent_runtime(request)
+    try:
+        decision = runtime.preview_route(
+            RouteRequest(
+                scope=body.scope,
+                required_capability_ids=tuple(body.required_capability_ids),
+                explicit_role_id=body.explicit_role_id,
+                identity_type=body.identity_type,
+                parent_role_id=body.parent_role_id,
+                max_candidates=body.max_candidates,
+                require_all_capabilities=body.require_all_capabilities,
+            )
+        )
+    except (KeyError, ValueError) as exc:
+        audit_api_task(request, tenant_id, "*", "agent_runtime.route_preview", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    audit_api_task(request, tenant_id, "*", "agent_runtime.route_preview", True)
+    return {
+        "status": decision.status,
+        "selected_role_id": decision.selected_role_id,
+        "suggested_role_id": decision.suggested_role_id,
+        "candidates": [
+            {
+                "role_id": candidate.role_id,
+                "display_name": candidate.display_name,
+                "identity_type": candidate.identity_type,
+                "score": candidate.score,
+                "matched_capability_ids": list(candidate.matched_capability_ids),
+                "dispatchable": candidate.dispatchable,
+                "explanation": candidate.explanation,
+            }
+            for candidate in decision.candidates
+        ],
+        "tool_grants": list(decision.tool_grants),
+    }
+
+
+@app.post("/v1/agent-runtime/plan-preview")
+def preview_agent_task_plan(
+    body: AgentTaskPlanPreviewRequest,
+    request: Request,
+    tenant_id: str = Depends(require_task_permission("task:read")),
+):
+    """Validate a proposed DAG using the authenticated tenant, without enqueueing it."""
+    runtime = _get_agent_runtime(request)
+    nodes = _agent_task_nodes(body.nodes)
+    plan = TaskPlan(
+        root_task_id=body.root_task_id,
+        tenant_id=tenant_id,
+        objective=body.objective,
+        nodes=nodes,
+    )
+    try:
+        validation = runtime.validate_plan(plan)
+    except (KeyError, ValueError) as exc:
+        audit_api_task(request, tenant_id, body.root_task_id, "agent_runtime.plan_preview", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    registry_status = runtime.status()
+    audit_api_task(request, tenant_id, body.root_task_id, "agent_runtime.plan_preview", True)
+    return {
+        "root_task_id": plan.root_task_id,
+        "tenant_id": tenant_id,
+        "node_count": len(plan.nodes),
+        "topological_order": list(validation.topological_order),
+        "effective_dependencies": {
+            task_id: list(dependencies)
+            for task_id, dependencies in validation.effective_dependencies.items()
+        },
+        "approval_required_node_ids": list(validation.approval_required_node_ids),
+        "registry_status": registry_status["status"],
+        "execution_enabled": registry_status["execution_enabled"],
+        "execution_dispatched": False,
+    }
+
+
+@app.post(
+    "/v1/agent-runtime/tasks",
+    response_model=AgentRuntimeTaskResponse,
+    status_code=202,
+)
+def create_agent_runtime_task(
+    body: AgentTaskPlanCreateRequest,
+    http_request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    tenant_id: str = Depends(require_task_permission("task:create")),
+):
+    """Validate and enqueue a tenant-bound DAG only after registry activation."""
+    config = RuntimeConfig.from_env()
+    if not config.aicode_enabled:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=503, detail="Agent Runtime task intake is disabled")
+    allowed_repositories = config.tenant_repositories.get(tenant_id)
+    if config.environment == "production" and not allowed_repositories:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=403, detail="Tenant has no repository permissions")
+    if allowed_repositories is not None and body.repository.full_name not in allowed_repositories:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=403, detail="Repository is not authorized for this tenant")
+
+    runtime = _get_agent_runtime(http_request)
+    registry_status = runtime.status()
+    if not registry_status["execution_enabled"]:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(
+            status_code=409,
+            detail="Agent Runtime execution is not activated; use plan-preview until approval",
+        )
+
+    task_id = str(uuid4())
+    plan = TaskPlan(
+        root_task_id=task_id,
+        tenant_id=tenant_id,
+        objective=body.objective,
+        nodes=_agent_task_nodes(body.nodes),
+    )
+    try:
+        validation = runtime.validate_plan(plan)
+        _validate_agent_runtime_execution_plan(plan, validation)
+    except (KeyError, ValueError) as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    queue = getattr(http_request.app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, "*", "task.create", False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+
+    payload = {
+        "execution_mode": "agent_runtime_v1",
+        "repository": body.repository.model_dump(),
+        "context": body.context,
+        "agent_runtime_plan": {
+            "schema_version": "1.0",
+            "objective": body.objective,
+            "nodes": [
+                node.model_dump(exclude_none=True)
+                for node in body.nodes
+            ],
+        },
+    }
+    status_value = "queued"
+    try:
+        if idempotency_key is not None:
+            task_id, _, status_value = queue.enqueue_idempotent(
+                task_id,
+                tenant_id,
+                payload,
+                idempotency_key,
+                audit_actor=_api_task_actor(http_request),
+            )
+            accepted = True
+        else:
+            accepted = queue.enqueue(
+                task_id,
+                tenant_id,
+                payload,
+                audit_actor=_api_task_actor(http_request),
+            )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Could not enqueue Agent Runtime task")
+        audit_api_task(http_request, tenant_id, task_id, "task.create", False)
+        raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
+    audit_api_task(
+        http_request, tenant_id, task_id, "task.create", accepted, persist=False
+    )
+    if not accepted:
+        raise HTTPException(status_code=409, detail="Task identifier conflict")
+    return AgentRuntimeTaskResponse(
+        task_id=task_id,
+        status=status_value,
+        tenant_id=tenant_id,
+        execution_enabled=True,
+    )
+
+
 @app.post("/v1/aicode/tasks", response_model=AICodeTaskResponse, status_code=202)
 def create_aicode_task(
     request: AICodeTaskRequest,
@@ -1099,6 +1521,63 @@ def list_aicode_tasks(
         logger.exception("Could not list AICode tasks")
         audit_api_task(request, tenant_id, "*", "task.list", False)
         raise HTTPException(status_code=503, detail="Task queue is unavailable") from None
+
+
+@app.post(
+    "/v1/agent-runtime/tasks/{task_id}/approve",
+    status_code=202,
+)
+def approve_agent_runtime_task(
+    task_id: UUID,
+    body: AgentRuntimeApprovalRequest,
+    http_request: Request,
+    tenant_id: str = Depends(require_task_permission("task:approve")),
+):
+    """Approve only node-level review gates for the exact tenant-owned DAG plan."""
+    config = RuntimeConfig.from_env()
+    if not config.aicode_enabled:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Agent Runtime task execution is disabled")
+    runtime = _get_agent_runtime(http_request)
+    if not runtime.status()["execution_enabled"]:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=409, detail="Agent Runtime registry is not active")
+    queue = getattr(http_request.app.state, "queue", None)
+    if queue is None:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Durable task queue is not configured")
+    try:
+        approved = queue.approve(
+            str(task_id),
+            tenant_id,
+            body.plan_fingerprint,
+            body.approved_node_ids,
+            body.rationale,
+            audit_actor=_api_task_actor(http_request),
+        )
+    except ValueError as exc:
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Agent Runtime approval could not be persisted")
+        audit_api_task(http_request, tenant_id, str(task_id), "task.approve", False, persist=False)
+        raise HTTPException(status_code=503, detail="Agent Runtime approval store is unavailable") from None
+    audit_api_task(
+        http_request, tenant_id, str(task_id), "task.approve", approved, persist=False
+    )
+    if not approved:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Task is not awaiting node approval, the plan fingerprint changed, "
+                "or one or more nodes are not approval-gated"
+            ),
+        )
+    return {
+        "task_id": str(task_id),
+        "status": "queued",
+        "approved_node_ids": body.approved_node_ids,
+    }
 
 
 @app.get("/v1/aicode/tasks/{task_id}")
