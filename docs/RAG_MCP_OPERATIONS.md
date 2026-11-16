@@ -24,6 +24,7 @@ has been migrated, populated, deployed or activated.
 See `docs/adr/ADR-0002-canonical-shared-agent-worker-knowledge-store.md` for
 the decision, alternatives and implementation/release gates.
 
+
 ## Runtime requirements
 
 - Python 3.11 or newer.
@@ -33,6 +34,8 @@ the decision, alternatives and implementation/release gates.
 - Agent/project lookup indexes from `migrations/011_rag_agent_project_scope.sql`.
 - Append-only document version history from
   `migrations/012_rag_knowledge_version_history.sql`.
+- Rights, review, approval, audit and publication gates from
+  `migrations/013_rag_knowledge_governance.sql`.
   Apply `migrations/009_knowledge_embedding_384.sql` only when the optional
   384-dimensional profile is deliberately enabled.
 - An OpenAI-compatible embeddings endpoint. The default model is
@@ -49,7 +52,9 @@ tenant-scoped document and chunk tables, pgvector indexes, forced row-level
 security, and a non-login knowledge-worker role. Then apply
 `migrations/011_rag_agent_project_scope.sql` to add the scope lookup indexes
 and `migrations/012_rag_knowledge_version_history.sql` to create append-only
-document/version chunk snapshots. Apply
+document/version chunk snapshots. Then apply
+`migrations/013_rag_knowledge_governance.sql` to create the rights, review,
+approval, audit and publication gate. Apply
 `migrations/009_knowledge_embedding_384.sql` only when the separate
 384-dimensional embedding profile is deliberately enabled. Migration 012
 stores both 1536d and 384d version-vector columns; the runtime writes only
@@ -101,12 +106,141 @@ individual agent or project. Therefore MCP reads are shared-only: records with
 Do not expose agent-specific knowledge through MCP until its service identity
 contract includes authenticated agent and project claims.
 
-Migrations 011 and 012 add agent/project retrieval scope and immutable
-document-version snapshots. They do not yet implement the complete source-rights,
-independent review, human approval, publication authorization, external
-vector/cache purge, index-generation reconciliation or tombstone/erasure lifecycle.
-Production publication remains blocked until the applicable governance and
-deletion controls are implemented, reviewed and tested.
+Migration 011 adds agent/project retrieval filtering and lookup indexes.
+Migration 012 adds append-only document/version chunk snapshots. Migration 013
+adds source-rights attestations, technical/source/security/QA review findings,
+separate human approvals, append-only audit events and a database-enforced
+publication/withdrawal gate. Candidate versions are available only through
+the reviewer-only path; answer-facing retrieval defaults to published
+versions only.
+
+The implementation still does not provide a canonical source registry and
+source-byte snapshot service, signed manifest verification, index-generation
+or external vector-store reconciliation, cache/backup tombstone propagation,
+or a privileged tenant-erasure/retention workflow. Production remains NO-GO
+until those remaining controls and the independent review gates are complete.
+
+## Rights, review, approval and publication lifecycle
+
+Answer-facing retrieval is publication-gated. The runtime defaults
+`RUSA_KNOWLEDGE_REQUIRE_PUBLICATION=true`; candidate documents without a
+current published version are not returned by search, document reads,
+collection counts or version-history reads. Do not disable this setting in a
+production environment. The service rejects the false setting whenever
+`ENVIRONMENT=staging` or `ENVIRONMENT=production`; false is reserved for
+disposable tests and isolated development.
+
+The governance migration creates separate non-login database roles:
+
+- `rusa_knowledge_reviewer` — may append rights attestations and technical,
+  source-fidelity, security and QA review findings.
+- `rusa_knowledge_approver` — may append human approval/rejection/revocation
+  decisions.
+- `rusa_knowledge_publisher` — may invoke the publication/withdrawal functions
+  after the database verifies the complete gate.
+
+A DBA must grant each human's distinct database login membership in exactly
+the required no-login role. Do not share one login across reviewer, approver
+and publisher. Database triggers overwrite caller-supplied actor columns with
+the authenticated `session_user` and reject inserts from the wrong role.
+All governance actors must be least-privileged LOGIN roles: no SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB, REPLICATION or NOINHERIT. The database rechecks the complete direct and transitive membership closure for every governance event and publication/withdrawal call; each login must inherit only its assigned no-login governance role, with no additional group memberships or admin option.
+Audit rows also record the database `session_user` and active role;
+actor identity is not accepted from model output or CLI arguments.
+
+Answer-facing document reads reconstruct content from immutable version chunks
+and take title, source URI, collection and scope metadata from the immutable
+version record. Search accepts active index rows only when their collection,
+content and metadata match that version snapshot. If the configured embedding
+vector is pinned in the snapshot, the active index vector must match it; an
+unpopulated dimension may be filled by the separate re-embedding path. Model
+revision/checksum lineage and index-generation manifests remain separate
+release controls. Mutable document-row metadata cannot widen an
+agent/project scope or rewrite the source identity shown in answers. The
+chunk-snapshot digest covers chunk text and the ingest-time embedding vector
+and is part of the version fingerprint, so changed source chunks or
+ingest-time vectors cannot reuse a version identity merely by repeating a
+caller-supplied source hash. Only the latest document version may be
+published; a worker cannot reactivate a superseded publication by changing
+the current-version pointer. Re-ingesting a historical fingerprint is a no-op
+and does not roll the current pointer backward; restoring old content requires
+an explicit new-version workflow and fresh governance evidence.
+
+The database publication function requires all of the following for the exact
+current document version:
+
+1. The latest rights attestation is `cleared`, with internal storage,
+   extraction, derivative, embedding and retrieval all explicitly permitted.
+2. The latest technical, source-fidelity, security and QA reviews each have
+   decision `passed`.
+3. The latest human approval is `approved`, comes from a non-privileged
+   login assigned exclusively to `rusa_knowledge_approver`, is distinct from
+   the publisher, and is recorded after the latest rights attestation and all
+   four passing reviews.
+4. The version has an immutable chunk snapshot and a well-formed release-
+   manifest URI plus lowercase SHA-256. The digest is not yet verified against
+   externally stored manifest bytes.
+
+Any new rights attestation, review finding or approval decision appended
+after publication invalidates the prior publication at retrieval time. The
+latest evidence must satisfy the complete gate, and a fresh publication event
+is required before answers resume. Restricted rights, failed reviews and
+rejected/revoked approvals therefore block retrieval immediately. Publication
+and withdrawal are append-only events. A withdrawal suppresses the version
+from answer-facing retrieval immediately within this PostgreSQL retrieval path.
+
+When a cleared rights attestation requires attribution, answer-facing search,
+document and published-version reads return the exact `attribution_required`
+and `attribution_text` fields from the latest rights attestation. The MCP
+grounded-answer prompt instructs the model to include that exact attribution
+text whenever the flag is true.
+
+Example operator flow (the login behind each command must be a member of the
+role selected by `RUSA_KNOWLEDGE_DB_ROLE`):
+
+```bash
+# Rights officer / reviewer
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_reviewer rusa-knowledge attest-rights \
+  --tenant-id tenant-a --document-id <document-uuid> --version-id <version-uuid> \
+  --rights-status cleared --source-owner "RUSA project owner" \
+  --license-id internal-owner-authorized --internal-storage-allowed \
+  --extraction-allowed --derivative-allowed --embedding-allowed \
+  --retrieval-allowed --retention-policy "owner authorization" \
+  --evidence-uri approval://rights/guide-v1
+
+# Independent technical, source-fidelity, security and QA findings
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_reviewer rusa-knowledge review-version \
+  --tenant-id tenant-a --document-id <document-uuid> --version-id <version-uuid> \
+  --review-type security --decision passed --finding "Security review passed"
+
+# A different human login, assigned to the approver role
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_approver rusa-knowledge approve-version \
+  --tenant-id tenant-a --document-id <document-uuid> --version-id <version-uuid> \
+  --decision approved --approval-reference ticket-001
+
+# A separate publisher login
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_publisher rusa-knowledge publish-version \
+  --tenant-id tenant-a --document-id <document-uuid> --version-id <version-uuid> \
+  --manifest-uri manifest://tenant-a/release-001 --manifest-sha256 <sha256>
+```
+
+The CLI records append-only events; it does not establish that a source's
+rights claim is substantively correct. Human reviewers must inspect the
+underlying terms and evidence. The release-manifest URI/hash is recorded, but
+a cryptographic signature and external immutable object-store retention are
+not implemented by this migration.
+
+Withdrawal example:
+
+```bash
+RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_publisher rusa-knowledge withdraw-version \
+  --tenant-id tenant-a --document-id <document-uuid> --version-id <version-uuid> \
+  --reason "source owner requested withdrawal"
+```
+
+Withdrawal currently filters this PostgreSQL retrieval path. It does not yet
+purge external caches, external vector indexes, source snapshots or retained
+backups. A separate privileged deletion/tombstone and recovery workflow remains
+a production release blocker.
 
 ## Immutable document versions
 

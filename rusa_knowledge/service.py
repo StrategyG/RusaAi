@@ -60,6 +60,20 @@ class KnowledgeService:
             raise RuntimeError(
                 "RUSA_EMBEDDING_BASE_URL or RUSA_MODEL_BASE_URL is required for embeddings"
             )
+        raw_require_publication = os.getenv("RUSA_KNOWLEDGE_REQUIRE_PUBLICATION", "true")
+        if raw_require_publication.strip().lower() in {"1", "true", "yes", "on"}:
+            require_publication = True
+        elif raw_require_publication.strip().lower() in {"0", "false", "no", "off"}:
+            require_publication = False
+        else:
+            raise ValueError("RUSA_KNOWLEDGE_REQUIRE_PUBLICATION must be a boolean value")
+
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if environment in {"staging", "production"} and not require_publication:
+            raise ValueError(
+                "RUSA_KNOWLEDGE_REQUIRE_PUBLICATION cannot be disabled in staging or production"
+            )
+
         provider = OpenAICompatibleEmbeddingProvider(
             base_url=base_url,
             api_key=(
@@ -78,6 +92,7 @@ class KnowledgeService:
             dsn,
             dimensions=dimensions,
             db_role=os.getenv("RUSA_KNOWLEDGE_DB_ROLE") or None,
+            require_publication=require_publication,
         )
         service = cls(store, provider)
         if check_ready:
@@ -91,12 +106,14 @@ class KnowledgeService:
                 required_migrations = (
                     "migrations/007_rag_knowledge_pgvector.sql, "
                     "migrations/009_knowledge_embedding_384.sql, "
-                    "migrations/011_rag_agent_project_scope.sql, and "
-                    "migrations/012_rag_knowledge_version_history.sql"
+                    "migrations/011_rag_agent_project_scope.sql, "
+                    "migrations/012_rag_knowledge_version_history.sql, and "
+                    "migrations/013_rag_knowledge_governance.sql"
                     if dimensions == 384
                     else "migrations/007_rag_knowledge_pgvector.sql, "
-                    "migrations/011_rag_agent_project_scope.sql, and "
-                    "migrations/012_rag_knowledge_version_history.sql"
+                    "migrations/011_rag_agent_project_scope.sql, "
+                    "migrations/012_rag_knowledge_version_history.sql, and "
+                    "migrations/013_rag_knowledge_governance.sql"
                 )
                 raise RuntimeError(
                     f"knowledge database is not ready; apply {required_migrations}"
@@ -292,6 +309,113 @@ class KnowledgeService:
             raise ValueError("project_id is invalid")
         return self.store.list_collections(
             tenant_id=tenant_id, agent_id=agent_id, project_id=project_id
+        )
+
+    def record_rights_attestation(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        rights_status: str,
+        source_owner: str,
+        license_id: str,
+        internal_storage_allowed: bool,
+        extraction_allowed: bool,
+        derivative_allowed: bool,
+        embedding_allowed: bool,
+        retrieval_allowed: bool,
+        retention_policy: str,
+        evidence_uri: str,
+        attribution_required: bool = False,
+        attribution_text: str | None = None,
+    ) -> int:
+        return self.store.record_rights_attestation(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            rights_status=rights_status,
+            source_owner=source_owner,
+            license_id=license_id,
+            internal_storage_allowed=internal_storage_allowed,
+            extraction_allowed=extraction_allowed,
+            derivative_allowed=derivative_allowed,
+            embedding_allowed=embedding_allowed,
+            retrieval_allowed=retrieval_allowed,
+            retention_policy=retention_policy,
+            evidence_uri=evidence_uri,
+            attribution_required=attribution_required,
+            attribution_text=attribution_text,
+        )
+
+    def record_review_finding(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        review_type: str,
+        decision: str,
+        finding_text: str,
+        evidence_uri: str | None = None,
+    ) -> int:
+        return self.store.record_review_finding(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            review_type=review_type,
+            decision=decision,
+            finding_text=finding_text,
+            evidence_uri=evidence_uri,
+        )
+
+    def record_human_approval(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        decision: str,
+        approval_reference: str,
+    ) -> int:
+        return self.store.record_human_approval(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            decision=decision,
+            approval_reference=approval_reference,
+        )
+
+    def publish_version(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        manifest_uri: str,
+        manifest_sha256: str,
+    ) -> int:
+        return self.store.publish_version(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            manifest_uri=manifest_uri,
+            manifest_sha256=manifest_sha256,
+        )
+
+    def withdraw_version(
+        self,
+        *,
+        tenant_id: str,
+        document_id: str,
+        version_id: str,
+        reason: str,
+    ) -> int:
+        return self.store.withdraw_version(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            version_id=version_id,
+            reason=reason,
         )
 
     def close(self) -> None:

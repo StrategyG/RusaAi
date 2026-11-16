@@ -237,6 +237,7 @@ def test_from_env_configures_rusamodels_384d_embedding_runtime(monkeypatch):
     monkeypatch.delenv("RUSA_EMBEDDING_MODEL", raising=False)
     monkeypatch.delenv("RUSA_EMBEDDING_API_KEY", raising=False)
     monkeypatch.delenv("RUSA_EMBEDDING_INPUT_TYPE_ENABLED", raising=False)
+    monkeypatch.delenv("RUSA_KNOWLEDGE_REQUIRE_PUBLICATION", raising=False)
     monkeypatch.setattr(service_module, "OpenAICompatibleEmbeddingProvider", Provider)
     monkeypatch.setattr(service_module, "PostgresKnowledgeStore", Store)
 
@@ -251,8 +252,28 @@ def test_from_env_configures_rusamodels_384d_embedding_runtime(monkeypatch):
     assert captured["provider"]["dimensions"] == 384
     assert captured["provider"]["input_type_enabled"] is True
     assert captured["store"]["dimensions"] == 384
+    assert captured["store"]["require_publication"] is True
     assert service.embeddings.input_type_enabled is True
 
+
+
+def test_from_env_rejects_disabling_publication_gate_in_staging_and_production(monkeypatch):
+    monkeypatch.setenv("RUSA_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://models.example.test/openai/v1")
+    monkeypatch.setenv("RUSA_KNOWLEDGE_REQUIRE_PUBLICATION", "false")
+    for environment in ("staging", "production"):
+        monkeypatch.setenv("ENVIRONMENT", environment)
+        try:
+            KnowledgeService.from_env(
+                check_ready=False,
+                database_url="postgresql://worker@db.example/rusa",
+            )
+        except ValueError as exc:
+            assert "cannot be disabled" in str(exc)
+        else:
+            raise AssertionError(
+                f"publication gate was disabled in {environment}"
+            )
 
 def test_from_env_rejects_384d_embedding_without_e5_input_types(monkeypatch):
     monkeypatch.setenv("RUSA_EMBEDDING_DIMENSIONS", "384")

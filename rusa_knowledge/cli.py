@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .evaluation import evaluate_retrieval
 from .parsers import parse_file
 from .service import KnowledgeService
+from .store import PostgresKnowledgeStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +56,64 @@ def build_parser() -> argparse.ArgumentParser:
     get_version.add_argument("--project-id")
     get_version.add_argument("--max-chars", type=int, default=20_000)
 
+    candidate = commands.add_parser(
+        "get-review-candidate",
+        help="read an unpublished version through the reviewer-only path",
+    )
+    candidate.add_argument("--tenant-id", required=True)
+    candidate.add_argument("--collection", default="agent")
+    candidate.add_argument("--document-id", required=True)
+    candidate.add_argument("--version-id", required=True)
+    candidate.add_argument("--agent-id")
+    candidate.add_argument("--project-id")
+    candidate.add_argument("--max-chars", type=int, default=20_000)
+
+    rights = commands.add_parser("attest-rights", help="record a source rights attestation")
+    rights.add_argument("--tenant-id", required=True)
+    rights.add_argument("--document-id", required=True)
+    rights.add_argument("--version-id", required=True)
+    rights.add_argument("--rights-status", choices=("unknown", "cleared", "restricted", "denied"), required=True)
+    rights.add_argument("--source-owner", required=True)
+    rights.add_argument("--license-id", required=True)
+    rights.add_argument("--internal-storage-allowed", action="store_true")
+    rights.add_argument("--extraction-allowed", action="store_true")
+    rights.add_argument("--derivative-allowed", action="store_true")
+    rights.add_argument("--embedding-allowed", action="store_true")
+    rights.add_argument("--retrieval-allowed", action="store_true")
+    rights.add_argument("--attribution-required", action="store_true")
+    rights.add_argument("--attribution-text")
+    rights.add_argument("--retention-policy", required=True)
+    rights.add_argument("--evidence-uri", required=True)
+
+    review = commands.add_parser("review-version", help="record a technical/source/security/QA review")
+    review.add_argument("--tenant-id", required=True)
+    review.add_argument("--document-id", required=True)
+    review.add_argument("--version-id", required=True)
+    review.add_argument("--review-type", choices=("technical", "source_fidelity", "security", "qa"), required=True)
+    review.add_argument("--decision", choices=("passed", "needs_changes", "failed"), required=True)
+    review.add_argument("--finding", required=True)
+    review.add_argument("--evidence-uri")
+
+    approval = commands.add_parser("approve-version", help="record a separate human approval decision")
+    approval.add_argument("--tenant-id", required=True)
+    approval.add_argument("--document-id", required=True)
+    approval.add_argument("--version-id", required=True)
+    approval.add_argument("--decision", choices=("approved", "rejected", "revoked"), required=True)
+    approval.add_argument("--approval-reference", required=True)
+
+    publication = commands.add_parser("publish-version", help="publish only after rights, review and approval gates pass")
+    publication.add_argument("--tenant-id", required=True)
+    publication.add_argument("--document-id", required=True)
+    publication.add_argument("--version-id", required=True)
+    publication.add_argument("--manifest-uri", required=True)
+    publication.add_argument("--manifest-sha256", required=True)
+
+    withdrawal = commands.add_parser("withdraw-version", help="withdraw a published version from answer-facing retrieval")
+    withdrawal.add_argument("--tenant-id", required=True)
+    withdrawal.add_argument("--document-id", required=True)
+    withdrawal.add_argument("--version-id", required=True)
+    withdrawal.add_argument("--reason", required=True)
+
     evaluation = commands.add_parser("evaluate", help="evaluate retrieval against a JSONL relevance dataset")
     evaluation.add_argument("--dataset", required=True)
     evaluation.add_argument("--tenant-id", required=True)
@@ -67,7 +127,104 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     service = None
+    governance_store = None
     try:
+        if args.command in {
+            "get-review-candidate", "attest-rights", "review-version",
+            "approve-version", "publish-version", "withdraw-version",
+        }:
+            expected_governance_role = {
+                "get-review-candidate": "rusa_knowledge_reviewer",
+                "attest-rights": "rusa_knowledge_reviewer",
+                "review-version": "rusa_knowledge_reviewer",
+                "approve-version": "rusa_knowledge_approver",
+                "publish-version": "rusa_knowledge_publisher",
+                "withdraw-version": "rusa_knowledge_publisher",
+            }[args.command]
+            if os.getenv("RUSA_KNOWLEDGE_DB_ROLE") != expected_governance_role:
+                raise PermissionError(
+                    f"{args.command} requires RUSA_KNOWLEDGE_DB_ROLE={expected_governance_role}"
+                )
+            dsn = os.getenv("RUSA_KNOWLEDGE_DATABASE_URL") or os.getenv("RUSA_AGENT_DATABASE_URL")
+            if not dsn:
+                raise RuntimeError("RUSA_KNOWLEDGE_DATABASE_URL is required")
+            dimensions = int(os.getenv("RUSA_EMBEDDING_DIMENSIONS", "1536"))
+            governance_store = PostgresKnowledgeStore(
+                dsn,
+                dimensions=dimensions,
+                db_role=os.getenv("RUSA_KNOWLEDGE_DB_ROLE") or None,
+                require_publication=True,
+            )
+            if not governance_store.check_ready():
+                raise RuntimeError("knowledge governance schema is not ready")
+            if args.command == "get-review-candidate":
+                if os.getenv("RUSA_KNOWLEDGE_DB_ROLE") != "rusa_knowledge_reviewer":
+                    raise PermissionError("get-review-candidate requires RUSA_KNOWLEDGE_DB_ROLE=rusa_knowledge_reviewer")
+                result = governance_store.get_review_candidate_version(
+                    tenant_id=args.tenant_id,
+                    collection=args.collection,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    agent_id=args.agent_id,
+                    project_id=args.project_id,
+                    max_chars=args.max_chars,
+                )
+                print(json.dumps({"found": result is not None, "version": result}, ensure_ascii=False))
+                return 0
+            if args.command == "attest-rights":
+                result = governance_store.record_rights_attestation(
+                    tenant_id=args.tenant_id,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    rights_status=args.rights_status,
+                    source_owner=args.source_owner,
+                    license_id=args.license_id,
+                    internal_storage_allowed=args.internal_storage_allowed,
+                    extraction_allowed=args.extraction_allowed,
+                    derivative_allowed=args.derivative_allowed,
+                    embedding_allowed=args.embedding_allowed,
+                    retrieval_allowed=args.retrieval_allowed,
+                    attribution_required=args.attribution_required,
+                    attribution_text=args.attribution_text,
+                    retention_policy=args.retention_policy,
+                    evidence_uri=args.evidence_uri,
+                )
+            elif args.command == "review-version":
+                result = governance_store.record_review_finding(
+                    tenant_id=args.tenant_id,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    review_type=args.review_type,
+                    decision=args.decision,
+                    finding_text=args.finding,
+                    evidence_uri=args.evidence_uri,
+                )
+            elif args.command == "approve-version":
+                result = governance_store.record_human_approval(
+                    tenant_id=args.tenant_id,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    decision=args.decision,
+                    approval_reference=args.approval_reference,
+                )
+            elif args.command == "publish-version":
+                result = governance_store.publish_version(
+                    tenant_id=args.tenant_id,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    manifest_uri=args.manifest_uri,
+                    manifest_sha256=args.manifest_sha256,
+                )
+            else:
+                result = governance_store.withdraw_version(
+                    tenant_id=args.tenant_id,
+                    document_id=args.document_id,
+                    version_id=args.version_id,
+                    reason=args.reason,
+                )
+            print(json.dumps({"event_id": result}, ensure_ascii=False))
+            return 0
+
         service = KnowledgeService.from_env(check_ready=True)
         if args.command == "check":
             print(json.dumps({"ready": service.store.check_ready()}))
@@ -159,6 +316,8 @@ def main() -> int:
     finally:
         if service is not None:
             service.close()
+        if governance_store is not None:
+            governance_store.close()
 
 
 if __name__ == "__main__":

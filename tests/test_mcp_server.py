@@ -16,10 +16,17 @@ class FakeKnowledgeService:
             "source_uri": "docs/guide.md",
             "content": "retrieved evidence",
             "score": 0.02,
+            "attribution_required": True,
+            "attribution_text": "Source: authorized internal knowledge base.",
         }]
 
     def get_document(self, **kwargs):
-        return {"document_id": kwargs["document_id"], "content": "full document"}
+        return {
+            "document_id": kwargs["document_id"],
+            "content": "full document",
+            "attribution_required": True,
+            "attribution_text": "Source: authorized internal knowledge base.",
+        }
 
     def list_collections(self, **kwargs):
         return [{"collection": "agent", "document_count": 1}]
@@ -41,6 +48,14 @@ def test_mcp_tools_require_request_tenant_and_return_grounded_results(monkeypatc
                 )
                 assert result.is_error is False
                 assert "retrieved evidence" in str(result.content)
+                assert "Source: authorized internal knowledge base." in str(result.content)
+                document_result = await client.call_tool(
+                    "get_document",
+                    {"document_id": "00000000-0000-0000-0000-000000000001", "collection": "agent"},
+                )
+                assert document_result.is_error is False
+                assert "attribution_required" in str(document_result.content)
+                assert "Source: authorized internal knowledge base." in str(document_result.content)
         finally:
             server.CURRENT_TENANT.reset(context_token)
 
