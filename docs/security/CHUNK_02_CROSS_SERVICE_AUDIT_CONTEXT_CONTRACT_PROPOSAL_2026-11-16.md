@@ -78,7 +78,7 @@ Proposed headers:
 
 The signature input must bind the key ID, HTTP method, exact request path and encoded claims. RusaModels must compare the request method, path and `X-Request-ID` against the signed claims after signature verification. Use constant-time signature comparison.
 
-Initial proposed maximum context lifetime: 60 seconds, with a strict maximum accepted lifetime of 120 seconds and bounded clock skew. The exact values must be covered by tests and agreed by service owners before implementation.
+Initial proposed maximum context lifetime: 60 seconds, with a strict maximum accepted lifetime of 120 seconds and bounded clock skew. The exact values must be covered by tests and agreed by service owners before implementation. RusaModels should reject a reused `jti` during its validity window using a shared replay cache or database-backed nonce table; an in-memory-only cache is insufficient for a multi-worker Model Server. If replay protection is deferred, that limitation must be explicitly accepted and inference idempotency/abuse controls must be documented before production enablement.
 
 ### Key rotation
 
@@ -143,6 +143,7 @@ Implementation mapping:
 
 - Missing context on an inference-role chat/embedding request is denied.
 - Unknown key ID, bad signature, expired/future context, wrong issuer/audience/version, wrong method/path, request-ID mismatch and malformed tenant/actor claims are denied.
+- A reused `jti` within its validity window is denied across Model Server workers.
 - A valid signature with an unsigned or forged tenant header does not change the verified tenant.
 - Manager/administrator system-scoped operations retain their explicit non-tenant behavior and cannot impersonate an inference context.
 - The audit row stores the verified tenant, originating actor and the same request ID.
