@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -148,3 +149,8 @@ def test_production_mcp_middleware_fails_before_accepting_requests(monkeypatch):
 
     with pytest.raises(RuntimeError, match="direct Model Plane embedding credentials are forbidden"):
         server.TenantAuthMiddleware(inner_app, {})
+
+
+def test_hardened_mcp_container_defaults_to_production_guard():
+    dockerfile = Path(__file__).resolve().parents[1] / "Dockerfile.rag-mcp"
+    assert "ENVIRONMENT=production" in dockerfile.read_text(encoding="utf-8")
