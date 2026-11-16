@@ -39,7 +39,7 @@ All PR heads below were re-fetched from GitHub. All are open and reported mergea
 
 | Repository | PR | Base SHA | Current head SHA | Exact-head CI | Review state |
 |---|---:|---|---|---|---|
-| RusaAi | [#119](https://github.com/StrategyG/RusaAi/pull/119) | 1adac8d3 | 226c8da9855106ece8caec76301e86da4b3cdc9d | 3/3 success, workflow 43733483582 | No submitted reviews; no inline threads |
+| RusaAi | [#119](https://github.com/StrategyG/RusaAi/pull/119) | 1adac8d3 | `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23` | 3/3 success, workflow [43758029041](https://github.com/StrategyG/RusaAi/actions/runs/43758029041) | Open; no submitted reviews; no inline threads |
 | RusaAi | [#117](https://github.com/StrategyG/RusaAi/pull/117) | 1adac8d3 | 30630895c870e70aa3b77080accbcf515124a39c | 3/3 success, workflow 43733130737 | 3 COMMENTED reviews; no APPROVED review; no inline threads |
 | RusaModels | [#24](https://github.com/StrategyG/RusaModels/pull/24) | 12c49b13 | 7ca01d6373c1b90aadc0182461982754ca54afce | 2/2 success, workflow 43704012560 | 2 COMMENTED reviews; no APPROVED review; no inline threads |
 | RAG_Cerdas | [#28](https://github.com/StrategyG/RAG_Cerdas/pull/28) | 1ead461e | 84e9a13450c4b107d470eed775c1bb0998981acb | 1/1 success, workflow 43680080103 | 2 COMMENTED reviews; no APPROVED review; no inline threads |
@@ -80,7 +80,7 @@ Important implementation qualification remains explicit: generic RusaAi configur
 
 ## 5. Execution status
 
-- **CHUNK 00:** PASS for the read-only baseline and evidence inventory. The existing coordinator PR #119 is still open; the current head 226c8da had 3/3 checks passing before this documentation refresh.
+- **CHUNK 00:** PASS for the read-only baseline and evidence inventory. The coordinator PR #119 remains open. Its pre-refresh head `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23` had 3/3 checks passing in workflow [43758029041](https://github.com/StrategyG/RusaAi/actions/runs/43758029041). This refresh commit creates a new PR head; re-fetch that head and its checks before treating the refreshed tracker artifact as final.
 - **CHUNK 01:** PARTIAL. Candidate architecture changes and documentation are prepared and green on their exact PR heads, but mainline documentation is still inconsistent, the PRs have no approving reviews, and RAG_Cerdas #28 is subject to the 10-approval ruleset.
 - **CHUNK 02:** NOT_STARTED; it depends on CHUNK 01.
 - The supplied v3.0 roadmap defines CHUNK 00–15 only. It does not define CHUNK 16.
