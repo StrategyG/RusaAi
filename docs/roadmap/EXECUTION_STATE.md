@@ -396,9 +396,9 @@ Key findings:
 - CHUNK 03–15: NOT_STARTED; dependency order remains unchanged.
 - Production readiness remains **45/100** and production remains NO-GO / NOT_VERIFIED.
 
-## 19. CHUNK 02 P0 implementation refresh — 2026-11-16
+## 19. CHUNK 02 P0 implementation refresh — 2026-11-16 (pre-PR #126 merge snapshot)
 
-### Current mainline snapshot
+### Mainline snapshot before PR #126
 
 | Repository | Main SHA | Exact-main checks | Open PRs | Branch/ruleset |
 |---|---|---|---:|---|
@@ -418,7 +418,7 @@ Branch: `security/chunk-02-tenant-spoofing-regressions-20261116`
 - Knowledge version-history tenant isolation regression: verifies another tenant cannot list or read historical versions, current documents or search results.
 - Existing tests continue to cover stale lease-token fencing, task API cross-tenant denial, RLS role separation, and agent/project visibility.
 
-PR #126 exact-head CI passed 3/3; the tests are verified in CI but remain outside mainline until merge. CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
+At this snapshot, PR #126 exact-head CI passed 3/3 and merge was pending; PR #126 was subsequently merged at `a646de5` (see section 20). CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
 
 ## 20. CHUNK 02 mainline refresh after PR #126 — 2026-11-16
 
