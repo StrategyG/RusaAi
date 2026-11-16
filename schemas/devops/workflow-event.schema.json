@@ -1,0 +1,1010 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rusa.ai/schemas/devops/v1/workflow-event.schema.json",
+  "title": "RUSA AI Durable Workflow Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "type",
+    "message_id",
+    "tenant_id",
+    "run_id",
+    "correlation_id",
+    "traceparent",
+    "producer",
+    "occurred_at",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "task.request",
+        "task.accepted",
+        "task.progress",
+        "tool.invocation",
+        "task.completed",
+        "task.failed",
+        "policy.violation",
+        "task.cancel.requested",
+        "task.cancelled",
+        "audit.recorded",
+        "workflow.blocked",
+        "workflow.completed"
+      ]
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "causation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^00-(?!0{32}-)[a-f0-9]{32}-(?!0{16}-)[a-f0-9]{16}-[a-f0-9]{2}$"
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.request"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "capability",
+              "input_ref",
+              "deadline_at",
+              "idempotency_key",
+              "priority"
+            ],
+            "properties": {
+              "capability": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "input_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "deadline_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "idempotency_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "P1",
+                  "P2",
+                  "P3"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.accepted"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "worker_id",
+              "lease_epoch",
+              "state_version"
+            ],
+            "properties": {
+              "worker_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.progress"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lease_epoch",
+              "state_version",
+              "percent",
+              "stage"
+            ],
+            "properties": {
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "percent": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "stage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tool.invocation"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool",
+              "action",
+              "input_ref",
+              "operation_id",
+              "lease_epoch"
+            ],
+            "properties": {
+              "tool": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "input_ref": {
+                "type": "string",
+                "format": "uri"
+              },
+              "operation_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lease_epoch",
+              "state_version",
+              "result_ref",
+              "sha256",
+              "stage",
+              "domain_event"
+            ],
+            "properties": {
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "result_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "plan",
+                  "code",
+                  "build",
+                  "test",
+                  "release",
+                  "deploy",
+                  "operate",
+                  "monitor"
+                ]
+              },
+              "domain_event": {
+                "type": "string",
+                "enum": [
+                  "plan.completed",
+                  "code.completed",
+                  "build.completed",
+                  "test.completed",
+                  "release.approved",
+                  "deploy.completed",
+                  "operate.incident_detected",
+                  "operate.recovered",
+                  "monitor.alert_triggered",
+                  "monitor.feedback_created"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.failed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "lease_epoch",
+              "state_version",
+              "code",
+              "category",
+              "side_effect"
+            ],
+            "properties": {
+              "lease_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "TRANSIENT",
+                  "PERMANENT",
+                  "POLICY",
+                  "AMBIGUOUS"
+                ]
+              },
+              "side_effect": {
+                "type": "string",
+                "enum": [
+                  "NONE",
+                  "APPLIED",
+                  "UNKNOWN"
+                ]
+              },
+              "diagnostic_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "policy.violation"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "policy_id",
+              "policy_version",
+              "decision_id",
+              "action",
+              "resource_ref",
+              "reason_code"
+            ],
+            "properties": {
+              "policy_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "policy_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decision_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "resource_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason_code": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.cancel.requested"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cancel_epoch",
+              "reason_code"
+            ],
+            "properties": {
+              "cancel_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason_code": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.cancelled"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "required": [
+          "task_id",
+          "attempt"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cancel_epoch",
+              "state_version",
+              "side_effect"
+            ],
+            "properties": {
+              "cancel_epoch": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "side_effect": {
+                "type": "string",
+                "enum": [
+                  "NONE",
+                  "APPLIED",
+                  "UNKNOWN"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "audit.recorded"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "outcome",
+              "resource_ref"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "type": "string",
+                "minLength": 1
+              },
+              "resource_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "policy_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "plan"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "plan.completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "code"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "code.completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "build"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "build.completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "test"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "test.completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "release"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "release.approved"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "deploy"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "deploy.completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "operate"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "operate.incident_detected",
+                  "operate.recovered"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          },
+          "payload": {
+            "properties": {
+              "stage": {
+                "const": "monitor"
+              }
+            },
+            "required": [
+              "stage"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "properties": {
+              "domain_event": {
+                "enum": [
+                  "monitor.alert_triggered",
+                  "monitor.feedback_created"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.blocked"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state_version",
+              "stage",
+              "reason_code"
+            ],
+            "properties": {
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "plan",
+                  "code",
+                  "build",
+                  "test",
+                  "release",
+                  "deploy",
+                  "operate",
+                  "monitor"
+                ]
+              },
+              "reason_code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.completed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state_version",
+              "result_ref",
+              "sha256"
+            ],
+            "properties": {
+              "state_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "result_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
