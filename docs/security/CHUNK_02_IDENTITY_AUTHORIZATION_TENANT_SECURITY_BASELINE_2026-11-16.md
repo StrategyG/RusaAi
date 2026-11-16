@@ -43,7 +43,7 @@ The CI databases are disposable test environments. Passing tests do not prove th
 - `rusa_api_runtime` and `rusa_worker_runtime` are NOLOGIN / NOBYPASSRLS group roles. Dedicated login roles are used for API and Worker connections.
 - Worker queue access is intentionally cross-tenant for claiming work. A claimed row supplies its tenant ID; worker ID and lease token fence heartbeat, completion and state transitions. This global queue-read capability must not be confused with permission to read arbitrary tenant memory or knowledge.
 - `rusa_knowledge` uses transaction-local role and tenant context. The query layer applies agent/project filters. Project scope is not independently enforced by the inspected database RLS predicates, so every read/list/search/history/export path must continue to be covered by negative tests.
-- Before CHUNK 02 PR #125, the optional Worker `KnowledgeService` path could construct an embedding client from `RUSA_EMBEDDING_BASE_URL` / `RUSA_EMBEDDING_API_KEY` and call RusaModels `/openai/v1/embeddings` directly. PR #125 now blocks this path in production Worker configuration; the separate MCP process remains outside that guard.
+- Before CHUNK 02 PR #125, the optional Worker `KnowledgeService` path could construct an embedding client from `RUSA_EMBEDDING_BASE_URL` / `RUSA_EMBEDDING_API_KEY` and call RusaModels `/openai/v1/embeddings` directly. PR #125 now blocks this path in production Worker configuration; standalone MCP remains separately gated by PR #128.
 
 **CHUNK 02 P0 mitigation — merged in RusaAi PR #125:** production Worker validation rejects `RUSA_RAG_ENABLED=true`, ambiguous RAG flag values, and Worker injection of `RUSA_KNOWLEDGE_DATABASE_URL`, `RUSA_EMBEDDING_BASE_URL`, or `RUSA_EMBEDDING_API_KEY`. Production Compose pins RAG off and clears those credentials. PR #125 exact-head CI and post-merge main CI both passed 4/4 on SHA `57541882563f18cf6b57442a2059c0b68962a4f4`. This does not authorize the separate MCP process to use direct Model Server credentials.
 
@@ -93,7 +93,7 @@ CHUNK 02 must define one cross-service audit envelope: `request_id`, `tenant_id`
 | Worker payload changes tenant | Tenant is read from the claimed DB row; lease owner/token fence state changes | Add a regression test that tampers with payload tenant metadata and proves the DB row remains authoritative |
 | Cross-tenant task/memory read | Forced RLS and dedicated API/Worker roles; PostgreSQL integration tests | Live production grants remain NOT_VERIFIED |
 | Cross-project knowledge leakage within one tenant | Agent/project filters in knowledge query layer; disposable pgvector tests passed | Project scope is not independently enforced by DB RLS; preserve exhaustive query-path negative tests or add DB-level project policy |
-| Worker bypasses tenant gateway for embeddings | Production Worker guard is merged in PR #125; Compose pins RAG off and clears direct knowledge/embedding credentials | MCP is a separate process and still needs its own brokered credential/egress design; production main image build/scan remains in progress |
+| Worker bypasses tenant gateway for embeddings | Production Worker guard is merged in PR #125; Compose pins RAG off and clears direct knowledge/embedding credentials | Standalone MCP remains separately gated; PR #128 blocks production startup until a signed tenant-aware gateway is approved |
 | Model Server token is over-privileged | Hashed principal registry and role-based API permissions; inference role is narrower than manager/admin | No expiry/key ID/automated rotation; one global service token remains for internal dependencies |
 | IM19 reviewer impersonation or role escalation | PostgreSQL login-to-reviewer binding, role-membership guard, revocation ledger and trigger checks | No external IdP, SSO, MFA, identity proofing or automated account lifecycle |
 | IM19 data leaks across tenants | Private schema, separate worker/approver roles, forced RLS; Edge Function disabled by default | IM19 has no tenant/project data model. It must remain isolated and single-pilot. |
@@ -178,6 +178,17 @@ The production Worker config now fails closed on a truthy or ambiguous `RUSA_RAG
 - Existing PostgreSQL tests already cover cross-tenant task API read/retry/cancel denial, forced RLS, API/Worker role separation, stale lease-token fencing, agent scope, project scope, and agent/project-scoped version history.
 - No export endpoint was found in the inspected RusaAi knowledge service/store API. The acceptance criterion remains applicable if another export surface is discovered.
 
-These two regression tests are committed on `security/chunk-02-tenant-spoofing-regressions-20261116`; PR #126 exact-head CI passed 3/3. The tests are CI-verified on the branch but are not yet in mainline. They do not access production data or perform DDL outside disposable CI fixtures.
+These two regression tests were merged by PR #126 at `a646de5`; exact-head CI passed 3/3 and the tests are now in mainline. They do not access production data or perform DDL outside disposable CI fixtures.
 
 CHUNK 02 remains IN_PROGRESS. Human IdP/SSO/MFA, key expiry and automated rotation, standardized cross-service audit correlation, MCP service identity/egress, live database grants and deployment evidence remain open. Production remains NO-GO / NOT_VERIFIED.
+
+### P0 standalone MCP production boundary
+
+The standalone MCP process uses per-tenant bearer tokens to establish request scope, but its knowledge service still constructs a direct embedding provider from `RUSA_EMBEDDING_*` or `RUSA_MODEL_*` environment variables. The production Compose file does not deploy an MCP service; separately deployed production instances were not previously protected by a fail-closed guard. RusaAi PR #128 adds a construction-time production block until a signed tenant-aware embedding gateway is implemented and approved. The guard is pending exact-head CI and merge; it does not enable production MCP.
+
+### Current CHUNK 02 evidence
+
+- PR #125: merged production Worker direct-RAG/embedding guard; exact-head and post-merge main CI passed 4/4.
+- PR #126: merged Worker payload-tenant spoofing and cross-tenant version-history regression tests; exact-head CI passed 3/3.
+- PR #127: proposed signed cross-service tenant/audit context contract, design only and not approved for production.
+- PR #128: production MCP fail-closed guard, pending exact-head CI.
