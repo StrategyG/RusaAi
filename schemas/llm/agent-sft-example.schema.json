@@ -6,6 +6,12 @@
   "required": ["id", "agent_role", "messages", "response"],
   "properties": {
     "id": {"type": "string", "minLength": 1},
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Stable scenario group identifier. All records must include it when scenario grouping is used; a scenario must not cross train/evaluation splits."
+    },
     "agent_role": {
       "type": "string",
       "enum": ["analyst", "architect", "developer", "debugger", "tester", "security"]
