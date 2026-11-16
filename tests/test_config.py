@@ -48,6 +48,10 @@ def set_worker_environment(monkeypatch):
     monkeypatch.delenv("RUSA_MODEL_BASE_URL", raising=False)
     monkeypatch.setenv("RUSA_MODEL_NAME", "rusa-general-4b")
     monkeypatch.delenv("RUSA_MODEL_API_KEY", raising=False)
+    monkeypatch.setenv("RUSA_RAG_ENABLED", "false")
+    monkeypatch.delenv("RUSA_KNOWLEDGE_DATABASE_URL", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_BASE_URL", raising=False)
+    monkeypatch.delenv("RUSA_EMBEDDING_API_KEY", raising=False)
     monkeypatch.delenv("RUSA_LOCAL_MODEL_PATH", raising=False)
     monkeypatch.delenv("RUSA_MODEL_PATH", raising=False)
     worker_key = "w" * 48
@@ -187,6 +191,39 @@ def test_production_worker_rejects_model_server_inference_token(monkeypatch):
     monkeypatch.setenv("RUSA_MODEL_API_KEY", "r" * 48)
 
     with pytest.raises(RuntimeError, match="only the API gateway holds"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_production_worker_rejects_optional_direct_rag_path(monkeypatch, value):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_RAG_ENABLED", value)
+
+    with pytest.raises(RuntimeError, match="tenant-aware RusaAi embedding gateway"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+def test_production_worker_rejects_ambiguous_rag_flag(monkeypatch):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv("RUSA_RAG_ENABLED", "sometimes")
+
+    with pytest.raises(RuntimeError, match="RUSA_RAG_ENABLED must be a boolean"):
+        RuntimeConfig.from_env().validate_worker()
+
+
+@pytest.mark.parametrize(
+    "variable,value",
+    [
+        ("RUSA_KNOWLEDGE_DATABASE_URL", "postgresql://knowledge_worker:secret@db/rusa?sslmode=verify-full"),
+        ("RUSA_EMBEDDING_BASE_URL", "https://model.internal/openai/v1"),
+        ("RUSA_EMBEDDING_API_KEY", "e" * 48),
+    ],
+)
+def test_production_worker_rejects_direct_knowledge_or_embedding_credentials(monkeypatch, variable, value):
+    set_worker_environment(monkeypatch)
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(RuntimeError, match=variable):
         RuntimeConfig.from_env().validate_worker()
 
 
