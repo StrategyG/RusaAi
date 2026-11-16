@@ -22,8 +22,8 @@
 
 | Repository | Branch | Verified main SHA | Exact-main CI checks | Main protected | Open PRs at baseline |
 |---|---|---|---:|---:|---:|
-| RusaAi | main | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 3/3 pass (run 43801535417) | No | 87 |
-| RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass (run 43801252283) | No | 8 |
+| RusaAi | main | `57541882563f18cf6b57442a2059c0b68962a4f4` | 3 completed success; production image build/scan in progress (run 43826751700) | No | 86 |
+| RusaModels | main | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 pass | No | 6 |
 | RAG_Cerdas | main | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 tests pass (run 43800691402) | No | 3 |
 
 The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.md`. The local working-tree state is **NOT_VERIFIED** because this audit used remote GitHub inspection and no local checkout was available.
@@ -34,7 +34,7 @@ The exact-main CI check-run evidence and workflow URLs are in `EVIDENCE_LEDGER.m
 |---|---|---|
 | 00 — Repository Discovery, Baseline, Evidence Inventory | PASS | Baseline artifacts merged in RusaAi PR #119 (merge commit `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb`); read-only baseline remains distinct from production certification |
 | 01 — Architecture Reconciliation and ADR Governance | PASS | RusaAi #117, RusaModels #24 and RAG_Cerdas #28 merged; post-merge documentation closeout PRs RusaAi #124, RusaModels #27 and RAG_Cerdas #31 merged; cross-repository ownership, canonical-store and IM19 isolation statements verified on all three main branches |
-| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Discovery/baseline is recorded in `docs/security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md`; first production Worker fail-closed guard is implemented on the current CHUNK 02 branch and awaits exact-head CI |
+| 02 — Trusted Identity, Authorization, Tenant Security | IN_PROGRESS | CHUNK 01 is PASS. Worker direct-RAG fail-closed guard merged in #125 (exact-head CI 4/4); post-merge main image build/scan is still in progress. Payload-tenant spoofing and cross-tenant version-history regressions are on the current branch, pending exact-head CI |
 | 03 — Canonical Knowledge Lifecycle and Governance | NOT_STARTED | Depends on CHUNK 02 |
 | 04 — Model Registry, Artifact Integrity, Release Lifecycle | NOT_STARTED | Depends on CHUNK 02 |
 | 05 — Versioned API Contract Between RusaAi and RusaModels | NOT_STARTED | Depends on CHUNK 03 and 04 |
@@ -395,3 +395,27 @@ Key findings:
 - CHUNK 02: IN_PROGRESS — DISCOVER/BASELINE complete; DESIGN and implementation are underway. The first fail-closed Worker RAG guard is on branch `security/chunk-02-identity-tenant-guard-20261116`, pending exact-head CI.
 - CHUNK 03–15: NOT_STARTED; dependency order remains unchanged.
 - Production readiness remains **45/100** and production remains NO-GO / NOT_VERIFIED.
+
+## 19. CHUNK 02 P0 implementation refresh — 2026-11-16
+
+### Current mainline snapshot
+
+| Repository | Main SHA | Exact-main checks | Open PRs | Branch/ruleset |
+|---|---|---|---:|---|
+| RusaAi | `57541882563f18cf6b57442a2059c0b68962a4f4` | 3 completed success; production image build/scan in progress, run [43826751700](https://github.com/StrategyG/RusaAi/actions/runs/43826751700) | 86 | protected=false; no active repository ruleset |
+| RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 success | 6 | protected=false; no active repository ruleset |
+| RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | tests and scheduled audit successful | 3 | protected=false; active `Rag` ruleset 25698740 remains unchanged |
+
+### Merged P0 guard
+
+RusaAi PR #125 merged at `57541882563f18cf6b57442a2059c0b68962a4f4`. Exact-head CI on `4f1e592e2d962ec67fb9dd34ceea5a2db179bb3a` passed 4/4. The merge-triggered main workflow has 3 completed successful checks and one production image build/scan in progress. The production Worker now fails closed on direct RAG and embedding credentials; this is a configuration/runtime guard, not a deployed-production verification.
+
+### Current P0 regression branch
+
+Branch: `security/chunk-02-tenant-spoofing-regressions-20261116`
+
+- Worker queue payload tenant spoofing regression: verifies that the database row tenant, not a forged JSON payload field, supplies the Worker task metadata and lease identity.
+- Knowledge version-history tenant isolation regression: verifies another tenant cannot list or read historical versions, current documents or search results.
+- Existing tests continue to cover stale lease-token fencing, task API cross-tenant denial, RLS role separation, and agent/project visibility.
+
+The regression branch must pass exact-head CI before these tests count as verified. CHUNK 02 remains IN_PROGRESS; no production database, IdP, secret manager, model artifact, deployment or external provider was accessed. Production remains NO-GO / NOT_VERIFIED; readiness remains 45/100.
