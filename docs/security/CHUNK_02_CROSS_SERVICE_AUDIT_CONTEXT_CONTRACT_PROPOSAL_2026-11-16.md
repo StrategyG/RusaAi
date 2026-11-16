@@ -47,6 +47,7 @@ The following observations were made from the current `main` source trees on 202
 7. **Least disclosure:** logs and audit metadata must not contain API tokens, signing secrets, prompts, model outputs or other unnecessary sensitive content.
 8. **System actions:** direct Model Server manager/administrator operations may remain system-scoped with a null tenant. They must still record their authenticated Model Server principal and request ID.
 9. **IM19 isolation:** no shared service identity, tenant propagation or production connection is introduced into IM19 by this contract.
+10. **Audit attribution is not data isolation:** this context adds trusted tenant attribution to inference audit events; it does not make the Model Server model registry, artifact store or job APIs tenant-partitioned. Those resource-authorization boundaries require a separate design and negative tests.
 
 ## 4. Proposed signed context
 
