@@ -653,3 +653,50 @@ def test_384d_ingestion_records_version_in_its_own_vector_space(knowledge_store)
         assert historical["content"] == "384-dimensional original passage"
     finally:
         store.close()
+
+
+def test_document_version_history_is_tenant_scoped(knowledge_store):
+    store, _ = knowledge_store
+    owner_tenant = "tenant-version-history-owner"
+    other_tenant = "tenant-version-history-other"
+    document_id = store.ingest_document(
+        tenant_id=owner_tenant,
+        collection="agent",
+        source_uri="kb://tenant-version-history/private",
+        title="Private version history",
+        content_hash="f" * 64,
+        metadata={"knowledge_scope": "shared"},
+        chunks=["tenant-owned historical evidence"],
+        embeddings=[_unit_vector(0)],
+    )
+    owner_versions = store.list_document_versions(
+        tenant_id=owner_tenant,
+        collection="agent",
+        document_id=document_id,
+    )
+    assert len(owner_versions) == 1
+    version_id = owner_versions[0]["version_id"]
+
+    assert store.list_document_versions(
+        tenant_id=other_tenant,
+        collection="agent",
+        document_id=document_id,
+    ) == []
+    assert store.get_document_version(
+        tenant_id=other_tenant,
+        collection="agent",
+        document_id=document_id,
+        version_id=version_id,
+    ) is None
+    assert store.get_document(
+        tenant_id=other_tenant,
+        collection="agent",
+        document_id=document_id,
+    ) is None
+    assert store.search(
+        tenant_id=other_tenant,
+        collection="agent",
+        query="historical evidence",
+        query_embedding=_unit_vector(0),
+        limit=5,
+    ) == []
