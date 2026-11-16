@@ -381,3 +381,47 @@ The RusaAi #117 branch contains the requested current-main scheduler attribution
 - CHUNK 02: NOT_STARTED; it remains dependency-blocked by CHUNK 01.
 
 This snapshot records pre-update PR #119 head `0eb9a62c7cb3e5b4b1da747ec8a83df6ffa8ff23`. The documentation commit that appends this evidence advances PR #119; the new head and its exact-head checks must be fetched again before closeout. No main branch, repository ruleset, production data, database, model artifact or deployment was changed by this revalidation.
+
+
+## 17. CHUNK 01 post-merge verification and CHUNK 02 identity baseline — 2026-11-16
+
+### Merged integration / closeout PRs
+
+| Repository | PR | Head SHA | Merge commit | Exact-head CI |
+|---|---:|---|---|---|
+| RusaAi | #119 | `b594ebaf07fb758868632e38c85cfbe6d47fbebb` | `2ca67a04b54342bf7f6b6b36666fbfc9fd774bdb` | [43797746210](https://github.com/StrategyG/RusaAi/actions/runs/43797746210), 3/3 success |
+| RusaAi | #117 | `30630895c870e70aa3b77080accbcf515124a39c` | `6485a38c2daf6744c0e8074ad91ea4bc1bfd5049` | [43733130737](https://github.com/StrategyG/RusaAi/actions/runs/43733130737), 3/3 success; core suite 337 passed / 6 skipped; RAG/MCP integration job 65 passed |
+| RusaModels | #24 | `7ca01d6373c1b90aadc0182461982754ca54afce` | `926f557cd955dd905e2b13da773e6c44152c506d` | [43704012560](https://github.com/StrategyG/RusaModels/actions/runs/43704012560), 2/2 success; 156 passed / 1 skipped |
+| RAG_Cerdas | #28 | `84e9a13450c4b107d470eed775c1bb0998981acb` | `2966572bbcb2eac41749454cc8ba3660a0a67148` | [43680080103](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43680080103), 1/1 success; disposable PostgreSQL/pgvector suite 240 passed |
+| RusaAi | #124 | `c55543f2764dbebf5f5c047e4fb6e7326796167a` | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | [43800481047](https://github.com/StrategyG/RusaAi/actions/runs/43800481047), 3/3 success |
+| RusaModels | #27 | `134b0c73b3367eb8c9c5f62e55fa3c1c65c4f82e` | `b9671c1581edc6c3ee265fa97dff949a070e1999` | [43800485366](https://github.com/StrategyG/RusaModels/actions/runs/43800485366), 2/2 success |
+| RAG_Cerdas | #31 | `1c0e6d84c326fa77035f98195bc40914c60896cc` | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | [43800490799](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800490799), 1/1 success |
+
+### Current mainline after merges
+
+| Repository | Main SHA | Post-merge CI | Open PRs |
+|---|---|---|---:|
+| RusaAi | `cb7e12a44406cba1ff3e55aa699b389bd2fcc773` | 2/3 success; production image build/scan remains in progress in [43801535417](https://github.com/StrategyG/RusaAi/actions/runs/43801535417) | 87 |
+| RusaModels | `b9671c1581edc6c3ee265fa97dff949a070e1999` | 2/2 success in [43801252283](https://github.com/StrategyG/RusaModels/actions/runs/43801252283) | 8 |
+| RAG_Cerdas | `7b62582824d5fda33f5c47d1ac9e67378d3c019d` | 1/1 success in [43800691402](https://github.com/StrategyG/RAG_Cerdas/actions/runs/43800691402) | 3 |
+
+### CHUNK 02 identity/security source evidence
+
+- RusaAi API-key principal registry binds subject, tenant and roles; request tenant substitution is rejected by API/RLS tests. Core PostgreSQL RLS and task API tests passed in the RusaAi exact-head CI; the dedicated knowledge-store PostgreSQL/pgvector integration job reported 65 passed.
+- RusaAi Worker queue claim is cross-tenant by design; the tenant ID comes from the claimed database row and state changes are fenced by worker/lease identity. `rusa_knowledge` uses transaction-local tenant/role context and query-level agent/project filters.
+- RusaModels uses hashed API-principal digests and role-based permissions. The Model Plane remains platform-wide; it is not the tenant data boundary.
+- RAG_Cerdas reviewer identity is bound to a PostgreSQL login role OID and stable reviewer ID; reviewer-role membership and revocation tests are included in the 240-passed disposable PostgreSQL/pgvector suite. This is not SSO/MFA or tenant/project authorization.
+- RusaAi audit, RusaModels audit and IM19 audit do not yet share a common request/tenant/actor/resource/outcome envelope.
+
+See [CHUNK 02 Identity, Authorization and Tenant Security Baseline](../security/CHUNK_02_IDENTITY_AUTHORIZATION_TENANT_SECURITY_BASELINE_2026-11-16.md) for the full identity matrix, threat model, DB privilege matrix, rotation runbook and acceptance gate.
+
+### Governance observation
+
+RAG_Cerdas ruleset `Rag` (ID `25698740`) remained active and unchanged, with 10 approving reviews and no bypass actors reported. GitHub accepted PR #28 and #31 merges without APPROVED reviews; the connected identity metadata reported `current_user_can_bypass=never`. The exact enforcement path is not established. No ruleset, branch-protection, permission or bypass setting was modified.
+
+### CHUNK disposition
+
+- CHUNK 00: PASS.
+- CHUNK 01: PASS — architecture/ADR integration and post-merge documentation are on all three main branches.
+- CHUNK 02: IN_PROGRESS — discovery/baseline complete; first production Worker direct-RAG fail-closed guard is on branch `security/chunk-02-identity-tenant-guard-20261116`, pending exact-head CI.
+- Production readiness remains 45/100; production remains NO-GO / NOT_VERIFIED.
