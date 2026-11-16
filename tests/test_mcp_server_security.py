@@ -114,3 +114,37 @@ def test_health_liveness_does_not_require_database_or_tenant_secrets():
     )
     assert sent[0]["status"] == 200
     assert json.loads(sent[1]["body"])["status"] == "ok"
+
+
+def test_production_mcp_rejects_direct_model_plane_embedding_credentials(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_MODEL_BASE_URL", "https://models.internal/openai/v1")
+    monkeypatch.setenv("RUSA_MODEL_API_KEY", "m" * 48)
+
+    with pytest.raises(RuntimeError, match="direct Model Plane embedding credentials are forbidden"):
+        server.validate_production_embedding_boundary()
+
+
+def test_production_mcp_stays_disabled_without_approved_tenant_aware_gateway(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    for name in (
+        "RUSA_EMBEDDING_BASE_URL",
+        "RUSA_EMBEDDING_API_KEY",
+        "RUSA_MODEL_BASE_URL",
+        "RUSA_MODEL_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with pytest.raises(RuntimeError, match="approved signed tenant-aware embedding gateway"):
+        server.validate_production_embedding_boundary()
+
+
+def test_production_mcp_middleware_fails_before_accepting_requests(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("RUSA_EMBEDDING_BASE_URL", "https://models.internal/openai/v1")
+
+    async def inner_app(scope, receive, send):
+        raise AssertionError("production MCP must fail during construction")
+
+    with pytest.raises(RuntimeError, match="direct Model Plane embedding credentials are forbidden"):
+        server.TenantAuthMiddleware(inner_app, {})
